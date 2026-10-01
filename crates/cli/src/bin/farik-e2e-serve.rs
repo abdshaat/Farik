@@ -175,7 +175,7 @@ impl Drop for Removed {
 
 /// Makes `project` a Farik project, as `startServe` in the browser suites does for step 08's
 /// journeys: `farik init`, sandboxing off, and Mira (Product Manager), Ada (Architect) and Theo
-/// (Developer) as the team.
+/// (Developer) as the team, which does not plan its work in sprints.
 fn recorded_team(
     project: &TempRepo,
     env: &std::collections::BTreeMap<String, String>,
@@ -207,7 +207,8 @@ fn recorded_team(
         agent("theo", "Theo", "software_developer"),
     ]
     .concat();
-    let team = format!("{}agents:\n{agents}{}", &yaml[..start], &yaml[end + 1..]);
+    let team = format!("{}agents:\n{agents}{}", &yaml[..start], &yaml[end + 1..])
+        .replace("plan_in_sprints: true", "plan_in_sprints: false");
     std::fs::write(&path, team).map_err(|error| error.to_string())
 }
 

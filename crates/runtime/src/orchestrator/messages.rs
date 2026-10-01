@@ -248,16 +248,22 @@ pub(super) struct Digest {
 /// agent or the human wrote is untrusted text, each block cut at 16 KiB.
 pub(super) fn planning_message(
     sprint_id: &str,
-    candidates: &[TaskContract],
+    candidates: &[(TaskContract, usize)],
+    backlog: bool,
     budget_left: Option<f64>,
     digest: &Digest,
     retro: Option<&str>,
 ) -> String {
     let listed = candidates
         .iter()
-        .map(|contract| {
+        .map(|(contract, tasks)| {
+            let under = match (contract.kind, tasks) {
+                (TaskKind::Task, _) => String::new(),
+                (TaskKind::Epic, 1) => ", 1 task under it".to_string(),
+                (TaskKind::Epic, tasks) => format!(", {tasks} tasks under it"),
+            };
             format!(
-                "{} ({}, ${:.2}): {}",
+                "{} ({}, ${:.2}{under}): {}",
                 contract.id.as_str(),
                 contract.kind,
                 contract.budget.max_cost_usd,
@@ -283,10 +289,15 @@ pub(super) fn planning_message(
     let facts = escalations.chain(spent).collect::<Vec<_>>().join("\n");
     format!(
         "Plan {sprint_id} with `farik_plan_sprint`, naming the tasks the team should finish in it. \
-         Its budget: {budget}. The candidates, each ready and in no sprint: {candidates}\nThe \
+         Its budget: {budget}. The candidates, {each}: {candidates}\nThe \
          digest, each open escalation and each budget spent since the last planning: \
          {digest}{retro}",
         budget = budget_left.map_or_else(|| "no budget".to_string(), |usd| format!("${usd:.2}")),
+        each = if backlog {
+            "each waiting in the Backlog"
+        } else {
+            "each ready and in no sprint"
+        },
         candidates = untrusted_block("candidates", &listed, NOTE_CAP_BYTES),
         digest = if facts.is_empty() {
             "none".to_string()
@@ -996,7 +1007,8 @@ mod tests {
         };
         let retro = format!("# Retro\n{}\nkeep the tasks small", "x".repeat(20 * 1024));
 
-        let message = planning_message("S2", &[contract()], None, &digest, Some(&retro));
+        let message =
+            planning_message("S2", &[(contract(), 0)], false, None, &digest, Some(&retro));
 
         assert!(
             message.contains("<untrusted source=\"retro\">"),
@@ -1004,7 +1016,7 @@ mod tests {
         );
         assert!(message.contains("keep the tasks small"), "{message}");
         assert!(!message.contains("# Retro"), "{message}");
-        let without = planning_message("S2", &[contract()], None, &digest, None);
+        let without = planning_message("S2", &[(contract(), 0)], false, None, &digest, None);
         assert!(!without.contains("source=\"retro\""), "{without}");
     }
 }

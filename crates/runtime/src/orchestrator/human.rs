@@ -2291,6 +2291,9 @@ mod tests {
             body.left.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
             vec!["FRK-2"]
         );
+        // With the policy off, what the sprint leaves goes on: no Backlog mark (ADR 0028).
+        assert_eq!(body.backlog, None);
+        assert!(!harness.row("FRK-2").left_for_the_backlog);
         assert_eq!(report.events, vec![ended.envelope.seq]);
         let contract = files.read_contract(&task("FRK-2")).expect("FRK-2 reads");
         assert_eq!(contract.sprint, None);

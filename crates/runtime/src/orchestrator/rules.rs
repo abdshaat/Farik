@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use farik_core::branch::task_branch;
 use farik_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskStatus};
-use farik_core::governor::gates::fits_the_open_sprint;
+use farik_core::governor::gates::{fits_the_open_sprint, in_the_backlog, waits_for_a_sprint};
 use farik_core::governor::task_status::is_terminal;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
@@ -39,13 +39,15 @@ use crate::cost::budget_state;
 use crate::exec::Executor;
 use crate::session::{EndReason, SessionPurpose};
 use crate::sleep::asleep_until;
-use crate::sprints::{EndedBy, end_sprint, planning_session_spent};
+use crate::sprints::{EndedBy, end_sprint, planning_session_spent, sprint_hold};
 use crate::transitions::{self, TransitionAsk, TransitionOutcome, integration_branch};
 
 /// What a tick says when no rule matched.
 const NOTHING_TO_DO: &str = "nothing on the board needs doing";
 /// What a tick says when the only rules that matched would have started a session on a spent day.
 const DAY_SPENT: &str = "the team's daily budget is spent";
+/// What a tick says when work waits in the Backlog and no sprint is open (ADR 0028).
+const WAITS_FOR_A_SPRINT: &str = "the ready work waits for a sprint";
 
 /// What kept the rules of one tick from starting a session, gathered as they pass work over.
 #[derive(Debug, Default)]
@@ -76,6 +78,11 @@ pub(super) async fn tick(
     let board = deps.tools.projections.board()?;
     let in_scope = in_scope(scope);
     let runs = |rule: u8| rule_runs(scope.rules, rule);
+    // Under the policy, a task outside the open sprint that waits for one is not started, worked
+    // on, or reworked (rules 7, 6 and 3); rule 8's assignment is refused by the gate (ADR 0028).
+    let open = deps.tools.projections.open_sprint()?;
+    let open_id = open.as_ref().map(|sprint| sprint.sprint_id.as_str());
+    let goes_on = |row: &&TaskProjection| !waits_for_a_sprint(&sprint_hold(&team, open_id, row));
     let mut waiting = Waiting::default();
     if let Some(report) = chat(deps, scope, &team, &mut waiting).await? {
         return Ok(report);
@@ -109,7 +116,10 @@ pub(super) async fn tick(
         return Ok(report);
     }
     if runs(3) {
-        for row in waiting_on_nobody(&board, TaskStatus::Rejected).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Rejected)
+            .filter(in_scope)
+            .filter(goes_on)
+        {
             if let Some(report) = rejected(deps, &team, row)? {
                 return Ok(report);
             }
@@ -135,6 +145,7 @@ pub(super) async fn tick(
     if runs(6) || epics_only {
         for row in waiting_on_nobody(&board, TaskStatus::InProgress)
             .filter(in_scope)
+            .filter(goes_on)
             .filter(|row| !epics_only || requests::is_epic(row))
         {
             if let Some(report) = in_progress(orchestrator, &team, row, &mut waiting).await? {
@@ -143,7 +154,10 @@ pub(super) async fn tick(
         }
     }
     if runs(7) {
-        for row in waiting_on_nobody(&board, TaskStatus::Assigned).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Assigned)
+            .filter(in_scope)
+            .filter(goes_on)
+        {
             if let Some(report) = assigned(deps, &team, row)? {
                 return Ok(report);
             }
@@ -170,18 +184,25 @@ pub(super) async fn tick(
             }
         }
     }
-    Ok(idle(&waiting))
+    let backlog = open_id.is_none()
+        && board
+            .iter()
+            .filter(in_scope)
+            .any(|row| in_the_backlog(&sprint_hold(&team, open_id, row)));
+    Ok(idle(&waiting, backlog))
 }
 
 /// What an idle tick says, from what kept its rules from starting a session: a spent day before a
-/// sleeping agent, and the time the first sleeping agent wakes whichever it names.
-fn idle(waiting: &Waiting) -> TickReport {
+/// sleeping agent, and the time the first sleeping agent wakes whichever it names; then, with no
+/// sprint open, work waiting in the Backlog (`backlog`).
+fn idle(waiting: &Waiting, backlog: bool) -> TickReport {
     let why = match &waiting.slept {
         _ if waiting.day_spent => DAY_SPENT.to_string(),
         Some((until, agent)) => format!(
             "waiting for {agent}, asleep until {} (its model's usage limit)",
             until.format("%Y-%m-%d %H:%M:%S UTC")
         ),
+        None if backlog => WAITS_FOR_A_SPRINT.to_string(),
         None => NOTHING_TO_DO.to_string(),
     };
     TickReport::Idle {
@@ -368,7 +389,9 @@ fn sprint_rules_run(scope: &TickScope) -> bool {
 /// The open sprint's planning ceremony (5.5, 5.9): while it holds no task and its planning has not
 /// run, the assigner (the ceremony runner) gets one `ceremony` session in the `planning` thread,
 /// about no task, given the reading tools, `farik_post_message`, and `farik_plan_sprint`, and
-/// offered the candidates, the rows `ready` with no parent and in no sprint, the digest of the
+/// offered the candidates (the rows `ready` with no parent and in no sprint, or, under the policy
+/// "plan work in sprints", the Backlog's rows with no parent, each epic with its count of tasks),
+/// the digest of the
 /// open escalations and the budgets spent since the previous planning, the last retros, and the
 /// channel. Passed over with no candidate, no assigner, or on a spent day; a planning that plans
 /// nothing is not asked again, and the empty sprint waits for the human to end it.
@@ -385,10 +408,17 @@ async fn sprint_planning(
     let Some(open) = deps.tools.projections.open_sprint()? else {
         return Ok(None);
     };
+    // Under the policy, the Backlog's rows with no parent; off, the `ready` ones in no sprint.
+    let backlog = team.plans_in_sprints();
     let candidates: Vec<&TaskProjection> = board
         .iter()
         .filter(|row| {
-            row.status == TaskStatus::Ready && row.parent.is_none() && row.sprint.is_none()
+            row.parent.is_none()
+                && if backlog {
+                    in_the_backlog(&sprint_hold(team, Some(open.sprint_id.as_str()), row))
+                } else {
+                    row.status == TaskStatus::Ready && row.sprint.is_none()
+                }
         })
         .collect();
     let Some(assigner) = assigner(team) else {
@@ -414,8 +444,17 @@ async fn sprint_planning(
     let tools = &deps.tools;
     let contracts = candidates
         .iter()
-        .map(|row| tools.files.read_contract(&row.task_id))
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(|row| {
+            let tasks = board
+                .iter()
+                .filter(|child| {
+                    child.parent.as_ref() == Some(&row.task_id)
+                        && child.status != TaskStatus::Cancelled
+                })
+                .count();
+            Ok((tools.files.read_contract(&row.task_id)?, tasks))
+        })
+        .collect::<Result<Vec<_>, OrchestratorError>>()?;
     let digest = Digest {
         escalations: open_escalations(&tools.log, &tools.projections)?,
         spent: budgets_spent_since_planning(&tools.log, &open.sprint_id)?,
@@ -425,6 +464,7 @@ async fn sprint_planning(
     let facts = planning_message(
         &open.sprint_id,
         &contracts,
+        backlog,
         open.budget_usd,
         &digest,
         retro.as_deref(),
@@ -1448,6 +1488,7 @@ mod tests {
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
+    use crate::sprints::{EndedBy, PlannedBy, end_sprint, plan_sprint, start_sprint};
     use crate::tools::fixtures::at;
     use crate::tools::tool_descriptors;
 
@@ -7371,6 +7412,315 @@ mod tests {
         assert!(
             refused.to_string().contains("agent_not_active"),
             "{agent} {purpose:?}: {refused:?}"
+        );
+    }
+
+    /// What an idle tick says while ready work waits in the Backlog with no sprint open.
+    const WAITS_FOR_A_SPRINT: &str = "the ready work waits for a sprint";
+
+    /// The harness's team, planning its work in sprints (ADR 0028).
+    fn in_sprints(wire: &mut serde_json::Value) {
+        wire["policy"]["plan_in_sprints"] = json!(true);
+    }
+
+    /// Writes the team file with the policy `on`, as a save of Settings does, through the page's
+    /// `team.save`.
+    async fn save_the_policy(harness: &Harness, on: bool) {
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        let mut wire = serde_json::to_value(&team).expect("the team is JSON");
+        wire["policy"]["plan_in_sprints"] = json!(on);
+        let reply = crate::daemon::fixtures::answered(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": wire }),
+        )
+        .await;
+        assert!(reply.get("error").is_none(), "{reply}");
+    }
+
+    /// Whether the board places `task` in the Backlog, read as the daemon reads it.
+    fn in_the_backlog_now(harness: &Harness, task: &str) -> bool {
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team reads");
+        let open = deps.projections.open_sprint().expect("the sprint reads");
+        let row = harness.row(task);
+        farik_core::governor::gates::in_the_backlog(&crate::sprints::sprint_hold(
+            &team,
+            open.as_ref().map(|sprint| sprint.sprint_id.as_str()),
+            &row,
+        ))
+    }
+
+    fn assert_idle_waiting_for_a_sprint(report: &TickReport) {
+        assert_eq!(
+            report,
+            &TickReport::Idle {
+                why: WAITS_FOR_A_SPRINT.to_string(),
+                until: None
+            }
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_a_ready_task_until_a_sprint_opens() {
+        let harness = Harness::new("orch-sprints-hold", in_sprints);
+        harness.ready("FRK-1");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..2 {
+            let report = orchestrator.tick().await.expect("the tick runs");
+            assert_idle_waiting_for_a_sprint(&report);
+        }
+
+        assert!(adapter.started().is_empty());
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_late_work_for_the_next_sprint() {
+        let harness = Harness::new("orch-sprints-late", in_sprints);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &["FRK-1"]);
+        harness.ready("FRK-3");
+        let adapter = harness.recorded(vec![plan_assigns_frk_1(), planning_ceremony_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let first = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&first), Some("FRK-1"), "{first:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Assigned);
+        let late = orchestrator
+            .tick_within(&TickScope {
+                task_id: Some("FRK-3".parse().expect("a task id")),
+                ..TickScope::default()
+            })
+            .await
+            .expect("the tick runs");
+        // With S1 open, its Backlog waits for the next sprint, not for one to start.
+        assert_eq!(
+            late,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None
+            }
+        );
+        let row = harness.row("FRK-3");
+        assert_eq!((row.status, row.sprint), (TaskStatus::Ready, None));
+        assert!(in_the_backlog_now(&harness, "FRK-3"));
+
+        let deps = &harness.project.deps;
+        end_sprint(deps, EndedBy::Human).expect("S1 ends");
+        start_sprint(deps, None, "human").expect("S2 starts");
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, .. } if sprint_id == "S2"),
+            "{report:?}"
+        );
+        let planning = &adapter.started()[1];
+        assert_eq!(planning.purpose, SessionPurpose::Ceremony);
+        assert!(
+            planning.initial_prompt.contains("FRK-3"),
+            "{}",
+            planning.initial_prompt
+        );
+        // FRK-1, which S1 left for the Backlog, is planned again.
+        assert_eq!(harness.row("FRK-1").sprint.as_deref(), Some("S2"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn stops_unfinished_work_of_an_ended_sprint() {
+        let harness = Harness::new("orch-sprints-ended", in_sprints);
+        harness.assigned("FRK-1", "dev-b", "dev-a");
+        harness.rejected("FRK-2", 1, "done.txt is missing");
+        harness.in_progress("FRK-3", "dev-b", "dev-a");
+        harness.open_sprint("S1", &["FRK-1", "FRK-2", "FRK-3"]);
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let deps = &harness.project.deps;
+
+        end_sprint(deps, EndedBy::Human).expect("S1 ends");
+
+        let ended = harness.events(&[EventKind::SprintEnded]);
+        let EventBody::SprintEnded(body) = &ended[0].body else {
+            panic!("a sprint.ended");
+        };
+        assert_eq!(body.backlog, Some(true));
+        assert_eq!(
+            body.left.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+            ["FRK-1", "FRK-2", "FRK-3"]
+        );
+        // S1's review and look back run; then nothing, until a sprint plans what S1 left.
+        for _ in 0..2 {
+            let report = orchestrator.tick().await.expect("the tick runs");
+            assert!(matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        }
+        for _ in 0..2 {
+            let report = orchestrator.tick().await.expect("the tick runs");
+            assert_idle_waiting_for_a_sprint(&report);
+        }
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Rejected);
+        assert_eq!(harness.row("FRK-3").status, TaskStatus::InProgress);
+        assert_eq!(
+            sessions(&adapter),
+            vec![
+                ("pm".to_string(), SessionPurpose::Ceremony),
+                ("pm".to_string(), SessionPurpose::Ceremony)
+            ]
+        );
+
+        start_sprint(deps, None, "human").expect("S2 starts");
+        plan_sprint(
+            deps,
+            &[
+                "FRK-1".parse().expect("an id"),
+                "FRK-2".parse().expect("an id"),
+            ],
+            &PlannedBy::Assigner("pm".to_string()),
+        )
+        .expect("S2 plans the Backlog");
+        let reworked = orchestrator.tick().await.expect("the tick runs");
+        let started = orchestrator
+            .tick_within(&TickScope {
+                task_id: Some("FRK-1".parse().expect("a task id")),
+                ..TickScope::default()
+            })
+            .await
+            .expect("the tick runs");
+
+        assert_eq!(acted_on(&reworked), Some("FRK-2"), "{reworked:?}");
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::InProgress);
+        assert_eq!(acted_on(&started), Some("FRK-1"), "{started:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn finishes_work_under_way_when_the_policy_turns_on() {
+        // Room for FRK-4, so that only the policy keeps it from being assigned.
+        let harness = Harness::new("orch-sprints-under-way", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(3);
+        });
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.rejected("FRK-2", 1, "done.txt is missing");
+        harness.assigned("FRK-3", "dev-b", "dev-a");
+        save_the_policy(&harness, true).await;
+        harness.ready("FRK-4");
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let tick = async |task: &str| {
+            orchestrator
+                .tick_within(&TickScope {
+                    task_id: Some(task.parse().expect("a task id")),
+                    ..TickScope::default()
+                })
+                .await
+                .expect("the tick runs")
+        };
+
+        let implemented = tick("FRK-1").await;
+        let reworked = tick("FRK-2").await;
+        let started = tick("FRK-3").await;
+        let held = tick("FRK-4").await;
+
+        assert_eq!(acted_on(&implemented), Some("FRK-1"), "{implemented:?}");
+        assert_eq!(
+            sessions(&adapter),
+            vec![("dev-a".to_string(), SessionPurpose::Implement)]
+        );
+        assert_eq!(acted_on(&reworked), Some("FRK-2"), "{reworked:?}");
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::InProgress);
+        assert_eq!(acted_on(&started), Some("FRK-3"), "{started:?}");
+        assert_eq!(harness.row("FRK-3").status, TaskStatus::InProgress);
+        assert!(matches!(held, TickReport::Idle { .. }), "{held:?}");
+        let row = harness.row("FRK-4");
+        assert_eq!((row.status, row.assignee_id), (TaskStatus::Ready, None));
+        for task in ["FRK-1", "FRK-2", "FRK-3"] {
+            assert!(!in_the_backlog_now(&harness, task), "{task}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn forgets_the_backlog_when_the_policy_turns_off() {
+        let harness = Harness::new("orch-sprints-off", in_sprints);
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.open_sprint("S1", &["FRK-1"]);
+        end_sprint(&harness.project.deps, EndedBy::Human).expect("S1 ends");
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let tick = async || {
+            orchestrator
+                .tick_within(&TickScope {
+                    task_id: Some("FRK-1".parse().expect("a task id")),
+                    ..TickScope::default()
+                })
+                .await
+                .expect("the tick runs")
+        };
+        assert!(harness.row("FRK-1").left_for_the_backlog);
+        assert!(matches!(tick().await, TickReport::Idle { .. }));
+
+        save_the_policy(&harness, false).await;
+
+        let updated = harness.events(&[EventKind::TeamUpdated]);
+        let EventBody::TeamUpdated(body) = &updated[updated.len() - 1].body else {
+            panic!("a team.updated");
+        };
+        assert_eq!(body.plan_in_sprints, Some(false));
+        assert!(!harness.row("FRK-1").left_for_the_backlog);
+        let started = tick().await;
+        assert_eq!(acted_on(&started), Some("FRK-1"), "{started:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+
+        save_the_policy(&harness, true).await;
+
+        let updated = harness.events(&[EventKind::TeamUpdated]);
+        let EventBody::TeamUpdated(body) = &updated[updated.len() - 1].body else {
+            panic!("a team.updated");
+        };
+        assert_eq!(body.plan_in_sprints, Some(true));
+        assert!(!in_the_backlog_now(&harness, "FRK-1"));
+        let implemented = tick().await;
+        assert_eq!(acted_on(&implemented), Some("FRK-1"), "{implemented:?}");
+        assert_eq!(
+            sessions(&adapter),
+            vec![("dev-a".to_string(), SessionPurpose::Implement)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_review_and_integration_outside_a_sprint() {
+        let harness = Harness::new("orch-sprints-review", |wire| {
+            in_sprints(wire);
+            wire["policy"]["integration"] = json!("auto_merge");
+        });
+        harness.verifying("FRK-1");
+        harness.accepted("FRK-2");
+        let adapter = harness.recorded(vec![review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let integrated = orchestrator.tick().await.expect("the tick runs");
+        let reviewed = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&integrated), Some("FRK-2"), "{integrated:?}");
+        assert_eq!(harness.events(&[EventKind::TaskIntegrated]).len(), 1);
+        assert_eq!(acted_on(&reviewed), Some("FRK-1"), "{reviewed:?}");
+        assert_eq!(
+            sessions(&adapter),
+            vec![("dev-b".to_string(), SessionPurpose::Verify)]
         );
     }
 }

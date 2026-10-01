@@ -258,7 +258,7 @@
     },
     "teamUpdatedBody": {
       "title": "Team Updated Body",
-      "description": "The team file was written. A status change alone is agent.updated. template names the saved team the team was made from, when it was.",
+      "description": "The team file was written. A status change alone is agent.updated. template names the saved team the team was made from, when it was. plan_in_sprints is the saved team's effective policy.plan_in_sprints (ADR 0028): false clears every Backlog mark; absent clears nothing.",
       "type": "object",
       "additionalProperties": false,
       "required": ["team_name", "agent_ids", "updated_by"],
@@ -266,7 +266,8 @@
         "team_name": { "type": "string" },
         "agent_ids": { "type": "array", "items": { "type": "string" } },
         "updated_by": { "type": "string" },
-        "template": { "type": "string" }
+        "template": { "type": "string" },
+        "plan_in_sprints": { "type": "boolean" }
       }
     },
     "criteriaUpdatedBody": {
@@ -600,7 +601,7 @@
     },
     "sprintEndedBody": {
       "title": "Sprint Ended Body",
-      "description": "A sprint ended (docs/SPEC.md 5.5): by the governor when every task in it was accepted or cancelled, or by the human. left is the tasks that were in it and were neither, which leave it.",
+      "description": "A sprint ended (docs/SPEC.md 5.5): by the governor when every task in it was accepted or cancelled, or by the human. left is the tasks that were in it and were neither, which leave it. backlog is true when the team planned its work in sprints as the sprint ended (ADR 0028): each task in left then waits in the Backlog for the next sprint. Absent reads as false.",
       "type": "object",
       "additionalProperties": false,
       "required": ["sprint_id", "ended_by", "left"],
@@ -612,7 +613,8 @@
           "maxItems": 1000,
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
-        }
+        },
+        "backlog": { "type": "boolean" }
       }
     },
     "agentSleptBody": {

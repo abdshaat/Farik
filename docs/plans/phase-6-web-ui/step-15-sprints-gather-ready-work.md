@@ -179,7 +179,7 @@ Consumes: Task 2. The same commit turns `defaults()` to `plan_in_sprints: Some(t
 - `writes_a_starter_team_that_plans_in_sprints` (cli init.rs): `starter_team("notes")` gives `plans_in_sprints() == true` (answer 1).
 - `defaults_to_planning_in_sprints` (core `team/defaults.rs`): `defaults().policy` has `plan_in_sprints: Some(true)`, and a team from `a_team_wire()`, which has no key, reads as off.
 
-- [ ] `feat(runtime): hold work outside the open sprint and plan the backlog when one starts`
+- [x] `feat(runtime): hold work outside the open sprint and plan the backlog when one starts`
 
 ### Task 4: The Backlog over the wire
 

@@ -1298,9 +1298,11 @@ mod tests {
             TeamPolicy {
                 judgment: Some(base.policy.judgment.clone().unwrap_or_default()),
                 permissions: Some(TeamPermissions::default()),
+                plan_in_sprints: Some(true),
                 ..starter.policy
             },
-            "the starter values, with the plan check and the permissions written out"
+            "the starter values, with the plan check, the permissions and sprint planning \
+             written out"
         );
         assert_eq!(defaults.policy.ambient_messages_per_sprint, 1);
         assert_eq!(defaults.policy.escalation_age_hours.get(), 24);

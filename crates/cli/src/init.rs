@@ -86,6 +86,7 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
                 team_name: project.team.name.to_string(),
                 updated_by: HUMAN.to_string(),
                 template: None,
+                plan_in_sprints: Some(project.team.plans_in_sprints()),
             }),
             now,
             None,
@@ -274,6 +275,12 @@ mod tests {
             team.budgets.daily_usd, None,
             "the starter team ships no daily dollar budget (ADR 0015)"
         );
+    }
+
+    #[test]
+    fn writes_a_starter_team_that_plans_in_sprints() {
+        // The founder's answer 1 (ADR 0028): `farik run` on a new project waits for a sprint.
+        assert!(starter_team("notes").expect("a team").plans_in_sprints());
     }
 
     #[test]

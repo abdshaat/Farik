@@ -290,6 +290,16 @@ pub fn planning_ceremony_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/planning_ceremony_frk_1.jsonl"))
 }
 
+/// The assigner's planning ceremony of S1 under the policy "plan work in sprints": one post, then
+/// `farik_plan_sprint` of the epic FRK-1, which brings its task FRK-2, and the task FRK-3, then
+/// "S1 holds FRK-1, its task FRK-2, and FRK-3.". Hand-written.
+#[must_use]
+pub fn planning_ceremony_frk_1_frk_3() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/planning_ceremony_frk_1_frk_3.jsonl"
+    ))
+}
+
 /// The Scrum Master's standup: one post, "Standup: FRK-1 moved from assigned to `in_progress`.
 /// …", then "The standup is posted.". Hand-written.
 #[must_use]

@@ -74,6 +74,11 @@ pub struct TaskProjection {
     /// The sprint the task is in: set by `sprint.planned`, cleared by the `sprint.ended` that
     /// leaves it (5.5).
     pub sprint: Option<String>,
+    /// Whether a sprint ended under the policy "plan work in sprints" left the task waiting in the
+    /// Backlog (ADR 0028): set by a `sprint.ended` with `backlog: true` for each task in its
+    /// `left`, cleared by the `sprint.planned` that puts the task in a sprint, and on every task by
+    /// a `team.updated` with `plan_in_sprints: false`.
+    pub left_for_the_backlog: bool,
 }
 
 /// A key that costs are summed by (`docs/SPEC.md` 5.5).
@@ -435,7 +440,8 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                   WHERE cost_records.task_id = task_projections.task_id), \
                                  assignee_id, reviewer_id, iteration, awaiting_integration, \
                                  open_questions > 0, awaiting_approval, verifications, \
-                                 rejections, interventions, sprint \
+                                 rejections, interventions, sprint, \
+                                 left_for_the_backlog \
                                  FROM task_projections";
 
 /// The board is ordered by the number in the task id, not by the id itself: `FRK-10` sorts before
@@ -477,6 +483,7 @@ type ProjectedRow = (
     i64,
     i64,
     Option<String>,
+    bool,
 );
 
 fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
@@ -501,6 +508,7 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
         row.get(17)?,
         row.get(18)?,
         row.get(19)?,
+        row.get(20)?,
     ))
 }
 
@@ -532,6 +540,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         rejections,
         interventions,
         sprint,
+        left_for_the_backlog,
     ) = row;
     let refuse = |what: &str, value: &str| StoreError::InvalidEvent {
         detail: format!("the projection of {task_id} holds {value:?} as its {what}"),
@@ -565,6 +574,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         interventions: u32::try_from(interventions)
             .map_err(|_| refuse("interventions", &interventions.to_string()))?,
         sprint,
+        left_for_the_backlog,
     })
 }
 
@@ -582,6 +592,14 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         // About no one contract, so they name their tasks in the body rather than the envelope.
         EventBody::SprintStarted(_) | EventBody::SprintPlanned(_) | EventBody::SprintEnded(_) => {
             return apply_sprint(transaction, &event.body, seq);
+        }
+        // Switching the policy off lets every task the Backlog held go on (ADR 0028).
+        EventBody::TeamUpdated(body) if body.plan_in_sprints == Some(false) => {
+            return update(
+                transaction,
+                "UPDATE task_projections SET left_for_the_backlog = 0 WHERE left_for_the_backlog = 1",
+                (),
+            );
         }
         _ => {}
     }
@@ -775,7 +793,8 @@ fn apply_sprint(
             for task_id in &body.task_ids {
                 update(
                     transaction,
-                    "UPDATE task_projections SET sprint = ?2, updated_seq = ?3
+                    "UPDATE task_projections SET sprint = ?2, left_for_the_backlog = 0,
+                                                 updated_seq = ?3
                      WHERE task_id = ?1
                        AND EXISTS (SELECT 1 FROM sprints WHERE sprint_id = ?2 AND open = 1)",
                     (task_id.as_str(), body.sprint_id.as_str(), seq),
@@ -794,7 +813,17 @@ fn apply_sprint(
                 "UPDATE task_projections SET sprint = NULL, updated_seq = ?2
                  WHERE sprint = ?1 AND status NOT IN ('accepted', 'cancelled')",
                 (body.sprint_id.as_str(), seq),
-            )
+            )?;
+            if body.backlog == Some(true) {
+                for task_id in &body.left {
+                    update(
+                        transaction,
+                        "UPDATE task_projections SET left_for_the_backlog = 1 WHERE task_id = ?1",
+                        (task_id.as_str(),),
+                    )?;
+                }
+            }
+            Ok(())
         }
         _ => Ok(()),
     }
@@ -1058,6 +1087,7 @@ mod tests {
                 rejections: 0,
                 interventions: 0,
                 sprint: None,
+                left_for_the_backlog: false,
             }]
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -1104,6 +1134,7 @@ mod tests {
                 rejections: 0,
                 interventions: 0,
                 sprint: None,
+                left_for_the_backlog: false,
             }
         );
     }
@@ -1304,7 +1335,7 @@ mod tests {
         );
         assert_eq!(
             migrations::known_versions(),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         );
     }
 
@@ -2223,6 +2254,69 @@ mod tests {
         row_of(projections, task_id).sprint
     }
 
+    fn marked(projections: &Projections, task_id: &str) -> bool {
+        row_of(projections, task_id).left_for_the_backlog
+    }
+
+    fn team_updated(plan_in_sprints: Option<bool>) -> NewEvent {
+        let mut body = json!({ "team_name": "farik", "agent_ids": ["pm"], "updated_by": "human" });
+        if let Some(on) = plan_in_sprints {
+            body["plan_in_sprints"] = json!(on);
+        }
+        sprint_event(EventKind::TeamUpdated, body)
+    }
+
+    #[test]
+    fn marks_what_a_sprint_leaves_for_the_backlog() {
+        let (log, projections) = a_board();
+        for task_id in ["FRK-1", "FRK-2", "FRK-3"] {
+            record(&log, &projections, &about(EventKind::TaskCreated, task_id));
+        }
+        // Without the field, an end marks nothing.
+        record(&log, &projections, &started("S1", None));
+        record(
+            &log,
+            &projections,
+            &planned("S1", &["FRK-1", "FRK-2", "FRK-3"]),
+        );
+        record(
+            &log,
+            &projections,
+            &ended("S1", &["FRK-1", "FRK-2", "FRK-3"]),
+        );
+        assert!(!marked(&projections, "FRK-1"));
+        // With `backlog: true`, each task in `left` and no other.
+        record(&log, &projections, &started("S2", None));
+        record(
+            &log,
+            &projections,
+            &planned("S2", &["FRK-1", "FRK-2", "FRK-3"]),
+        );
+        let mut end = ended("S2", &["FRK-1", "FRK-2"]);
+        let farik_protocol::event::EventBody::SprintEnded(body) = &mut end.body else {
+            panic!("a sprint.ended");
+        };
+        body.backlog = Some(true);
+        record(&log, &projections, &end);
+        assert_eq!(
+            ["FRK-1", "FRK-2", "FRK-3"].map(|task_id| marked(&projections, task_id)),
+            [true, true, false]
+        );
+        // The plan that puts a task in a sprint clears its mark.
+        record(&log, &projections, &started("S3", None));
+        record(&log, &projections, &planned("S3", &["FRK-1"]));
+        assert_eq!(
+            ["FRK-1", "FRK-2"].map(|task_id| marked(&projections, task_id)),
+            [false, true]
+        );
+        // Switching the policy on, or saying nothing of it, clears none; switching it off, all.
+        record(&log, &projections, &team_updated(Some(true)));
+        record(&log, &projections, &team_updated(None));
+        assert!(marked(&projections, "FRK-2"));
+        record(&log, &projections, &team_updated(Some(false)));
+        assert!(!marked(&projections, "FRK-2"));
+    }
+
     #[test]
     fn projects_the_open_sprint() {
         let (log, projections) = a_board();
@@ -2448,7 +2542,9 @@ mod tests {
             // stuck in S1 after S1 ended. A move into `verifying` and a cost are also already
             // projected, in `task_projections` and `cost_records`, so a 0009 that failed to empty
             // either table (N2, N4) would replay them a second time. 0008 runs before these rows
-            // exist, so its own emptying of `task_projections` (M4c) is not pinned here.
+            // exist, so its own emptying of `task_projections` (M4c) is not pinned here. Opening
+            // the log applies every later migration; only 0009's record is taken back, since
+            // 0010's column cannot be.
             let log = Arc::new(open_event_log(&path, at(9)).expect("the log opens"));
             for event in [
                 about(EventKind::TaskCreated, "FRK-1"),
@@ -2462,7 +2558,7 @@ mod tests {
             }
             log.connection()
                 .execute_batch(
-                    "DELETE FROM schema_migrations WHERE version > 8;
+                    "DELETE FROM schema_migrations WHERE version = 9;
                      INSERT INTO task_projections
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq,
                           sprint, verifications)

@@ -879,9 +879,9 @@ mod tests {
     use crate::recorded::fixtures::{
         accept_frk_1, implement_finishes_frk_1, judge_frk_1_by_architect, judge_frk_1_fails,
         judge_frk_1_passes, plan_assigns_frk_1, plan_assigns_frk_2, plan_breaks_down_frk_1,
-        plan_closes_epic_frk_1, refine_asks_frk_1, refine_writes_epic_frk_1,
-        refine_writes_task_frk_1, replays_farik_read_board, review_epic_fails_frk_1,
-        review_epic_frk_1, triage_by_sm_frk_1, triage_frk_1_large,
+        plan_closes_epic_frk_1, planning_ceremony_frk_1_frk_3, refine_asks_frk_1,
+        refine_writes_epic_frk_1, refine_writes_task_frk_1, replays_farik_read_board,
+        review_epic_fails_frk_1, review_epic_frk_1, triage_by_sm_frk_1, triage_frk_1_large,
     };
     use crate::session::SessionPurpose;
     use crate::tools::fixtures::at;
@@ -3076,5 +3076,99 @@ mod tests {
         harness.asleep("pm", in_an_hour());
 
         waits_for(&orchestrator, "pm", in_an_hour()).await;
+    }
+
+    /// A team with the Scrum Master `sam`, planning its work in sprints (ADR 0028).
+    fn in_sprints_with_a_scrum_master(wire: &mut Value) {
+        with_a_scrum_master(wire);
+        wire["policy"]["plan_in_sprints"] = json!(true);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn breaks_an_epic_down_outside_a_sprint() {
+        let harness = Harness::new("epic-sprints-breakdown", in_sprints_with_a_scrum_master);
+        a_scrum_masters_epic(&harness);
+        let adapter = harness.recorded(vec![plan_breaks_down_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let assigned = orchestrator.tick().await.expect("the tick runs");
+        let started = orchestrator.tick().await.expect("the tick runs");
+        let broken_down = orchestrator.tick().await.expect("the tick runs");
+        for (from, to) in [("draft", "refining"), ("refining", "ready")] {
+            harness.project.moved("FRK-2", from, to, &json!({}));
+        }
+        let later = [
+            orchestrator.tick().await.expect("the tick runs"),
+            orchestrator.tick().await.expect("the tick runs"),
+        ];
+
+        for report in [&assigned, &started, &broken_down] {
+            assert!(
+                matches!(report, TickReport::Acted { task_id, .. } if task_id.as_str() == "FRK-1"),
+                "{report:?}"
+            );
+        }
+        assert_eq!(
+            moves_of(&harness, "FRK-1"),
+            ["ready -> assigned", "assigned -> in_progress"]
+        );
+        assert_eq!(harness.row("FRK-1").assignee_id.as_deref(), Some("sam"));
+        let spec = &adapter.started()[0];
+        assert_eq!(
+            (spec.agent_id.as_str(), spec.purpose),
+            ("sam", SessionPurpose::Plan)
+        );
+        assert_eq!(harness.row("FRK-2").parent, Some(task("FRK-1")));
+        for report in &later {
+            assert_eq!(
+                report,
+                &TickReport::Idle {
+                    why: "the ready work waits for a sprint".to_string(),
+                    until: None
+                }
+            );
+        }
+        let child = harness.row("FRK-2");
+        assert_eq!((child.status, child.assignee_id), (TaskStatus::Ready, None));
+        assert_eq!(adapter.started().len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn plans_both_on_the_first_tick_of_the_sprint() {
+        let harness = Harness::new("epic-sprints-plans-both", in_sprints_with_a_scrum_master);
+        a_scrum_masters_epic_in_progress(&harness);
+        a_child(&harness, "ready");
+        harness.ready("FRK-3");
+        let adapter = harness.recorded(vec![planning_ceremony_frk_1_frk_3()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let waiting = orchestrator.tick().await.expect("the tick runs");
+        assert!(is_idle(&waiting), "{waiting:?}");
+        crate::sprints::start_sprint(&harness.project.deps, None, "human").expect("S1 starts");
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, .. } if sprint_id == "S1"),
+            "{report:?}"
+        );
+        let spec = &adapter.started()[0];
+        assert_eq!(
+            (spec.agent_id.as_str(), spec.purpose),
+            ("sam", SessionPurpose::Ceremony)
+        );
+        let prompt = &spec.initial_prompt;
+        assert!(prompt.contains("each waiting in the Backlog"), "{prompt}");
+        assert!(
+            prompt
+                .lines()
+                .any(|line| line.contains("FRK-1") && line.contains("1 task under it")),
+            "{prompt}"
+        );
+        assert!(prompt.contains("FRK-3"), "{prompt}");
+        for id in ["FRK-1", "FRK-2", "FRK-3"] {
+            assert_eq!(harness.row(id).sprint.as_deref(), Some("S1"), "{id}");
+        }
     }
 }

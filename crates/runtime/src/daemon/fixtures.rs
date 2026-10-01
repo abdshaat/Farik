@@ -170,3 +170,10 @@ impl TestDaemon {
         self.project.events(&[kind])
     }
 }
+
+/// The reply frame to `method` with `params`, as the web page's socket is answered: for a test
+/// outside the daemon that asks what the page asks.
+pub(crate) async fn answered(state: &Arc<DaemonState>, method: &str, params: &Value) -> Value {
+    let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
+    super::web::answer(state, &frame.to_string(), &mut None).await
+}

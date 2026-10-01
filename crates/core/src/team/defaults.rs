@@ -38,8 +38,26 @@ pub fn defaults() -> TeamDefaults {
     .expect("the starter policy is one the team schema accepts");
     policy.judgment = Some(Judgment::default());
     policy.permissions = Some(TeamPermissions::default());
+    // A new team plans its work in sprints (ADR 0028); an old file without the key does not.
+    policy.plan_in_sprints = Some(true);
     TeamDefaults {
         budgets: TeamBudgets::default(),
         policy,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::defaults;
+    use crate::team::fixtures::a_team_wire;
+    use crate::team::validate_team;
+
+    #[test]
+    fn defaults_to_planning_in_sprints() {
+        // A new team plans in sprints (ADR 0028, the founder's answer 1); a team file without the
+        // key, as every one written before it, does not.
+        assert_eq!(defaults().policy.plan_in_sprints, Some(true));
+        let old = validate_team(&a_team_wire()).expect("the fixture is a team");
+        assert!(!old.plans_in_sprints());
     }
 }

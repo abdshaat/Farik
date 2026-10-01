@@ -1109,7 +1109,7 @@ fn assignment(
                 .find(|epic| &epic.task_id == parent)
                 .and_then(|epic| epic.sprint.clone())
         }),
-        plan_in_sprints: false,
+        plan_in_sprints: team.plans_in_sprints(),
         dependencies,
         designer_browser,
     })

@@ -566,6 +566,7 @@ pub(super) fn team_updated(team: &Team, template: Option<&str>) -> EventBody {
             .collect(),
         updated_by: HUMAN.to_string(),
         template: template.map(str::to_string),
+        plan_in_sprints: Some(team.plans_in_sprints()),
     })
 }
 
@@ -1043,7 +1044,12 @@ pub(super) mod tests {
         assert_eq!(updated.len(), 1);
         assert_eq!(
             farik_protocol::event::event_to_value(&updated[0])["body"],
-            json!({ "team_name": "Farik", "agent_ids": ["pm", "dev-a", "dev-b"], "updated_by": "human" })
+            json!({
+                "team_name": "Farik",
+                "agent_ids": ["pm", "dev-a", "dev-b"],
+                "updated_by": "human",
+                "plan_in_sprints": false
+            })
         );
     }
 
@@ -1697,7 +1703,8 @@ pub(super) mod tests {
                     ],
                     "judge": "auto"
                 },
-                "permissions": { "run_commands": true, "push": false }
+                "permissions": { "run_commands": true, "push": false },
+                "plan_in_sprints": true
             })
         );
     }

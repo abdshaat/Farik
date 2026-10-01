@@ -73,11 +73,16 @@ pub fn run_with(cwd: &Path, args: &[&str], set: impl FnOnce(&mut CliIo<'_>)) -> 
     }
 }
 
-/// A repository made a Farik project by `farik init`.
+/// A repository made a Farik project by `farik init`, its team saying `plan_in_sprints: false` so
+/// that work flows without a sprint, as before ADR 0028.
 pub fn a_project(name: &str) -> TempRepo {
     let repository = TempRepo::new(name);
     let ran = run(&repository.path, &["init"]);
     assert_eq!(ran.code, 0, "{}", ran.err);
+    let files = files_of(&repository);
+    let mut team = files.read_team().expect("farik init wrote a team");
+    team.policy.plan_in_sprints = Some(false);
+    files.write_team(&team).expect("the team is written");
     repository
 }
 

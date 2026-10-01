@@ -753,6 +753,43 @@ fn lists_what_waits_on_the_human() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_the_backlog_waits() {
+    let repository = a_team_with("run-backlog", |wire| {
+        wire["policy"]["plan_in_sprints"] = json!(true);
+    });
+    let task = a_small_request(&repository);
+    walked(&repository, &task, &["refining", "ready"]);
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.out
+            .lines()
+            .any(|line| line == "idle: the ready work waits for a sprint"),
+        "{}",
+        ran.out
+    );
+    assert_eq!(
+        ran.out.lines().last(),
+        Some("start a sprint: 1 waits in the Backlog (`farik sprint start`)"),
+        "{}",
+        ran.out
+    );
+    assert_eq!(status_of(&repository, &task), "ready");
+
+    let ran = run_with(&repository.path, &["--json", "run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
+    assert_eq!(last, json!({ "backlog": { "count": 1 } }));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn lists_a_high_risk_result_and_no_answered_question() {
     let repository = a_team("plan-waiting");
     let task = a_high_risk_task_verifying(&repository, "Add done.txt");
