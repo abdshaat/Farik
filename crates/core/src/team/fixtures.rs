@@ -103,3 +103,31 @@ pub fn a_full_team_wire() -> Value {
         }
     })
 }
+
+/// A schema-valid wire template (ADR 0026 C): Mira, Product Manager, and Theo, Developer, with
+/// the four answers written out.
+#[must_use]
+pub fn a_template_wire() -> Value {
+    json!({
+        "version": 1,
+        "name": "Three of us",
+        "saved_at": "2026-09-30T12:00:00Z",
+        "agents": [
+            {
+                "id": "mira",
+                "display_name": "Mira",
+                "role": "product_manager",
+                "persona": "Mira.",
+                "avatar": "product-manager",
+                "model": { "id": "claude-opus-5", "effort": "high" }
+            },
+            { "id": "theo", "display_name": "Theo", "role": "software_developer" }
+        ],
+        "policy": {
+            "permissions": { "run_commands": true, "push": false },
+            "judgment": { "required": "always", "judge": "auto" },
+            "integration": "auto_merge"
+        },
+        "budgets": { "daily_usd": 20 }
+    })
+}

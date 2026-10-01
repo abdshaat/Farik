@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://farik.dev/schemas/team-template.schema.json",
+  "title": "TeamTemplate",
+  "description": "A team saved on this computer to use in any project: each agent's name, role, persona, picture and model, and the four answers setup asks. Stored as templates/<slug>.yaml in Farik's state folder, readable by its owner alone. It leaves out everything that belongs to one project: rules, the criterion library, the preview, the integration branch, the team's name, and each agent's status, grants, revokes, preauthorized tools and connectors. See docs/SPEC.md section 3 and ADR 0026 (C).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "name",
+    "saved_at",
+    "agents",
+    "policy",
+    "budgets"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "The format's version."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "pattern": "^\\S([\\s\\S]*\\S)?$",
+      "description": "What the user calls this saved team, with no space at either end. Its slug is the file's name."
+    },
+    "saved_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When it was saved."
+    },
+    "agents": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 7,
+      "items": {
+        "$ref": "#/$defs/templateAgent"
+      },
+      "description": "Each agent becomes an active one where the template is used. validate_template holds the team they make to validate_team's rules: unique ids, an active Product Manager and Software Developer, a named judge on the team."
+    },
+    "policy": {
+      "$ref": "#/$defs/templatePolicy"
+    },
+    "budgets": {
+      "$ref": "#/$defs/templateBudgets"
+    }
+  },
+  "$defs": {
+    "templateAgent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "display_name",
+        "role"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "maxLength": 64,
+          "description": "A kebab-case slug of the display name, unique within the team. Events and contracts refer to an agent by it, so it never changes."
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "role": {
+          "$ref": "#/$defs/role"
+        },
+        "persona": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "A few lines of character added to the role's system prompt. It never grants anything."
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "The name of a shipped avatar. An uploaded picture, a path under .farik/team/avatars/, is left out: nothing uploads one yet."
+        },
+        "model": {
+          "$ref": "#/$defs/model"
+        }
+      }
+    },
+    "templatePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "permissions",
+        "judgment",
+        "integration"
+      ],
+      "properties": {
+        "permissions": {
+          "$ref": "#/$defs/permissions"
+        },
+        "judgment": {
+          "$ref": "#/$defs/judgment"
+        },
+        "integration": {
+          "$ref": "#/$defs/integration"
+        }
+      },
+      "description": "Three of the four answers setup asks: what the agents may do, the plan check, and what happens to accepted work."
+    },
+    "templateBudgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "daily_usd": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "What the team may spend in a day before it pauses (spec 5.5). Left out, the day has no dollar limit: Farik ships none (ADR 0015). A sprint's own budget belongs to the sprint, not here."
+        }
+      },
+      "description": "The fourth answer, spending. Left out, the day has no dollar limit."
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "product_manager",
+        "scrum_master",
+        "architect",
+        "software_developer",
+        "marketing_specialist",
+        "ui_ux_designer"
+      ],
+      "description": "The role an agent is instantiated from. `human` is a role a contract may name as a reviewer, never a role an agent holds."
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The agent's own model and effort. Either may be left out, and the role's stands in for it: changing how carefully an agent works never changes what it runs on.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "The provider's model id, exactly as the runtime reports it in usage, so that the price table can be asked about it."
+        },
+        "effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "How hard the model thinks. The runtime passes this value to the program as it is (farik_runtime::SessionSpec::effort)."
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run_commands": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether Developers and Architects run commands (the execute tier). Farik still runs every check itself. Left out, true."
+        },
+        "push": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether Developers push and open pull requests (the git_remote tier). Left out, false."
+        }
+      },
+      "description": "The team's answers to what its agents may do, applied to every agent of the role before the agent's own grants and revokes (spec 5.6)."
+    },
+    "judgment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "string",
+          "enum": [
+            "always",
+            "never"
+          ],
+          "default": "always",
+          "description": "Whether every contract's plan is checked before work starts (spec 5.3). Left out, always."
+        },
+        "questions": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 200
+          },
+          "default": [
+            "Does the task fit its budget?",
+            "Would its checks notice if the work went wrong the way its intent worries about?"
+          ],
+          "description": "What the judge answers about each plan, one answer per question. Left out, the two of spec 5.3. validate_team refuses none while required is always."
+        },
+        "judge": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "architect",
+            "scrum_master"
+          ],
+          "default": "auto",
+          "description": "Who checks plans. `auto` is the first active agent of the Architect, the Scrum Master and the Product Manager, in that order (the founder, 2026-09-29). A named judge must be an active agent (validate_team)."
+        }
+      },
+      "description": "The plan check (spec 5.3). Left out, every plan is checked by the defaults."
+    },
+    "integration": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "auto_merge",
+        "pull_request"
+      ],
+      "description": "What happens to a task's branch after it is accepted (spec 5.14)."
+    }
+  }
+}

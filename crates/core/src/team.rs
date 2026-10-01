@@ -25,9 +25,13 @@ pub mod fixtures;
 
 mod defaults;
 mod describe;
+mod template;
 
 pub use defaults::{SMALL_ENOUGH_QUESTION, TeamDefaults, defaults};
 pub use describe::describe_change;
+pub use template::{
+    TeamTemplate, TemplateAgent, template_from_team, template_slug, validate_template,
+};
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/team.schema.json");
 
