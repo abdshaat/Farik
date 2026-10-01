@@ -247,7 +247,9 @@ Files: created `apps/web/e2e/templates.spec.ts`, `apps/web/e2e/fixtures/pair-tem
 3. Project A again: copy `pair-template.yaml` into `${stateFolder}/templates/pair.yaml`. Team → Use a saved team → Pair. The preview shows Stays: Mira; Joins: Noor; Retired: Theo; Removed: Ada. Use this team. Assert A's `team.yaml` has `mira` active, `noor` active, `theo` retired and no `ada`, and the log's last events are `agent.updated { theo, retired }` then `team.updated { template: "Pair" }`.
 Screenshots of "Your team" with the three starts and of the preview, at 360 and 1280 px.
 
-- [ ] `test(web): save a team, start a project from it, and use one on a live team`
+As built (Task 7): one test, `templates.spec.ts`, which also covers a refused result and Settings. Before saving, A's push answer is changed to yes in Settings, so B's carried answer differs from the suggested team's default and the carry-over is seen (B is never shown What they may do, its Finish screen says the push answer in words, and its `team.yaml` has `push: true`). B runs in a second browser context, since both servers sign in on 127.0.0.1. Pair's fixture also changes `run_commands` to false and sets a $5 daily limit; the test asserts A's `run_commands: false` after it is used. The refused result: on A after Pair, Add someone (a Developer who never worked) and Pause Noor; Pair's preview then says "Your team would have no active Developer. Noor stays but is paused. Resume Noor on the Team page first, or choose another saved team.", "Use this team" is disabled, and A's `team.yaml` is unchanged after Back and Cancel. Settings: "Three of us" renamed "Our trio" (the file moves to `our-trio.yaml`), Pair deleted after "Delete it", and the footer names the real folder. Screenshots `templates-{starts,preview,refused,settings}` at 360 and 1440 px (1440, step 13's width), with no sideways scroll at 360; setup's screen is resized without waiting for the rail it does not have.
+
+- [x] `test(web): save a team, start a project from it, and use one on a live team`
 
 ### Task 8: Spec and plan
 

@@ -27,6 +27,9 @@ const env = {
 	XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), "farik-e2e-config-")),
 };
 
+/** Farik's state folder, which every serve with a project shares: saved teams are kept in it. */
+export const stateFolder = join(env.XDG_CONFIG_HOME, "farik");
+
 /** Runs `farik <args>` in the project and answers what it printed. */
 export function farik(project: string, args: string[]): string {
 	return execFileSync(join(target, "farik"), args, {
