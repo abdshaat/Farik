@@ -1069,6 +1069,31 @@ fn store_refusal(error: &crate::credential::CredentialError) -> Refusal {
     )
 }
 
+/// What the launch route answers when a signed-in server's entry could not be given.
+fn fresh_refusal(fresh: signed_in::Fresh, server: &str) -> Refusal {
+    match fresh {
+        signed_in::Fresh::NotConfirmed => (
+            StatusCode::FORBIDDEN,
+            format!(
+                "connector_not_confirmed: {server} is not as it was connected on this \
+                 computer; connect it again"
+            ),
+        ),
+        signed_in::Fresh::Lapsed => (
+            StatusCode::FORBIDDEN,
+            format!("sign_in_again: the service ended {server}'s sign-in; sign in again"),
+        ),
+        signed_in::Fresh::Failed(why) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("sign_in_failed: {why}"),
+        ),
+        signed_in::Fresh::Store(detail) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("secret_store_unavailable: {detail}"),
+        ),
+    }
+}
+
 /// What the launch route answers for `asked`. No refusal names a key's value.
 async fn launch_answer(state: &Arc<DaemonState>, asked: &LaunchAsk) -> Result<Value, Refusal> {
     use crate::connectors::{ConnectorError, confirmed_entry, launch_headers, launch_spec};
@@ -1104,28 +1129,7 @@ async fn launch_answer(state: &Arc<DaemonState>, asked: &LaunchAsk) -> Result<Va
         .await
         {
             Ok(entry) => entry,
-            Err(signed_in::Fresh::NotConfirmed) => return Err(not_confirmed()),
-            Err(signed_in::Fresh::Lapsed) => {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    format!(
-                        "sign_in_again: the service ended {}'s sign-in; sign in again",
-                        asked.server
-                    ),
-                ));
-            }
-            Err(signed_in::Fresh::Failed(why)) => {
-                return Err((
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    format!("sign_in_failed: {why}"),
-                ));
-            }
-            Err(signed_in::Fresh::Store(detail)) => {
-                return Err((
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    format!("secret_store_unavailable: {detail}"),
-                ));
-            }
+            Err(fresh) => return Err(fresh_refusal(fresh, &asked.server)),
         }
     } else {
         let (secrets, held, kept_at) = (state.connector_secrets(), server.clone(), at.clone());
@@ -2416,8 +2420,6 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn launch_refuses_a_signed_in_server_kept_without_a_grant() {
-        use crate::connectors::ConnectorSecrets as _;
-
         let fixture = crate::oauth_fixture::Fixture::start().await;
         let (daemon, _) =
             launching_signed_in("launch-no-grant", &fixture, chrono::Duration::minutes(30));
