@@ -9,6 +9,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
+import { media } from "../test/media.ts";
 import {
 	answerQuery,
 	answerStatus,
@@ -122,6 +123,7 @@ const VIDEOS = {
 	used: 2,
 	of: 5,
 };
+const WIDE = "(min-width: 1024px)";
 const sprintPeriod = { kind: "sprint", sprint_id: "S2" };
 
 const teamGot = (
@@ -385,6 +387,26 @@ describe("allowances on the screens", () => {
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
+	it("connector_allowance_starts_at_the_entrys_number", async () => {
+		await kaiPage(
+			[HIGGSFIELD],
+			[entry({ generate_image: 5, generate_video: 5 })],
+			CONNECTED,
+			[{ ...ROW, of: 5 }, VIDEOS],
+		);
+		fireEvent.click(
+			within(kitRow("Higgsfield")).getByRole("button", {
+				name: "Change how many Kai may make with Higgsfield",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "How many may Kai make each sprint without asking?",
+		});
+		expect(
+			(within(dialog).getByLabelText(/^Images/) as HTMLInputElement).value,
+		).toBe("5");
+	});
+
 	it("connector_allowance_says_connect_again_when_the_kit_changed", async () => {
 		const { s } = await kaiPage(
 			[HIGGSFIELD],
@@ -512,6 +534,7 @@ describe("allowances on the screens", () => {
 	});
 
 	it("costs_lists_what_was_made_on_other_services", async () => {
+		media.set(WIDE, true);
 		const { container, socket } = await renderApp("/costs");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
@@ -575,12 +598,58 @@ describe("allowances on the screens", () => {
 			["Higgsfield", "14 of 20 images", "This sprint"],
 			["Higgsfield", "6 of 5 videos", "This sprint"],
 		]);
-		expect(
-			within(section).getByText(
-				"Farik counts what agents made, not what the service charges. Check your bill there.",
-			),
-		).toBeTruthy();
+		const bill =
+			"Farik counts what agents made, not what the service charges. Check your bill there.";
+		expect(within(section).getByText(bill)).toBeTruthy();
 		await expectNoAxeViolations(container);
+		// On a phone each row stacks, as the board draws it.
+		act(() => media.set(WIDE, false));
+		expect(within(section).queryByRole("table")).toBeNull();
+		expect(within(section).getAllByText("Kai, on Higgsfield")).toHaveLength(2);
+		expect(within(section).getByText("14 of 20 images")).toBeTruthy();
+		expect(within(section).getAllByText("This sprint")).toHaveLength(2);
+		expect(within(section).getByText(bill)).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("costs_says_today_with_no_sprint_open", async () => {
+		const { socket } = await renderApp("/costs");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "team.get", teamGot([], [HIGGSFIELD]));
+		await answerQuery(s, "costs.summary", {
+			today_usd: 0,
+			daily_limit_usd: null,
+			sprint: null,
+			agents: [],
+			conversations_today_usd: 0,
+		});
+		await answerQuery(s, "team.activity", { activity: [] });
+		await answerQuery(s, "metrics", {
+			accepted_tasks: 0,
+			first_pass_acceptance_rate: null,
+			interventions_per_accepted_task: null,
+			cost_per_accepted_task: null,
+			mechanically_verified_criteria_share: null,
+			active_weeks: 0,
+			messages: {
+				reaction: 0,
+				ambient: 0,
+				reply: 0,
+				ceremony: 0,
+				system: 0,
+				human: 0,
+			},
+		});
+		await answerQuery(s, "allowances.list", {
+			period: { kind: "day", day: "2026-09-22" },
+			rows: [ROW],
+		});
+		const section = await screen.findByRole("region", {
+			name: "Made on other services",
+		});
+		expect(within(section).getByText("Today")).toBeTruthy();
+		expect(within(section).queryByText("This sprint")).toBeNull();
 	});
 
 	it("tool_approval_says_the_count_for_a_tool_with_an_allowance", async () => {
@@ -612,8 +681,13 @@ describe("allowances on the screens", () => {
 			await screen.findByRole("button", { name: en.waitingReview }),
 		);
 		const dialog = await screen.findByRole("dialog", {
-			name: "Kai wants to use higgsfield",
+			name: "Kai wants to use Higgsfield",
 		});
+		expect(
+			within(dialog).getByText(
+				"Higgsfield, from the Marketing Specialist’s kit",
+			),
+		).toBeTruthy();
 		expect(
 			await within(dialog).findByText(
 				"Kai has made 20 of 20 images this sprint.",
@@ -660,12 +734,45 @@ describe("allowances on the screens", () => {
 			await screen.findByRole("button", { name: en.waitingReview }),
 		);
 		const dialog = await screen.findByRole("dialog", {
-			name: "Kai wants to use higgsfield",
+			name: "Kai wants to use Higgsfield",
 		});
 		expect(within(dialog).queryByText(/made .* of/)).toBeNull();
 		expect(
 			within(dialog).queryByRole("link", { name: /Change how many/ }),
 		).toBeNull();
+	});
+
+	it("tool_approval_names_a_server_outside_any_kit_as_it_is", async () => {
+		const { socket } = await renderApp("/");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "team.get", teamGot([], [HIGGSFIELD]));
+		await answerQuery(s, "team.activity", { activity: [] });
+		await answerQuery(s, "allowances.list", { period: sprintPeriod, rows: [] });
+		await answerQuery(s, "waiting.list", {
+			waiting: [
+				{
+					task_id: "FRK-16",
+					kind: "tool_approval",
+					agent_id: "kai",
+					title: "Launch post",
+					line: "",
+					approval: 43,
+					server: "my-notes",
+					tool: "save_note",
+					input: "{}",
+				},
+			],
+		});
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.waitingReview }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Kai wants to use my-notes",
+		});
+		expect(
+			within(dialog).getByText("my-notes, which you added to Kai"),
+		).toBeTruthy();
 	});
 
 	it("allowance_screens_never_name_the_plumbing", () => {

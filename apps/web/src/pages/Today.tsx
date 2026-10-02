@@ -11,7 +11,7 @@ import { type Allowances, useAllowances } from "./allowances.tsx";
 import { type Backlog, moreWaits } from "./Board.tsx";
 import { ChannelPreview } from "./Channel.tsx";
 import { ToolApproval, type ToolAsk } from "./dialogs/ToolApproval.tsx";
-import type { Agent, Team } from "./setup/TeamSetup.tsx";
+import { type Agent, roleName, type Team } from "./setup/TeamSetup.tsx";
 import type { RoleKit } from "./Team.tsx";
 import styles from "./Today.module.css";
 
@@ -181,11 +181,7 @@ export function Today() {
 										item={item}
 										agent={agent(item.agentId)}
 										allowances={allowances}
-										service={
-											(team?.kits ?? [])
-												.flatMap((kit) => kit.connectors)
-												.find((one) => one.name === item.server)?.title
-										}
+										kits={team?.kits ?? []}
 									/>
 								) : (
 									<WaitingRow
@@ -362,17 +358,22 @@ function ToolApprovalRow({
 	item,
 	agent,
 	allowances,
-	service,
+	kits,
 }: {
 	item: Waiting;
 	agent: Agent | undefined;
 	allowances: Allowances | undefined;
-	/** The service's title in the kit, when the kit has it. */
-	service: string | undefined;
+	/** What Farik offers each role, to name the service by its kit's title. */
+	kits: RoleKit[];
 }) {
 	const [open, setOpen] = useState(false);
 	const name = agent?.displayName ?? item.agentId ?? "";
 	const titleId = `waiting-tool-${item.approval}`;
+	// The agent's own role's kit, since two roles' kits may share a service name.
+	const offered = kits.find((one) => one.role === agent?.role);
+	const service = offered?.connectors.find((one) => one.name === item.server);
+	const kit = offered &&
+		service && { title: service.title, role: roleName(offered.role) };
 	const ask: ToolAsk = {
 		approval: item.approval ?? 0,
 		server: item.server ?? "",
@@ -386,7 +387,10 @@ function ToolApprovalRow({
 			)}
 			<div className={styles.rowText}>
 				<strong id={titleId}>
-					{t("waitingToolApproval", { agent: name, server: ask.server })}
+					{t("waitingToolApproval", {
+						agent: name,
+						server: kit?.title ?? ask.server,
+					})}
 				</strong>
 				<span>
 					{t("waitingToolApprovalLine", {
@@ -419,9 +423,9 @@ function ToolApprovalRow({
 									row.tool === ask.tool,
 							),
 							period: allowances.period,
-							service: service ?? ask.server,
 						}
 					}
+					kit={kit}
 					taskId={item.taskId}
 					title={item.title}
 					onClose={() => setOpen(false)}

@@ -55,6 +55,7 @@ export function ToolApproval({
 	agent,
 	agentId,
 	allowance,
+	kit,
 	taskId,
 	title,
 	onClose,
@@ -67,9 +68,10 @@ export function ToolApproval({
 		| {
 				row: AllowanceRow | undefined;
 				period: Allowances["period"];
-				service: string;
 		  }
 		| undefined;
+	/** The kit's title for the service and the role's name, when the service is one of its kit's. */
+	kit?: { title: string; role: string } | undefined;
 	taskId: string;
 	title: string;
 	onClose: () => void;
@@ -89,7 +91,10 @@ export function ToolApproval({
 		<Dialog
 			open
 			fillsPhone
-			title={t("waitingToolApproval", { agent, server: ask.server })}
+			title={t("waitingToolApproval", {
+				agent,
+				server: kit?.title ?? ask.server,
+			})}
 			onClose={onClose}
 			actions={
 				<>
@@ -113,7 +118,7 @@ export function ToolApproval({
 							{t("allowApprovalStopped", {
 								name: agent,
 								what: counted.what,
-								service: allowance.service,
+								service: kit?.title ?? ask.server,
 							})}
 						</p>
 						<p>
@@ -143,7 +148,14 @@ export function ToolApproval({
 						{t("toolApprovalLabelled", { tag: t("tagExternal") })}
 					</dd>
 					<dt>{t("toolApprovalService")}</dt>
-					<dd>{t("toolApprovalServiceLine", { server: ask.server, agent })}</dd>
+					<dd>
+						{kit
+							? t("toolApprovalServiceKit", {
+									service: kit.title,
+									role: kit.role,
+								})
+							: t("toolApprovalServiceLine", { server: ask.server, agent })}
+					</dd>
 					<dt>{t("toolApprovalFor")}</dt>
 					<dd>
 						<Link to={`/tasks/${taskId}`}>

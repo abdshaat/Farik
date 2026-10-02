@@ -439,6 +439,7 @@ export const en = {
 	toolApprovalLabelled: ", labelled “{tag}”",
 	toolApprovalService: "Service",
 	toolApprovalServiceLine: "{server}, which you added to {agent}",
+	toolApprovalServiceKit: "{service}, from the {role}’s kit",
 	toolApprovalFor: "For",
 	toolApprovalSend: "What {agent} wants to send",
 	toolApprovalSendHint:
@@ -1388,6 +1389,7 @@ export const en = {
 	allowCostsService: "Service",
 	allowCostsMade: "Made",
 	allowCostsWhen: "When",
+	allowCostsWho: "{name}, on {service}",
 	allowCostsSprint: "This sprint",
 	allowCostsDay: "Today",
 	allowCostsBill:
