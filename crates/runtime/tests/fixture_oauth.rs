@@ -25,13 +25,19 @@ fn auto() -> OAuthSettings {
     }
 }
 
-/// A port nothing is listening on, for a pre-registered client's redirect.
+/// A port nothing is listening on, for a pre-registered client's redirect. Taken from below the
+/// kernel's ephemeral range (32768 and up), so no other test's port-0 listener can be handed it;
+/// the counter keeps this process's tests off each other's ports.
 fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("a port")
-        .local_addr()
-        .expect("its address")
-        .port()
+    static NEXT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+    loop {
+        let step = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let base = u16::try_from(std::process::id() % 6_000).expect("under 6000");
+        let port = 20_000 + base * 2 + step % 2_000;
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return port;
+        }
+    }
 }
 
 /// Signs in at `fixture`'s server and follows the page as a browser would.
@@ -113,17 +119,6 @@ async fn uses_a_preregistered_client_without_registering() {
     assert_eq!(
         fixture.requests("/authorize")[0].query["redirect_uri"],
         format!("http://localhost:{port}/callback")
-    );
-    // Without a port, the one Claude Code's own clients registered: 33418.
-    let settings = OAuthSettings {
-        client_id: Some("abc".to_string()),
-        callback_port: None,
-        scopes: Vec::new(),
-    };
-    sign_in_with(&fixture, &settings).await.expect("signed in");
-    assert_eq!(
-        fixture.requests("/authorize")[1].query["redirect_uri"],
-        "http://localhost:33418/callback"
     );
     assert_eq!(fixture.count("/register"), 0);
 }

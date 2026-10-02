@@ -574,13 +574,15 @@ async fn wait_for_callback(
     }
 }
 
+/// The callback port a registered client fixes; none when Farik registers its own client.
+fn fixed_port(settings: &OAuthSettings) -> Option<u16> {
+    (settings.client_id.is_some()).then(|| settings.callback_port.unwrap_or(DEFAULT_CALLBACK_PORT))
+}
+
 /// Binds the callback listener: this computer's loopback only, never every address. With a
 /// registered client the port is fixed; otherwise any free one, tried again up to five times.
 async fn bind(settings: &OAuthSettings) -> Result<(Vec<TcpListener>, SocketAddr), SignInError> {
-    let fixed = settings
-        .client_id
-        .is_some()
-        .then(|| settings.callback_port.unwrap_or(DEFAULT_CALLBACK_PORT));
+    let fixed = fixed_port(settings);
     let taken = |port: u16| SignInError::Failed(format!("port {port} is in use on this computer"));
     for _ in 0..5 {
         let first = TcpListener::bind(("127.0.0.1", fixed.unwrap_or(0)))
@@ -983,6 +985,22 @@ impl OAuthGrant {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The default port is checked here, not by binding it: 33418 lies in the kernel's
+    /// ephemeral range, so a test that binds it races every other test's port-0 listener.
+    #[test]
+    fn a_registered_client_without_a_port_gets_33418() {
+        let mut settings = OAuthSettings {
+            client_id: Some("abc".to_string()),
+            callback_port: None,
+            scopes: Vec::new(),
+        };
+        assert_eq!(fixed_port(&settings), Some(33418));
+        settings.callback_port = Some(4000);
+        assert_eq!(fixed_port(&settings), Some(4000));
+        settings.client_id = None;
+        assert_eq!(fixed_port(&settings), None);
+    }
 
     /// rmcp refuses metadata without an issuer before Farik's own check runs, so the check is
     /// held up directly: the plan lists it as Farik's.
