@@ -167,9 +167,6 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 /// What a kit file may not say in a service's copy: the plumbing's names (ADR 0036).
 const PLUMBING: [&str; 3] = ["mcp", "oauth", "token"];
 
-/// Programs that fetch and run a package by name, which must then name it at an exact version.
-const PACKAGE_RUNNERS: [&str; 4] = ["npx", "uvx", "pipx", "bunx"];
-
 /// What one connector may and must say, by transport.
 struct Shape {
     allowed: &'static [&'static str],
@@ -479,7 +476,7 @@ fn load_server(
         check_pinned(
             &connector["command"],
             &strings(&connector["args"]),
-            &at("args"),
+            &at,
             refused,
         );
     }
@@ -592,25 +589,61 @@ fn tool_tags(connector: &Value) -> BTreeMap<String, ConnectorTag> {
         .collect()
 }
 
-/// A stdio connector that fetches a package by name must name it at an exact version, so the code
-/// Farik runs changes only with a Farik release and its pin review.
-fn check_pinned(command: &Value, args: &[String], pointer: &str, refused: &mut Refusals) {
+/// A stdio connector runs only a package runner, at an exact version, or a binary Farik ships, so
+/// the code Farik runs changes only with a Farik release and its pin review (ADR 0036).
+fn check_pinned(
+    command: &Value,
+    args: &[String],
+    at: &dyn Fn(&str) -> String,
+    refused: &mut Refusals,
+) {
+    const SAYS: &str =
+        "a kit starts a package only with npx, bunx, uvx or pipx run, at an exact version";
+    const NAMING_FLAGS: [&str; 7] = [
+        "-p",
+        "--package",
+        "--from",
+        "--spec",
+        "--with",
+        "--registry",
+        "--index-url",
+    ];
     let command = command.as_str().unwrap_or_default();
-    let program = command.rsplit('/').next().unwrap_or(command);
-    if PACKAGE_RUNNERS.contains(&program) && !args.iter().any(|arg| names_exact_version(arg)) {
-        refused.add(
-            pointer.to_string(),
-            "package_not_pinned",
-            &format!(
-                "{program} fetches code by name; name the package at an exact version, \
-                 name@1.2.3 or name==1.2.3"
-            ),
-        );
+    let file = command.rsplit(['/', '\\']).next().unwrap_or(command);
+    let program = file
+        .strip_suffix(".cmd")
+        .or_else(|| file.strip_suffix(".exe"))
+        .unwrap_or(file);
+    let mut refuse = |field: &str| refused.add(at(field), "package_not_pinned", SAYS);
+    if !["npx", "bunx", "uvx", "pipx"].contains(&program) {
+        // Farik's own binaries are the one thing a kit may start by absolute path.
+        let ships =
+            command.starts_with('/') && (program == "farik" || program.starts_with("farik-"));
+        if !ships {
+            refuse("command");
+        }
+        return;
+    }
+    let mut args = args;
+    if program == "pipx" {
+        match args.split_first() {
+            Some((first, rest)) if first == "run" => args = rest,
+            _ => return refuse("args"),
+        }
+    }
+    let names_apart = args.iter().any(|arg| {
+        NAMING_FLAGS
+            .iter()
+            .any(|flag| arg == flag || arg.strip_prefix(flag).is_some_and(|r| r.starts_with('=')))
+    });
+    let package = args.iter().find(|arg| !arg.starts_with('-'));
+    if names_apart || !package.is_some_and(|arg| names_exact_version(arg)) {
+        refuse("args");
     }
 }
 
-/// Whether an argument names a package at an exact version: `name@1.2.3` (npm, three numbers and
-/// an optional pre-release) or `name==1.2.3` (Python, two or more numbers and an optional suffix).
+/// Whether a package argument is an exact pin: `name@1.2.3` (npm, three numbers and an optional
+/// pre-release) or `name==1.2.3` (Python, two or more numbers and an optional suffix).
 fn names_exact_version(arg: &str) -> bool {
     let numbers = |version: &str, least: usize| {
         let head: &str = version.split(['-', '+']).next().unwrap_or_default();
@@ -620,11 +653,42 @@ fn names_exact_version(arg: &str) -> bool {
                 .iter()
                 .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
     };
+    let word = |c: char, extra: &str| c.is_ascii_alphanumeric() || extra.contains(c);
     if let Some((name, version)) = arg.split_once("==") {
-        return !name.is_empty() && numbers(version, 2);
+        let (base, extras) = match name.split_once('[') {
+            Some((base, rest)) => match rest.strip_suffix(']') {
+                Some(extras) if !extras.is_empty() => (base, extras),
+                _ => return false,
+            },
+            None => (name, "a"),
+        };
+        return numbers(version, 2)
+            && base
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric())
+            && base.chars().all(|c| word(c, "._-"))
+            && extras.chars().all(|c| word(c, ",._-"));
     }
-    arg.rfind('@')
-        .is_some_and(|at| at > 0 && numbers(&arg[at + 1..], 3))
+    let Some(at) = arg.rfind('@').filter(|at| *at > 0) else {
+        return false;
+    };
+    let name = &arg[..at];
+    let unscoped = |part: &str| {
+        part.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            && part
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c))
+    };
+    let named = match name.strip_prefix('@') {
+        Some(scoped) => scoped
+            .split_once('/')
+            .is_some_and(|(scope, rest)| unscoped(scope) && unscoped(rest)),
+        None => unscoped(name),
+    };
+    named && numbers(&arg[at + 1..], 3)
 }
 
 /// The text ranges of a service's own labels quoted in a kit's `setup`: after `‘` up to `’`, after
@@ -1068,7 +1132,59 @@ mod tests {
         );
         parse(&stdio("uvx", &["mcp-server-fetch==2025.4.7"])).expect("pinned loads");
         parse(&stdio("./server", &[])).expect_err("a relative command is the team file's refusal");
-        parse(&stdio("/usr/local/bin/server", &["--flag"])).expect("not checked");
+        for (command, args, pointer) in [
+            ("npx", vec!["-y", "evil", "--flag=x@1.2.3"], "args"),
+            ("npx", vec!["-y", "./local@1.2.3"], "args"),
+            ("npx", vec!["-y", "https://example.com/x@1.2.3"], "args"),
+            (
+                "uvx",
+                vec!["--from", "git+https://github.com/u/r@1.2.3", "r"],
+                "args",
+            ),
+            ("uvx", vec!["--from", "pkg", "x==1.2"], "args"),
+            ("uvx", vec!["--from=pkg==1.2", "x==1.2"], "args"),
+            ("npx", vec!["-p", "evil@1.2.3", "x@1.2.3"], "args"),
+            ("npx", vec!["-y", "evil@1"], "args"),
+            ("npx", vec!["-y", "@1.2.3"], "args"),
+            ("npx", vec!["-y"], "args"),
+            ("uvx", vec!["==1.2"], "args"),
+            ("pipx", vec!["run", "evil"], "args"),
+            ("pipx", vec!["evil==1.2.3"], "args"),
+            ("npx.cmd", vec!["-y", "evil"], "args"),
+            ("/usr/bin/npx", vec!["-y", "evil"], "args"),
+            ("pnpm", vec!["dlx", "evil"], "command"),
+            ("npm", vec!["exec", "--yes", "evil"], "command"),
+            ("yarn", vec!["dlx", "evil"], "command"),
+            ("bun", vec!["x", "evil"], "command"),
+            ("uv", vec!["tool", "run", "evil"], "command"),
+            ("sh", vec!["-c", "npx -y evil"], "command"),
+            ("/bin/bash", vec!["-c", "npx -y evil"], "command"),
+            ("docker", vec!["run", "-i", "evil:latest"], "command"),
+        ] {
+            let value = stdio(command, &args);
+            let found = detail(parse(&value));
+            assert!(
+                found.contains(&format!("/connectors/0/{pointer}: package_not_pinned")),
+                "{command} {args:?}: {found}"
+            );
+        }
+        for (command, args) in [
+            ("npx", vec!["-y", "@notionhq/notion-mcp-server@1.8.1"]),
+            ("uvx", vec!["mcp-server-fetch==2025.4.7"]),
+            ("pipx", vec!["run", "mcp-x==1.2.3"]),
+            ("/usr/bin/npx", vec!["-y", "left-pad@1.2.3"]),
+        ] {
+            parse(&stdio(command, &args)).unwrap_or_else(|e| panic!("{command} {args:?}: {e}"));
+        }
+        // Any other program, even by absolute path, is refused: only Farik's own binary is allowed.
+        for command in ["/usr/local/bin/server", "/usr/bin/node", "/usr/bin/python3"] {
+            let found = detail(parse(&stdio(command, &["--flag"])));
+            assert!(
+                found.contains("/connectors/0/command: package_not_pinned"),
+                "{command}: {found}"
+            );
+        }
+        parse(&stdio("/usr/local/bin/farik-mcp", &["--flag"])).expect("Farik's own binary");
     }
 
     fn browser(role: Role, name: &str, image: &str) -> Result<Kit, KitError> {
@@ -1156,6 +1272,8 @@ mod tests {
         ] {
             setup_text(text).unwrap_or_else(|error| panic!("{text}: {error}"));
         }
+        let sixty = format!("Copy ‘{}token’ from the page", "x".repeat(55));
+        setup_text(&sixty).unwrap_or_else(|error| panic!("{sixty}: {error}"));
     }
 
     #[test]
