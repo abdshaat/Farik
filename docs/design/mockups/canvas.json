@@ -6,8 +6,8 @@
       "x": 0,
       "y": 0,
       "w": 1440,
-      "h": 3658,
-      "title": "Edit Theo: connectors added by you, Connect again, Remove",
+      "h": 5465,
+      "title": "Edit Theo: connectors added by you, signed in and Sign in again, skills, Remove",
       "page": "connectors",
       "is_interactive": true
     },
@@ -310,7 +310,7 @@
       "y": 0,
       "w": 1440,
       "h": 2080,
-      "title": "Iris\u2019s plan, and checking the screens",
+      "title": "Iris’s plan, and checking the screens",
       "page": "designer",
       "is_interactive": true
     },
@@ -319,7 +319,7 @@
       "y": 0,
       "w": 1440,
       "h": 2200,
-      "title": "Accept work, with Iris\u2019s check",
+      "title": "Accept work, with Iris’s check",
       "page": "designer",
       "is_interactive": true
     },
@@ -453,8 +453,8 @@
       "x": 1520,
       "y": 0,
       "w": 1440,
-      "h": 6063,
-      "title": "Add a custom connector: start it, label its tools, done",
+      "h": 15271,
+      "title": "Add a custom connector: start it or sign in, label its tools, done",
       "page": "connectors",
       "is_interactive": true
     },
@@ -474,6 +474,51 @@
       "h": 1626,
       "title": "Theo wants to use airtable, on a phone",
       "page": "connectors",
+      "is_interactive": true
+    },
+    "PhoneSignIn.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 360,
+      "h": 11372,
+      "title": "Signing in to a service, on a phone",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "PhoneSkills.dc.html": {
+      "x": 5000,
+      "y": 0,
+      "w": 360,
+      "h": 7425,
+      "title": "Skills on the agent page, on a phone",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "SignInDone.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 1095,
+      "title": "Signed in: the tab Farik serves",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "SkillEdit.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 4025,
+      "title": "Add or edit a skill",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "SkillReview.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 1320,
+      "title": "Review a skill",
+      "page": "signin-skills",
       "is_interactive": true
     }
   },
@@ -585,6 +630,15 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_signin-skills": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "signin-skills",
+      "text": "Signing in to a service, and skills per agent",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -640,7 +694,12 @@
     "SetupSprints.dc.html",
     "ConnectorAdd.dc.html",
     "ToolApproval.dc.html",
-    "PhoneToolApproval.dc.html"
+    "PhoneToolApproval.dc.html",
+    "SignInDone.dc.html",
+    "SkillEdit.dc.html",
+    "SkillReview.dc.html",
+    "PhoneSignIn.dc.html",
+    "PhoneSkills.dc.html"
   ],
   "pages": [
     {
@@ -686,6 +745,10 @@
     {
       "id": "connectors",
       "name": "Connectors"
+    },
+    {
+      "id": "signin-skills",
+      "name": "Sign-in and skills"
     }
   ],
   "title": "Farik web UI mockup"
