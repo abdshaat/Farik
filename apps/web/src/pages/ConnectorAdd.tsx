@@ -16,7 +16,7 @@ type Field =
 	| "command"
 	| `arg-${number}`
 	| "url"
-	| "header"
+	| `header:${string}`
 	| "keys"
 	| "other";
 
@@ -56,7 +56,7 @@ function fieldOf(path: string): Field {
 	if (field === "args" && index !== undefined) return `arg-${Number(index)}`;
 	if (field === "command" || field === "args") return "command";
 	if (field === "url") return "url";
-	if (field === "headers") return "header";
+	if (field === "headers") return `header:${index ?? ""}`;
 	if (field === "credential_keys") return "keys";
 	return "other";
 }
@@ -82,12 +82,13 @@ function wordsFor(r: Refusal, field: Field, fill: Record<string, string>) {
 		name: "addNameWrong",
 		command: "addCommandWrong",
 		url: "addUrlWrong",
-		header: "addHeaderWrong",
 		keys: "addKeyWrong",
 		other: "refuseOther",
 	};
 	return t(
-		BY_CODE[codeOf(r.message)] ?? byField[field] ?? "addCommandWrong",
+		BY_CODE[codeOf(r.message)] ??
+			byField[field] ??
+			(field.startsWith("header:") ? "addHeaderWrong" : "addCommandWrong"),
 		fill,
 	);
 }
@@ -144,10 +145,11 @@ export function ConnectorAdd({
 	// Each part after the program in a field of its own, so one holding a space is kept whole.
 	const [args, setArgs] = useState<string[]>(again?.args ?? []);
 	const [url, setUrl] = useState(again?.url ?? "");
-	// The field holds the first header; Connect again keeps the others as the team file has them.
-	const [first, ...others] = Object.entries(again?.headers ?? {});
-	const [header, setHeader] = useState(
-		first ? `${first[0]}: ${first[1]}` : "Authorization: Bearer {API_KEY}",
+	// One line per header, "Name: value": Connect again shows each the team file has (N7).
+	const [headers, setHeaders] = useState<string[]>(
+		again
+			? Object.entries(again.headers ?? {}).map(([n, v]) => `${n}: ${v}`)
+			: ["Authorization: Bearer {API_KEY}"],
 	);
 	const [keys, setKeys] = useState<Key[]>(
 		again
@@ -167,21 +169,36 @@ export function ConnectorAdd({
 	const named = keys.filter((k) => k.name.trim());
 	const http = transport === "http";
 	const secretInUrl = http && holdsSecret(url);
-	const [headerName, ...rest] = header.split(":");
-	const headerOk = !header.trim() || (rest.length > 0 && headerName?.trim());
+	const lines = headers.map((line) => {
+		const [n, ...value] = line.split(":");
+		const name = n?.trim() ?? "";
+		const ok = !line.trim() || (value.length > 0 && name !== "");
+		return { name, value: value.join(":").trim(), ok };
+	});
+	/** What is wrong with line `i` before anything is sent: its form, or a name an earlier line has. */
+	const lineWrong = (i: number) => {
+		const line = lines[i];
+		if (!line?.ok) return t("addHeaderWrong");
+		const twice = (o: { name: string }) =>
+			o.name.toLowerCase() === line.name.toLowerCase();
+		return line.name && lines.slice(0, i).some(twice)
+			? t("addHeaderTwice")
+			: "";
+	};
+	const lineError = (i: number) =>
+		lineWrong(i) || (refused[`header:${lines[i]?.name ?? ""}`] ?? "");
+	const headerOk = headers.every((_, i) => !lineWrong(i));
+	const sentHeaders = lines.filter((l) => l.name);
 	const wire = {
 		name: server.trim(),
 		transport,
 		...(http
 			? {
 					url: url.trim(),
-					...((header.trim() || others.length > 0) && {
-						headers: {
-							...Object.fromEntries(others),
-							...(header.trim() && {
-								[headerName?.trim() ?? ""]: rest.join(":").trim(),
-							}),
-						},
+					...(sentHeaders.length > 0 && {
+						headers: Object.fromEntries(
+							sentHeaders.map((l) => [l.name, l.value]),
+						),
 					}),
 				}
 			: { command: command.trim(), args: args.filter((a) => a !== "") }),
@@ -299,16 +316,47 @@ export function ConnectorAdd({
 								onChange={setUrl}
 							/>
 							{!secretInUrl && (
-								<TextField
-									id="connector-header"
-									label={t("addHeader")}
-									hint={t("addHeaderHint")}
-									value={header}
-									error={
-										headerOk ? (refused.header ?? "") : t("addHeaderWrong")
-									}
-									onChange={setHeader}
-								/>
+								<>
+									{headers.map((line, i) => (
+										// biome-ignore lint/suspicious/noArrayIndexKey: a line is its place in the list
+										<div key={i} className={styles.keyRow}>
+											<TextField
+												id={`connector-header-${i}`}
+												label={
+													i === 0
+														? t("addHeader")
+														: t("addHeaderN", { count: i + 1 })
+												}
+												hint={i === 0 ? t("addHeaderHint") : ""}
+												value={line}
+												error={lineError(i)}
+												onChange={(value) =>
+													setHeaders(
+														headers.map((old, j) => (j === i ? value : old)),
+													)
+												}
+											/>
+											<Button
+												kind="quiet"
+												onClick={() =>
+													setHeaders(headers.filter((_, j) => j !== i))
+												}
+											>
+												{t("addKeyRemove")}{" "}
+												<span className={styles.hidden}>
+													{t("addHeaderRemoveLabel", { count: i + 1 })}
+												</span>
+											</Button>
+										</div>
+									))}
+									{headers.length < 16 && (
+										<span>
+											<Button onClick={() => setHeaders([...headers, ""])}>
+												{t("addHeaderMore")}
+											</Button>
+										</span>
+									)}
+								</>
 							)}
 						</>
 					) : (

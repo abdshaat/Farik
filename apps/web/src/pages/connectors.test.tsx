@@ -558,6 +558,47 @@ describe("connectors on the agent page", () => {
 		expect(value("Part 2")).toBe("airtable-connector");
 	});
 
+	it("connect_again_shows_every_header_and_lets_one_go", async () => {
+		// Every header after the first was sent unseen, and could not be taken out (re-review N7).
+		const { container, s } = await opened();
+		fireEvent.click(
+			within(row("linear")).getByRole("button", {
+				name: en.connectorAgainButton,
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Add linear to Theo",
+		});
+		const field = (label: string) =>
+			within(dialog).getByLabelText(label) as HTMLInputElement;
+		expect(field(en.addHeader).value).toBe(
+			"Authorization: Bearer {LINEAR_KEY}",
+		);
+		expect(field("Header 2").value).toBe("X-Workspace: corner-bakery");
+		await expectNoAxeViolations(container);
+
+		// Named as another, it is said there, rather than one silently replacing the other.
+		fireEvent.change(field(en.addHeader), {
+			target: { value: "X-Workspace: Bearer {LINEAR_KEY}" },
+		});
+		expect(field("Header 2").getAttribute("aria-invalid")).toBe("true");
+		expect(within(dialog).getByText(en.addHeaderTwice)).toBeTruthy();
+		fireEvent.change(field(en.addHeader), {
+			target: { value: "Authorization: Bearer {LINEAR_KEY}" },
+		});
+
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Remove header 2" }),
+		);
+		expect(within(dialog).queryByLabelText("Header 2")).toBeNull();
+		fireEvent.change(field(en.addKeyValue), { target: { value: "lin-key" } });
+		fireEvent.click(within(dialog).getByRole("button", { name: en.addNext }));
+		const asked = await sent(s, "connector.tools");
+		expect(
+			(asked.params as { server: { headers: object } }).server.headers,
+		).toEqual({ Authorization: "Bearer {LINEAR_KEY}" });
+	});
+
 	it("connector_add_offers_three_labels_and_defaults_to_asks", async () => {
 		const { container, s, dialog, asked } = await listed();
 		expect(asked.params).toEqual({

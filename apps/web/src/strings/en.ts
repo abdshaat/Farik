@@ -1167,6 +1167,11 @@ export const en = {
 		"This address has a key inside it. Farik cannot keep a key that is part of an address safe yet, so a service like this cannot be added for now. Zapier is one.",
 	addHeader: "Where the key goes",
 	addHeaderHint: "Change it only if the service’s instructions say so.",
+	addHeaderN: "Header {count}",
+	addHeaderRemoveLabel: "header {count}",
+	addHeaderMore: "Add a header",
+	addHeaderTwice:
+		"Another header above has this name. Give each header its own name, or remove one.",
 	addKeys: "Keys",
 	addKeysHint:
 		"Each key is for {name} only. Name it as the connector’s instructions do.",
