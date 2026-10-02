@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use super::paths::{GlobError, PathRefusal, check_allowed_paths, check_protected_paths};
 use super::team_rules::TeamRules;
-use crate::contract::Role;
+use crate::contract::{Role, TaskId};
+use crate::team::canonical_json;
 
 /// A capability tier of `docs/SPEC.md` section 5.6, attached to a role and overridable per
 /// agent. Serialised in `snake_case`, as on the wire.
@@ -151,7 +152,7 @@ pub enum ToolRefusal {
 pub enum ConnectorTag {
     /// Reaches only the preview and changes nothing outside the sandbox.
     Network,
-    /// Changes state outside the sandbox; refused until a human can approve one call.
+    /// Changes state outside the sandbox; runs once for each call the human allows.
     ExternalEffect,
     /// Never offered and always refused.
     Denied,
@@ -170,6 +171,33 @@ pub struct SessionConnector {
     pub tools: std::collections::BTreeMap<String, ConnectorTag>,
 }
 
+/// The largest input, in bytes of its compact JSON, that the human is asked to allow: anything
+/// longer is too long to show, so it is refused without asking.
+pub const MAX_APPROVAL_INPUT: usize = 64 * 1024;
+
+/// The sha256, in lower-case hex, of `canonical_json(input)`: what binds a human's grant to the
+/// one input they saw, whatever order its keys arrive in.
+#[must_use]
+pub fn input_sha256(input: &serde_json::Value) -> String {
+    crate::team::sha256_hex(&canonical_json(input))
+}
+
+/// What a human's grant of one `external_effect` call is bound to (ADR 0031): the asking agent,
+/// the task, the server, the tool and the input's `input_sha256`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalKey {
+    /// The agent that asked.
+    pub agent_id: String,
+    /// The task it asked about.
+    pub task_id: TaskId,
+    /// The connector's server.
+    pub server: String,
+    /// The bare tool name.
+    pub tool: String,
+    /// `input_sha256` of the call's input.
+    pub input_sha256: String,
+}
+
 /// Why a connector call is refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectorRefusal {
@@ -179,8 +207,11 @@ pub enum ConnectorRefusal {
     ToolNotTagged,
     /// The tool is tagged `denied`.
     ToolDenied,
-    /// The tool is tagged `external_effect`, which Farik cannot yet ask the human about.
-    ExternalEffectRefused,
+    /// The tool is tagged `external_effect` and the human has not allowed this call: it waits.
+    ApprovalNeeded,
+    /// The tool is tagged `external_effect` and its input is over `MAX_APPROVAL_INPUT`, too long
+    /// to show the human, so it is refused without asking.
+    InputTooLarge,
     /// A `url` field names something other than the preview.
     UrlOutsidePreview {
         /// The field's value: the string, or the JSON of a value that is not one.
@@ -189,33 +220,44 @@ pub enum ConnectorRefusal {
 }
 
 /// Decides one connector call (`docs/SPEC.md` sections 5.6 and 8.6): the session must have the
-/// connector, the tool must be tagged `network`, and, for a connector with an origin, every field
-/// named `url`, at any depth of the input, must be a string naming the preview: its origin
-/// exactly, or followed by `/`, `?` or `#`. The tag governs whatever the agent's tiers.
+/// connector, the tool must be tagged `network` or `external_effect`, and, for a connector with an
+/// origin, every field named `url`, at any depth of the input, must be a string naming the
+/// preview: its origin exactly, or followed by `/`, `?` or `#`. An `external_effect` call also
+/// needs `granted`, the seq of the human's open grant for exactly this call, which the caller
+/// looks up by `ApprovalKey`; it is returned beside the tag, so the call's record can use it up.
+/// A `network` call ignores `granted`. The tag governs whatever the agent's tiers.
 /// `tool` is the bare tool name, without `mcp__<server>__`.
 ///
 /// # Errors
 ///
-/// `ConnectorNotInSession`, then `ToolNotTagged`, then `ToolDenied` for a `denied` tool or
-/// `ExternalEffectRefused` for an `external_effect` one, then `UrlOutsidePreview` with the first
-/// `url` found outside the origin.
+/// `ConnectorNotInSession`, then `ToolNotTagged`, then `ToolDenied` for a `denied` tool, then
+/// `UrlOutsidePreview` with the first `url` found outside the origin, then, for an
+/// `external_effect` tool, `InputTooLarge` for an input over `MAX_APPROVAL_INPUT`, grant or not,
+/// and `ApprovalNeeded` without a grant.
 pub fn evaluate_connector_call(
     tool: &str,
     input: &serde_json::Value,
     connector: Option<&SessionConnector>,
-) -> Result<ConnectorTag, ConnectorRefusal> {
+    granted: Option<u64>,
+) -> Result<(ConnectorTag, Option<u64>), ConnectorRefusal> {
     let connector = connector.ok_or(ConnectorRefusal::ConnectorNotInSession)?;
-    match connector.tools.get(tool) {
-        None => Err(ConnectorRefusal::ToolNotTagged),
-        Some(ConnectorTag::Denied) => Err(ConnectorRefusal::ToolDenied),
-        Some(ConnectorTag::ExternalEffect) => Err(ConnectorRefusal::ExternalEffectRefused),
-        Some(ConnectorTag::Network) => {
-            if let Some(origin) = &connector.origin {
-                check_urls(input, origin)?;
-            }
-            Ok(ConnectorTag::Network)
-        }
+    let tag = match connector.tools.get(tool) {
+        None => return Err(ConnectorRefusal::ToolNotTagged),
+        Some(ConnectorTag::Denied) => return Err(ConnectorRefusal::ToolDenied),
+        Some(tag) => *tag,
+    };
+    if let Some(origin) = &connector.origin {
+        check_urls(input, origin)?;
     }
+    if tag == ConnectorTag::Network {
+        return Ok((tag, None));
+    }
+    if canonical_json(input).len() > MAX_APPROVAL_INPUT {
+        return Err(ConnectorRefusal::InputTooLarge);
+    }
+    granted
+        .map(|approval| (tag, Some(approval)))
+        .ok_or(ConnectorRefusal::ApprovalNeeded)
 }
 
 fn check_urls(value: &serde_json::Value, origin: &str) -> Result<(), ConnectorRefusal> {
@@ -247,9 +289,9 @@ fn check_urls(value: &serde_json::Value, origin: &str) -> Result<(), ConnectorRe
 ///
 /// # Errors
 ///
-/// `DesignPlanNotApproved` for a Designer's `write_workspace`, `execute`, `git_local` or
-/// `git_remote` call while the plan is not approved: nothing to push without a commit, and the safe
-/// side all the same.
+/// `DesignPlanNotApproved` for a Designer's `write_workspace`, `execute`, `git_local`,
+/// `git_remote` or `external_effect` call while the plan is not approved: nothing to push without
+/// a commit, nothing to change outside before the plan, and the safe side all the same.
 pub fn check_design_plan(
     role: Role,
     tier: PermissionTier,
@@ -261,6 +303,7 @@ pub fn check_design_plan(
             | PermissionTier::Execute
             | PermissionTier::GitLocal
             | PermissionTier::GitRemote
+            | PermissionTier::ExternalEffect
     );
     if role == Role::UiUxDesigner && writes && !approved {
         return Err(ToolRefusal::DesignPlanNotApproved);
@@ -448,9 +491,9 @@ mod tests {
 
     use super::{
         AgentGrants, ApprovedCall, CommandRefusal, ConnectorRefusal as Refused, ConnectorTag,
-        PermissionTier as T, SessionConnector, ToolCallContext, ToolCallRequest, ToolDescriptor,
-        ToolRefusal, check_design_plan, default_tiers, evaluate_command, evaluate_connector_call,
-        evaluate_tool_call,
+        MAX_APPROVAL_INPUT, PermissionTier as T, SessionConnector, ToolCallContext,
+        ToolCallRequest, ToolDescriptor, ToolRefusal, check_design_plan, default_tiers,
+        evaluate_command, evaluate_connector_call, evaluate_tool_call, input_sha256,
     };
     use crate::contract::Role;
     use crate::governor::team_rules::TeamRules;
@@ -490,9 +533,10 @@ mod tests {
                 evaluate_connector_call(
                     "browser_navigate",
                     &json!({ "url": url, "then": [{ "url": url }] }),
-                    Some(&github)
+                    Some(&github),
+                    None
                 ),
-                Ok(ConnectorTag::Network),
+                Ok((ConnectorTag::Network, None)),
                 "{url}"
             );
         }
@@ -502,23 +546,28 @@ mod tests {
     fn a_preview_connector_still_checks_urls() {
         let connector = playwright();
         let navigate = |input: serde_json::Value| {
-            evaluate_connector_call("browser_navigate", &input, Some(&connector))
+            evaluate_connector_call("browser_navigate", &input, Some(&connector), None)
         };
         assert_eq!(
             navigate(json!({ "url": "http://localhost:4400/x" })),
-            Ok(ConnectorTag::Network)
+            Ok((ConnectorTag::Network, None))
         );
         assert_eq!(
             navigate(json!({ "url": "http://localhost:4400" })),
-            Ok(ConnectorTag::Network)
+            Ok((ConnectorTag::Network, None))
         );
         assert_eq!(
             navigate(json!({ "url": "http://localhost:4400?q=1#top" })),
-            Ok(ConnectorTag::Network)
+            Ok((ConnectorTag::Network, None))
         );
         assert_eq!(
-            evaluate_connector_call("browser_click", &json!({ "ref": "e3" }), Some(&connector)),
-            Ok(ConnectorTag::Network),
+            evaluate_connector_call(
+                "browser_click",
+                &json!({ "ref": "e3" }),
+                Some(&connector),
+                None
+            ),
+            Ok((ConnectorTag::Network, None)),
             "a call with no url is judged by its tag alone"
         );
         // F2: only the preview's origin, exactly, followed by nothing or by `/`, `?` or `#`.
@@ -557,25 +606,163 @@ mod tests {
             "a url that is not a string"
         );
         assert_eq!(
-            evaluate_connector_call("browser_evaluate", &json!({}), Some(&connector)),
+            evaluate_connector_call("browser_evaluate", &json!({}), Some(&connector), None),
             Err(Refused::ToolDenied)
         );
         assert_eq!(
-            evaluate_connector_call("browser_install", &json!({}), Some(&connector)),
+            evaluate_connector_call("browser_install", &json!({}), Some(&connector), None),
             Err(Refused::ToolNotTagged)
         );
         assert_eq!(
             evaluate_connector_call(
                 "browser_navigate",
                 &json!({ "url": "http://localhost:4400/" }),
+                None,
                 None
             ),
             Err(Refused::ConnectorNotInSession)
         );
+    }
+
+    fn github() -> SessionConnector {
+        SessionConnector {
+            server: "github".to_string(),
+            origin: None,
+            tools: [
+                ("search_issues", ConnectorTag::Network),
+                ("create_issue", ConnectorTag::ExternalEffect),
+                ("delete_repository", ConnectorTag::Denied),
+            ]
+            .into_iter()
+            .map(|(tool, tag)| (tool.to_string(), tag))
+            .collect(),
+        }
+    }
+
+    #[test]
+    fn external_effect_without_a_grant_needs_approval() {
         assert_eq!(
-            evaluate_connector_call("browser_send_email", &json!({}), Some(&connector)),
-            Err(Refused::ExternalEffectRefused),
-            "external_effect is refused, with its own reason, until step 02 asks the human"
+            evaluate_connector_call(
+                "create_issue",
+                &json!({ "title": "x" }),
+                Some(&github()),
+                None
+            ),
+            Err(Refused::ApprovalNeeded)
+        );
+    }
+
+    #[test]
+    fn external_effect_with_a_grant_runs_and_names_it() {
+        assert_eq!(
+            evaluate_connector_call(
+                "create_issue",
+                &json!({ "title": "x" }),
+                Some(&github()),
+                Some(7)
+            ),
+            Ok((ConnectorTag::ExternalEffect, Some(7)))
+        );
+    }
+
+    #[test]
+    fn denied_is_refused_even_with_a_grant() {
+        assert_eq!(
+            evaluate_connector_call("delete_repository", &json!({}), Some(&github()), Some(7)),
+            Err(Refused::ToolDenied)
+        );
+    }
+
+    #[test]
+    fn a_large_input_is_refused_not_asked() {
+        // `{"b":"…"}` is 8 bytes around the string.
+        let sized = |bytes: usize| json!({ "b": "x".repeat(bytes - 8) });
+        assert_eq!(
+            sized(MAX_APPROVAL_INPUT).to_string().len(),
+            MAX_APPROVAL_INPUT
+        );
+        for granted in [None, Some(7)] {
+            assert_eq!(
+                evaluate_connector_call(
+                    "create_issue",
+                    &sized(MAX_APPROVAL_INPUT + 1),
+                    Some(&github()),
+                    granted
+                ),
+                Err(Refused::InputTooLarge),
+                "{granted:?}"
+            );
+        }
+        assert_eq!(
+            evaluate_connector_call(
+                "create_issue",
+                &sized(MAX_APPROVAL_INPUT),
+                Some(&github()),
+                None
+            ),
+            Err(Refused::ApprovalNeeded),
+            "64 KiB exactly is still asked about"
+        );
+        assert_eq!(
+            evaluate_connector_call(
+                "search_issues",
+                &sized(MAX_APPROVAL_INPUT + 1),
+                Some(&github()),
+                None
+            ),
+            Ok((ConnectorTag::Network, None)),
+            "the limit is the ask's, not a network call's"
+        );
+    }
+
+    #[test]
+    fn the_approval_key_ignores_key_order() {
+        let ordered: serde_json::Value = serde_json::from_str(r#"{"a":1,"b":2}"#).expect("json");
+        let reversed: serde_json::Value = serde_json::from_str(r#"{"b":2,"a":1}"#).expect("json");
+        // sha256 of the bytes `{"a":1,"b":2}`.
+        let expected = "43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777";
+        assert_eq!(input_sha256(&ordered), expected);
+        assert_eq!(input_sha256(&reversed), expected);
+        assert_ne!(input_sha256(&json!({ "a": 1, "b": 3 })), expected);
+    }
+
+    #[test]
+    fn a_network_tool_ignores_grants() {
+        for granted in [None, Some(7)] {
+            assert_eq!(
+                evaluate_connector_call("search_issues", &json!({}), Some(&github()), granted),
+                Ok((ConnectorTag::Network, None)),
+                "{granted:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_preview_connectors_external_effect_checks_urls_before_asking() {
+        let connector = playwright();
+        assert_eq!(
+            evaluate_connector_call(
+                "browser_send_email",
+                &json!({ "url": "http://evil.test/" }),
+                Some(&connector),
+                Some(7)
+            ),
+            Err(Refused::UrlOutsidePreview {
+                url: "http://evil.test/".to_string()
+            }),
+            "a grant does not take a preview connector's call outside the preview"
+        );
+    }
+
+    #[test]
+    fn a_designers_external_effect_waits_for_the_plan() {
+        assert_eq!(
+            check_design_plan(Role::UiUxDesigner, T::ExternalEffect, false),
+            Err(ToolRefusal::DesignPlanNotApproved)
+        );
+        assert_eq!(
+            check_design_plan(Role::UiUxDesigner, T::ExternalEffect, true),
+            Ok(())
         );
     }
 

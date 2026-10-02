@@ -700,7 +700,12 @@ pub fn spec_sha256(server: &CustomServer) -> String {
     };
     definition["credential_keys"] = serde_json::json!(server.credential_keys);
     definition["tools"] = serde_json::json!(server.tools);
-    Sha256::digest(canonical_json(&definition).as_bytes())
+    sha256_hex(&canonical_json(&definition))
+}
+
+/// The sha256 of `text`, in lower-case hex.
+pub(crate) fn sha256_hex(text: &str) -> String {
+    Sha256::digest(text.as_bytes())
         .iter()
         .fold(String::with_capacity(64), |mut hex, byte| {
             let _ = write!(hex, "{byte:02x}");

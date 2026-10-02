@@ -357,7 +357,8 @@ fn judge_connector(
         .connectors
         .iter()
         .find(|connector| connector.server == server);
-    evaluate_connector_call(tool, &request.tool_input, connector)
+    // No grant is looked up yet, so every external_effect call is refused until step 02 asks.
+    evaluate_connector_call(tool, &request.tool_input, connector, None)
         .map(|_| ())
         .map_err(|refusal| match refusal {
             ConnectorRefusal::ConnectorNotInSession => format!(
@@ -370,9 +371,13 @@ fn judge_connector(
             ConnectorRefusal::ToolDenied => format!(
                 "tool_denied: {tool} of {server} is tagged denied, and no session may call it"
             ),
-            ConnectorRefusal::ExternalEffectRefused => format!(
+            ConnectorRefusal::ApprovalNeeded => format!(
                 "external_effect_refused: {tool} of {server} changes something outside the \
                  sandbox, and Farik cannot ask you about one call yet, so it is refused"
+            ),
+            ConnectorRefusal::InputTooLarge => format!(
+                "tool_input_too_large: {tool}'s input is over 64 KiB, too long to show you, so it \
+                 is refused"
             ),
             ConnectorRefusal::UrlOutsidePreview { url } => format!(
                 "url_outside_preview: {url} is not the project's preview; open pages under {}",
@@ -1274,8 +1279,8 @@ mod tests {
             .into(),
         };
         assert_eq!(
-            evaluate_connector_call("create_issue", &json!({}), Some(&connector)),
-            Err(ConnectorRefusal::ExternalEffectRefused)
+            evaluate_connector_call("create_issue", &json!({}), Some(&connector), None),
+            Err(ConnectorRefusal::ApprovalNeeded)
         );
         let decision = github_call(
             &daemon,

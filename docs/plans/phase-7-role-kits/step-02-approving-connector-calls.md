@@ -111,7 +111,7 @@ Files: `permissions.rs`, ADR 0031, and, as call sites only, `daemon/hooks.rs` (`
 - `a_network_tool_ignores_grants`: `Ok((Network, None))` whatever `granted` holds.
 - `a_designers_external_effect_waits_for_the_plan`: `check_design_plan(UiUxDesigner, ExternalEffect, false)` is `DesignPlanNotApproved`.
 
-- [ ] `feat(core): let an external_effect connector call run once the human allows it`
+- [x] `feat(core): let an external_effect connector call run once the human allows it`
 
 ### Task 3: The hook, and approvals that wait
 
