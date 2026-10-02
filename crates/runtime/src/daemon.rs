@@ -1089,8 +1089,15 @@ async fn launch_answer(state: &Arc<DaemonState>, asked: &LaunchAsk) -> Result<Va
         CustomTransport::Http { oauth: Some(_), .. }
     );
     let entry = if signs_in {
-        match signed_in::refreshed_entry(state, &at, &server, LAUNCH_VALID_FOR, LAUNCH_REFRESH_WAIT)
-            .await
+        match signed_in::refreshed_entry(
+            state,
+            &at,
+            &server,
+            LAUNCH_VALID_FOR,
+            LAUNCH_REFRESH_WAIT,
+            false,
+        )
+        .await
         {
             Ok(entry) => entry,
             Err(signed_in::Fresh::NotConfirmed) => return Err(not_confirmed()),
@@ -2400,6 +2407,81 @@ mod tests {
         assert_eq!(second.0, StatusCode::OK, "{}", second.1);
         assert_eq!(first.1, second.1, "both send the one new token");
         assert_eq!(fixture.count("/token"), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn launch_refuses_a_signed_in_server_kept_without_a_grant() {
+        use crate::connectors::ConnectorSecrets as _;
+
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        let (daemon, _) =
+            launching_signed_in("launch-no-grant", &fixture, chrono::Duration::minutes(30));
+        let at = daemon
+            .state
+            .secret_at(daemon.project.deps.files.root(), "dev-a", "notion")
+            .expect("an address");
+        let secrets = daemon.state.connector_secrets();
+        let mut entry = secrets.load(&at).expect("readable").expect("kept");
+        entry.oauth = None;
+        secrets.save(&at, &entry).expect("kept again");
+        let (status, body) = launch(&daemon, "session-signed", "notion").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(body.starts_with("connector_not_confirmed:"), "{body}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_delete_from_outside_during_a_refresh_keeps_nothing() {
+        // The command line changes the store without the daemon's lock (ADR 0033).
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        let (daemon, old) = launching_signed_in(
+            "launch-outside-delete",
+            &fixture,
+            chrono::Duration::minutes(-1),
+        );
+        let at = daemon
+            .state
+            .secret_at(daemon.project.deps.files.root(), "dev-a", "notion")
+            .expect("an address");
+        fixture.hold("token");
+        let launching = launch(&daemon, "session-signed", "notion");
+        let deleting = async {
+            while fixture.count("/token") == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            daemon
+                .state
+                .connector_secrets()
+                .delete(&at)
+                .expect("deleted");
+            fixture.release("token");
+        };
+        let ((status, body), ()) = tokio::join!(launching, deleting);
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(
+            daemon
+                .state
+                .connector_secrets()
+                .load(&at)
+                .expect("readable")
+                .is_none(),
+            "the refreshed grant is not put back"
+        );
+        // The service is asked to forget the token it just rotated, not the old one.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while fixture.count("/revoke") == 0 {
+            assert!(std::time::Instant::now() < deadline, "no revoke was sent");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let revoked = &fixture.requests("/revoke")[0].form["token"];
+        assert!(revoked.starts_with("rt-"), "{revoked}");
+        assert_ne!(
+            Some(revoked.as_str()),
+            old.refresh_token
+                .as_ref()
+                .map(crate::claude::Secret::expose)
+        );
     }
 
     /// The servers `session` is given now.

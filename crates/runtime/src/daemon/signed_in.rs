@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use farik_core::team::{CustomServer, CustomTransport, OAuthSettings};
 
+use crate::claude::Secret;
 use crate::connectors::{ConnectorEntry, ConnectorSecrets, SecretAt, confirmed_entry};
 use crate::credential::CredentialError;
 use crate::sign_in::{OAuthGrant, SIGN_IN_WINDOW, SignInError, refreshed, revoke, start_sign_in};
@@ -32,25 +33,55 @@ const REFRESH_REQUEST: Duration = Duration::from_secs(30);
 /// Waits at most `wait` for that; the refresh and its save go on after.
 ///
 /// A refresh that fails leaves the entry as it was while its access token still holds; a refused
-/// one lapses the grant (ADR 0033).
+/// one lapses the grant (ADR 0033). With `fallback_when_valid`, a refresh still going when `wait`
+/// passes also leaves the entry as it was while its access token holds: a session's setup, which
+/// has no one waiting on it; the launch route answers that it did not finish.
 pub(crate) async fn refreshed_entry(
     state: &Arc<DaemonState>,
     at: &SecretAt,
     server: &CustomServer,
     valid_for: Duration,
     wait: Duration,
+    fallback_when_valid: bool,
 ) -> Result<ConnectorEntry, Fresh> {
-    let (state, at, server) = (Arc::clone(state), at.clone(), server.clone());
+    let (held, kept_at, definition) = (Arc::clone(state), at.clone(), server.clone());
     let task =
-        tokio::spawn(async move { refresh_under_lock(&state, &at, &server, valid_for).await });
+        tokio::spawn(
+            async move { refresh_under_lock(&held, &kept_at, &definition, valid_for).await },
+        );
     match tokio::time::timeout(wait, task).await {
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err(Fresh::Failed("the refresh did not finish".to_string())),
-        Err(_) => Err(Fresh::Failed(format!(
-            "the service did not answer within {} seconds",
-            wait.as_secs()
-        ))),
+        Err(_) => {
+            if fallback_when_valid && let Some(entry) = unexpired_entry(state, at, server).await {
+                return Ok(entry);
+            }
+            Err(Fresh::Failed(format!(
+                "the service did not answer within {} seconds",
+                wait.as_secs()
+            )))
+        }
     }
+}
+
+/// The entry as the store has it, read without the lock the refresh holds, when its sign-in is not
+/// lapsed and its access token has not expired.
+async fn unexpired_entry(
+    state: &Arc<DaemonState>,
+    at: &SecretAt,
+    server: &CustomServer,
+) -> Option<ConnectorEntry> {
+    let (secrets, kept_at, definition) = (state.connector_secrets(), at.clone(), server.clone());
+    let entry = blocking(move || confirmed_entry(secrets.as_ref(), &kept_at, &definition))
+        .await
+        .ok()?
+        .ok()??;
+    let grant = entry.oauth.as_ref()?;
+    let holds = !grant.lapsed
+        && grant
+            .expires_at
+            .is_some_and(|expires_at| expires_at > chrono::Utc::now());
+    holds.then_some(entry)
 }
 
 /// `work` on a thread that may block, as a store does.
@@ -82,6 +113,26 @@ async fn keep(state: &Arc<DaemonState>, at: &SecretAt, entry: ConnectorEntry) ->
     .map_err(|error| store_failed(&error))
 }
 
+/// Whether the store still holds `grant` for `server` at `at`: read again, just before a save.
+async fn still_holds(
+    state: &Arc<DaemonState>,
+    at: &SecretAt,
+    server: &CustomServer,
+    grant: &OAuthGrant,
+) -> bool {
+    let (secrets, kept_at, definition) = (state.connector_secrets(), at.clone(), server.clone());
+    let read = blocking(move || confirmed_entry(secrets.as_ref(), &kept_at, &definition)).await;
+    let Ok(Ok(Some(ConnectorEntry {
+        oauth: Some(now), ..
+    }))) = read
+    else {
+        return false;
+    };
+    now.access_token.expose() == grant.access_token.expose()
+        && now.refresh_token.as_ref().map(Secret::expose)
+            == grant.refresh_token.as_ref().map(Secret::expose)
+}
+
 async fn refresh_under_lock(
     state: &Arc<DaemonState>,
     at: &SecretAt,
@@ -96,8 +147,9 @@ async fn refresh_under_lock(
         .await?
         .map_err(|error| store_failed(&error))?
         .ok_or(Fresh::NotConfirmed)?;
+    // A server that signs in and is kept without a grant is not handed out bare.
     let Some(grant) = entry.oauth.clone() else {
-        return Ok(entry);
+        return Err(Fresh::NotConfirmed);
     };
     if grant.lapsed {
         return Err(Fresh::Lapsed);
@@ -107,6 +159,12 @@ async fn refresh_under_lock(
         Ok(None) => Ok(entry),
         // The rotated refresh token is saved before the new access token is used.
         Ok(Some(fresh)) => {
+            // The command line changes the store without this lock: an entry gone or changed
+            // since it was read is not written over, and the token just rotated is given back.
+            if !still_holds(state, at, server, &grant).await {
+                tokio::spawn(async move { revoke(&fresh).await });
+                return Err(Fresh::NotConfirmed);
+            }
             entry.oauth = Some(fresh);
             keep(state, at, entry.clone())
                 .await
@@ -114,6 +172,9 @@ async fn refresh_under_lock(
             Ok(entry)
         }
         Err(SignInError::Lapsed) => {
+            if !still_holds(state, at, server, &grant).await {
+                return Err(Fresh::NotConfirmed);
+            }
             if let Some(held) = &mut entry.oauth {
                 held.lapsed = true;
             }

@@ -3539,6 +3539,7 @@ pub(super) mod tests {
                     &server,
                     std::time::Duration::from_mins(35),
                     std::time::Duration::from_secs(30),
+                    false,
                 )
                 .await
             })

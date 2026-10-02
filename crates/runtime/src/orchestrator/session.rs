@@ -361,6 +361,7 @@ async fn refresh_signed_in(
                 &server,
                 wall_clock + SETUP_VALID_MARGIN,
                 SETUP_REFRESH_WAIT,
+                true,
             )
             .await
         {
@@ -3176,6 +3177,54 @@ mod tests {
             .expect("the session runs");
             assert_eq!(server_names(&adapter.started()[0]), given, "{minutes}");
             assert!(!grant_kept(&harness).lapsed, "{minutes}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_slow_refresh_keeps_a_token_that_still_holds() {
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        let harness = Harness::new("session-signed-slow", |wire| {
+            signed_in_server(wire, &fixture.mcp_url, &json!({}));
+        });
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        // Ten minutes left, a session of thirty, and the service not answering the refresh.
+        let old = keep_signed_in(&harness, &fixture, chrono::Duration::minutes(10), |_| {});
+        fixture.hold("token");
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        run_session(
+            deps,
+            &team,
+            dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+        )
+        .await
+        .expect("the session runs");
+        assert_eq!(server_names(&adapter.started()[0]), ["notion"]);
+        // The refresh goes on, and what the service rotated is kept.
+        fixture.release("token");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while grant_kept(&harness)
+            .refresh_token
+            .as_ref()
+            .map(crate::claude::Secret::expose)
+            == old
+                .refresh_token
+                .as_ref()
+                .map(crate::claude::Secret::expose)
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the rotated token was not kept"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
     }
 
