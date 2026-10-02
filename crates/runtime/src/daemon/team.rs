@@ -402,7 +402,11 @@ fn not_listed(error: ConnectorError) -> Failure {
 
 /// The tools of the server `params` describes for its agent, held to the team's rules first, as
 /// it lists them with the keys `params` carries.
-async fn listed(deps: &Arc<ToolDeps>, params: &Value) -> Result<Vec<ListedTool>, Failure> {
+async fn listed(
+    state: &DaemonState,
+    deps: &Arc<ToolDeps>,
+    params: &Value,
+) -> Result<Vec<ListedTool>, Failure> {
     let (held, asked) = (Arc::clone(deps), params.clone());
     let (_, server) = off_the_worker(move || {
         described(
@@ -413,11 +417,12 @@ async fn listed(deps: &Arc<ToolDeps>, params: &Value) -> Result<Vec<ListedTool>,
         )
     })
     .await?;
-    let folder = crate::connectors::working_folder(
-        deps.files.root(),
+    let folder = secret_at(
+        deps,
         params["agent"].as_str().unwrap_or_default(),
         &server.name,
     )
+    .and_then(|at| state.connector_folder(&at))
     .map_err(|error| Failure::new(REFUSED, format!("its folder could not be made: {error}")))?;
     list_tools(&server, &keys_of(params), &folder)
         .await
@@ -433,7 +438,7 @@ async fn connector_connect(
     params: &Value,
 ) -> Result<Value, Failure> {
     let agent = params["agent"].as_str().unwrap_or_default().to_string();
-    let listed = listed(deps, params).await?;
+    let listed = listed(state, deps, params).await?;
     let tools = labelled(&listed, &params["tags"]).map_err(|why| Failure::new(REFUSED, why))?;
     let (held, asked, labels) = (Arc::clone(deps), params.clone(), tools.clone());
     let (entry, server) = off_the_worker(move || {
@@ -963,7 +968,7 @@ pub(super) async fn call(
     let params = params.clone();
     match method {
         "connector.tools" => {
-            let tools = Box::pin(listed(&deps, &params)).await?;
+            let tools = Box::pin(listed(state, &deps, &params)).await?;
             Ok(json!({ "tools": tools
                 .iter()
                 .map(|tool| json!({

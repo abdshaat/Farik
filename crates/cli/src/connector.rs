@@ -55,8 +55,16 @@ pub(crate) fn connect(
     let (_, server) =
         custom_entry(&project.team, asked.agent, &wire, json!({})).map_err(|e| errors(&e))?;
     let keys = read_keys(asked.keys, io)?;
-    let folder = working_folder(&project.root, asked.agent, &server.name)
-        .map_err(|error| format!("{} cannot be made: {error}", server.name))?;
+    let at = SecretAt::of(&project.root, asked.agent, &server.name)
+        .map_err(|error| format!("this project's id cannot be read: {error}"))?;
+    let state = crate::state::state_dir(&io.env).ok_or_else(|| {
+        format!(
+            "XDG_CONFIG_HOME, HOME and APPDATA are all unset, so {} has no folder to run in",
+            server.name
+        )
+    })?;
+    let folder = working_folder(&state, &at)
+        .map_err(|error| format!("{}'s folder cannot be made: {error}", server.name))?;
     let listed = runtime()?
         .block_on(list_tools(&server, &keys, &folder))
         .map_err(|error| not_listed(&error))?;
@@ -64,8 +72,6 @@ pub(crate) fn connect(
     let (entry, server) = custom_entry(&project.team, asked.agent, &wire, Value::Object(tools))
         .map_err(|e| errors(&e))?;
     let spec = spec_sha256(&server);
-    let at = SecretAt::of(&project.root, asked.agent, &server.name)
-        .map_err(|error| format!("this project's id cannot be read: {error}"))?;
     let stored_in = io
         .connector_secrets
         .save(

@@ -55,6 +55,11 @@ impl Harness {
         });
         let project = TestProject::new(name, &team);
         let daemon = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
+        // The user's state folder, beside the repository and outside it, as `~/.config/farik` is.
+        daemon.set_state_dir(std::path::PathBuf::from(format!(
+            "{}-state",
+            project.repo.path.display()
+        )));
         let gh = FakeGh::new(name);
         Self {
             project,

@@ -163,6 +163,8 @@ pub struct DaemonState {
     /// What that store held for each account the last time it was read, so that `team.get` does
     /// not ask a keychain each time.
     connectors_kept: Mutex<BTreeMap<String, Kept>>,
+    /// The user's state folder, where each stdio connector runs (ADR 0030), once it is set.
+    state_dir: OnceLock<std::path::PathBuf>,
 }
 
 /// What the connector store held for one agent's server the last time Farik read it.
@@ -209,6 +211,7 @@ impl DaemonState {
             team_writes: Mutex::new(()),
             connector_secrets: OnceLock::new(),
             connectors_kept: Mutex::new(BTreeMap::new()),
+            state_dir: OnceLock::new(),
         }
     }
 
@@ -227,6 +230,7 @@ impl DaemonState {
             team_writes: Mutex::new(()),
             connector_secrets: OnceLock::new(),
             connectors_kept: Mutex::new(BTreeMap::new()),
+            state_dir: OnceLock::new(),
         }
     }
 
@@ -234,6 +238,29 @@ impl DaemonState {
     /// a store was already set, which is kept.
     pub fn set_connector_secrets(&self, secrets: Arc<dyn ConnectorSecrets>) -> bool {
         self.connector_secrets.set(secrets).is_ok()
+    }
+
+    /// Runs each stdio connector in a folder of `directory`, the user's state folder, from now on.
+    /// Answers `true`, or `false` when one was already set, which is kept.
+    pub fn set_state_dir(&self, directory: std::path::PathBuf) -> bool {
+        self.state_dir.set(directory).is_ok()
+    }
+
+    /// The folder the stdio connector `at` runs in, made again empty ([`working_folder`]).
+    ///
+    /// # Errors
+    ///
+    /// No state folder was set, so no connector runs, or the folder could not be made.
+    ///
+    /// [`working_folder`]: crate::connectors::working_folder
+    pub(crate) fn connector_folder(&self, at: &SecretAt) -> std::io::Result<std::path::PathBuf> {
+        let state = self.state_dir.get().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "there is no Farik state folder to run it in",
+            )
+        })?;
+        crate::connectors::working_folder(state, at)
     }
 
     /// Where the agents' connector keys are kept: until a store is set, an empty one, so that no
@@ -899,13 +926,9 @@ fn launch_answer(state: &DaemonState, asked: &LaunchAsk) -> Result<Value, Refusa
     Ok(match &server.transport {
         CustomTransport::Stdio { .. } => {
             let spec = launch_spec(&server, &entry).map_err(refused)?;
-            let root = state.deps().map(|deps| deps.files.root().to_path_buf());
-            let folder = root
-                .ok_or_else(|| failed(NO_PROJECT.to_string()))
-                .and_then(|root| {
-                    crate::connectors::working_folder(&root, &at.agent_id, &server.name)
-                        .map_err(|error| failed(format!("its folder could not be made: {error}")))
-                })?;
+            let folder = state
+                .connector_folder(&at)
+                .map_err(|error| failed(format!("its folder could not be made: {error}")))?;
             serde_json::json!({
                 "command": spec.command, "args": spec.args, "env": exposed(&spec.env),
                 "cwd": folder.display().to_string()
@@ -1715,13 +1738,15 @@ mod tests {
         let (status, body) = launch(&daemon, "session-custom", "github").await;
         assert_eq!(status, StatusCode::OK, "{body}");
         let answer: Value = serde_json::from_str(&body).expect("JSON");
-        // It runs in a folder Farik keeps for it, never the session's worktree (finding C1).
-        let folder = daemon
-            .project
-            .deps
-            .files
-            .root()
-            .join(".farik/local/connectors/dev-a/github");
+        // It runs in a folder Farik keeps for it in the user's state folder, never the session's
+        // worktree, nor anywhere in the repository (finding C1).
+        let root = daemon.project.deps.files.root();
+        let at = crate::connectors::SecretAt::of(root, "dev-a", "github").expect("an address");
+        let folder =
+            std::path::PathBuf::from(format!("{}-state", daemon.project.repo.path.display()))
+                .join("connectors")
+                .join(&at.project_id)
+                .join("dev-a/github");
         assert_eq!(
             answer,
             json!({

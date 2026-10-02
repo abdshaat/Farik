@@ -38,6 +38,11 @@ fn fixture(test: &str) -> PathBuf {
     path
 }
 
+/// The user's state folder for `repository`'s tests: beside it and outside it, as `~/.config` is.
+fn state_of(repository: &TempRepo) -> PathBuf {
+    PathBuf::from(format!("{}-state", repository.path.display()))
+}
+
 /// Where `agent`'s keys for `server` are kept in `repository`'s project: where the daemon looks
 /// for them, under the project's id on this machine, never the log's team or project id.
 fn kept_at(repository: &TempRepo, agent: &str, server: &str) -> SecretAt {
@@ -80,9 +85,12 @@ fn connect(
     ];
     args.extend_from_slice(extra);
     let stdin = stdin.to_string();
+    let state = state_of(repository);
     run_with(&repository.path, &args, move |io| {
         io.stdin = Box::new(std::io::Cursor::new(stdin.into_bytes()));
         io.connector_secrets = store;
+        io.env
+            .insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
     })
 }
 

@@ -210,6 +210,20 @@ pub(crate) fn command_orchestrator(
     }))
 }
 
+/// A daemon over `tools` that keeps connector keys where `io` says, and runs each stdio
+/// connector in a folder of the user's state folder (ADR 0030).
+fn connected_daemon(
+    tools: &Arc<farik_runtime::tools::ToolDeps>,
+    io: &CliIo<'_>,
+) -> Arc<DaemonState> {
+    let daemon = Arc::new(DaemonState::new(Arc::clone(tools)));
+    daemon.set_connector_secrets(Arc::clone(&io.connector_secrets));
+    if let Some(directory) = state_dir(&io.env) {
+        daemon.set_state_dir(directory);
+    }
+    daemon
+}
+
 /// What a driving process waits on: the test's sleeper, else the machine's timer over the clock.
 fn sleeper(io: &CliIo<'_>) -> Arc<dyn Sleeper> {
     io.sleeper.clone().unwrap_or_else(|| {
@@ -425,8 +439,7 @@ async fn start_listening(
         );
     }
     let tools = tool_deps(project, io)?;
-    let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));
-    daemon.set_connector_secrets(Arc::clone(&io.connector_secrets));
+    let daemon = connected_daemon(&tools, io);
     let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
     let web = options
         .web

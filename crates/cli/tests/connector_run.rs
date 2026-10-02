@@ -92,6 +92,11 @@ struct Served {
 }
 
 impl Served {
+    /// The user's state folder for `repo`: beside it and outside it, as `~/.config/farik` is.
+    fn state_of(repo: &TempRepo) -> PathBuf {
+        PathBuf::from(format!("{}-state", repo.path.display()))
+    }
+
     fn new(name: &str) -> Self {
         let repo = TempRepo::new(name);
         let team = a_team(|_| {});
@@ -132,6 +137,7 @@ impl Served {
             store.save(&at, &entry).expect("kept");
         }
         state.set_connector_secrets(store);
+        state.set_state_dir(Served::state_of(&repo));
         state.register_session(SessionRegistration {
             session_id: SESSION.to_string(),
             agent_id: "dev-a".to_string(),
@@ -368,11 +374,13 @@ fn connector_run_starts_the_server_in_a_folder_farik_keeps() {
         String::from_utf8_lossy(&output.stderr)
     );
     let printed = String::from_utf8(output.stdout).expect("text");
-    let folder = served
-        .repo
-        .path
+    // Outside the repository, in the user's state folder (fix wave C).
+    let at = SecretAt::of(&served.repo.path, "dev-a", "whereami").expect("an address");
+    let folder = Served::state_of(&served.repo)
         .canonicalize()
-        .expect("the repository")
-        .join(".farik/local/connectors/dev-a/whereami");
+        .expect("the state folder")
+        .join("connectors")
+        .join(&at.project_id)
+        .join("dev-a/whereami");
     assert_eq!(printed.trim_end(), folder.display().to_string());
 }

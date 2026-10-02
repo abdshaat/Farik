@@ -203,6 +203,8 @@ impl Project {
             store.save(&at, &entry).expect("kept");
         }
         state.set_connector_secrets(store);
+        // The user's state folder, outside the repository, where each server runs.
+        state.set_state_dir(PathBuf::from(format!("{}-state", repo.path.display())));
         let session_id = a_session_id();
         state.register_session(SessionRegistration {
             session_id: session_id.clone(),

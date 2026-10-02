@@ -56,6 +56,11 @@ impl TestDaemon {
             .create_worktree(&worktree, &project.branch("FRK-1"), "main")
             .expect("the worktree is made");
         let state = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
+        // The user's state folder, beside the repository and outside it, as `~/.config/farik` is.
+        state.set_state_dir(std::path::PathBuf::from(format!(
+            "{}-state",
+            project.repo.path.display()
+        )));
         let daemon = Self {
             project,
             worktree,
