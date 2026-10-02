@@ -42,7 +42,7 @@ Where skills live:
 Loading into a session:
 - **A plugin folder per session, outside the project.** The Claude adapter writes it at `<state>/skills/<local project id>/<session id>/`, where `<state>` is the user's Farik state folder and `<local project id>` is `local_project_id(state, root)` (ADR 0030's place for a connector's folder). It is 0700, written fresh at each start and resume, removed when the Claude Code process exits whatever the outcome, and `<state>/skills/<local project id>/` is removed whole when the daemon starts. It holds `.claude-plugin/plugin.json` `{"name":"farik"}` and `skills/<name>/` with a copy of each skill whose `SKILL.md` frontmatter is rewritten to `name` and `description` alone. The adapter passes `--plugin-dir <that folder>`, and adds `Skill` to `--tools`, only when the session has at least one skill. Every session's `--settings` sets `"disableSkillShellExecution": true`. Rejected: under `.farik/local/sessions/<id>/`, because the shipped protected path `.farik/local/**` is a `Read` deny rule Claude Code applies to sessions run in the project's root (`conversation`, `ceremony`, `chat`), which a hook's `allow` cannot lift (probed). Rejected: `.claude/skills` in the worktree, which `--setting-sources ""` turns off and which an agent could commit. Rejected: every skill in the prompt, the cost ADR 0011 names.
 - **Which sessions.** Every session not given one Farik tool alone: the task sessions, `conversation`, `ceremony` and `chat`.
-- **The hook.** A `Skill` call is allowed only when its input is exactly `{ "skill": "farik:<name>" }` or `{ "skill": "farik:<name>", "args": <string> }`, with `<name>` one of the session's skills. Anything else (a bare name, Claude Code's own skills, another field, a non-string) is denied `skill_not_in_session`. It is judged in `judge` after the `tool_call_limit` check and before the connector check, asks no tier, meets no plan gate, and an allowed call counts towards `max_tool_calls`.
+- **The hook.** A `Skill` call is allowed only when its input is exactly `{ "skill": "farik:<name>" }` or `{ "skill": "farik:<name>", "args": <string> }` with an `args` holding no `@` (Claude Code attaches `@<path>` in a skill's arguments past the hook), with `<name>` one of the session's skills. Anything else (a bare name, Claude Code's own skills, another field, a non-string, an `args` with an `@`) is denied `skill_not_in_session`. It is judged in `judge` after the `tool_call_limit` check and before the connector check, asks no tier, meets no plan gate, and an allowed call counts towards `max_tool_calls`.
 - **Reads in the skill folder.** A `Read`, `Glob` or `Grep` whose `file_path` or `path`, resolved through links (`resolve`), lies under the registration's `skills_root` is allowed at tier `read` with no paths, so `allowed_paths` and the protected paths are not asked about. A `Glob` pattern stays relative. Every other tool's path there, and any write, stays `path_outside_workspace`.
 - **The prompt** gains nothing. Claude Code lists the skills itself.
 
@@ -51,7 +51,7 @@ Trust:
 - **Pinned in the team file.** `team.yaml` gains `skills: [{ name, sha256 }]` at the top level for the team, and on each agent for that agent. `sha256` is `skill_sha256`: the sha256 of `canonical_json` of `{ <relative path>: <sha256 hex of the file's bytes> }` over every file in the folder.
 - **Confirmed on this computer**, as ADR 0030 does for a connector: a skill loads only when it is `in_use` (the states above), that is when its folder hashes to its pin, the newest `skill.added`, `skill.changed` or `skill.confirmed` for it in this machine's log (8.4, never committed) carries that hash, and no `skill.removed` follows. Why: `.farik/` travels with the repository, so a pull could change a skill's instructions and its pin together.
   - `skill_confirm`, with the hash the person saw, confirms one. The daemon reads the folder, refuses `skill_hash_mismatch` unless its `skill_sha256` equals the hash sent, refuses whatever `check_skill` refuses with that refusal's code, writes that hash as the pin when the pin differs, then records `skill.confirmed`. So a skill whose folder or pin changed outside Farik is used again only after the person has read the folder as it is now.
-- **No commands and no attached files.** A `SKILL.md` holding `` !` `` anywhere, or a line whose first characters, after spaces, are three or more backticks or tildes followed by `!`, is refused `skill_runs_commands`. A `SKILL.md` with an `@` at the start of a line or after whitespace, followed by a character that is not whitespace (regex `(^|\s)@\S`, multi-line), is refused `skill_attaches_files`; an `@` inside a word, as in an email address, is allowed. To point at a bundled file, a skill names it as a path or a Markdown link (`references/a.md`), which the agent reads with `Read` and the hook judges. Other frontmatter fields are accepted, dropped from the session's copy, and listed to the person: "Farik ignores: allowed-tools, hooks".
+- **No commands and no attached files.** A `SKILL.md` holding `` !` `` or ```` ```! ```` anywhere, or a line whose first characters, after spaces, are three or more backticks or tildes followed by `!`, is refused `skill_runs_commands`. A `SKILL.md` with an `@` is refused `skill_attaches_files` unless the character before it is an ASCII letter or digit or one of `._%+-`, as in an email address (Claude Code attaches `@<path>` after any whitespace, U+FEFF included, and after 。、？！). To point at a bundled file, a skill names it as a path or a Markdown link (`references/a.md`), which the agent reads with `Read` and the hook judges. Other frontmatter fields are accepted, dropped from the session's copy, and listed to the person: "Farik ignores: allowed-tools, hooks".
 - **Shipped skills are Farik's own** and are neither pinned nor confirmed.
 - **What stays.** A confirmed skill can steer its agent within its own tiers and connectors, in every later session, and its description is listed in each; the reading before adding is the defence against the instructions themselves. Claude Code's own skills stay listed and their calls are denied, which costs turns, not `max_tool_calls`. In no-sandbox mode a command an agent runs can read `daemon.json`'s token and send `skill_save`, whose `skill.added` counts as confirmation (Task 7 adds it to 8.3's warning).
 
@@ -97,7 +97,9 @@ docs/decisions/0034-skills-load-on-demand-and-are-confirmed.md   creates: the AD
 docs/schemas/team.schema.json                                    modifies: skillPin, top-level and per-agent skills (Task 1)
 crates/core/src/team.rs, crates/core/src/skill.rs, lib.rs        modifies/creates: SkillPin, skill_sha256 (Task 1)
 crates/roles/src/lib.rs, crates/roles/src/skill_check.rs         modifies/creates: check_skill, the limits, core skill names (Task 2)
-crates/runtime/src/skills.rs, lib.rs                             creates: reading a folder, confirmations, assembly, the plugin folder (Task 3)
+crates/runtime/src/skills.rs, lib.rs                             creates: reading a folder, confirmations, assembly, the plugin folder, skill_folder_unlinked (Task 3)
+docs/schemas/event.schema.json, crates/protocol/src/event.rs     modifies: the four skill events (Task 3)
+crates/protocol/src/event/fixtures.rs, crates/store/src/projections.rs   modifies: their fixtures, the store's projection arm (Task 3)
 crates/runtime/src/session.rs                                    modifies: SessionSpec.skills (Task 4)
 crates/runtime/src/claude.rs                                     modifies: ClaudeConfig.skills_dir, the plugin folder's write and removal, --plugin-dir, Skill, disableSkillShellExecution (Task 4)
 crates/runtime/src/orchestrator/session.rs                       modifies: skills into sessions, replaced role skills out of the prompt (Task 4)
@@ -106,8 +108,8 @@ crates/runtime/src/skills.rs                                     modifies: save_
 crates/runtime/src/daemon/team.rs                                modifies: the three commands, the two RPCs, team.save and agent.replace keep pins (Task 5)
 crates/runtime/src/daemon/templates.rs                           modifies: apply keeps pins (Task 5)
 crates/runtime/src/daemon/web.rs                                 modifies: routes the two RPCs (Task 5)
-docs/schemas/{event,command,rpc}.schema.json                     modifies: four events, three commands, two RPCs (Task 5)
-crates/protocol/src/event.rs, command.rs                         modifies: EventKind, EventBody, Command (Task 5)
+docs/schemas/{command,rpc}.schema.json                           modifies: three commands, two RPCs (Task 5)
+crates/protocol/src/command.rs                                   modifies: Command (Task 5)
 crates/cli/src/skill.rs, lib.rs                                  creates/modifies: farik skill (Task 6)
 docs/SPEC.md, docs/plans/project-plan.md, docs/design/role-kits.md   modifies (Task 7)
 ```
@@ -124,6 +126,8 @@ pub struct SkillPin { pub name: String, pub sha256: String }
 // Team::skills() -> &[SkillPin]; each validated agent's skills: Vec<SkillPin>
 pub fn skill_sha256(files: &BTreeMap<String, Vec<u8>>) -> String;
 // farik-roles
+pub fn declared_name_and_description(files: &BTreeMap<String, Vec<u8>>) -> Option<(String, String)>;
+pub fn skill_name_ok(name: &str) -> bool;
 pub struct CheckedSkill { pub name: String, pub description: String,
     pub ignored_fields: Vec<String>, pub session_files: BTreeMap<String, String> }
     // session_files: SKILL.md with its frontmatter rewritten, the rest unchanged
@@ -137,7 +141,7 @@ pub enum SkillLevel { Team, Agent(String) }
 pub fn skill_folder(root: &Path, level: &SkillLevel, name: &str) -> PathBuf;
 pub fn read_skill_folder(folder: &Path) -> Result<BTreeMap<String, Vec<u8>>, SkillRefusal>;
 pub fn confirmed_skills(events: &[FarikEvent]) -> BTreeMap<(SkillLevel, String), String>;
-pub struct SessionSkill { pub name: String, pub files: BTreeMap<String, String> }
+pub struct SessionSkill { pub name: String, pub files: BTreeMap<String, String> }  // lives in session.rs, re-exported here
 pub struct SessionSkills { pub skills: Vec<SessionSkill>, pub replaced_role_skills: BTreeSet<String> }
 pub fn session_skills(root: &Path, team: &Team, agent_id: &str,
     confirmed: &BTreeMap<(SkillLevel, String), String>) -> SessionSkills;
@@ -145,20 +149,26 @@ pub fn write_plugin(plugin_dir: &Path, skills: &[SessionSkill]) -> io::Result<()
 pub enum SkillState { InUse, Replaced, Review, Missing }
 pub enum SkillRowLevel { Role, Team, Agent }
 pub struct SkillRow { pub level: SkillRowLevel, pub name: String,
-    pub description: String, pub state: SkillState, pub bytes: u64 }
+    pub description: String, pub state: SkillState, pub bytes: u64 }  // bytes: the folder's total size
 pub fn skill_rows(root: &Path, team: &Team, agent_id: Option<&str>,
     confirmed: &BTreeMap<(SkillLevel, String), String>) -> Vec<SkillRow>;
-pub fn save_skill(root: &Path, log: &EventLog, level: &SkillLevel,
-    files: &BTreeMap<String, Vec<u8>>, replace_shipped: bool) -> Result<SkillPin, SkillCommandError>;
-pub fn remove_skill(root: &Path, log: &EventLog, level: &SkillLevel, name: &str) -> Result<(), SkillCommandError>;
-pub fn confirm_skill(root: &Path, log: &EventLog, level: &SkillLevel, name: &str, sha256: &str,
-    replace_shipped: bool) -> Result<(), SkillCommandError>;
+pub struct SkillSaved { pub name: String, pub sha256: String, pub changed: bool, pub event: u64 }
+pub fn save_skill(tools: &ToolDeps, level: &SkillLevel,
+    files: &BTreeMap<String, Vec<u8>>, replace_shipped: bool) -> Result<SkillSaved, SkillCommandError>;
+pub fn remove_skill(tools: &ToolDeps, level: &SkillLevel, name: &str) -> Result<u64, SkillCommandError>;
+pub fn confirm_skill(tools: &ToolDeps, level: &SkillLevel, name: &str, sha256: &str,
+    replace_shipped: bool) -> Result<u64, SkillCommandError>;  // the event's sequence number
+pub fn skills_dir(state: &Path, project_id: &str) -> PathBuf;  // <state>/skills/<local project id>
+// skill_folder, refused PathInvalid when the folder or any folder above it is a link
+pub fn skill_folder_unlinked(root: &Path, level: &SkillLevel, name: &str) -> Result<PathBuf, SkillRefusal>;
 pub enum SkillCommandError { Unknown, HashMismatch, NameTaken, LimitReached, AgentUnknown,
-    Refused(SkillRefusal), Io(io::Error) }
+    Refused(SkillRefusal), Io(io::Error) }  // Io: a team-file or log failure too, as skill_failed
 impl SkillCommandError { pub fn code(&self) -> &'static str; }  // skill_unknown, …, the refusal's code
 ```
 
-`SessionSpec` gains `skills: Vec<SessionSkill>`. `ClaudeConfig` gains `skills_dir: PathBuf` (`<state>/skills/<local project id>`). `write_session_files` writes `<skills_dir>/<session id>/` when `spec.skills` is not empty. `claude_args` adds `--plugin-dir <that folder>` and `Skill` to `--tools` when it is not empty. The adapter owns the folder, as it owns `system-prompt.md` and `mcp.json`. `SessionRegistration` gains `skills: Vec<String>` and `skills_root: Option<PathBuf>` (the folder's `skills/`).
+`SessionSpec` gains `skills: Vec<SessionSkill>`. `ClaudeConfig` gains `skills_dir: PathBuf` (`<state>/skills/<local project id>`). `write_session_files` writes `<skills_dir>/<session id>/` when `spec.skills` is not empty. `claude_args` adds `--plugin-dir <that folder>` and `Skill` to `--tools` when it is not empty. The adapter owns the folder, as it owns `system-prompt.md` and `mcp.json`. `SessionRegistration` gains `skills: Vec<String>` and `skills_root: Option<PathBuf>` (the folder's `skills/`). `write_session_files` refuses a spec with skills when `skills_dir` is not absolute.
+
+**Answered (Q2).** For a `chat` session, `.farik/local/sessions/<id>/mcp.json` is refused as a protected path, not `path_outside_workspace`.
 
 Wire (`snake_case`): the team file's `skills: [{ name, sha256 }]`, top level and per agent; events `skill.added`, `skill.changed`, `skill.removed`, `skill.confirmed`; commands `skill_save`, `skill_remove`, `skill_confirm`; RPCs `skills.list`, `skill.get`.
 
@@ -264,3 +274,10 @@ cargo xtask check --integration
 - `system-prompt.md` lacks the skill's body.
 
 The input shape is pinned in Decisions; the live test confirms it once more. Optional: the readiness review's fake Messages API (`ANTHROPIC_BASE_URL` at a local server streaming scripted `tool_use` blocks) would make this test deterministic and free of a credential.
+
+## Execution notes
+
+- **The review of the running code (ADR 0032)** found two critical gaps, which the fix commits close: an `@` after U+FEFF or CJK punctuation, and an `@` in a `Skill` call's `args`, each of which attaches a file past the hook. It also found a fence that does not start its line, a skill folder that is or sits under a link, and the live test's plugin folder inside `.farik/local`. `args` is still allowed when it holds no `@`; the controller ruled against refusing `args` altogether.
+- **Accepted deviations:** the four events moved to Task 3 (a forward dependency otherwise), and the commands take `&ToolDeps` (recording an event needs the ids, the clock and the projections).
+- **Tests written after their code** (Task 4's plugin removal in `claude_process.rs`; Task 5's RPC arms, `keep_pins` and `Skill.bytes`) broke hard rule 1. The controller accepted them on the reviewer's mutation evidence, each caught: M25 (`keep_pins` off), M26 (newcomer pins kept), M27 (`skill.get` without `check_skill`), M37 (no cleanup on a failed spawn) and M38 (no cleanup after exit or kill).
+- `a_live_session_loads_a_skill_on_use` has not run: it needs the founder's credential.
