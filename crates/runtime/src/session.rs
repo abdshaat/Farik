@@ -77,6 +77,16 @@ pub struct McpServerConfig {
     pub headers: BTreeMap<String, String>,
 }
 
+/// One skill a session loads on demand (ADR 0034): its name and the session copy of each file,
+/// `SKILL.md`'s frontmatter rewritten to `name` and `description` alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSkill {
+    /// The skill's name.
+    pub name: String,
+    /// Every file as text, by path relative to the skill's folder.
+    pub files: BTreeMap<String, String>,
+}
+
 /// Everything a runtime needs to start one session.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionSpec {
@@ -106,6 +116,9 @@ pub struct SessionSpec {
     /// The connector tools it may never call, as `mcp__<server>__<tool>`: refused by the program
     /// beside `Bash`, and by the hook whatever the program does.
     pub disallowed_tools: Vec<String>,
+    /// The skills it loads on demand. A runtime that can load skills makes them available under
+    /// their names; one that cannot ignores them.
+    pub skills: Vec<SessionSkill>,
     /// The directory it works in.
     pub cwd: PathBuf,
     /// When it is stopped.

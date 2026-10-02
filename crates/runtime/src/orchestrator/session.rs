@@ -48,6 +48,7 @@ use crate::session::{
     SessionSpec, session_model,
 };
 use crate::sessions::{record_session_ended, record_session_started};
+use crate::skills::{SessionSkills, confirmed_skills, session_skills};
 use crate::tools::{FarikTool, tool_descriptors};
 use crate::transitions::TransitionAsk;
 
@@ -152,6 +153,7 @@ pub(super) async fn run_session(
     if browser.is_some() && !tiers.contains(&PermissionTier::Network) {
         tiers.push(PermissionTier::Network);
     }
+    let (skills, skills_root) = skill_registration(deps, &spec);
     deps.daemon.register_session(SessionRegistration {
         session_id: spec.session_id.clone(),
         agent_id: spec.agent_id.clone(),
@@ -159,6 +161,8 @@ pub(super) async fn run_session(
         purpose: ask.purpose,
         in_reply_to: ask.in_reply_to,
         thread: ask.thread,
+        skills,
+        skills_root,
         cwd: spec.cwd.clone(),
         executor: ask.executor,
         limits: spec.limits,
@@ -647,6 +651,52 @@ fn leave_note(
     )
 }
 
+/// The names of a session's skills, and the `skills/` folder of its plugin folder, for its
+/// registration with the daemon.
+fn skill_registration(
+    deps: &OrchestratorDeps,
+    spec: &SessionSpec,
+) -> (Vec<String>, Option<PathBuf>) {
+    if spec.skills.is_empty() {
+        return (Vec::new(), None);
+    }
+    (
+        spec.skills.iter().map(|skill| skill.name.clone()).collect(),
+        deps.daemon
+            .skills_dir()
+            .ok()
+            .map(|folder| folder.join(&spec.session_id).join("skills")),
+    )
+}
+
+/// The skills `ask`'s session loads on demand: its agent's confirmed ones, in every session not
+/// given one Farik tool alone, which has no `Skill` tool, and only where there is a state folder
+/// to write the session's plugin folder in (ADR 0034).
+fn session_skills_of(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    ask: &SessionAsk<'_>,
+) -> Result<SessionSkills, OrchestratorError> {
+    if ask.only_tool.is_some() || deps.daemon.skills_dir().is_err() {
+        return Ok(SessionSkills::default());
+    }
+    let events = deps.tools.log.read(&EventQuery {
+        kinds: vec![
+            EventKind::SkillAdded,
+            EventKind::SkillChanged,
+            EventKind::SkillRemoved,
+            EventKind::SkillConfirmed,
+        ],
+        ..EventQuery::default()
+    })?;
+    Ok(session_skills(
+        deps.tools.files.root(),
+        team,
+        ask.agent.id.as_str(),
+        &confirmed_skills(&events),
+    ))
+}
+
 /// The tool that checks a page of the task's preview.
 pub(super) const CHECK_PAGE_TOOL: &str = "farik_check_page";
 
@@ -694,7 +744,12 @@ fn session_spec(
 ) -> Result<SessionSpec, OrchestratorError> {
     let files = &deps.tools.files;
     let role_id = Role::from(ask.agent.role);
-    let role = load_role(role_id)?;
+    let mut role = load_role(role_id)?;
+    let skills = session_skills_of(deps, team, ask)?;
+    // A confirmed skill of a shipped skill's name replaces it: it is loaded on demand, and the
+    // prompt no longer carries the shipped one (ADR 0034).
+    role.skills
+        .retain(|skill| !skills.replaced_role_skills.contains(&skill.name));
     // 5.16 runs triage on the cheaper model, whatever the agent's own, and 5.9 the channel's
     // conversations and ceremonies, a ceremony thinking harder.
     let (model, effort) = match ask.purpose {
@@ -793,6 +848,7 @@ fn session_spec(
         disallowed_tools: custom.iter().flat_map(denied_tools).collect(),
         cwd: ask.cwd.clone(),
         limits,
+        skills: skills.skills,
         initial_prompt: ask.initial_prompt.clone(),
     })
 }
@@ -2078,6 +2134,368 @@ mod tests {
         }
     }
 
+    /// A team skill `name` with `body`: its pin, which `Harness::new` puts in the team file, and
+    /// the folder `put_skill` writes once the project exists.
+    fn a_skill_pin(name: &str, body: &str) -> (serde_json::Value, String) {
+        let text = format!("---\nname: {name}\ndescription: Use when {name}.\n---\n{body}");
+        let files =
+            std::collections::BTreeMap::from([("SKILL.md".to_string(), text.clone().into_bytes())]);
+        let sha = farik_core::skill::skill_sha256(&files);
+        (json!({ "name": name, "sha256": sha }), text)
+    }
+
+    /// Writes the team skill `name` in the project and, when `confirm`, records that this
+    /// computer confirmed it.
+    fn put_skill(harness: &Harness, name: &str, text: &str, sha: &str, confirm: bool) {
+        let folder = harness
+            .project
+            .deps
+            .files
+            .root()
+            .join(".farik/skills")
+            .join(name);
+        std::fs::create_dir_all(&folder).expect("a skill folder");
+        std::fs::write(folder.join("SKILL.md"), text).expect("a SKILL.md");
+        if confirm {
+            harness.project.record(
+                "",
+                "skill.confirmed",
+                &json!({ "level": "team", "name": name, "sha256": sha }),
+            );
+        }
+    }
+
+    fn skill_names(spec: &crate::session::SessionSpec) -> Vec<&str> {
+        spec.skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn one_tool_sessions_get_no_skills() {
+        let (pin, text) = a_skill_pin("api-style", "ZEBRA-STYLE-BODY");
+        let harness = Harness::new("session-skills-which", |wire| wire["skills"] = json!([pin]));
+        harness.file("FRK-1", "draft", |_| {});
+        put_skill(
+            &harness,
+            "api-style",
+            &text,
+            pin["sha256"].as_str().expect("a hash"),
+            true,
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let skills = |purpose, only_tool| {
+            let spec = session_spec(
+                deps,
+                &team,
+                &dev_asks(&harness, &team, &contract, purpose, only_tool),
+            )
+            .expect("the spec");
+            skill_names(&spec)
+                .into_iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        for purpose in [
+            SessionPurpose::Refine,
+            SessionPurpose::Plan,
+            SessionPurpose::Explore,
+            SessionPurpose::Implement,
+            SessionPurpose::Verify,
+            SessionPurpose::Ceremony,
+            SessionPurpose::Conversation,
+            SessionPurpose::Chat,
+        ] {
+            assert_eq!(skills(purpose, None), ["api-style"], "{purpose:?}");
+        }
+        for (purpose, only_tool) in [
+            (SessionPurpose::Triage, Some(TRIAGE_TOOL)),
+            (SessionPurpose::Refine, Some(super::JUDGMENT_TOOL)),
+            (SessionPurpose::Verify, Some(super::DECIDE_TOOL)),
+        ] {
+            assert!(
+                skills(purpose, only_tool).is_empty(),
+                "{purpose:?} {only_tool:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_prompt_still_carries_the_role_skills_alone() {
+        let (pin, text) = a_skill_pin("api-style", "ZEBRA-STYLE-BODY");
+        let harness = Harness::new("session-skills-prompt", |wire| {
+            wire["skills"] = json!([pin]);
+        });
+        harness.file("FRK-1", "draft", |_| {});
+        put_skill(
+            &harness,
+            "api-style",
+            &text,
+            pin["sha256"].as_str().expect("a hash"),
+            true,
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let spec = session_spec(
+            deps,
+            &team,
+            &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+        )
+        .expect("the spec");
+        assert_eq!(skill_names(&spec), ["api-style"]);
+        assert!(
+            spec.system_prompt
+                .contains("### Skill: implementing-a-contract"),
+            "the role's skill stays in the prompt"
+        );
+        assert!(
+            !spec.system_prompt.contains("ZEBRA-STYLE-BODY"),
+            "the agent's skill loads on demand"
+        );
+        assert!(
+            !spec.system_prompt.contains("api-style"),
+            "and is not listed in the prompt"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_replaced_role_skill_leaves_the_prompt() {
+        let (pin, text) = a_skill_pin("writing-task-contracts", "MY-CONTRACT-STYLE");
+        let harness = Harness::new("session-skills-replaced", |wire| {
+            wire["skills"] = json!([pin]);
+        });
+        harness.file("FRK-1", "draft", |_| {});
+        put_skill(
+            &harness,
+            "writing-task-contracts",
+            &text,
+            pin["sha256"].as_str().expect("a hash"),
+            true,
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let pm = team.active_agents().next().expect("an agent");
+        let spec = |purpose, only_tool| {
+            let mut ask = asked(deps, pm, purpose, None);
+            ask.only_tool = only_tool;
+            session_spec(deps, &team, &ask).expect("the spec")
+        };
+        let conversation = spec(SessionPurpose::Conversation, None);
+        assert_eq!(skill_names(&conversation), ["writing-task-contracts"]);
+        assert!(
+            !conversation
+                .system_prompt
+                .contains("### Skill: writing-task-contracts"),
+            "the replaced skill leaves the prompt"
+        );
+        // Triage loads no skills, so it keeps the one it has.
+        let triage = spec(SessionPurpose::Triage, Some(TRIAGE_TOOL));
+        assert!(triage.skills.is_empty());
+        assert!(
+            triage
+                .system_prompt
+                .contains("### Skill: writing-task-contracts")
+        );
+        // A skill in review replaces nothing.
+        let unconfirmed = Harness::new("session-skills-review", |wire| {
+            wire["skills"] = json!([pin]);
+        });
+        put_skill(
+            &unconfirmed,
+            "writing-task-contracts",
+            &text,
+            pin["sha256"].as_str().expect("a hash"),
+            false,
+        );
+        let orchestrator = unconfirmed.orchestrator(unconfirmed.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let pm = team.active_agents().next().expect("an agent");
+        let review = session_spec(
+            deps,
+            &team,
+            &asked(deps, pm, SessionPurpose::Conversation, None),
+        )
+        .expect("the spec");
+        assert!(review.skills.is_empty());
+        assert!(
+            review
+                .system_prompt
+                .contains("### Skill: writing-task-contracts")
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn registers_the_skills_and_where_to_read_them() {
+        let (pin, text) = a_skill_pin("api-style", "x");
+        let harness = Harness::new("session-skills-register", |wire| {
+            wire["skills"] = json!([pin]);
+        });
+        harness.file("FRK-1", "draft", |_| {});
+        put_skill(
+            &harness,
+            "api-style",
+            &text,
+            pin["sha256"].as_str().expect("a hash"),
+            true,
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let spec = session_spec(
+            deps,
+            &team,
+            &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+        )
+        .expect("the spec");
+        let (names, root) = super::skill_registration(deps, &spec);
+        assert_eq!(names, ["api-style"]);
+        let plugin = deps
+            .daemon
+            .skills_dir()
+            .expect("a skills folder")
+            .join(&spec.session_id);
+        assert_eq!(root, Some(plugin.join("skills")));
+        let bare = crate::session::SessionSpec {
+            skills: Vec::new(),
+            ..spec
+        };
+        assert_eq!(super::skill_registration(deps, &bare), (Vec::new(), None));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_removed_skill_is_not_loaded() {
+        let (pin, text) = a_skill_pin("api-style", "x");
+        let harness = Harness::new("session-skills-removed", |wire| {
+            wire["skills"] = json!([pin]);
+        });
+        harness.file("FRK-1", "draft", |_| {});
+        put_skill(
+            &harness,
+            "api-style",
+            &text,
+            pin["sha256"].as_str().expect("a hash"),
+            true,
+        );
+        harness.project.record(
+            "",
+            "skill.removed",
+            &json!({ "level": "team", "name": "api-style" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let spec = session_spec(
+            deps,
+            &team,
+            &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+        )
+        .expect("the spec");
+        assert!(spec.skills.is_empty(), "{:?}", skill_names(&spec));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_session_is_registered_with_its_skills() {
+        let (pin, text) = a_skill_pin("api-style", "x");
+        let harness = Harness::new("session-skills-hook", |wire| wire["skills"] = json!([pin]));
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        put_skill(
+            &harness,
+            "api-style",
+            &text,
+            pin["sha256"].as_str().expect("a hash"),
+            true,
+        );
+        let adapter = harness.recorded(vec![implement_finishes_frk_1()]);
+        let witness = Arc::new(
+            ExecutorWitness::probing(adapter.clone(), Arc::clone(&harness.daemon), &["Skill"])
+                .with_input(json!({ "skill": "farik:api-style" })),
+        );
+        let orchestrator = harness.orchestrator(witness.clone());
+        orchestrator.tick().await.expect("the task starts");
+        orchestrator.tick().await.expect("the session runs");
+        let started = adapter.started();
+        assert_eq!(skill_names(&started[0]), ["api-style"]);
+        let decided = witness.decided();
+        assert!(
+            decided[0][0].allow,
+            "the hook knows the session's skill: {decided:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn each_confirming_event_loads_a_skill() {
+        for (n, kind) in ["skill.added", "skill.changed", "skill.confirmed"]
+            .into_iter()
+            .enumerate()
+        {
+            let (pin, text) = a_skill_pin("api-style", "x");
+            let harness = Harness::new(&format!("session-skills-kind-{n}"), |wire| {
+                wire["skills"] = json!([pin]);
+            });
+            harness.file("FRK-1", "draft", |_| {});
+            put_skill(
+                &harness,
+                "api-style",
+                &text,
+                pin["sha256"].as_str().expect("a hash"),
+                false,
+            );
+            harness.project.record(
+                "",
+                kind,
+                &json!({ "level": "team", "name": "api-style", "sha256": pin["sha256"] }),
+            );
+            let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+            let deps = &orchestrator.deps;
+            let team = deps.tools.files.read_team().expect("the team");
+            let contract = deps
+                .tools
+                .files
+                .read_contract(&"FRK-1".parse().expect("a task id"))
+                .expect("the contract");
+            let spec = session_spec(
+                deps,
+                &team,
+                &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+            )
+            .expect("the spec");
+            assert_eq!(skill_names(&spec), ["api-style"], "{kind}");
+        }
+    }
+
     fn server_names(spec: &crate::session::SessionSpec) -> Vec<&str> {
         spec.mcp_servers.iter().map(|s| s.name.as_str()).collect()
     }
@@ -2164,6 +2582,7 @@ mod tests {
                 pid: 1,
             },
             sessions_dir: root.join(".farik/local/sessions"),
+            skills_dir: root.join("skills-state"),
             team_file: root.join(".farik/team.yaml"),
             env: std::collections::BTreeMap::new(),
         };
@@ -2233,6 +2652,7 @@ mod tests {
                 pid: 1,
             },
             sessions_dir: root.join(".farik/local/sessions"),
+            skills_dir: root.join("skills-state"),
             team_file: root.join(".farik/team.yaml"),
             env: std::collections::BTreeMap::new(),
         };

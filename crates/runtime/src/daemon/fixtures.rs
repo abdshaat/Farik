@@ -121,6 +121,8 @@ impl TestDaemon {
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
         });
     }
 
@@ -181,6 +183,8 @@ impl TestDaemon {
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
         });
         state
     }

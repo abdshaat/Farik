@@ -572,6 +572,8 @@ mod tests {
             purpose: SessionPurpose::Verify,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
         });
         let mut client = Client::new(&daemon, "session-iris");
         client.initialize().await;

@@ -27,7 +27,7 @@ use farik_runtime::connectors::{
     ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
 };
 use farik_runtime::daemon::{DaemonConfig, DaemonState, SessionRegistration, serve};
-use farik_runtime::session::{McpServerConfig, McpTransport};
+use farik_runtime::session::{McpServerConfig, McpTransport, SessionSkill};
 use farik_runtime::transitions::Transitions;
 use farik_runtime::{
     EndReason, RuntimeAdapter, SessionEvent, SessionPurpose, SessionSpec, ToolDeps,
@@ -136,6 +136,7 @@ impl Project {
 
     /// `new`, with `change` made to the team's wire, given the repository's folder: each custom
     /// server `dev-a` then has is given to its session, and connected as it is.
+    #[allow(clippy::too_many_lines, reason = "one fixture, built in one place")]
     fn with_team(change: impl FnOnce(&mut Value, &Path)) -> Project {
         let repo = TempRepo::new("live-claude");
         repo.write("note.txt", "hello live\n");
@@ -229,6 +230,8 @@ impl Project {
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
         });
         Project {
             repo,
@@ -256,6 +259,7 @@ impl Project {
             disallowed_tools: Vec::new(),
             cwd: self.repo.path.clone(),
             limits: DEFAULT_SESSION_LIMITS,
+            skills: Vec::new(),
             initial_prompt: format!(
                 "First, use the Read tool to read note.txt. Second, use the Write tool to create \
                  out.txt containing the word yes. Third, use the Grep tool to search this \
@@ -328,6 +332,7 @@ fn run(
         daemon_file,
         daemon: handle.info.clone(),
         sessions_dir: local.join("sessions"),
+        skills_dir: local.join("skills-state"),
         team_file: project.repo.path.join(".farik/team.yaml"),
         env: BASE_ENV
             .iter()
@@ -534,4 +539,114 @@ fn a_live_session_calls_a_custom_connector() {
     assert!(!called("mcp__fixture__delete_repo"));
     // The key went to the server, and to nothing the session can read.
     assert!(!run.stream.contains(CONNECTOR_KEY));
+}
+
+/// What the program's `init` line lists as its skills.
+fn init_skills(stream: &str) -> Vec<String> {
+    let init: Value = stream
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|line| line["type"] == "system" && line["subtype"] == "init")
+        .expect("an init line");
+    init["skills"]
+        .as_array()
+        .map(|skills| {
+            skills
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The marker the skill's body holds and the prompt must not.
+const SKILL_BODY_MARKER: &str = "FIXTURE-SKILL-BODY-MARKER";
+
+#[test]
+#[ignore = "a live Claude Code session needs the founder's credential: FARIK_LIVE_TESTS=1 with \
+            ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand; the credential-free equivalent \
+            is the readiness review's fake-API probe (ADR 0034)"]
+fn a_live_session_loads_a_skill_on_use() {
+    if std::env::var("FARIK_LIVE_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set FARIK_LIVE_TESTS=1 to run a live Claude Code session");
+        return;
+    }
+    let env: BTreeMap<String, String> = std::env::vars().collect();
+    let credential = credential_from_env(&env)
+        .expect("FARIK_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
+    let project = Project::new();
+    let local = project.repo.path.join(".farik/local");
+    // A chat session, which works in the project's root: the harder case, where Claude Code's own
+    // deny rule for `.farik/local/**` applies, and the skills' folder lies outside it.
+    let skills_root = local
+        .join("skills-state")
+        .join(&project.session_id)
+        .join("skills");
+    project.state.register_session(SessionRegistration {
+        session_id: project.session_id.clone(),
+        agent_id: "dev-a".to_string(),
+        task_id: None,
+        cwd: project.repo.path.clone(),
+        executor: None,
+        limits: DEFAULT_SESSION_LIMITS,
+        farik_tools: Vec::new(),
+        tiers: project.tiers.iter().copied().collect(),
+        connectors: Vec::new(),
+        preview: None,
+        purpose: SessionPurpose::Chat,
+        in_reply_to: None,
+        thread: None,
+        skills: vec!["fixture-skill".to_string()],
+        skills_root: Some(skills_root),
+    });
+    let mut spec = project.spec();
+    spec.purpose = SessionPurpose::Chat;
+    spec.farik_tools = Vec::new();
+    spec.skills = vec![SessionSkill {
+        name: "fixture-skill".to_string(),
+        files: BTreeMap::from([
+            (
+                "SKILL.md".to_string(),
+                format!(
+                    "---\nname: fixture-skill\ndescription: Use when asked to use the fixture \
+                     skill.\n---\n{SKILL_BODY_MARKER}: read references/note.md, in this skill's \
+                     folder, and report the one word in it.\n"
+                ),
+            ),
+            ("references/note.md".to_string(), "pelican\n".to_string()),
+        ]),
+    }];
+    spec.initial_prompt = "Use the fixture-skill skill, read the note it points to, say the one \
+                           word the note holds, and end."
+        .to_string();
+    let run = run(&project, spec.clone(), credential, &env);
+    assert!(
+        init_skills(&run.stream)
+            .iter()
+            .any(|skill| skill == "farik:fixture-skill"),
+        "{}",
+        run.stream
+    );
+    let logged = project
+        .log
+        .read(&EventQuery::default())
+        .expect("the log reads");
+    let called = |tool: &str, needle: &str| {
+        logged.iter().any(|event| {
+            event.body.kind() == EventKind::ToolCalled
+                && serde_json::to_value(&event.body)
+                    .is_ok_and(|body| body["tool"] == tool && body.to_string().contains(needle))
+        })
+    };
+    assert!(called("Skill", "farik:fixture-skill"), "{logged:?}");
+    assert!(called("Read", "references/note.md"), "{logged:?}");
+    let prompt = std::fs::read_to_string(
+        local
+            .join("sessions")
+            .join(&spec.session_id)
+            .join("system-prompt.md"),
+    )
+    .expect("the prompt is kept");
+    assert!(!prompt.contains(SKILL_BODY_MARKER), "{prompt}");
 }

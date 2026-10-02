@@ -6,6 +6,7 @@ use std::io::{self, Read as _};
 use std::os::unix::fs::DirBuilderExt as _;
 use std::path::{Path, PathBuf};
 
+pub use crate::session::SessionSkill;
 use farik_core::skill::skill_sha256;
 use farik_core::team::{SkillPin, Team};
 use farik_protocol::event::{EventBody, FarikEvent};
@@ -28,6 +29,13 @@ pub fn skill_folder(root: &Path, level: &SkillLevel, name: &str) -> PathBuf {
         SkillLevel::Team => farik.join("skills").join(name),
         SkillLevel::Agent(agent) => farik.join("agents").join(agent).join("skills").join(name),
     }
+}
+
+/// Where a project's sessions' plugin folders are written, in the user's state folder `state`:
+/// `skills/<local project id>` (ADR 0034, in the place ADR 0030 keeps a connector's folder).
+#[must_use]
+pub fn skills_dir(state: &Path, project_id: &str) -> PathBuf {
+    state.join("skills").join(project_id)
 }
 
 /// The limits `check_skill` holds a folder to, which the walk applies as it goes so that a folder
@@ -125,15 +133,6 @@ pub fn confirmed_skills(events: &[FarikEvent]) -> BTreeMap<(SkillLevel, String),
         }
     }
     confirmed
-}
-
-/// One skill a session loads on demand: its name and the session copy of each file.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionSkill {
-    /// The skill's name.
-    pub name: String,
-    /// Every file as text, `SKILL.md`'s frontmatter rewritten to `name` and `description`.
-    pub files: BTreeMap<String, String>,
 }
 
 /// What one agent's sessions load.

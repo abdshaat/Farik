@@ -42,6 +42,7 @@ pub fn a_session_spec() -> SessionSpec {
         disallowed_tools: Vec::new(),
         cwd: PathBuf::from("/workspace"),
         limits: DEFAULT_SESSION_LIMITS,
+        skills: Vec::new(),
         initial_prompt: "Read note.txt.".to_string(),
     }
 }

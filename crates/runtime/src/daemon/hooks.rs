@@ -81,6 +81,8 @@ impl Serialize for HookDecision {
 const RECORD_LIMIT_BYTES: usize = 4_096;
 /// What ends a value the log kept only part of.
 const CUT_MARKER: &str = "[cut at 4 KiB]";
+/// Claude Code's tool for loading a skill.
+const SKILL_TOOL: &str = "Skill";
 /// The prefix Claude Code gives the tools of Farik's own MCP server.
 const FARIK_PREFIX: &str = "mcp__farik__";
 /// The largest integer a JSON number holds exactly, and the schema's ceiling for one.
@@ -109,6 +111,7 @@ pub fn builtin_tool_tier(tool: &str) -> Option<PermissionTier> {
 /// Decides one `PreToolUse` hook and records the decision, `tool.called` or `tool.denied`. It
 /// refuses, in this order: a session the daemon does not know (`unknown_session`); an agent that
 /// is not active (`agent_not_active`); a session at its `max_tool_calls` (`tool_call_limit`); a
+/// `Skill` call that is not `farik:<name>` of one of the session's skills (`skill_not_in_session`); a
 /// tool that is neither Farik's nor a built-in with a tier (`tool_not_allowed`); a Farik tool the
 /// session was not given (`tool_not_in_session`); a built-in's path
 /// outside the session's worktree (`path_outside_workspace`); and whatever `evaluate_tool_call`
@@ -252,6 +255,12 @@ fn judge(
             registration.limits.max_tool_calls
         )));
     }
+    // A skill is loaded by name, which is no tier's business (ADR 0034).
+    if request.tool_name == SKILL_TOOL {
+        return judge_skill(&request.tool_input, registration)
+            .map(|()| None)
+            .map_err(Denial::from);
+    }
     // A connector's call is judged by its tag alone, whatever the session's tiers (5.6).
     if !request.tool_name.starts_with(FARIK_PREFIX) && connector_tool(&request.tool_name).is_some()
     {
@@ -283,6 +292,8 @@ fn judge_call(
             None => return Err(not_allowed(&request.tool_name)),
         },
         None => match builtin_tool_tier(&request.tool_name) {
+            // The skills' folder is outside the worktree, and a read there asks about no path.
+            Some(tier) if in_skill_folder(request, registration) => (tier, Vec::new()),
             Some(tier) => (
                 tier,
                 workspace_paths(&request.tool_name, &request.tool_input, &registration.cwd)?,
@@ -322,6 +333,68 @@ fn judge_call(
     )
     .map_err(|refusal| Refusal::Tool(refusal).reason())?;
     plan_gate(deps, team, registration, tier)
+}
+
+/// Whether a `Skill` call names one of the session's skills as `farik:<name>` and holds nothing
+/// but that and an optional string `args` (ADR 0034): a bare name would load Claude Code's own
+/// skill of that name, and any other field is not one Farik has judged.
+fn judge_skill(input: &Value, registration: &SessionRegistration) -> Result<(), String> {
+    let named = input.as_object().is_some_and(|fields| {
+        fields.keys().all(|key| key == "skill" || key == "args")
+            && fields.get("args").is_none_or(Value::is_string)
+            && fields
+                .get("skill")
+                .and_then(Value::as_str)
+                .and_then(|skill| skill.strip_prefix("farik:"))
+                .is_some_and(|name| registration.skills.iter().any(|given| given == name))
+    });
+    if named {
+        return Ok(());
+    }
+    Err(format!(
+        "skill_not_in_session: a session uses its own skills as farik:<name> with nothing but an \
+         optional args, and this one has {}",
+        if registration.skills.is_empty() {
+            "none".to_string()
+        } else {
+            registration.skills.join(", ")
+        }
+    ))
+}
+
+/// Whether a `Read`, `Glob` or `Grep` is of the session's skills folder, resolved through links:
+/// the one place outside the worktree a session reads (ADR 0034). A `Glob` pattern stays
+/// relative, as everywhere.
+fn in_skill_folder(request: &HookRequest, registration: &SessionRegistration) -> bool {
+    let Some(skills_root) = &registration.skills_root else {
+        return false;
+    };
+    let field = match request.tool_name.as_str() {
+        "Read" => "file_path",
+        "Glob" | "Grep" => "path",
+        _ => return false,
+    };
+    let Some(raw) = request.tool_input.get(field).and_then(Value::as_str) else {
+        return false;
+    };
+    if request.tool_name == "Glob"
+        && let Some(pattern) = request.tool_input.get("pattern").and_then(Value::as_str)
+        && (Path::new(pattern).is_absolute()
+            || parts(pattern).any(|part| part == "..")
+            || expands_home(pattern))
+    {
+        return false;
+    }
+    if expands_home(raw) {
+        return false;
+    }
+    match (
+        skills_root.canonicalize(),
+        resolve(&registration.cwd.join(raw)),
+    ) {
+        (Ok(root), Some(resolved)) => resolved.starts_with(root),
+        _ => false,
+    }
 }
 
 /// The Designer's plan gate (ADR 0026): before the Product Manager approves its plan, a Designer's
@@ -1194,6 +1267,223 @@ mod tests {
         denied_for(&next, "tier_not_granted");
     }
 
+    /// A session of `dev-a` with the skill `api-style`, whose plugin folder is `<state>/plugin`,
+    /// outside the project; `cwd` is where it works.
+    fn register_with_skills(
+        daemon: &TestDaemon,
+        session: &str,
+        cwd: &std::path::Path,
+        purpose: crate::session::SessionPurpose,
+        limits: SessionLimits,
+    ) -> std::path::PathBuf {
+        use crate::daemon::SessionRegistration;
+
+        let plugin = std::path::PathBuf::from(format!(
+            "{}-state/plugin-{session}",
+            daemon.project.repo.path.display()
+        ));
+        let _ = std::fs::remove_dir_all(&plugin);
+        let skill = plugin.join("skills/api-style");
+        std::fs::create_dir_all(skill.join("references")).expect("a plugin folder");
+        std::fs::write(skill.join("SKILL.md"), "x").expect("a file");
+        std::fs::write(skill.join("references/a.md"), "details").expect("a file");
+        std::fs::create_dir_all(plugin.join(".claude-plugin")).expect("a folder");
+        std::fs::write(plugin.join(".claude-plugin/plugin.json"), "{}").expect("a file");
+        daemon.state.register_session(SessionRegistration {
+            session_id: session.to_string(),
+            agent_id: "dev-a".to_string(),
+            task_id: None,
+            purpose,
+            in_reply_to: None,
+            thread: None,
+            skills: vec!["api-style".to_string()],
+            skills_root: Some(plugin.join("skills")),
+            cwd: cwd.to_path_buf(),
+            executor: None,
+            limits,
+            farik_tools: Vec::new(),
+            tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
+            connectors: Vec::new(),
+            preview: None,
+        });
+        plugin
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_hook_allows_only_the_sessions_skills() {
+        let daemon = TestDaemon::new("hook-skills", |_| {});
+        register_with_skills(
+            &daemon,
+            "session-skills",
+            &daemon.worktree,
+            crate::session::SessionPurpose::Implement,
+            DEFAULT_SESSION_LIMITS,
+        );
+        let call = |input: Value| {
+            decide_pre_tool_use(
+                &daemon.call("session-skills", "Skill", &input),
+                &daemon.state,
+            )
+        };
+        for input in [
+            json!({ "skill": "farik:api-style" }),
+            json!({ "skill": "farik:api-style", "args": "x" }),
+        ] {
+            let allowed = call(input.clone());
+            assert!(allowed.allow, "{input}: {allowed:?}");
+        }
+        let called = daemon.events(EventKind::ToolCalled);
+        assert!(
+            called
+                .iter()
+                .filter(|event| matches!(&event.body, EventBody::ToolCalled(body) if body.tool == "Skill"))
+                .count()
+                == 2,
+            "two allowed calls are recorded"
+        );
+        for input in [
+            json!({ "skill": "api-style" }),
+            json!({ "skill": "deep-research" }),
+            json!({ "skill": "farik:other" }),
+            json!({ "skill": 3 }),
+            json!({}),
+            json!({ "skill": "farik:api-style", "extra": 1 }),
+            json!({ "skill": "farik:api-style", "args": 5 }),
+            json!("farik:api-style"),
+        ] {
+            denied_for(&call(input.clone()), "skill_not_in_session");
+        }
+        // A session with no skills is denied even the plugin's name.
+        let denied = decide_pre_tool_use(
+            &daemon.dev_call("Skill", &json!({ "skill": "farik:api-style" })),
+            &daemon.state,
+        );
+        denied_for(&denied, "skill_not_in_session");
+
+        // An allowed call counts towards the limit, and at it the name is denied like any call.
+        register_with_skills(
+            &daemon,
+            "session-limited",
+            &daemon.worktree,
+            crate::session::SessionPurpose::Implement,
+            SessionLimits {
+                max_tool_calls: 1,
+                ..DEFAULT_SESSION_LIMITS
+            },
+        );
+        let first = decide_pre_tool_use(
+            &daemon.call(
+                "session-limited",
+                "Skill",
+                &json!({ "skill": "farik:api-style" }),
+            ),
+            &daemon.state,
+        );
+        assert!(first.allow, "{first:?}");
+        let second = decide_pre_tool_use(
+            &daemon.call(
+                "session-limited",
+                "Skill",
+                &json!({ "skill": "farik:api-style" }),
+            ),
+            &daemon.state,
+        );
+        denied_for(&second, "tool_call_limit");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_reach_the_skill_folder_and_writes_do_not() {
+        let daemon = TestDaemon::new("hook-skill-reads", |_| {});
+        let root = daemon.project.repo.path.clone();
+        // The task session works in its worktree; the chat session in the project's root.
+        for (session, cwd, purpose) in [
+            (
+                "session-task",
+                daemon.worktree.clone(),
+                crate::session::SessionPurpose::Implement,
+            ),
+            (
+                "session-chat",
+                root.clone(),
+                crate::session::SessionPurpose::Chat,
+            ),
+        ] {
+            let plugin =
+                register_with_skills(&daemon, session, &cwd, purpose, DEFAULT_SESSION_LIMITS);
+            let skills = plugin.join("skills");
+            let hook = |tool: &str, input: Value| {
+                decide_pre_tool_use(&daemon.call(session, tool, &input), &daemon.state)
+            };
+            let note = skills
+                .join("api-style/references/a.md")
+                .display()
+                .to_string();
+            let allowed = hook("Read", json!({ "file_path": note }));
+            assert!(allowed.allow, "{session}: {allowed:?}");
+            for (tool, input) in [
+                (
+                    "Glob",
+                    json!({ "path": skills.display().to_string(), "pattern": "**/*.md" }),
+                ),
+                (
+                    "Grep",
+                    json!({ "path": skills.display().to_string(), "pattern": "det" }),
+                ),
+            ] {
+                let allowed = hook(tool, input);
+                assert!(allowed.allow, "{session} {tool}: {allowed:?}");
+            }
+            // A Glob pattern stays relative, and a link out of the folder is judged by where it
+            // points.
+            let absolute = hook(
+                "Glob",
+                json!({ "path": skills.display().to_string(), "pattern": "/etc/*" }),
+            );
+            denied_for(&absolute, "path_outside_workspace");
+            let climbing = hook(
+                "Glob",
+                json!({ "path": skills.display().to_string(), "pattern": "../*" }),
+            );
+            denied_for(&climbing, "path_outside_workspace");
+            std::os::unix::fs::symlink("/etc/hostname", skills.join("api-style/link.md"))
+                .expect("a link");
+            let linked = hook(
+                "Read",
+                json!({ "file_path": skills.join("api-style/link.md").display().to_string() }),
+            );
+            denied_for(&linked, "path_outside_workspace");
+            // Writes there, any other tool's path there, and the plugin's other files are not.
+            for (tool, input) in [
+                ("Write", json!({ "file_path": note, "content": "x" })),
+                (
+                    "Edit",
+                    json!({ "file_path": note, "old_string": "a", "new_string": "b" }),
+                ),
+                ("LS", json!({ "path": skills.display().to_string() })),
+                (
+                    "Read",
+                    json!({ "file_path": plugin.join(".claude-plugin/plugin.json").display().to_string() }),
+                ),
+                (
+                    "Read",
+                    json!({ "file_path": plugin.join("skills/../x").display().to_string() }),
+                ),
+            ] {
+                denied_for(&hook(tool, input.clone()), "path_outside_workspace");
+            }
+            // The session's own prompt and MCP config, in the project, stay unreadable: outside the
+            // task's worktree, or under the protected `.farik/local/**` in the root.
+            let mcp = root
+                .join(".farik/local/sessions")
+                .join(session)
+                .join("mcp.json");
+            let refused = hook("Read", json!({ "file_path": mcp.display().to_string() }));
+            assert!(!refused.allow, "{session}: {refused:?}");
+        }
+    }
+
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn denies_a_connector_call_outside_the_rules() {
@@ -1212,6 +1502,8 @@ mod tests {
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
             cwd: daemon.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
@@ -1325,6 +1617,8 @@ mod tests {
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
             cwd: daemon.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,

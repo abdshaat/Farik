@@ -2403,6 +2403,8 @@ mod tests {
                     purpose,
                     in_reply_to: None,
                     thread: None,
+                    skills: Vec::new(),
+                    skills_root: None,
                     cwd: harness.project.repo.path.clone(),
                     executor: None,
                     limits: farik_core::budget::DEFAULT_SESSION_LIMITS,

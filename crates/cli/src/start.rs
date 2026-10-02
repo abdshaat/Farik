@@ -596,6 +596,15 @@ fn adapter(
                 daemon_file: project.root.join(DAEMON_FILE),
                 daemon: handle.info.clone(),
                 sessions_dir: project.root.join(".farik/local/sessions"),
+                // No state folder, or no id for the project: the orchestrator offers no skills
+                // either, so nothing is written here.
+                skills_dir: state_dir(&io.env)
+                    .and_then(|state| {
+                        let id = farik_runtime::connectors::local_project_id(&state, &project.root)
+                            .ok()?;
+                        Some(farik_runtime::skills::skills_dir(&state, &id))
+                    })
+                    .unwrap_or_default(),
                 team_file: project.root.join(".farik/team.yaml"),
                 env: SESSION_ENV
                     .iter()

@@ -68,6 +68,8 @@ const QUIET: &[(&str, &str)] = &[
     ("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1"),
     ("DISABLE_AUTOUPDATER", "1"),
 ];
+/// The tool a session with skills is given to load them with.
+const SKILL_TOOL: &str = "Skill";
 const SYSTEM_PROMPT_FILE: &str = "system-prompt.md";
 const MCP_CONFIG_FILE: &str = "mcp.json";
 /// How much of the program's standard error an error end keeps.
@@ -172,6 +174,10 @@ pub struct ClaudeConfig {
     pub daemon: DaemonInfo,
     /// `.farik/local/sessions`: each session's prompt and MCP config, under its id.
     pub sessions_dir: PathBuf,
+    /// `<state>/skills/<local project id>` in the user's state folder, outside the project
+    /// (ADR 0034): a session's plugin folder, with the skills it loads on demand, is written
+    /// under its id and removed when the program exits.
+    pub skills_dir: PathBuf,
     /// `.farik/team.yaml`, read at each session start for the protected paths.
     pub team_file: PathBuf,
     /// The whole environment the program gets besides its credential; nothing else is inherited.
@@ -187,6 +193,7 @@ impl fmt::Debug for ClaudeConfig {
             .field("daemon_file", &self.daemon_file)
             .field("daemon", &self.daemon)
             .field("sessions_dir", &self.sessions_dir)
+            .field("skills_dir", &self.skills_dir)
             .field("team_file", &self.team_file)
             .field("env", &self.env.keys().collect::<Vec<_>>())
             .finish()
@@ -250,6 +257,15 @@ impl ClaudeAdapter {
         let session_dir = self.config.sessions_dir.join(&spec.session_id);
         let args = claude_args(spec, &self.config, &session_dir, resume)?;
         write_session_files(spec, &self.config, &session_dir)?;
+        // The session's plugin folder, removed when the program exits whatever the outcome, and
+        // here when it cannot be started.
+        let plugin =
+            (!spec.skills.is_empty()).then(|| self.config.skills_dir.join(&spec.session_id));
+        let remove_plugin = || {
+            if let Some(plugin) = &plugin {
+                let _ = std::fs::remove_dir_all(plugin);
+            }
+        };
         let mut child = tokio::process::Command::new(&self.config.claude_path)
             .args(&args)
             .current_dir(&spec.cwd)
@@ -263,11 +279,14 @@ impl ClaudeAdapter {
             .process_group(0)
             .kill_on_drop(true)
             .spawn()
-            .map_err(|error| RuntimeError::Spawn {
-                detail: format!(
-                    "{} cannot be run: {error}",
-                    self.config.claude_path.display()
-                ),
+            .map_err(|error| {
+                remove_plugin();
+                RuntimeError::Spawn {
+                    detail: format!(
+                        "{} cannot be run: {error}",
+                        self.config.claude_path.display()
+                    ),
+                }
             })?;
         let (Some(pid), Some(stdin), Some(stdout), Some(stderr)) = (
             child.id(),
@@ -275,6 +294,7 @@ impl ClaudeAdapter {
             child.stdout.take(),
             child.stderr.take(),
         ) else {
+            remove_plugin();
             return Err(RuntimeError::Spawn {
                 detail: "the program's pipes were not opened".to_string(),
             });
@@ -289,6 +309,7 @@ impl ClaudeAdapter {
             stdin,
             stdout,
             tail: collect_tail(stderr),
+            plugin,
         };
         tokio::spawn(supervise(
             process,
@@ -379,6 +400,8 @@ struct Process {
     stdin: ChildStdin,
     stdout: ChildStdout,
     tail: tokio::task::JoinHandle<Vec<u8>>,
+    /// The session's plugin folder, which is removed once the program has exited.
+    plugin: Option<PathBuf>,
 }
 
 /// How the supervisor stopped reading.
@@ -429,6 +452,7 @@ async fn supervise(
         mut stdin,
         stdout,
         tail,
+        plugin,
     } = process;
     let mut guard = GroupGuard {
         pid,
@@ -455,6 +479,10 @@ async fn supervise(
     kill_group(pid);
     guard.is_armed = false;
     let status = tokio::time::timeout(EXIT_GRACE, child.wait()).await;
+    // The program is gone: its skills' copy goes with it, before a resume can write a new one.
+    if let Some(plugin) = plugin {
+        let _ = std::fs::remove_dir_all(plugin);
+    }
     // The process is gone, so the session may be resumed.
     guard.done.cancel();
     let last = match stop {
@@ -620,7 +648,11 @@ pub fn claude_args(
         .chain(spec.disallowed_tools.iter().map(String::as_str))
         .collect::<Vec<_>>()
         .join(",");
-    let args = [
+    let mut tools = spec.builtin_tools.clone();
+    if !spec.skills.is_empty() {
+        tools.push(SKILL_TOOL.to_string());
+    }
+    let mut args: Vec<String> = [
         "-p",
         "--output-format",
         "stream-json",
@@ -636,7 +668,7 @@ pub fn claude_args(
         "--append-system-prompt-file",
         &session_dir.join(SYSTEM_PROMPT_FILE).display().to_string(),
         "--tools",
-        &spec.builtin_tools.join(","),
+        &tools.join(","),
         "--disallowedTools",
         &disallowed,
         "--mcp-config",
@@ -650,11 +682,25 @@ pub fn claude_args(
         "",
         "--settings",
         &settings.to_string(),
-    ];
-    Ok(args.iter().map(|arg| (*arg).to_string()).collect())
+    ]
+    .iter()
+    .map(|arg| (*arg).to_string())
+    .collect();
+    if !spec.skills.is_empty() {
+        args.push("--plugin-dir".to_string());
+        args.push(
+            config
+                .skills_dir
+                .join(&spec.session_id)
+                .display()
+                .to_string(),
+        );
+    }
+    Ok(args)
 }
 
-/// Writes `session_dir`'s two files: `system-prompt.md`, the spec's exact prompt, kept after the
+/// Writes `session_dir`'s two files, and the session's plugin folder under `config.skills_dir`
+/// when the spec has skills (ADR 0034): `system-prompt.md`, the spec's exact prompt, kept after the
 /// session as the record of what it was told; and `mcp.json`, mode 0600, naming Farik's server
 /// with the daemon's token and the session's id, and the spec's other servers.
 ///
@@ -675,7 +721,12 @@ pub fn write_session_files(
     std::fs::write(&prompt, &spec.system_prompt).map_err(|error| io(&prompt, error))?;
     let mcp = session_dir.join(MCP_CONFIG_FILE);
     crate::write_private(&mcp, mcp_config(spec, config).to_string().as_bytes())
-        .map_err(|error| io(&mcp, error))
+        .map_err(|error| io(&mcp, error))?;
+    if spec.skills.is_empty() {
+        return Ok(());
+    }
+    let plugin = config.skills_dir.join(&spec.session_id);
+    crate::skills::write_plugin(&plugin, &spec.skills).map_err(|error| io(&plugin, error))
 }
 
 /// The program's whole environment: `base`, the credential's one variable, and `QUIET`.
@@ -843,6 +894,9 @@ fn settings_json(config: &ClaudeConfig, protected: &[String]) -> Value {
         "permissions": {
             "deny": protected.iter().map(|path| format!("Read({path})")).collect::<Vec<_>>(),
         },
+        // A skill's body may hold `!` commands that run when it loads; Farik refuses such a
+        // skill (ADR 0034), and this stops one that gets through (a plugin's own, say).
+        "disableSkillShellExecution": true,
     })
 }
 
@@ -930,7 +984,7 @@ mod tests {
     };
     use crate::daemon::DaemonInfo;
     use crate::recorded::fixtures::a_session_spec;
-    use crate::session::{McpServerConfig, McpTransport, RuntimeError, SessionSpec};
+    use crate::session::{McpServerConfig, McpTransport, RuntimeError, SessionSkill, SessionSpec};
 
     const TOKEN: &str = "0123456789abcdef-the-daemon-token";
 
@@ -945,6 +999,7 @@ mod tests {
                 pid: 1,
             },
             sessions_dir: project.root.join(".farik/local/sessions"),
+            skills_dir: project.root.join("skills-state"),
             team_file: project.root.join(".farik/team.yaml"),
             env: BTreeMap::new(),
         }
@@ -1043,6 +1098,79 @@ mod tests {
             args.iter().all(|arg| !arg.contains(TOKEN)),
             "the token is on the command line: {args:?}"
         );
+    }
+
+    fn a_skill() -> SessionSkill {
+        SessionSkill {
+            name: "api-style".to_string(),
+            files: BTreeMap::from([
+                (
+                    "SKILL.md".to_string(),
+                    "---\nname: api-style\ndescription: \"d\"\n---\nbody".to_string(),
+                ),
+                ("references/a.md".to_string(), "details".to_string()),
+            ]),
+        }
+    }
+
+    #[test]
+    fn a_session_with_skills_gets_the_plugin_and_skill() {
+        let project = a_project("claude-skills");
+        let config = config(&project);
+        let with = SessionSpec {
+            skills: vec![a_skill()],
+            ..spec()
+        };
+        let plugin = config.skills_dir.join(&with.session_id);
+        let args = claude_args(&with, &config, &session_dir(&config, &with), false).expect("args");
+        assert_eq!(Path::new(value_after(&args, "--plugin-dir")), plugin);
+        assert_eq!(value_after(&args, "--tools"), "Read,Grep,Skill");
+        write_session_files(&with, &config, &session_dir(&config, &with)).expect("written");
+        assert_eq!(
+            std::fs::read_to_string(plugin.join("skills/api-style/references/a.md"))
+                .expect("a copy"),
+            "details"
+        );
+        // A resume writes it fresh.
+        std::fs::write(plugin.join("stale.txt"), "x").expect("a stale file");
+        write_session_files(&with, &config, &session_dir(&config, &with)).expect("written again");
+        assert!(!plugin.join("stale.txt").exists());
+
+        // Without skills, neither the flag nor the tool, and no folder.
+        let without = SessionSpec {
+            session_id: "no-skills-session".to_string(),
+            ..spec()
+        };
+        let args =
+            claude_args(&without, &config, &session_dir(&config, &without), false).expect("args");
+        assert!(!args.iter().any(|arg| arg == "--plugin-dir"), "{args:?}");
+        assert_eq!(value_after(&args, "--tools"), "Read,Grep");
+        write_session_files(&without, &config, &session_dir(&config, &without)).expect("written");
+        assert!(!config.skills_dir.join("no-skills-session").exists());
+        // Only skills make Skill a tool: a session with none and no builtins lists none.
+        let bare = SessionSpec {
+            builtin_tools: Vec::new(),
+            ..without
+        };
+        let args = claude_args(&bare, &config, &session_dir(&config, &bare), false).expect("args");
+        assert_eq!(value_after(&args, "--tools"), "");
+    }
+
+    #[test]
+    fn settings_turn_off_skill_commands() {
+        let project = a_project("claude-skill-shell");
+        let config = config(&project);
+        for skills in [Vec::new(), vec![a_skill()]] {
+            let spec = SessionSpec { skills, ..spec() };
+            let args =
+                claude_args(&spec, &config, &session_dir(&config, &spec), false).expect("args");
+            assert_eq!(
+                settings(&args)["disableSkillShellExecution"],
+                json!(true),
+                "{}",
+                spec.skills.len()
+            );
+        }
     }
 
     #[test]

@@ -127,6 +127,12 @@ pub struct SessionRegistration {
     pub connectors: Vec<SessionConnector>,
     /// The task's preview while the session runs, when it was given a connector.
     pub preview: Option<Arc<dyn RunningPreview>>,
+    /// The names of the skills it loads on demand: the hook allows a `Skill` call for
+    /// `farik:<name>` of one of these and no other (ADR 0034).
+    pub skills: Vec<String>,
+    /// The `skills/` folder of its plugin folder, when it has skills: `Read`, `Glob` and `Grep`
+    /// there are allowed at tier `read`, whatever its worktree.
+    pub skills_root: Option<PathBuf>,
 }
 
 /// A registration, the tool calls the hook has allowed it, and why it was told to stop, once it
@@ -258,6 +264,32 @@ impl DaemonState {
                     "there is no Farik state folder on this computer",
                 )
             })
+    }
+
+    /// The folder this project's sessions' plugin folders are written in ([`skills_dir`]).
+    ///
+    /// # Errors
+    ///
+    /// No state folder was set, or no project is open, so no session is given a skill; or the
+    /// project's id could not be read or made.
+    ///
+    /// [`skills_dir`]: crate::skills::skills_dir
+    pub(crate) fn skills_dir(&self) -> std::io::Result<std::path::PathBuf> {
+        let deps = self.deps().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "no project is open")
+        })?;
+        let state = self.state_dir()?;
+        let id = crate::connectors::local_project_id(state, deps.files.root())?;
+        Ok(crate::skills::skills_dir(state, &id))
+    }
+
+    /// Removes every plugin folder a session of this project left, which only a daemon that was
+    /// killed leaves: no session of an earlier daemon is running now. A project with no state
+    /// folder has none.
+    fn wipe_skill_folders(&self) {
+        if let Ok(folder) = self.skills_dir() {
+            let _ = std::fs::remove_dir_all(folder);
+        }
     }
 
     /// Where `agent`'s keys for `server` are kept in the project at `root` ([`SecretAt::of`]).
@@ -632,6 +664,7 @@ async fn serve_on(
     daemon_file: Option<PathBuf>,
     state: Arc<DaemonState>,
 ) -> Result<DaemonHandle, DaemonError> {
+    state.wipe_skill_folders();
     let token = random_token()?;
     let port = listener
         .local_addr()
@@ -1204,6 +1237,34 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_daemon_start_wipes_old_plugin_folders() {
+        let daemon = TestDaemon::new("daemon-wipe-skills", |_| {});
+        let state =
+            std::path::PathBuf::from(format!("{}-state", daemon.project.repo.path.display()));
+        let id = crate::connectors::local_project_id(&state, &daemon.project.repo.path)
+            .expect("the project's id");
+        let ours = crate::skills::skills_dir(&state, &id);
+        std::fs::create_dir_all(ours.join("old-session/skills/api-style")).expect("a leftover");
+        std::fs::write(ours.join("old-session/skills/api-style/SKILL.md"), "x").expect("a file");
+        // Another project's folders are not this daemon's to remove.
+        let others = crate::skills::skills_dir(&state, "another-project-id");
+        std::fs::create_dir_all(others.join("session")).expect("another project's folder");
+        let handle = serve(
+            DaemonConfig {
+                port: PortChoice::Any,
+                daemon_file: None,
+            },
+            daemon.state.clone(),
+        )
+        .await
+        .expect("the daemon is up");
+        assert!(!ours.exists(), "the leftover folder is gone");
+        assert!(others.join("session").exists());
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn writes_the_daemon_file_and_removes_it_on_shutdown() {
         let daemon = TestDaemon::new("daemon-file", |_| {});
         let daemon_file = daemon.project.repo.path.join(".farik/local/daemon.json");
@@ -1321,6 +1382,8 @@ mod tests {
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
         });
         let context = daemon
             .state
@@ -1542,6 +1605,8 @@ mod tests {
                 purpose: SessionPurpose::Implement,
                 in_reply_to: None,
                 thread: None,
+                skills: Vec::new(),
+                skills_root: None,
             });
         }
         assert_eq!(state.session_ids(), ["s-1", "s-2"]);
@@ -1763,6 +1828,8 @@ mod tests {
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
             cwd: daemon.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,

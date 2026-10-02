@@ -216,7 +216,7 @@ Files: `session.rs`, `claude.rs`, `orchestrator/session.rs`, `daemon.rs`, `daemo
 - `reads_reach_the_skill_folder_and_writes_do_not`: `Read` of `<skills_root>/api-style/references/a.md` is allowed; `Write` there, and `Read` of `<session dir>/mcp.json`, are denied `path_outside_workspace`. The same holds for a `chat` session registered with cwd = the project root.
 - `a_live_session_loads_a_skill_on_use` (integration, `--integration`): see Verification.
 
-- [ ] `feat(runtime): load an agent's skills into its sessions on demand`
+- [x] `feat(runtime): load an agent's skills into its sessions on demand`
 
 ### Task 5: Saving, removing and confirming
 
