@@ -724,6 +724,16 @@ fn farik_disconnect_asks_the_service_to_forget_the_sign_in() {
 /// key, or, given `oauth_url`, the sign-in fixture's web address. Its tags: `search` network,
 /// `env` external effect, `delete_repo` denied (and `whoami` network for the sign-in one).
 fn a_kit(script: &std::path::Path, oauth_url: Option<&str>) -> farik_runtime::KitSource {
+    a_kit_of(script, oauth_url, false)
+}
+
+/// [`a_kit`], and, when `allowing`, with a spending tool `make` that may run 20 times a sprint
+/// unasked and a `post` that always asks.
+fn a_kit_of(
+    script: &std::path::Path,
+    oauth_url: Option<&str>,
+    allowing: bool,
+) -> farik_runtime::KitSource {
     let mut connector = json!({
         "name": "fixture", "title": "Fixture", "about": "A stand-in service.",
         "why": "Lets the Developer search it.", "setup": "Make a key on its page and paste it.",
@@ -742,6 +752,11 @@ fn a_kit(script: &std::path::Path, oauth_url: Option<&str>) -> farik_runtime::Ki
         connector["labels"] = json!({ "search": "search the fixture" });
         connector["tools"] =
             json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
+        if allowing {
+            connector["tools"]["make"] = json!("external_effect");
+            connector["tools"]["post"] = json!("external_effect");
+            connector["allowances"] = json!({ "make": { "calls": 20, "what": "pictures" } });
+        }
     }
     let file = json!({ "role": "software_developer", "skills": [], "connectors": [connector] });
     let kit = farik_roles::parse_fixture_kit(
@@ -830,6 +845,68 @@ fn connects_a_kit_connector_with_its_keys_from_standard_input() {
     );
     let kept = loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).expect("kept");
     assert_eq!(kept.keys["API_KEY"].expose(), KEY);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_takes_allowances() {
+    let repository = a_team("connect-allowances");
+    let script = fixture("connect-allowances");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let connect = |extra: &[&str]| {
+        connect_by_name(
+            &repository,
+            a_kit_of(&script, None, true),
+            "dev-a",
+            "fixture",
+            extra,
+            &format!("{KEY}\n"),
+            Arc::clone(&store) as _,
+        )
+    };
+    let ran = connect(&["--allowance", "make=3"]);
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert_eq!(
+        entry(&repository, "dev-a").expect("written")["allowances"],
+        json!({ "make": 3 })
+    );
+    let ran = connect(&[]);
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert_eq!(
+        entry(&repository, "dev-a").expect("written")["allowances"],
+        json!({ "make": 20 }),
+        "the kit's default when none is given"
+    );
+    for (extra, said) in [
+        (&["--allowance", "post=3"][..], "allowance_not_offered"),
+        (&["--allowance", "make=1001"], "allowance_out_of_range"),
+        (&["--allowance", "make=lots"], "allowance_out_of_range"),
+        (&["--allowance", "make"], "--allowance wants tool=number"),
+    ] {
+        let ran = connect(extra);
+        assert_eq!(ran.code, 1, "{extra:?}: {}{}", ran.out, ran.err);
+        assert!(ran.err.contains(said), "{extra:?}: {}", ran.err);
+    }
+    assert_eq!(
+        entry(&repository, "dev-a").expect("kept")["allowances"],
+        json!({ "make": 20 }),
+        "a refusal changes nothing"
+    );
+    let ran = run_with(
+        &repository.path,
+        &[
+            "connect",
+            "dev-b",
+            "mine",
+            "--command",
+            "sh",
+            "--allowance",
+            "make=3",
+        ],
+        |_| {},
+    );
+    assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
+    assert!(ran.err.contains("kit_names_these"), "{}", ran.err);
 }
 
 #[test]

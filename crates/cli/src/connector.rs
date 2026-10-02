@@ -35,6 +35,8 @@ pub(crate) struct Asked<'a> {
     pub(crate) headers: &'a [String],
     pub(crate) keys: &'a [String],
     pub(crate) tags: &'a [String],
+    /// `<tool>=<calls>`, for a kit's service.
+    pub(crate) allowances: &'a [String],
     /// Sign in to the server's service instead of giving keys.
     pub(crate) sign_in: bool,
     pub(crate) client_id: Option<&'a str>,
@@ -77,6 +79,13 @@ pub(crate) fn connect_with(
 ) -> Result<Report, String> {
     if asked.command.is_none() && asked.url.is_none() {
         return connect_kit(project, asked, io, open);
+    }
+    if !asked.allowances.is_empty() {
+        return Err(
+            "kit_names_these: only a service of the role's kit has an allowance, and a server \
+             you describe asks every time; leave out --allowance"
+                .to_string(),
+        );
     }
     needs_its_form(asked)?;
     if asked.sign_in {
@@ -172,7 +181,8 @@ fn connect_kit(
         .ok_or_else(|| format!("there is no agent {}", asked.agent))?;
     let kit = (io.kits)(farik_core::contract::Role::from(held.role))
         .map_err(|error| error.to_string())?;
-    let build = || kit_entry(&kit, &project.team, asked.agent, name);
+    let allowances = asked_from(asked.allowances)?;
+    let build = || kit_entry(&kit, &project.team, asked.agent, name, &allowances);
     let (_, server) = build().map_err(|refused| {
         let has: Vec<&str> = kit
             .connectors
@@ -237,6 +247,23 @@ fn connect_kit(
         &tools_of,
         &build_with,
     )
+}
+
+/// The `--allowance <tool>=<calls>` flags as the numbers they ask for.
+fn asked_from(given: &[String]) -> Result<BTreeMap<String, u32>, String> {
+    let mut asked = Map::new();
+    for flag in given {
+        let (tool, calls) = flag
+            .split_once('=')
+            .ok_or_else(|| format!("--allowance wants tool=number, not {flag}"))?;
+        asked.insert(
+            tool.to_string(),
+            calls
+                .parse::<u64>()
+                .map_or_else(|_| Value::from(calls), Value::from),
+        );
+    }
+    farik_runtime::allowances::asked_allowances(&Value::Object(asked))
 }
 
 /// What decides the tools an entry is written with: the labels the user gave, or the kit's.

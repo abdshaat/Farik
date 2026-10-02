@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use super::signed_in::Binding;
 use super::web::{Failure, INTERNAL_ERROR, NO_PROJECT, REFUSED};
 use super::{DaemonState, Kept};
+use crate::allowances::{asked_allowances, checked_allowances};
 use crate::claude::{CredentialKind, Secret, credential_variable};
 use crate::connectors::{ConnectorEntry, ConnectorError, ListedTool, SecretAt, list_tools};
 use crate::credential::{CredentialError, credential_of_kind, load_credential, save_credential};
@@ -37,7 +38,7 @@ use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 11] = [
+pub(super) const METHODS: [&str; 12] = [
     "team.save",
     "agent.replace",
     "team.start",
@@ -46,6 +47,7 @@ pub(super) const METHODS: [&str; 11] = [
     "project.note",
     "connector.tools",
     "connector.connect",
+    "connector.allowances",
     "connector.disconnect",
     "connector.sign_in",
     "connector.sign_in_status",
@@ -493,7 +495,9 @@ fn described(
             })?;
         let kit = (deps.kits)(role).map_err(|error| internal(&error))?;
         let name = wire["name"].as_str().unwrap_or_default();
-        return kit_entry(&kit, &team, agent, name)
+        let asked =
+            asked_allowances(&wire["allowances"]).map_err(|why| Failure::new(REFUSED, why))?;
+        return kit_entry(&kit, &team, agent, name, &asked)
             .map_err(|errors| Failure::from(Refused::Errors(errors)));
     }
     custom_entry(&team, agent, wire, tools).map_err(|errors| Failure::from(Refused::Errors(errors)))
@@ -551,12 +555,15 @@ fn entry_in(
 ///
 /// `connector_not_in_kit` at `/agents/<i>/mcp_servers` when `kit` is not the agent's role's, lacks
 /// `name`, or holds a `container` connector of that name, which Farik runs itself; an agent the
-/// team lacks at `/agents`; else the team's errors, each at its field.
+/// team lacks at `/agents`; `allowance_not_offered` or `allowance_out_of_range` at
+/// `/agents/<i>/mcp_servers` for an `asked` allowance (ADR 0037); else the team's errors, each at
+/// its field. The entry's allowances are the kit's defaults overlaid by `asked`.
 pub fn kit_entry(
     kit: &Kit,
     team: &Team,
     agent: &str,
     name: &str,
+    asked: &BTreeMap<String, u32>,
 ) -> Result<(Value, CustomServer), Vec<ValidationError>> {
     let at = team
         .agents
@@ -590,14 +597,23 @@ pub fn kit_entry(
             kit.role
         )));
     };
+    let allowances = checked_allowances(kit, name, asked).map_err(|why| {
+        vec![ValidationError {
+            path: format!("/agents/{at}/mcp_servers"),
+            message: why,
+        }]
+    })?;
     let mut wire = entry.clone();
     wire.source = McpServerSource::Kit;
-    let value = serde_json::to_value(&wire).map_err(|error| {
+    let mut value = serde_json::to_value(&wire).map_err(|error| {
         vec![ValidationError {
             path: String::new(),
             message: error.to_string(),
         }]
     })?;
+    if !allowances.is_empty() {
+        value["allowances"] = json!(allowances);
+    }
     entry_in(team, agent, value)
 }
 
@@ -609,15 +625,19 @@ fn kit_server(entry: &McpServerWire) -> Option<CustomServer> {
 }
 
 /// Whether `server` is exactly what `kit` says its service of that name is: every field and every
-/// tag. A kit entry that is not (a team file or a clone widened a tag, or the kit changed with a
-/// release) is not the kit's, and runs nothing (ADR 0036).
+/// tag, its allowances apart: those are the user's, and each must be for a tool the kit offers
+/// one for. A kit entry that is not (a team file or a clone widened a tag, or the kit changed with
+/// a release) is not the kit's, and runs nothing (ADR 0036, ADR 0037).
 #[must_use]
 pub fn matches_kit(kit: &Kit, server: &CustomServer) -> bool {
+    let mut bare = server.clone();
+    bare.allowances.clear();
     server.kit
         && kit.connectors.iter().any(|connector| {
-            matches!(connector, KitConnector::Server { entry, .. }
+            matches!(connector, KitConnector::Server { entry, allowances, .. }
                 if entry.name.as_str() == server.name
-                    && kit_server(entry).as_ref() == Some(server))
+                    && kit_server(entry).as_ref() == Some(&bare)
+                    && server.allowances.keys().all(|tool| allowances.contains_key(tool)))
         })
 }
 
@@ -643,7 +663,11 @@ fn kits_of(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Failure> {
             .connectors
             .iter()
             .filter_map(|connector| match connector {
-                KitConnector::Server { entry, copy, .. } => {
+                KitConnector::Server {
+                    entry,
+                    copy,
+                    allowances,
+                } => {
                     let mut row = json!({
                         "name": entry.name.as_str(), "title": copy.title, "about": copy.about,
                         "why": copy.why, "setup": copy.setup, "labels": copy.labels,
@@ -657,6 +681,14 @@ fn kits_of(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Failure> {
                     });
                     if let Some(page) = &copy.key_page {
                         row["key_page"] = json!(page);
+                    }
+                    if !allowances.is_empty() {
+                        row["allowances"] = allowances
+                            .iter()
+                            .map(|(tool, offer)| {
+                                json!({ "tool": tool, "calls": offer.calls, "what": offer.what })
+                            })
+                            .collect();
                     }
                     Some(row)
                 }
@@ -865,6 +897,13 @@ async fn connector_connect(
     deps: &Arc<ToolDeps>,
     params: &Value,
 ) -> Result<Value, Failure> {
+    // The allowances are part of the entry (ADR 0037): where the entry is described, they are
+    // beside its name. A custom server given any is refused `allowance_not_kit`.
+    let mut with_allowances = params.clone();
+    if let Some(allowances) = params.get("allowances") {
+        with_allowances["server"]["allowances"] = allowances.clone();
+    }
+    let params = &with_allowances;
     let agent = params["agent"].as_str().unwrap_or_default().to_string();
     if params["server"]["source"] == "kit"
         && params["tags"]
@@ -1011,6 +1050,154 @@ async fn connect_with(
     )
     .await?;
     Ok(json!({ "stored_in": stored_in, "tools": tools }))
+}
+
+/// What `connector_allowances` decides before it keeps anything: the kept entry, the team file's
+/// entry with its new allowances, and the server it describes.
+fn allowed_entry(
+    deps: &ToolDeps,
+    secrets: &dyn crate::connectors::ConnectorSecrets,
+    at: &SecretAt,
+    (agent, name): (&str, &str),
+    requested: &Value,
+) -> Result<(ConnectorEntry, Value, CustomServer), Failure> {
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    let held = team
+        .agents
+        .iter()
+        .find(|held| held.id.as_str() == agent)
+        .ok_or_else(|| Failure::new(REFUSED, format!("there is no agent {agent}")))?;
+    let current = held
+        .mcp_servers
+        .iter()
+        .flatten()
+        .find(|server| server.name.as_str() == name)
+        .ok_or_else(|| {
+            Failure::new(
+                REFUSED,
+                format!("connector_not_found: {agent} has no connector {name}"),
+            )
+        })?;
+    let current_server = custom_server(current)
+        .filter(|server| server.kit)
+        .ok_or_else(|| {
+            Failure::new(
+                REFUSED,
+                format!(
+                    "connector_not_in_kit: {name} is not a service of the kit, so it has no \
+                 allowances"
+                ),
+            )
+        })?;
+    let old = crate::connectors::confirmed_entry(secrets, at, &current_server)
+        .map_err(|error| Failure::new(REFUSED, words(&error)))?
+        .ok_or_else(|| {
+            Failure::new(
+                REFUSED,
+                format!(
+                    "connector_not_confirmed: {name} is not as it was connected on this \
+                     computer; connect it again"
+                ),
+            )
+        })?;
+    // Not the kit's now (a release changed it): connecting again is the way.
+    let kit = (deps.kits)(Role::from(held.role)).map_err(|error| internal(&error))?;
+    if !matches_kit(&kit, &current_server) {
+        return Err(Failure::new(
+            REFUSED,
+            format!(
+                "connector_not_in_kit: {name} is not what the kit says it is now; connect \
+                 it again"
+            ),
+        ));
+    }
+    // The ones it holds, overlaid by the request: a tool left out keeps its number.
+    let mut asked = current_server.allowances.clone();
+    asked.extend(asked_allowances(requested).map_err(|why| Failure::new(REFUSED, why))?);
+    let allowances =
+        checked_allowances(&kit, name, &asked).map_err(|why| Failure::new(REFUSED, why))?;
+    let mut entry = serde_json::to_value(current).map_err(|e| internal(&e))?;
+    entry["allowances"] = json!(allowances);
+    let (entry, server) =
+        entry_in(&team, agent, entry).map_err(|errors| Failure::from(Refused::Errors(errors)))?;
+    Ok((old, entry, server))
+}
+
+/// `connector.allowances`: a kit connector's allowances changed without typing its key again
+/// (ADR 0037). With the entry's lock held, the kept entry must be the team file's entry now
+/// (`connector_not_confirmed`); the allowances are checked as connect checks them, over the ones
+/// the entry holds; the same keys or grant are kept beside the new entry's hash; then
+/// `connector_connect` is handled with the new entry, which writes the team file and records
+/// `connector.connected`. An entry the kit has changed is `connector_not_in_kit`, and nothing is
+/// kept.
+async fn connector_allowances(
+    state: &Arc<DaemonState>,
+    deps: &Arc<ToolDeps>,
+    params: &Value,
+) -> Result<Value, Failure> {
+    let (agent, name) = (
+        params["agent"].as_str().unwrap_or_default().to_string(),
+        params["server"].as_str().unwrap_or_default().to_string(),
+    );
+    let at = secret_at(state, deps, &agent, &name).map_err(|error| internal(&error))?;
+    let lock = state.entry_lock(&at);
+    let held = lock.lock().await;
+    let (secrets, held_deps, requested) = (
+        state.connector_secrets(),
+        Arc::clone(deps),
+        params["allowances"].clone(),
+    );
+    let (agent_of, name_of, at_of) = (agent.clone(), name.clone(), at.clone());
+    let (old, entry, server) = off_the_worker(move || {
+        allowed_entry(
+            &held_deps,
+            secrets.as_ref(),
+            &at_of,
+            (&agent_of, &name_of),
+            &requested,
+        )
+    })
+    .await?;
+    let spec = spec_sha256(&server);
+    let issuer = old.oauth.as_ref().map(|grant| grant.issuer.clone());
+    let kept = ConnectorEntry {
+        spec_sha256: spec.clone(),
+        keys: old.keys.clone(),
+        oauth: old.oauth.clone(),
+    };
+    let (secrets, save_at) = (state.connector_secrets(), at.clone());
+    off_the_worker(move || {
+        secrets
+            .save(&save_at, &kept)
+            .map(|_| ())
+            .map_err(|error| Failure::new(REFUSED, words(&error)))
+    })
+    .await?;
+    let handled_as = handled(
+        state,
+        Command::ConnectorConnect {
+            agent: agent.clone(),
+            server: entry.as_object().cloned().unwrap_or_default(),
+            spec_sha256: spec,
+            issuer,
+        },
+    )
+    .await;
+    if let Err(failed) = handled_as {
+        // The team file is as it was, so the kept entry goes back to match it.
+        let (secrets, save_at) = (state.connector_secrets(), at.clone());
+        let _ = off_the_worker(move || {
+            secrets
+                .save(&save_at, &old)
+                .map(|_| ())
+                .map_err(|error| Failure::new(REFUSED, words(&error)))
+        })
+        .await;
+        drop(held);
+        return Err(failed);
+    }
+    drop(held);
+    Ok(json!({}))
 }
 
 /// `connector.disconnect`: `connector_disconnect` handled, which removes the entry from the team
@@ -1546,6 +1733,7 @@ pub(super) async fn call(
         }
         // Boxed: listing a server's tools makes a large future of every method's.
         "connector.connect" => Box::pin(connector_connect(state, &deps, &params)).await,
+        "connector.allowances" => connector_allowances(state, &deps, &params).await,
         "connector.disconnect" => connector_disconnect(state, &deps, &params).await,
         "connector.sign_in" => Box::pin(connector_sign_in(state, &deps, &params)).await,
         "connector.sign_in_status" => state
@@ -3598,6 +3786,15 @@ pub(super) mod tests {
     /// The Developer's kit with one service, `fixture`: the fixture server, with its copy and its
     /// tags (`search` network, `env` external effect, `delete_repo` denied).
     pub(crate) fn fixture_kit(test: &str) -> farik_roles::Kit {
+        fixture_kit_with(test, &json!({}), &json!({}))
+    }
+
+    /// [`fixture_kit`] with the tools `more` tagged too, and the kit's `allowances`.
+    pub(crate) fn fixture_kit_with(
+        test: &str,
+        more: &Value,
+        allowances: &Value,
+    ) -> farik_roles::Kit {
         let mut connector = fixture_server(test);
         connector["title"] = json!("Fixture");
         connector["about"] = json!("A server that stands in for a service.");
@@ -3607,6 +3804,15 @@ pub(super) mod tests {
         connector["labels"] = json!({ "search": "search the fixture" });
         connector["tools"] =
             json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
+        for (tool, tag) in more.as_object().into_iter().flatten() {
+            connector["tools"][tool] = tag.clone();
+        }
+        if allowances
+            .as_object()
+            .is_some_and(|given| !given.is_empty())
+        {
+            connector["allowances"] = allowances.clone();
+        }
         let kit = json!({ "role": "software_developer", "skills": [], "connectors": [connector] });
         farik_roles::parse_fixture_kit(
             farik_core::contract::Role::SoftwareDeveloper,
@@ -3628,6 +3834,28 @@ pub(super) mod tests {
     const KIT_TAGS: fn() -> Value =
         || json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
 
+    /// The fixture kit with a spending tool `make`, which may run 20 times a sprint unasked, and
+    /// `post`, which publishes and so always asks.
+    fn allowance_kit(test: &str) -> farik_roles::Kit {
+        fixture_kit_with(
+            test,
+            &json!({ "make": "external_effect", "post": "external_effect" }),
+            &json!({ "make": { "calls": 20, "what": "pictures" } }),
+        )
+    }
+
+    fn keeping_an_allowance_kit(name: &str) -> (Harness, Arc<MemoryConnectorSecrets>) {
+        let (harness, store) = keeping(name);
+        harness.project.set_kit(allowance_kit(name));
+        (harness, store)
+    }
+
+    fn allowance_params(agent: &str, allowances: &Value) -> Value {
+        let mut params = kit_params(agent, &json!({}));
+        params["allowances"] = allowances.clone();
+        params
+    }
+
     /// A driven daemon keeping connector keys in memory, whose Developer kit is the fixture's.
     fn keeping_a_kit(name: &str) -> (Harness, Arc<MemoryConnectorSecrets>) {
         let (harness, store) = keeping(name);
@@ -3638,8 +3866,14 @@ pub(super) mod tests {
     #[test]
     fn kit_entry_writes_the_kits_tags() {
         let team = crate::tools::fixtures::a_team_of_three(|_| {});
-        let (entry, server) =
-            super::kit_entry(&fixture_kit("entry"), &team, "dev-a", "fixture").expect("an entry");
+        let (entry, server) = super::kit_entry(
+            &fixture_kit("entry"),
+            &team,
+            "dev-a",
+            "fixture",
+            &BTreeMap::new(),
+        )
+        .expect("an entry");
         assert_eq!(entry["source"], "kit");
         assert_eq!(entry["command"], "sh");
         assert_eq!(entry["credential_keys"], json!(["API_KEY"]));
@@ -3653,7 +3887,7 @@ pub(super) mod tests {
         let team = crate::tools::fixtures::a_team_of_three(|_| {});
         let kit = fixture_kit("another-role");
         let refusal = |agent: &str, name: &str| {
-            super::kit_entry(&kit, &team, agent, name)
+            super::kit_entry(&kit, &team, agent, name, &BTreeMap::new())
                 .expect_err("refused")
                 .into_iter()
                 .map(|error| (error.path, error.message))
@@ -3676,7 +3910,7 @@ pub(super) mod tests {
         let team = crate::tools::fixtures::a_team_of_three(crate::tools::fixtures::browsing);
         let designer = farik_roles::load_kit(farik_core::contract::Role::UiUxDesigner)
             .expect("the Designer's kit");
-        let container = super::kit_entry(&designer, &team, "iris", "playwright")
+        let container = super::kit_entry(&designer, &team, "iris", "playwright", &BTreeMap::new())
             .expect_err("a container is not connected by name");
         assert_eq!(container[0].path, "/agents/3/mcp_servers");
         assert!(container[0].message.starts_with("connector_not_in_kit: "));
@@ -3686,7 +3920,8 @@ pub(super) mod tests {
     fn matches_kit_compares_the_whole_entry() {
         let team = crate::tools::fixtures::a_team_of_three(|_| {});
         let kit = fixture_kit("matches");
-        let (_, server) = super::kit_entry(&kit, &team, "dev-a", "fixture").expect("an entry");
+        let (_, server) =
+            super::kit_entry(&kit, &team, "dev-a", "fixture", &BTreeMap::new()).expect("an entry");
         assert!(super::matches_kit(&kit, &server));
         let mut wider = server.clone();
         wider.tools.insert(
@@ -3750,6 +3985,252 @@ pub(super) mod tests {
         assert!(!log_text(&harness).contains(KEY));
     }
 
+    const ALLOW_TAGS: fn() -> Value = || {
+        json!({ "search": "network", "env": "external_effect", "delete_repo": "denied",
+                "make": "external_effect", "post": "external_effect" })
+    };
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn connects_with_the_kits_default_allowances() {
+        let (harness, _) = keeping_an_allowance_kit("allow-default");
+        connected(&harness, "dev-a", &kit_server(), &json!({}));
+        let written = entry(&harness, 1, "fixture").expect("the entry is written");
+        assert_eq!(written["allowances"], json!({ "make": 20 }));
+        let spec = farik_core::team::spec_sha256(&custom(&written));
+        assert_eq!(
+            bodies(&harness, EventKind::ConnectorConnected),
+            [json!({
+                "agent": "dev-a", "server": "fixture", "transport": "stdio",
+                "credential_keys": ["API_KEY"], "tools": ALLOW_TAGS(), "spec_sha256": spec,
+                "allowances": { "make": 20 },
+            })]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn connects_with_the_users_allowances() {
+        let (harness, _) = keeping_an_allowance_kit("allow-users");
+        call(
+            &harness.daemon,
+            "connector.connect",
+            &allowance_params("dev-a", &json!({ "make": 5 })),
+            "connectorConnectResult",
+        );
+        assert_eq!(
+            entry(&harness, 1, "fixture").expect("written")["allowances"],
+            json!({ "make": 5 })
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_an_allowance_the_kit_does_not_offer() {
+        let (harness, store) = keeping_an_allowance_kit("allow-not-offered");
+        let (code, message) = refused(
+            &harness,
+            "connector.connect",
+            &allowance_params("dev-a", &json!({ "post": 3 })),
+        );
+        assert_eq!(code, -32005);
+        assert!(message.starts_with("allowance_not_offered: "), "{message}");
+        assert_eq!(entry(&harness, 1, "fixture"), None);
+        assert!(
+            store
+                .load(&kept_at(&harness, "dev-a", "fixture"))
+                .expect("reads")
+                .is_none(),
+            "nothing is kept"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_an_allowance_out_of_range() {
+        let (harness, _) = keeping_an_allowance_kit("allow-range");
+        for calls in [json!(1001), json!(-1), json!(4_294_967_297_u64)] {
+            let (code, message) = refused(
+                &harness,
+                "connector.connect",
+                &allowance_params("dev-a", &json!({ "make": calls })),
+            );
+            assert_eq!(code, -32005, "{calls}");
+            assert!(
+                message.starts_with("allowance_out_of_range: "),
+                "{calls}: {message}"
+            );
+        }
+        assert_eq!(entry(&harness, 1, "fixture"), None);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn changes_allowances_without_the_key() {
+        let (harness, store) = keeping_an_allowance_kit("allow-change");
+        connected(&harness, "dev-a", &kit_server(), &json!({}));
+        let before = store
+            .load(&kept_at(&harness, "dev-a", "fixture"))
+            .expect("reads")
+            .expect("kept");
+        call(
+            &harness.daemon,
+            "connector.allowances",
+            &json!({ "agent": "dev-a", "server": "fixture", "allowances": { "make": 30 } }),
+            "emptyResult",
+        );
+        let written = entry(&harness, 1, "fixture").expect("the entry stays");
+        assert_eq!(written["allowances"], json!({ "make": 30 }));
+        let spec = farik_core::team::spec_sha256(&custom(&written));
+        assert_ne!(spec, before.spec_sha256, "an allowance is in the hash");
+        let after = store
+            .load(&kept_at(&harness, "dev-a", "fixture"))
+            .expect("reads")
+            .expect("kept");
+        assert_eq!(after.spec_sha256, spec);
+        assert_eq!(
+            after.keys.keys().collect::<Vec<_>>(),
+            before.keys.keys().collect::<Vec<_>>(),
+            "the same keys, none typed again"
+        );
+        let connected_bodies = bodies(&harness, EventKind::ConnectorConnected);
+        assert_eq!(connected_bodies.len(), 2);
+        assert_eq!(connected_bodies[1]["allowances"], json!({ "make": 30 }));
+        assert_eq!(connected_bodies[1]["spec_sha256"], json!(spec));
+        assert_eq!(states(&harness)[0]["state"], "connected");
+        assert!(!log_text(&harness).contains(KEY));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn changing_allowances_checks_them_as_connect_does() {
+        let (harness, _) = keeping_an_allowance_kit("allow-change-checked");
+        connected(&harness, "dev-a", &kit_server(), &json!({}));
+        for (allowances, code) in [
+            (json!({ "post": 1 }), "allowance_not_offered: "),
+            (json!({ "make": 1001 }), "allowance_out_of_range: "),
+        ] {
+            let (_, message) = refused(
+                &harness,
+                "connector.allowances",
+                &json!({ "agent": "dev-a", "server": "fixture", "allowances": allowances }),
+            );
+            assert!(message.starts_with(code), "{message}");
+        }
+        assert_eq!(
+            entry(&harness, 1, "fixture").expect("kept")["allowances"],
+            json!({ "make": 20 })
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_to_change_an_unconfirmed_entry() {
+        let (harness, _) = keeping_an_allowance_kit("allow-unconfirmed");
+        connected(&harness, "dev-a", &kit_server(), &json!({}));
+        let mut team = team_file(&harness);
+        team["agents"][1]["mcp_servers"][0]["args"]
+            .as_array_mut()
+            .expect("args")
+            .push(json!("--elsewhere"));
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&farik_core::team::validate_team(&team).expect("a team"))
+            .expect("the team is written");
+        let (_, message) = refused(
+            &harness,
+            "connector.allowances",
+            &json!({ "agent": "dev-a", "server": "fixture", "allowances": { "make": 30 } }),
+        );
+        assert!(
+            message.starts_with("connector_not_confirmed: "),
+            "{message}"
+        );
+        assert_eq!(
+            entry(&harness, 1, "fixture").expect("kept")["allowances"],
+            json!({ "make": 20 })
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn changing_allowances_after_the_kit_changed_says_connect_again() {
+        let (harness, _) = keeping_an_allowance_kit("allow-kit-changed");
+        connected(&harness, "dev-a", &kit_server(), &json!({}));
+        // A release tags `make` denied: the entry is no longer the kit's.
+        harness.project.set_kit(fixture_kit_with(
+            "allow-kit-changed-2",
+            &json!({ "make": "denied", "post": "external_effect" }),
+            &json!({}),
+        ));
+        let (_, message) = refused(
+            &harness,
+            "connector.allowances",
+            &json!({ "agent": "dev-a", "server": "fixture", "allowances": { "make": 30 } }),
+        );
+        assert!(message.starts_with("connector_not_in_kit: "), "{message}");
+    }
+
+    #[test]
+    fn matches_a_kit_entry_whose_allowance_differs_from_the_kits_default() {
+        let team = crate::tools::fixtures::a_team_of_three(|_| {});
+        let kit = allowance_kit("allow-matches");
+        let (_, server) = super::kit_entry(
+            &kit,
+            &team,
+            "dev-a",
+            "fixture",
+            &BTreeMap::from([("make".to_string(), 5)]),
+        )
+        .expect("an entry");
+        assert_eq!(server.allowances, BTreeMap::from([("make".to_string(), 5)]));
+        assert!(super::matches_kit(&kit, &server));
+        let mut other = server.clone();
+        other.allowances = BTreeMap::from([("post".to_string(), 3)]);
+        assert!(
+            !super::matches_kit(&kit, &other),
+            "the kit offers none for post"
+        );
+        let mut none = server;
+        none.allowances.clear();
+        assert!(super::matches_kit(&kit, &none), "an entry may hold none");
+    }
+
+    #[test]
+    fn kit_entry_gives_the_defaults_and_refuses_what_is_not_offered() {
+        let team = crate::tools::fixtures::a_team_of_three(|_| {});
+        let kit = allowance_kit("allow-entry");
+        let (entry, _) =
+            super::kit_entry(&kit, &team, "dev-a", "fixture", &BTreeMap::new()).expect("an entry");
+        assert_eq!(entry["allowances"], json!({ "make": 20 }));
+        let refused = |asked: &[(&str, u32)]| {
+            let asked = asked
+                .iter()
+                .map(|(tool, n)| ((*tool).to_string(), *n))
+                .collect();
+            super::kit_entry(&kit, &team, "dev-a", "fixture", &asked)
+                .expect_err("refused")
+                .remove(0)
+                .message
+        };
+        assert!(refused(&[("post", 3)]).starts_with("allowance_not_offered: "));
+        assert!(refused(&[("make", 1001)]).starts_with("allowance_out_of_range: "));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_says_what_a_kit_offers_to_allow() {
+        let (harness, _) = keeping_an_allowance_kit("allow-team-get");
+        let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+        let row = &got["kits"][0]["connectors"][0];
+        assert_eq!(
+            row["allowances"],
+            json!([{ "tool": "make", "calls": 20, "what": "pictures" }])
+        );
+    }
+
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_labels_for_a_kit_connector() {
@@ -3787,9 +4268,14 @@ pub(super) mod tests {
     fn refuses_an_entry_that_is_not_the_kits() {
         let (harness, _) = keeping_a_kit("kit-not-the-kits");
         let team = harness.project.deps.files.read_team().expect("the team");
-        let (mut written, _) =
-            super::kit_entry(&fixture_kit("kit-not-the-kits"), &team, "dev-a", "fixture")
-                .expect("an entry");
+        let (mut written, _) = super::kit_entry(
+            &fixture_kit("kit-not-the-kits"),
+            &team,
+            "dev-a",
+            "fixture",
+            &BTreeMap::new(),
+        )
+        .expect("an entry");
         written["tools"]["env"] = json!("network");
         let spec = farik_core::team::spec_sha256(&custom(&written));
         let command = farik_protocol::command::Command::ConnectorConnect {
@@ -3807,9 +4293,14 @@ pub(super) mod tests {
         assert!(text.contains("connector_not_in_kit"), "{text}");
         assert_eq!(entry(&harness, 1, "fixture"), None);
         // The same entry for an agent of another role is refused too.
-        let (mut other, _) =
-            super::kit_entry(&fixture_kit("kit-not-the-kits"), &team, "dev-b", "fixture")
-                .expect("an entry");
+        let (mut other, _) = super::kit_entry(
+            &fixture_kit("kit-not-the-kits"),
+            &team,
+            "dev-b",
+            "fixture",
+            &BTreeMap::new(),
+        )
+        .expect("an entry");
         other["tools"] = KIT_TAGS();
         let command = farik_protocol::command::Command::ConnectorConnect {
             agent: "pm".to_string(),

@@ -1431,6 +1431,9 @@ fn connect_server(
     if let Some(issuer) = issuer {
         body["issuer"] = issuer.into();
     }
+    if !custom.allowances.is_empty() {
+        body["allowances"] = serde_json::json!(custom.allowances);
+    }
     let body = serde_json::from_value(body).map_err(failed)?;
     let event = append(tools, None, EventBody::ConnectorConnected(body))?;
     if let Ok(at) = secret_at(daemon, tools, agent, &name) {

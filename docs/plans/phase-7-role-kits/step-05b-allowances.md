@@ -119,7 +119,7 @@ Files: `daemon/team.rs`, `orchestrator/human.rs`, `rpc.schema.json`, `event.sche
 - `matches_a_kit_entry_whose_allowance_differs_from_the_kits_default`: `matches_kit` of an entry with `{ make: 5 }` is true; with `{ post: 3 }` it is false.
 - `farik_connect_takes_allowances`: `--allowance make=3` writes 3; with a custom server, `kit_names_these`.
 
-- [ ] `feat(runtime): set a kit connector's allowances`
+- [x] `feat(runtime): set a kit connector's allowances`
 
 ### Task 4: Counting in the hook
 

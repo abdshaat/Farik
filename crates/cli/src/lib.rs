@@ -415,6 +415,10 @@ enum Commands {
         /// left unlabelled is `external_effect`.
         #[arg(long = "tag")]
         tags: Vec<String>,
+        /// How many calls each sprint the agent makes of a kit service's spending tool without
+        /// asking, `<tool>=<number>` from 0 to 1000; repeat it for each. Left out, the kit's number.
+        #[arg(long = "allowance")]
+        allowances: Vec<String>,
     },
     /// Take an MCP server from one agent, and delete its keys.
     #[cfg(unix)]
@@ -931,6 +935,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             callback_port,
             scopes,
             tags,
+            allowances,
         } => open_project(&io.cwd, now).and_then(|project| {
             connector::connect(
                 &project,
@@ -943,6 +948,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
                     headers,
                     keys,
                     tags,
+                    allowances,
                     sign_in: *sign_in,
                     client_id: client_id.as_deref(),
                     callback_port: *callback_port,

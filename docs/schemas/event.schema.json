@@ -865,6 +865,7 @@
         "transport": { "type": "string", "enum": ["stdio", "http"] },
         "credential_keys": { "type": "array", "items": { "type": "string" } },
         "tools": { "type": "object", "additionalProperties": { "$ref": "#/$defs/connectorTag" } },
+        "allowances": { "type": "object", "description": "A kit connector's allowances when it has any (ADR 0037): each tool to the calls each period its agent makes without asking, 0 to 1000.", "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 1000 } },
         "spec_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
     },
