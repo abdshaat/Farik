@@ -110,7 +110,7 @@ export const en = {
 		"Your UI/UX Designer opens your app in this browser, inside the safe box. Farik fetches it once. It takes a few minutes.",
 	fetchIt: "Fetch it",
 	noDockerWarning:
-		"Without Docker, a mistaken or tricked agent command can reach any file you can. Farik reminds you of this every time it starts.",
+		"Without Docker, a mistaken or tricked agent command can reach any file you can, and the keys you gave your agents’ connectors. Farik reminds you of this every time it starts.",
 	checkAgain: "Check again",
 	continueWithoutDocker: "Continue without Docker",
 	accountTitle: "Connect your AI account",
