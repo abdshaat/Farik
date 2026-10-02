@@ -332,7 +332,7 @@ fn run(
         daemon_file,
         daemon: handle.info.clone(),
         sessions_dir: local.join("sessions"),
-        skills_dir: skills_state(&project),
+        skills_dir: skills_state(project),
         team_file: project.repo.path.join(".farik/team.yaml"),
         env: BASE_ENV
             .iter()
