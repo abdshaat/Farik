@@ -128,12 +128,14 @@ pub(super) async fn handle(
             agent,
             server,
             spec_sha256,
+            issuer,
         } => connect_server(
             tools,
             &orchestrator.deps.daemon,
             &agent,
             server,
             &spec_sha256,
+            issuer.as_deref(),
         ),
         Command::ConnectorDisconnect { agent, server } => {
             disconnect_server(tools, &orchestrator.deps.daemon, &agent, &server)
@@ -1118,8 +1120,7 @@ pub(crate) fn forget_removed_keys(
         if !kept.contains(&(agent.clone(), server.clone()))
             && let Ok(at) = secret_at(daemon, tools, &agent, &server)
         {
-            let _ = daemon.connector_secrets().delete(&at);
-            daemon.forget_kept(&at);
+            daemon.forget_entry(&at);
         }
     }
 }
@@ -1136,8 +1137,7 @@ fn forget_connector_keys(tools: &ToolDeps, daemon: &DaemonState, team: &Team, ag
         .filter_map(custom_server);
     for server in servers {
         if let Ok(at) = secret_at(daemon, tools, agent_id, &server.name) {
-            let _ = daemon.connector_secrets().delete(&at);
-            daemon.forget_kept(&at);
+            daemon.forget_entry(&at);
         }
     }
 }
@@ -1373,6 +1373,7 @@ fn connect_server(
     agent: &str,
     server: serde_json::Map<String, serde_json::Value>,
     spec_sha256: &str,
+    issuer: Option<&str>,
 ) -> Result<CommandReport, CommandError> {
     let entry = serde_json::Value::Object(server);
     let name = entry["name"].as_str().unwrap_or_default().to_string();
@@ -1398,15 +1399,18 @@ fn connect_server(
         });
     }
     tools.files.write_team(&after).map_err(failed)?;
-    let body = serde_json::from_value(serde_json::json!({
+    let mut body = serde_json::json!({
         "agent": agent,
         "server": name,
         "transport": entry["transport"],
         "credential_keys": entry.get("credential_keys").cloned().unwrap_or_else(|| serde_json::json!([])),
         "tools": entry.get("tools").cloned().unwrap_or_else(|| serde_json::json!({})),
         "spec_sha256": spec_sha256,
-    }))
-    .map_err(failed)?;
+    });
+    if let Some(issuer) = issuer {
+        body["issuer"] = issuer.into();
+    }
+    let body = serde_json::from_value(body).map_err(failed)?;
     let event = append(tools, None, EventBody::ConnectorConnected(body))?;
     if let Ok(at) = secret_at(daemon, tools, agent, &name) {
         daemon.read_kept(&at);

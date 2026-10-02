@@ -767,7 +767,7 @@ pub(super) mod tests {
         reply["result"].clone()
     }
 
-    fn conforms(value: &Value, definition: &str, reply: &Value) {
+    pub(crate) fn conforms(value: &Value, definition: &str, reply: &Value) {
         let schema: Value =
             serde_json::from_str(farik_protocol::rpc::SCHEMA_JSON).expect("the schema is JSON");
         let root = json!({

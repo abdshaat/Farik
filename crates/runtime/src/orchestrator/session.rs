@@ -2830,7 +2830,9 @@ mod tests {
         );
         let state = || crate::daemon::fixtures::connector_states(&harness.daemon);
         let shown = |state: &str| {
-            let mut shown = json!({ "agent": "dev-a", "server": "github", "state": state });
+            let mut shown = json!({
+                "agent": "dev-a", "server": "github", "state": state, "auth": "keys"
+            });
             if state == "connected" {
                 shown["stored_in"] = json!("keychain");
             }
@@ -3223,7 +3225,7 @@ mod tests {
         assert_eq!(
             crate::daemon::fixtures::connector_states(&harness.daemon),
             json!([{ "agent": "dev-a", "server": "notion", "state": "connect_again",
-                     "stored_in": "keychain" }])
+                     "auth": "oauth", "revokes": true, "stored_in": "keychain" }])
         );
     }
 

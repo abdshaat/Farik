@@ -14,8 +14,8 @@ use farik_core::criteria::validate_criteria;
 use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::paths::{PathRefusal, check_protected_paths};
 use farik_core::team::{
-    Agent, CustomServer, MODEL_FAMILIES, Team, ValidationError, custom_server, describe_change,
-    spec_sha256, validate_team,
+    Agent, CustomServer, CustomTransport, MODEL_FAMILIES, Team, ValidationError, custom_server,
+    describe_change, spec_sha256, validate_team,
 };
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{EventBody, new_event};
@@ -24,6 +24,7 @@ use farik_roles::load_role;
 use farik_store::{EventQuery, names_of, scan_project};
 use serde_json::{Value, json};
 
+use super::signed_in::Binding;
 use super::web::{Failure, INTERNAL_ERROR, NO_PROJECT, REFUSED};
 use super::{DaemonState, Kept};
 use crate::claude::{CredentialKind, Secret, credential_variable};
@@ -35,7 +36,7 @@ use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 9] = [
+pub(super) const METHODS: [&str; 11] = [
     "team.save",
     "agent.replace",
     "team.start",
@@ -45,6 +46,8 @@ pub(super) const METHODS: [&str; 9] = [
     "connector.tools",
     "connector.connect",
     "connector.disconnect",
+    "connector.sign_in",
+    "connector.sign_in_status",
 ];
 
 /// The marker the setup host leaves in a project it just made one, which "Start the team" removes.
@@ -308,14 +311,32 @@ fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team) -> Vec<Va
         .map(|(agent, server)| {
             let kept = secret_at(state, deps, agent, &server.name)
                 .map_or(Kept::Unavailable, |at| state.kept(&at));
+            let signs_in = matches!(
+                &server.transport,
+                CustomTransport::Http { oauth: Some(_), .. }
+            );
+            let ended = matches!(&kept, Kept::Entry { spec_sha256, signed_in: Some(grant), .. }
+                if grant.lapsed && *spec_sha256 == farik_core::team::spec_sha256(&server));
             let shown = match kept {
                 ref kept if kept.runs(&server) => "connected",
                 Kept::Unavailable => "store_unavailable",
+                _ if ended => "sign_in_again",
                 _ => "connect_again",
             };
-            let mut row = json!({ "agent": agent, "server": server.name, "state": shown });
-            if let Kept::Entry { stored_in, .. } = kept {
+            let mut row = json!({
+                "agent": agent, "server": server.name, "state": shown,
+                "auth": if signs_in { "oauth" } else { "keys" },
+            });
+            if let Kept::Entry {
+                stored_in,
+                signed_in,
+                ..
+            } = kept
+            {
                 row["stored_in"] = json!(stored_in);
+                if let (true, Some(grant)) = (signs_in, signed_in) {
+                    row["revokes"] = json!(grant.revokes);
+                }
             }
             row
         })
@@ -490,8 +511,53 @@ fn not_listed(error: ConnectorError) -> Failure {
     )
 }
 
+/// What lists, and then keeps, a server for an agent.
+enum Authority {
+    /// The keys the user gave.
+    Keys(BTreeMap<String, Secret>),
+    /// A sign-in the user finished, and who it is with.
+    SignedIn(Box<crate::sign_in::OAuthGrant>),
+}
+
+/// Whether `server` is one the user signs in to rather than gives keys.
+fn signs_in(server: &CustomServer) -> bool {
+    matches!(
+        &server.transport,
+        CustomTransport::Http { oauth: Some(_), .. }
+    )
+}
+
+/// The attempt `params` carries, for a server that signs in; its keys, for one that does not.
+/// A server that signs in with no attempt is refused `sign_in_needed`, and an attempt for a server
+/// that does not is `sign_in_unknown`.
+fn authority(
+    state: &DaemonState,
+    params: &Value,
+    server: &CustomServer,
+) -> Result<Authority, Failure> {
+    let agent = params["agent"].as_str().unwrap_or_default();
+    match (signs_in(server), params["attempt"].as_str()) {
+        (true, None) => Err(Failure::new(
+            REFUSED,
+            format!(
+                "sign_in_needed: {} signs in to its service; sign in first",
+                server.name
+            ),
+        )),
+        (true, Some(attempt)) => state
+            .peek_sign_in(attempt, &Binding { agent, server })
+            .map(|grant| Authority::SignedIn(Box::new(grant)))
+            .map_err(|why| Failure::new(REFUSED, why)),
+        (false, Some(_)) => Err(Failure::new(
+            REFUSED,
+            "sign_in_unknown: this server takes keys, not a sign-in".to_string(),
+        )),
+        (false, None) => Ok(Authority::Keys(keys_of(params))),
+    }
+}
+
 /// The tools of the server `params` describes for its agent, held to the team's rules first, as
-/// it lists them with the keys `params` carries.
+/// it lists them with the keys `params` carries, or the sign-in its attempt made.
 async fn listed(
     state: &DaemonState,
     deps: &Arc<ToolDeps>,
@@ -507,6 +573,18 @@ async fn listed(
         )
     })
     .await?;
+    let authority = authority(state, params, &server)?;
+    list_with(state, deps, params, &server, &authority).await
+}
+
+/// `server`'s tools, listed with `authority`.
+async fn list_with(
+    state: &DaemonState,
+    deps: &Arc<ToolDeps>,
+    params: &Value,
+    server: &CustomServer,
+    authority: &Authority,
+) -> Result<Vec<ListedTool>, Failure> {
     let folder = secret_at(
         state,
         deps,
@@ -515,21 +593,104 @@ async fn listed(
     )
     .and_then(|at| state.connector_folder(&at))
     .map_err(|error| Failure::new(REFUSED, crate::connectors::folder_refusal(&error)))?;
-    list_tools(&server, &keys_of(params), None, &folder)
+    let (keys, bearer) = match authority {
+        Authority::Keys(keys) => (keys.clone(), None),
+        Authority::SignedIn(grant) => (BTreeMap::new(), Some(grant.access_token.clone())),
+    };
+    list_tools(server, &keys, bearer.as_ref(), &folder)
         .await
         .map_err(not_listed)
 }
 
-/// `connector.connect`: the server's tools listed with its keys, each usable one labelled by
-/// `tags` or else `external_effect` (SPEC 5.6), the keys kept beside the definition's hash, then
-/// `connector_connect` handled, which writes the team file and records `connector.connected`.
+/// `connector.sign_in`: signs `agent` in to the service of the web-address server `server`.
+async fn connector_sign_in(
+    state: &Arc<DaemonState>,
+    deps: &Arc<ToolDeps>,
+    params: &Value,
+) -> Result<Value, Failure> {
+    let (held, asked) = (Arc::clone(deps), params.clone());
+    let (_, server) = off_the_worker(move || {
+        described(
+            &held,
+            asked["agent"].as_str().unwrap_or_default(),
+            &asked["server"],
+            json!({}),
+        )
+    })
+    .await?;
+    let agent = params["agent"].as_str().unwrap_or_default();
+    let (attempt, authorize_url, issuer) = state
+        .begin_sign_in(agent, &server)
+        .await
+        .map_err(|why| Failure::new(REFUSED, why))?;
+    Ok(json!({ "attempt": attempt, "authorize_url": authorize_url, "issuer": issuer }))
+}
+
+/// `connector.connect`: the server's tools listed with its keys, or its sign-in, each usable one
+/// labelled by `tags` or else `external_effect` (SPEC 5.6), the keys or the grant kept beside the
+/// definition's hash, then `connector_connect` handled, which writes the team file and records
+/// `connector.connected`.
 async fn connector_connect(
-    state: &DaemonState,
+    state: &Arc<DaemonState>,
     deps: &Arc<ToolDeps>,
     params: &Value,
 ) -> Result<Value, Failure> {
     let agent = params["agent"].as_str().unwrap_or_default().to_string();
-    let listed = listed(state, deps, params).await?;
+    let (held, asked) = (Arc::clone(deps), params.clone());
+    let (_, described_as) = off_the_worker(move || {
+        described(
+            &held,
+            asked["agent"].as_str().unwrap_or_default(),
+            &asked["server"],
+            json!({}),
+        )
+    })
+    .await?;
+    // A sign-in's attempt is used up here, and put back if the connect fails before the grant is
+    // kept, so a refused label does not cost the user their sign-in.
+    let mut taken = None;
+    let authority = match (signs_in(&described_as), params["attempt"].as_str()) {
+        (true, Some(attempt)) => {
+            let (grant, _, kept) = state
+                .take_sign_in(
+                    attempt,
+                    &Binding {
+                        agent: &agent,
+                        server: &described_as,
+                    },
+                )
+                .map_err(|why| Failure::new(REFUSED, why))?;
+            taken = Some((attempt.to_string(), kept));
+            Authority::SignedIn(Box::new(grant))
+        }
+        _ => authority(state, params, &described_as)?,
+    };
+    let result = Box::pin(connect_with(state, deps, params, &agent, &authority)).await;
+    if let (Err(_), Some((attempt, kept))) = (&result, taken) {
+        state.restore_sign_in(&attempt, kept);
+    }
+    result
+}
+
+/// What `connector_connect` does once it knows what lists and keeps the server.
+async fn connect_with(
+    state: &Arc<DaemonState>,
+    deps: &Arc<ToolDeps>,
+    params: &Value,
+    agent: &str,
+    authority: &Authority,
+) -> Result<Value, Failure> {
+    let (held, asked) = (Arc::clone(deps), params.clone());
+    let (_, server) = off_the_worker(move || {
+        described(
+            &held,
+            asked["agent"].as_str().unwrap_or_default(),
+            &asked["server"],
+            json!({}),
+        )
+    })
+    .await?;
+    let listed = list_with(state, deps, params, &server, authority).await?;
     let tools = labelled(&listed, &params["tags"]).map_err(|why| Failure::new(REFUSED, why))?;
     let (held, asked, labels) = (Arc::clone(deps), params.clone(), tools.clone());
     let (entry, server) = off_the_worker(move || {
@@ -542,29 +703,52 @@ async fn connector_connect(
     })
     .await?;
     let spec = spec_sha256(&server);
-    let mut keys = keys_of(params);
-    keys.retain(|name, _| server.credential_keys.contains(name));
+    let (keys, oauth, issuer) = match authority {
+        Authority::Keys(keys) => {
+            let mut keys = keys.clone();
+            keys.retain(|name, _| server.credential_keys.contains(name));
+            (keys, None, None)
+        }
+        Authority::SignedIn(grant) => (
+            BTreeMap::new(),
+            Some((**grant).clone()),
+            Some(grant.issuer.clone()),
+        ),
+    };
     let kept = ConnectorEntry {
         spec_sha256: spec.clone(),
         keys,
-        oauth: None,
+        oauth,
     };
-    let (secrets, at) = (
-        state.connector_secrets(),
-        secret_at(state, deps, &agent, &server.name).map_err(|error| internal(&error))?,
-    );
-    let stored_in = off_the_worker(move || {
-        secrets
-            .save(&at, &kept)
-            .map_err(|error| Failure::new(REFUSED, words(&error)))
+    let at = secret_at(state, deps, agent, &server.name).map_err(|error| internal(&error))?;
+    let (secrets, kept_at) = (state.connector_secrets(), at.clone());
+    // Held across the read of what is replaced and the save, with refresh and remove.
+    let lock = state.entry_lock(&at);
+    let held = lock.lock().await;
+    let (stored_in, replaced) = off_the_worker(move || {
+        let replaced = secrets
+            .load(&kept_at)
+            .ok()
+            .flatten()
+            .and_then(|old| old.oauth);
+        let stored_in = secrets
+            .save(&kept_at, &kept)
+            .map_err(|error| Failure::new(REFUSED, words(&error)))?;
+        Ok((stored_in, replaced))
     })
     .await?;
+    drop(held);
+    // A sign-in this one replaces is asked to be forgotten, so it does not linger at the service.
+    if let Some(old) = replaced {
+        tokio::spawn(async move { crate::sign_in::revoke(&old).await });
+    }
     handled(
         state,
         Command::ConnectorConnect {
-            agent,
+            agent: agent.to_string(),
             server: entry.as_object().cloned().unwrap_or_default(),
             spec_sha256: spec,
+            issuer,
         },
     )
     .await?;
@@ -572,7 +756,8 @@ async fn connector_connect(
 }
 
 /// `connector.disconnect`: `connector_disconnect` handled, which removes the entry from the team
-/// file and records `connector.disconnected`, then the agent's keys for it deleted.
+/// file and records `connector.disconnected`, then the agent's entry deleted and, when it held a
+/// sign-in, the service asked to forget it.
 async fn connector_disconnect(
     state: &DaemonState,
     deps: &ToolDeps,
@@ -597,12 +782,21 @@ async fn connector_disconnect(
     // Held across the delete: a refresh in flight saves before it, never after (ADR 0033).
     let lock = state.entry_lock(&at);
     let _held = lock.lock().await;
-    off_the_worker(move || {
+    let grant = off_the_worker(move || {
+        let grant = secrets
+            .load(&at)
+            .ok()
+            .flatten()
+            .and_then(|entry| entry.oauth);
         secrets
             .delete(&at)
-            .map_err(|error| Failure::new(REFUSED, words(&error)))
+            .map_err(|error| Failure::new(REFUSED, words(&error)))?;
+        Ok(grant)
     })
     .await?;
+    if let Some(grant) = grant {
+        crate::sign_in::revoke(&grant).await;
+    }
     Ok(json!({}))
 }
 
@@ -1094,6 +1288,10 @@ pub(super) async fn call(
         // Boxed: listing a server's tools makes a large future of every method's.
         "connector.connect" => Box::pin(connector_connect(state, &deps, &params)).await,
         "connector.disconnect" => connector_disconnect(state, &deps, &params).await,
+        "connector.sign_in" => Box::pin(connector_sign_in(state, &deps, &params)).await,
+        "connector.sign_in_status" => state
+            .sign_in_status(params["attempt"].as_str().unwrap_or_default())
+            .map_err(|why| Failure::new(REFUSED, why)),
         "project.note" => off_the_worker(move || {
             deps.files
                 .append_project_note(
@@ -3066,7 +3264,7 @@ pub(super) mod tests {
         );
         assert_eq!(
             states(&harness),
-            json!([{ "agent": "dev-a", "server": "fixture", "state": "connected", "stored_in": "keychain" }])
+            json!([{ "agent": "dev-a", "server": "fixture", "auth": "keys", "state": "connected", "stored_in": "keychain" }])
         );
     }
 
@@ -3112,7 +3310,7 @@ pub(super) mod tests {
             written["tools"],
             json!({ "search": "external_effect", "env": "external_effect", "delete_repo": "external_effect" })
         );
-        let shown = json!([{ "agent": "dev-a", "server": "fixture", "state": "connected", "stored_in": "keychain" }]);
+        let shown = json!([{ "agent": "dev-a", "server": "fixture", "auth": "keys", "state": "connected", "stored_in": "keychain" }]);
         assert_eq!(states(&harness), shown);
 
         // Connected again with a label: the one entry is replaced, and the new hash is read.
@@ -3231,7 +3429,7 @@ pub(super) mod tests {
         );
         assert_eq!(
             states(&harness),
-            json!([{ "agent": "dev-b", "server": "fixture", "state": "connected", "stored_in": "keychain" }])
+            json!([{ "agent": "dev-b", "server": "fixture", "auth": "keys", "state": "connected", "stored_in": "keychain" }])
         );
         let (code, _) = refused(
             &harness,
@@ -3277,8 +3475,8 @@ pub(super) mod tests {
         assert_eq!(
             states(&harness),
             json!([
-                { "agent": "dev-a", "server": "fixture", "state": "connect_again" },
-                { "agent": "dev-b", "server": "fixture", "state": "connected", "stored_in": "keychain" },
+                { "agent": "dev-a", "server": "fixture", "auth": "keys", "state": "connect_again" },
+                { "agent": "dev-b", "server": "fixture", "auth": "keys", "state": "connected", "stored_in": "keychain" },
             ])
         );
     }
@@ -3369,6 +3567,506 @@ pub(super) mod tests {
             store.load(&at).expect("the store reads").is_none(),
             "the entry removed during the refresh is not put back"
         );
+    }
+
+    /// A daemon whose agent `dev-a` signs in to an OAuth fixture, on one runtime the fixture,
+    /// the daemon's tasks and every call share, so that a sign-in left waiting between two calls
+    /// is still there for the second.
+    struct Signing {
+        runtime: tokio::runtime::Runtime,
+        fixture: crate::oauth_fixture::Fixture,
+        harness: Harness,
+        store: Arc<MemoryConnectorSecrets>,
+        /// Every reply the daemon sent, as text.
+        replies: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl Signing {
+        fn new(name: &str) -> Signing {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime");
+            let fixture = runtime.block_on(crate::oauth_fixture::Fixture::start());
+            let (harness, store) = keeping(name);
+            Signing {
+                runtime,
+                fixture,
+                harness,
+                store,
+                replies: std::sync::Mutex::default(),
+            }
+        }
+
+        /// `notion`, as `connector.sign_in` takes it, at the fixture's address.
+        fn server(&self) -> Value {
+            json!({
+                "name": "notion", "transport": "http", "url": self.fixture.mcp_url, "oauth": {}
+            })
+        }
+
+        fn reply(&self, method: &str, params: &Value) -> Value {
+            let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
+            let reply = self.runtime.block_on(crate::daemon::web::answer(
+                &self.harness.daemon,
+                &frame.to_string(),
+                &mut None,
+            ));
+            crate::locked(&self.replies).push(reply.to_string());
+            reply
+        }
+
+        /// The result of `method`, checked against `definition`.
+        fn call(&self, method: &str, params: &Value, definition: &str) -> Value {
+            let reply = self.reply(method, params);
+            crate::daemon::gates::tests::conforms(&reply["result"], definition, &reply);
+            reply["result"].clone()
+        }
+
+        /// The code and message `method` is refused with.
+        fn refused(&self, method: &str, params: &Value) -> (i64, String) {
+            let reply = self.reply(method, params);
+            (
+                reply["error"]["code"].as_i64().unwrap_or_default(),
+                reply["error"]["message"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("an error: {reply}"))
+                    .to_string(),
+            )
+        }
+
+        fn sign_in(&self, server: &Value) -> Value {
+            self.call(
+                "connector.sign_in",
+                &json!({ "agent": "dev-a", "server": server }),
+                "connectorSignInResult",
+            )
+        }
+
+        fn status(&self, attempt: &Value) -> Value {
+            self.call(
+                "connector.sign_in_status",
+                &json!({ "attempt": attempt }),
+                "connectorSignInStatusResult",
+            )
+        }
+
+        /// The user says yes on the service's page, and the status stops waiting.
+        fn approve(&self, started: &Value) -> Value {
+            let url = started["authorize_url"].as_str().expect("an address");
+            self.runtime.block_on(crate::oauth_fixture::follow(url));
+            for _ in 0..200 {
+                let status = self.status(&started["attempt"]);
+                if status["state"] != "waiting" {
+                    return status;
+                }
+                self.runtime.block_on(async {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                });
+            }
+            panic!("the sign-in never finished");
+        }
+
+        /// A finished sign-in's attempt.
+        fn signed_in(&self, server: &Value) -> Value {
+            let started = self.sign_in(server);
+            assert_eq!(self.approve(&started)["state"], "signed_in");
+            started["attempt"].clone()
+        }
+
+        fn connect(&self, attempt: &Value) -> Value {
+            self.call(
+                "connector.connect",
+                &json!({
+                    "agent": "dev-a", "server": self.server(), "attempt": attempt,
+                    "tags": { "whoami": "network" }
+                }),
+                "connectorConnectResult",
+            )
+        }
+
+        fn grant(&self) -> Option<crate::sign_in::OAuthGrant> {
+            self.store
+                .load(&kept_at(&self.harness, "dev-a", "notion"))
+                .expect("the store reads")
+                .and_then(|entry| entry.oauth)
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn sign_in_then_connect_keeps_the_grant() {
+        let signing = Signing::new("connector-sign-in");
+        let started = signing.sign_in(&signing.server());
+        assert_eq!(started["issuer"], signing.fixture.origin);
+        assert_eq!(signing.status(&started["attempt"])["state"], "waiting");
+        assert_eq!(signing.approve(&started)["state"], "signed_in");
+        let listed = signing.call(
+            "connector.tools",
+            &json!({ "agent": "dev-a", "server": signing.server(), "attempt": started["attempt"] }),
+            "connectorToolsResult",
+        );
+        assert_eq!(listed["tools"][0]["name"], "whoami");
+        let connected = signing.connect(&started["attempt"]);
+        assert_eq!(connected["tools"], json!({ "whoami": "network" }));
+        let entry = entry(&signing.harness, 1, "notion").expect("the team file has notion");
+        assert_eq!(entry["oauth"], json!({}));
+        let grant = signing.grant().expect("a grant is kept");
+        assert_eq!(grant.issuer, signing.fixture.origin);
+        assert_eq!(
+            bodies(&signing.harness, EventKind::ConnectorConnected)[0]["issuer"],
+            signing.fixture.origin
+        );
+        assert_eq!(
+            states(&signing.harness),
+            json!([{
+                "agent": "dev-a", "server": "notion", "state": "connected", "auth": "oauth",
+                "revokes": true, "stored_in": "keychain"
+            }])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn no_reply_event_or_log_holds_a_token() {
+        let signing = Signing::new("connector-sign-in-secrets");
+        // A server that echoes its `Authorization` header into a tool's description would put the
+        // token in a reply itself: this one does not.
+        signing
+            .fixture
+            .set(|flags| flags.echo_authorization = false);
+        let attempt = signing.signed_in(&signing.server());
+        signing.call(
+            "connector.tools",
+            &json!({ "agent": "dev-a", "server": signing.server(), "attempt": attempt }),
+            "connectorToolsResult",
+        );
+        signing.connect(&attempt);
+        let grant = signing.grant().expect("a grant");
+        let tokens = [
+            grant.access_token.expose().to_string(),
+            grant
+                .refresh_token
+                .as_ref()
+                .expect("a refresh token")
+                .expose()
+                .to_string(),
+        ];
+        let mut seen = crate::locked(&signing.replies).concat();
+        seen.push_str(&log_text(&signing.harness));
+        for token in &tokens {
+            assert!(!seen.contains(token), "a reply or an event holds a token");
+        }
+        // No file Farik wrote holds one either: the repository, `.farik/local/events.db` and
+        // `team.yaml` among them, and the state folder.
+        let root = signing.harness.project.repo.path.clone();
+        let state = std::path::PathBuf::from(format!("{}-state", root.display()));
+        let mut stack = vec![root, state];
+        let mut files = 0;
+        while let Some(path) = stack.pop() {
+            let Ok(read) = std::fs::read_dir(&path) else {
+                continue;
+            };
+            for item in read.flatten() {
+                let path = item.path();
+                if path.is_dir() {
+                    if path.file_name().is_none_or(|name| name != ".git") {
+                        stack.push(path);
+                    }
+                } else if let Ok(bytes) = std::fs::read(&path) {
+                    files += 1;
+                    let text = String::from_utf8_lossy(&bytes);
+                    for token in &tokens {
+                        assert!(!text.contains(token), "{} holds a token", path.display());
+                    }
+                }
+            }
+        }
+        assert!(files > 3, "the files were searched: {files}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn sign_in_status_says_why_it_failed() {
+        let signing = Signing::new("connector-sign-in-denied");
+        signing.fixture.set(|flags| flags.access_denied = true);
+        let started = signing.sign_in(&signing.server());
+        let status = signing.approve(&started);
+        assert_eq!(status["state"], "failed");
+        assert_eq!(status["reason"]["code"], "access_denied");
+        assert!(
+            status["reason"]["message"]
+                .as_str()
+                .is_some_and(|message| !message.is_empty())
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_attempt_is_used_once_and_expires() {
+        let signing = Signing::new("connector-sign-in-once");
+        let attempt = signing.signed_in(&signing.server());
+        signing.connect(&attempt);
+        let params = json!({
+            "agent": "dev-a", "server": signing.server(), "attempt": attempt, "tags": {}
+        });
+        let (code, message) = signing.refused("connector.connect", &params);
+        assert_eq!(code, -32005);
+        assert!(message.starts_with("sign_in_unknown:"), "{message}");
+        // Another, finished and left standing past ten minutes.
+        let late = signing.signed_in(&signing.server());
+        signing.runtime.block_on(async {
+            tokio::time::pause();
+            tokio::time::advance(
+                crate::sign_in::SIGN_IN_WINDOW + std::time::Duration::from_secs(1),
+            )
+            .await;
+        });
+        let (code, message) = signing.refused(
+            "connector.connect",
+            &json!({
+                "agent": "dev-a", "server": signing.server(), "attempt": late, "tags": {}
+            }),
+        );
+        assert_eq!(code, -32005);
+        assert!(message.starts_with("sign_in_unknown:"), "{message}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_attempt_signs_in_one_server_only() {
+        let signing = Signing::new("connector-sign-in-bound");
+        let variants = [
+            ("url", json!("http://127.0.0.1:9/elsewhere")),
+            ("name", json!("other")),
+            ("oauth", json!({ "scopes": ["write"] })),
+        ];
+        for (field, value) in variants {
+            for method in ["connector.connect", "connector.tools"] {
+                let attempt = signing.signed_in(&signing.server());
+                let mut server = signing.server();
+                server[field] = value.clone();
+                let mut params = json!({ "agent": "dev-a", "server": server, "attempt": attempt });
+                if method == "connector.connect" {
+                    params["tags"] = json!({});
+                }
+                let (code, message) = signing.refused(method, &params);
+                assert_eq!(code, -32005, "{field} {method}");
+                assert!(
+                    message.starts_with("sign_in_unknown:"),
+                    "{field}: {message}"
+                );
+                assert!(signing.grant().is_none(), "{field}: no entry is kept");
+                // The mismatch ended the attempt: even the right server is refused now.
+                let (_, message) = signing.refused(
+                    "connector.connect",
+                    &json!({
+                        "agent": "dev-a", "server": signing.server(), "attempt": attempt,
+                        "tags": {}
+                    }),
+                );
+                assert!(
+                    message.starts_with("sign_in_unknown:"),
+                    "{field}: {message}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn connect_needs_an_attempt_to_sign_in() {
+        let signing = Signing::new("connector-sign-in-needed");
+        for method in ["connector.connect", "connector.tools"] {
+            let mut params = json!({
+                "agent": "dev-a", "server": signing.server(), "keys": { "API_KEY": "k" }
+            });
+            if method == "connector.connect" {
+                params["tags"] = json!({});
+            }
+            let (code, message) = signing.refused(method, &params);
+            assert_eq!(code, -32005, "{method}");
+            assert!(
+                message.starts_with("sign_in_needed:"),
+                "{method}: {message}"
+            );
+        }
+        assert!(signing.grant().is_none());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_new_attempt_ends_the_old() {
+        let signing = Signing::new("connector-sign-in-replaced");
+        let first = signing.sign_in(&signing.server());
+        let port = |started: &Value| {
+            reqwest::Url::parse(started["authorize_url"].as_str().expect("an address"))
+                .expect("a url")
+                .query_pairs()
+                .find(|(name, _)| name == "redirect_uri")
+                .and_then(|(_, uri)| reqwest::Url::parse(&uri).ok())
+                .and_then(|uri| uri.port())
+                .expect("the redirect's port")
+        };
+        let old = port(&first);
+        let listening = |port: u16| {
+            signing
+                .runtime
+                .block_on(tokio::net::TcpStream::connect(("127.0.0.1", port)))
+                .is_ok()
+        };
+        assert!(listening(old), "the first attempt listens");
+        let second = signing.sign_in(&signing.server());
+        assert!(
+            !listening(old),
+            "the old attempt's callback address is closed"
+        );
+        assert!(listening(port(&second)));
+        let (_, message) = signing.refused(
+            "connector.sign_in_status",
+            &json!({ "attempt": first["attempt"] }),
+        );
+        assert!(message.starts_with("sign_in_unknown:"), "{message}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn disconnect_deletes_then_revokes() {
+        for status in [200, 500] {
+            let signing = Signing::new(&format!("connector-sign-in-revoke-{status}"));
+            signing.fixture.set(|flags| flags.revoke_status = status);
+            let attempt = signing.signed_in(&signing.server());
+            signing.connect(&attempt);
+            let refresh = signing
+                .grant()
+                .and_then(|grant| grant.refresh_token)
+                .expect("a refresh token");
+            let reply = signing.call(
+                "connector.disconnect",
+                &json!({ "agent": "dev-a", "server": "notion" }),
+                "emptyResult",
+            );
+            assert_eq!(reply, json!({}), "{status}");
+            assert!(signing.grant().is_none(), "{status}: the entry is gone");
+            let revoked = signing.fixture.requests("/revoke");
+            assert_eq!(revoked.len(), 1, "{status}");
+            assert_eq!(revoked[0].form["token"], refresh.expose(), "{status}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn connect_again_revokes_the_replaced_grant() {
+        let signing = Signing::new("connector-sign-in-replace");
+        let first = signing.signed_in(&signing.server());
+        signing.connect(&first);
+        let old = signing
+            .grant()
+            .and_then(|grant| grant.refresh_token)
+            .expect("a refresh token");
+        let second = signing.signed_in(&signing.server());
+        signing.connect(&second);
+        for _ in 0..500 {
+            if signing.fixture.count("/revoke") > 0 {
+                break;
+            }
+            signing.runtime.block_on(async {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            });
+        }
+        let revoked = signing.fixture.requests("/revoke");
+        assert_eq!(revoked.len(), 1);
+        assert_eq!(revoked[0].form["token"], old.expose());
+        let kept = signing.grant().and_then(|grant| grant.refresh_token);
+        assert_ne!(
+            kept.map(|token| token.expose().to_string()),
+            Some(old.expose().to_string())
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_says_auth_and_sign_in_again() {
+        let signing = Signing::new("connector-sign-in-states");
+        // One that cannot be revoked, signed in and connected.
+        signing.fixture.set(|flags| flags.revocation = false);
+        let attempt = signing.signed_in(&signing.server());
+        signing.connect(&attempt);
+        assert_eq!(
+            states(&signing.harness),
+            json!([{
+                "agent": "dev-a", "server": "notion", "state": "connected", "auth": "oauth",
+                "revokes": false, "stored_in": "keychain"
+            }])
+        );
+        // The service ends it.
+        let at = kept_at(&signing.harness, "dev-a", "notion");
+        let mut kept = signing.store.load(&at).expect("reads").expect("kept");
+        if let Some(grant) = &mut kept.oauth {
+            grant.lapsed = true;
+            grant.revocation_endpoint = Some("https://auth.example/revoke".to_string());
+        }
+        signing.store.save(&at, &kept).expect("kept");
+        signing.harness.daemon.read_kept(&at);
+        assert_eq!(
+            states(&signing.harness),
+            json!([{
+                "agent": "dev-a", "server": "notion", "state": "sign_in_again", "auth": "oauth",
+                "revokes": true, "stored_in": "keychain"
+            }])
+        );
+        // A server that takes keys.
+        let (harness, _) = keeping("connector-sign-in-keys");
+        connected(
+            &harness,
+            "dev-a",
+            &fixture_server("sign-in-keys"),
+            &json!({}),
+        );
+        assert_eq!(
+            states(&harness),
+            json!([{
+                "agent": "dev-a", "server": "fixture", "state": "connected", "auth": "keys",
+                "stored_in": "keychain"
+            }])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_synchronous_delete_waits_for_whoever_holds_the_entry() {
+        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+        let (harness, store) = keeping("connector-forget-waits");
+        connected(
+            &harness,
+            "dev-a",
+            &fixture_server("forget-waits"),
+            &json!({}),
+        );
+        let at = kept_at(&harness, "dev-a", "fixture");
+        // A refresh or a connect holds the entry.
+        let held = runtime.block_on(harness.daemon.entry_lock(&at).lock_owned());
+        runtime.block_on(async { harness.daemon.forget_entry(&at) });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            store.load(&at).expect("reads").is_some(),
+            "the delete waits its turn"
+        );
+        drop(held);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while store.load(&at).expect("reads").is_some() {
+            assert!(std::time::Instant::now() < deadline, "the delete ran");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        // And with no one holding it, the delete is done when it returns.
+        connected(
+            &harness,
+            "dev-a",
+            &fixture_server("forget-waits"),
+            &json!({}),
+        );
+        harness.daemon.forget_entry(&at);
+        assert!(store.load(&at).expect("reads").is_none());
     }
 
     #[test]
@@ -3464,7 +4162,7 @@ pub(super) mod tests {
         connected(&harness, "dev-a", &fixture_server("stored-in"), &json!({}));
         assert_eq!(
             states(&harness),
-            json!([{ "agent": "dev-a", "server": "fixture", "state": "connected", "stored_in": "file" }])
+            json!([{ "agent": "dev-a", "server": "fixture", "auth": "keys", "state": "connected", "stored_in": "file" }])
         );
     }
 
@@ -3495,7 +4193,7 @@ pub(super) mod tests {
             .expect("kept");
         assert_eq!(
             states(&harness),
-            json!([{ "agent": "dev-a", "server": "linear", "state": "connected", "stored_in": "keychain" }])
+            json!([{ "agent": "dev-a", "server": "linear", "auth": "keys", "state": "connected", "stored_in": "keychain" }])
         );
         // What is kept is read once, not on each query: a keychain may ask the user each time.
         store
@@ -3503,7 +4201,7 @@ pub(super) mod tests {
             .expect("deleted");
         assert_eq!(
             states(&harness),
-            json!([{ "agent": "dev-a", "server": "linear", "state": "connected", "stored_in": "keychain" }])
+            json!([{ "agent": "dev-a", "server": "linear", "auth": "keys", "state": "connected", "stored_in": "keychain" }])
         );
 
         wire["agents"][1]["mcp_servers"][0]["url"] = json!("https://elsewhere.example/mcp");
@@ -3513,7 +4211,7 @@ pub(super) mod tests {
         // The keys read last are still kept somewhere, which Remove says.
         assert_eq!(
             got["connectors"],
-            json!([{ "agent": "dev-a", "server": "linear", "state": "connect_again", "stored_in": "keychain" }])
+            json!([{ "agent": "dev-a", "server": "linear", "auth": "keys", "state": "connect_again", "stored_in": "keychain" }])
         );
         farik_core::team::validate_team(&got["team"]).expect("team is still the team file");
     }

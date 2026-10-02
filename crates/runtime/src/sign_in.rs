@@ -514,29 +514,41 @@ async fn serve_connection(
     let _ = found.send((stream, params));
 }
 
-/// Accepts connections on every listener until one is the callback, then closes them all.
+/// Accepts connections on the listeners until one is the callback, then closes them. The
+/// listeners belong to this future, so dropping it closes them at once.
 async fn wait_for_callback(
-    listeners: Vec<TcpListener>,
+    mut listeners: Vec<TcpListener>,
     state: &str,
 ) -> Result<(TcpStream, HashMap<String, String>), SignInError> {
     let (found, mut arrived) = tokio::sync::mpsc::unbounded_channel();
-    let mut accepting = tokio::task::JoinSet::new();
-    for listener in listeners {
-        let (state, found) = (state.to_string(), found.clone());
-        accepting.spawn(async move {
-            loop {
-                let Ok((stream, _)) = listener.accept().await else {
-                    return;
-                };
-                tokio::spawn(serve_connection(stream, state.clone(), found.clone()));
+    let second = if listeners.len() > 1 {
+        listeners.pop()
+    } else {
+        None
+    };
+    let Some(first) = listeners.pop() else {
+        return Err(SignInError::Failed("there is no listener".to_string()));
+    };
+    loop {
+        let accepted = tokio::select! {
+            accepted = first.accept() => accepted,
+            accepted = async {
+                match &second {
+                    Some(listener) => listener.accept().await,
+                    None => std::future::pending().await,
+                }
+            } => accepted,
+            callback = arrived.recv() => {
+                // The listeners close here, before the code is exchanged.
+                return callback.ok_or_else(|| {
+                    SignInError::Failed("the sign-in listener stopped".to_string())
+                });
             }
-        });
+        };
+        if let Ok((stream, _)) = accepted {
+            tokio::spawn(serve_connection(stream, state.to_string(), found.clone()));
+        }
     }
-    drop(found);
-    let callback = arrived.recv().await;
-    // The listeners close here, before the code is exchanged.
-    accepting.shutdown().await;
-    callback.ok_or_else(|| SignInError::Failed("the sign-in listener stopped".to_string()))
 }
 
 /// Binds the callback listener: this computer's loopback only, never every address. With a

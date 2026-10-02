@@ -348,6 +348,7 @@ fn farik_connect_sends_names_when_something_drives() {
         agent,
         server,
         spec_sha256,
+        ..
     } = &commands[0]
     else {
         panic!("connector_connect, not {:?}", commands[0]);

@@ -65,6 +65,8 @@ pub struct Flags {
     pub expires_in: u64,
     /// A token answer with no `expires_in`.
     pub no_expiry: bool,
+    /// Whether the tool's description is the `Authorization` header it was listed with.
+    pub echo_authorization: bool,
 }
 
 impl Default for Flags {
@@ -88,6 +90,7 @@ impl Default for Flags {
             keep_refresh_token: false,
             expires_in: 3600,
             no_expiry: false,
+            echo_authorization: true,
         }
     }
 }
@@ -128,7 +131,7 @@ pub struct Fixture {
 }
 
 #[derive(Clone)]
-struct Tools;
+struct Tools(Arc<Shared>);
 
 impl ServerHandler for Tools {
     fn get_info(&self) -> InitializeResult {
@@ -160,6 +163,11 @@ impl ServerHandler for Tools {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("none")
             .to_string();
+        let seen = if self.0.flags().echo_authorization {
+            seen
+        } else {
+            "Says who is asking.".to_string()
+        };
         std::future::ready(Ok(ListToolsResult::with_all_items(vec![Tool::new(
             "whoami",
             seen,
@@ -507,8 +515,9 @@ impl Fixture {
             counter: AtomicU64::new(0),
             held,
         });
+        let for_tools = shared.clone();
         let service = StreamableHttpService::new(
-            || Ok(Tools),
+            move || Ok(Tools(for_tools.clone())),
             Arc::new(LocalSessionManager::default()),
             StreamableHttpServerConfig::default(),
         );

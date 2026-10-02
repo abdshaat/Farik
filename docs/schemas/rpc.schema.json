@@ -497,6 +497,12 @@
         },
         {
           "$ref": "#/$defs/connectorDisconnectRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorSignInRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorSignInStatusRequest"
         }
       ]
     },
@@ -850,14 +856,15 @@
         },
         "connectors": {
           "type": "array",
-          "description": "Each agent's custom MCP servers and whether each runs (ADR 0030): connected when the definition kept on this machine beside its keys is the team file's and every key it names is kept; connect_again when none is kept or the team file changed since, so it runs nothing until the user connects it again; store_unavailable when the keychain or the private file could not be read, the last time Farik read it, so it is left out of sessions until it can be. The kept definition is read once per connect and disconnect, when a session is set up, and the first time it is asked for.",
+          "description": "Each agent's custom MCP servers and whether each runs (ADR 0030): connected when the definition kept on this machine beside its keys is the team file's and every key it names is kept; connect_again when none is kept or the team file changed since, so it runs nothing until the user connects it again; sign_in_again when the service ended the agent's sign-in, so it runs nothing until the user signs in again; store_unavailable when the keychain or the private file could not be read, the last time Farik read it, so it is left out of sessions until it can be. The kept definition is read once per connect and disconnect, when a session is set up, and the first time it is asked for.",
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": [
               "agent",
               "server",
-              "state"
+              "state",
+              "auth"
             ],
             "properties": {
               "agent": {
@@ -871,8 +878,21 @@
                 "enum": [
                   "connected",
                   "connect_again",
+                  "sign_in_again",
                   "store_unavailable"
                 ]
+              },
+              "auth": {
+                "type": "string",
+                "enum": [
+                  "keys",
+                  "oauth"
+                ],
+                "description": "How the server is reached with the user's authority: keys the user gave, or a sign-in to the service (ADR 0033)."
+              },
+              "revokes": {
+                "type": "boolean",
+                "description": "For a server signed in to: whether the service has a way to be asked to forget the sign-in when it is removed. Absent for a server with keys."
               },
               "stored_in": {
                 "type": "string",
@@ -3636,7 +3656,7 @@
     },
     "connectorServer": {
       "type": "object",
-      "description": "A custom MCP server as the user describes it, before its tools are labelled: an mcp_servers entry of team.schema.json without source and tools (name, transport, and command and args, or url and headers, and credential_keys). The daemon holds it to validate_team as the agent's entry."
+      "description": "A custom MCP server as the user describes it, before its tools are labelled: an mcp_servers entry of team.schema.json without source and tools (name, transport, and command and args, or url and headers, credential_keys, and oauth for a web address the user signs in to). The daemon holds it to validate_team as the agent's entry."
     },
     "connectorKeys": {
       "type": "object",
@@ -3653,7 +3673,7 @@
     },
     "connectorToolsRequest": {
       "title": "Connector Tools Request",
-      "description": "Lists a custom MCP server's tools, started or reached with the agent's keys, as ConnectorAdd's second step shows them (docs/SPEC.md 5.6; ADR 0030). Nothing is kept. A refusal of these params carries no data, as account.connect's does.",
+      "description": "Lists a custom MCP server's tools, started or reached with the agent's keys, or with the sign-in an attempt made when the server has oauth, as ConnectorAdd's second step shows them (docs/SPEC.md 5.6; ADRs 0030 and 0033). Nothing is kept, and the attempt is not used up. A server with oauth and no attempt is refused sign_in_needed; an attempt that is unknown, used, expired, unfinished, or another server's is refused sign_in_unknown. A refusal of these params carries no data, as account.connect's does.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -3677,8 +3697,7 @@
           "additionalProperties": false,
           "required": [
             "agent",
-            "server",
-            "keys"
+            "server"
           ],
           "properties": {
             "agent": {
@@ -3689,6 +3708,9 @@
             },
             "keys": {
               "$ref": "#/$defs/connectorKeys"
+            },
+            "attempt": {
+              "$ref": "#/$defs/signInAttempt"
             }
           }
         }
@@ -3729,7 +3751,7 @@
     },
     "connectorConnectRequest": {
       "title": "Connector Connect Request",
-      "description": "Gives the agent a custom MCP server (docs/SPEC.md 5.6, 6.7; ADR 0030): its tools listed with the keys, each usable one labelled by tags or else external_effect, the keys kept in the keychain or a private file beside the definition's spec_sha256, then connector_connect handled, which writes the team file and appends connector.connected. A refusal of these params carries no data, as account.connect's does; a refusal of the entry carries the team's errors, each at its field.",
+      "description": "Gives the agent a custom MCP server (docs/SPEC.md 5.6, 6.7; ADR 0030): its tools listed with the keys, each usable one labelled by tags or else external_effect, the keys kept in the keychain or a private file beside the definition's spec_sha256, then connector_connect handled, which writes the team file and appends connector.connected. A server with oauth takes attempt, a finished sign-in, in place of keys, and uses it up; its grant is kept where keys are, and a grant it replaces is asked to be forgotten. A refusal of these params carries no data, as account.connect's does; a refusal of the entry carries the team's errors, each at its field.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -3754,7 +3776,6 @@
           "required": [
             "agent",
             "server",
-            "keys",
             "tags"
           ],
           "properties": {
@@ -3766,6 +3787,9 @@
             },
             "keys": {
               "$ref": "#/$defs/connectorKeys"
+            },
+            "attempt": {
+              "$ref": "#/$defs/signInAttempt"
             },
             "tags": {
               "type": "object",
@@ -3800,6 +3824,148 @@
             "$ref": "#/$defs/connectorTag"
           },
           "description": "Each tool as it was written to the team file, with its label."
+        }
+      }
+    },
+    "signInAttempt": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "A sign-in under way, held in the daemon's memory for ten minutes, bound to the agent and the server (name, url and oauth) it was made for, and used up by connector.connect."
+    },
+    "connectorSignInRequest": {
+      "title": "Connector Sign In Request",
+      "description": "Starts signing the agent in to the service of a web-address server (docs/SPEC.md 6.7; ADR 0033): finds how the server offers it, registers Farik as a client or uses the one the server names, opens a listener for the way back on this computer's loopback, and answers the address the user opens in the browser. A new attempt for the same agent and server ends the old one. Refused sign_in_not_offered (the server does not say it can be signed in to), sign_in_not_supported (it does, and Farik has no way to register), pkce_not_supported, or sign_in_failed, each as the message's first word and a colon. server is the object connector.tools takes, and holds oauth.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.sign_in"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "$ref": "#/$defs/connectorServer"
+            }
+          }
+        }
+      }
+    },
+    "connectorSignInResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt",
+        "authorize_url",
+        "issuer"
+      ],
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/signInAttempt"
+        },
+        "authorize_url": {
+          "type": "string",
+          "description": "The service's page, which the browser opens. No token is in it."
+        },
+        "issuer": {
+          "type": "string",
+          "description": "Who signs the user in, as the service says. Its host is what the page names; it can differ from the server's, as Stripe's sign-in is at access.stripe.com."
+        }
+      }
+    },
+    "connectorSignInStatusRequest": {
+      "title": "Connector Sign In Status Request",
+      "description": "How an attempt is going. Refused sign_in_unknown for one that is not known, was used up, ended, or expired. Never answers a token.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.sign_in_status"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attempt"
+          ],
+          "properties": {
+            "attempt": {
+              "$ref": "#/$defs/signInAttempt"
+            }
+          }
+        }
+      }
+    },
+    "connectorSignInStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "waiting",
+            "signed_in",
+            "failed"
+          ]
+        },
+        "reason": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "access_denied",
+                "sign_in_timed_out",
+                "sign_in_mismatch",
+                "sign_in_failed"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "description": "Farik's words for the step that failed and, where there was one, the HTTP status. It quotes nothing the service sent."
+            }
+          },
+          "description": "Present when state is failed."
         }
       }
     },

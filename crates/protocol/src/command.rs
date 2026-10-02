@@ -215,6 +215,8 @@ pub enum Command {
         server: serde_json::Map<String, Value>,
         /// The hash of the entry kept beside its keys.
         spec_sha256: String,
+        /// Who the agent signed in with, when the connector is signed in to (ADR 0033).
+        issuer: Option<String>,
     },
     /// Take a custom MCP server away from an agent.
     ConnectorDisconnect {
@@ -497,6 +499,7 @@ fn connector_command(name: CommandName, body: &Value) -> Result<Command, Vec<Val
             agent: body.agent.to_string(),
             server: body.server,
             spec_sha256: body.spec_sha256.to_string(),
+            issuer: body.issuer.map(|issuer| issuer.to_string()),
         })
     } else {
         let body: ConnectorDisconnectBody = read_body(body, name)?;
@@ -709,10 +712,14 @@ fn connector_wire(command: &Command) -> (CommandName, Value) {
             agent,
             server,
             spec_sha256,
-        } => (
-            CommandName::ConnectorConnect,
-            json!({ "agent": agent, "server": server, "spec_sha256": spec_sha256 }),
-        ),
+            issuer,
+        } => {
+            let mut body = json!({ "agent": agent, "server": server, "spec_sha256": spec_sha256 });
+            if let Some(issuer) = issuer {
+                body["issuer"] = json!(issuer);
+            }
+            (CommandName::ConnectorConnect, body)
+        }
         Command::ConnectorDisconnect { agent, server } => (
             CommandName::ConnectorDisconnect,
             json!({ "agent": agent, "server": server }),
@@ -960,6 +967,26 @@ mod tests {
         assert_eq!(contract.id.to_string(), "FRK-1");
         // The validator applied the schema's defaults, which is the proof it was the one used.
         assert_eq!(contract.budget.max_sessions.get(), 14);
+    }
+
+    #[test]
+    fn a_connector_connect_names_who_signed_the_agent_in_only_when_it_did() {
+        let hash = "a".repeat(64);
+        for issuer in [None, Some("https://auth.example")] {
+            let mut body = json!({
+                "agent": "dev-a", "server": { "name": "notion" }, "spec_sha256": hash
+            });
+            if let Some(issuer) = issuer {
+                body["issuer"] = json!(issuer);
+            }
+            let wire = json!({ "command": "connector_connect", "body": body });
+            let command = command_from_value(&wire).expect("valid");
+            let Command::ConnectorConnect { issuer: read, .. } = &command else {
+                panic!("a connector_connect");
+            };
+            assert_eq!(read.as_deref(), issuer);
+            assert_eq!(command_to_value(&command), wire);
+        }
     }
 
     #[test]

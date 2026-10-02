@@ -861,6 +861,7 @@
       "properties": {
         "agent": { "type": "string", "minLength": 1 },
         "server": { "type": "string", "minLength": 1 },
+        "issuer": { "type": "string", "minLength": 1, "description": "Who signed the agent in, when it signed in to the service instead of being given keys (ADR 0033). No token is ever here." },
         "transport": { "type": "string", "enum": ["stdio", "http"] },
         "credential_keys": { "type": "array", "items": { "type": "string" } },
         "tools": { "type": "object", "additionalProperties": { "$ref": "#/$defs/connectorTag" } },

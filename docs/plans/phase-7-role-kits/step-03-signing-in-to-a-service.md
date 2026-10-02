@@ -262,7 +262,7 @@ Files: `daemon/team.rs`, `daemon/web.rs`, `orchestrator/human.rs`, `rpc.schema.j
 - `connect_again_revokes_the_replaced_grant`: a second sign-in and connect for the same server sends the first grant's refresh token to `/revoke`.
 - `team_get_says_auth_and_sign_in_again`: a lapsed grant gives `state: sign_in_again`, `auth: oauth`; a key server, `auth: keys`; a grant whose metadata had no revocation endpoint, `revokes: false`.
 
-- [ ] `feat(runtime): sign an agent in to a service from the web app`
+- [x] `feat(runtime): sign an agent in to a service from the web app`
 
 ### Task 7: The command line
 

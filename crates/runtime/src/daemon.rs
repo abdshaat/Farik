@@ -177,6 +177,8 @@ pub struct DaemonState {
     /// One lock per connector entry, by account: refresh, connect, disconnect and the deletes each
     /// take it, so a token refreshed while the entry is removed is not kept (ADR 0033).
     entry_locks: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// The sign-ins under way or finished and not yet used, by attempt, in memory only (ADR 0033).
+    sign_ins: Mutex<BTreeMap<String, signed_in::Attempt>>,
 }
 
 /// What a kept entry says of the agent's sign-in to the service.
@@ -242,6 +244,7 @@ impl DaemonState {
             connectors_kept: Mutex::new(BTreeMap::new()),
             state_dir: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
+            sign_ins: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -262,6 +265,7 @@ impl DaemonState {
             connectors_kept: Mutex::new(BTreeMap::new()),
             state_dir: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
+            sign_ins: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -384,6 +388,33 @@ impl DaemonState {
                 .entry(at.account())
                 .or_default(),
         )
+    }
+
+    /// Deletes the entry at `at`, which will never run again, and asks the service to forget a
+    /// sign-in it held, from a caller that cannot wait: at once when no one else is changing the
+    /// entry, else on a task that waits its turn (ADR 0033). The request to the service is always
+    /// a task of its own.
+    pub(crate) fn forget_entry(&self, at: &SecretAt) {
+        let (secrets, lock, entry_at) = (self.connector_secrets(), self.entry_lock(at), at.clone());
+        match Arc::clone(&lock).try_lock_owned() {
+            Ok(held) => {
+                signed_in::delete_and_revoke(&secrets, &entry_at);
+                drop(held);
+            }
+            Err(_) => {
+                if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                    runtime.spawn(async move {
+                        let held = lock.lock_owned().await;
+                        let _ = tokio::task::spawn_blocking(move || {
+                            signed_in::delete_and_revoke(&secrets, &entry_at);
+                            drop(held);
+                        })
+                        .await;
+                    });
+                }
+            }
+        }
+        self.forget_kept(at);
     }
 
     /// What the store held for `at` the last time it was read, read now the first time.

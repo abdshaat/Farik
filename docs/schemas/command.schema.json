@@ -223,7 +223,8 @@
       "properties": {
         "agent": { "type": "string", "minLength": 1 },
         "server": { "type": "object" },
-        "spec_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "spec_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "issuer": { "type": "string", "minLength": 1, "description": "Who signed the agent in, when the connector is signed in to rather than given keys; recorded on connector.connected. The grant itself is kept by whoever sends this, never here." }
       }
     },
     "connectorDisconnectBody": {

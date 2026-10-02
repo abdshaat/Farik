@@ -84,6 +84,7 @@ pub(crate) fn connect(
             agent: asked.agent.to_string(),
             server: entry.as_object().cloned().unwrap_or_default(),
             spec_sha256: spec,
+            issuer: None,
         },
         "connect",
         io,
