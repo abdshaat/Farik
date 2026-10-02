@@ -5,7 +5,7 @@ Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6.7, 5.5, 5.6, 8.5; F9, F17
 Depends on: step 05 of this phase (its `Kit`, `KitAllowance`, `kit_entry`, `matches_kit`, `ToolDeps.kits`, the `source: kit` entry and the boards of its Task 1; it lands first), step 02 (the grant and the ask), phase 6 (merged in #19)
 Readiness confirmed by: fresh-session Opus reviewer, 2026-10-02: ready with should-fixes, all folded
-Mockups approved by: pending (step 05's O1; this step draws no boards of its own)
+Mockups approved by: the founder, 2026-10-02 (step 05's O1; this step draws no boards of its own)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 

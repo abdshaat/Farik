@@ -5,7 +5,7 @@ Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6.7, 5.6, 8.1, 8.2, 8.5; F9
 Depends on: steps 01, 02, 03, 03b, 04 and 04b of this phase (committed on this branch; the branch was at 8cf2122 at the readiness review, two test-port fixes and this plan after dc8f41f), phase 6 (merged in #19)
 Readiness confirmed by: fresh-session Opus reviewer, 2026-10-02: not ready, 3 Blocking, all folded; no second round (ADR 0032)
-Mockups approved by: pending (O1)
+Mockups approved by: the founder, 2026-10-02
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -124,7 +124,7 @@ An Opus session (ADR 0032) draws these on the canvas (https://claude.ai/artifact
 
 Gate (O1): the founder approves the boards, or says to approve them automatically, and the approval is written into this plan's header and step 05b's with its date.
 
-- [ ] `docs(design): mock up connecting a kit and its allowances`
+- [x] `docs(design): mock up connecting a kit and its allowances` (aa83951, ce7ba9c, 26d6b77; approved by the founder, 2026-10-02)
 
 ### Task 2: The kit file and its loader
 
