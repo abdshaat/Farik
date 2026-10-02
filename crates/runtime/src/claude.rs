@@ -726,6 +726,12 @@ pub fn write_session_files(
         return Ok(());
     }
     let plugin = config.skills_dir.join(&spec.session_id);
+    if !config.skills_dir.is_absolute() {
+        return Err(io(
+            &plugin,
+            std::io::Error::other("no skills folder: the state folder is not known"),
+        ));
+    }
     crate::skills::write_plugin(&plugin, &spec.skills).map_err(|error| io(&plugin, error))
 }
 
@@ -1154,6 +1160,26 @@ mod tests {
         };
         let args = claude_args(&bare, &config, &session_dir(&config, &bare), false).expect("args");
         assert_eq!(value_after(&args, "--tools"), "");
+    }
+
+    #[test]
+    fn a_session_with_skills_needs_an_absolute_skills_dir() {
+        let project = a_project("claude-skills-relative");
+        let good = config(&project);
+        let config = ClaudeConfig {
+            skills_dir: PathBuf::new(),
+            ..good.clone()
+        };
+        let with = SessionSpec {
+            skills: vec![a_skill()],
+            ..spec()
+        };
+        let written = write_session_files(&with, &config, &session_dir(&good, &with));
+        assert!(written.is_err(), "{written:?}");
+        assert!(
+            !Path::new(&with.session_id).exists(),
+            "nothing is written relative to the working directory"
+        );
     }
 
     #[test]
