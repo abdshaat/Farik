@@ -992,17 +992,35 @@ pub(crate) fn status_effects(
     Ok(events)
 }
 
-/// Deletes the connector keys of each agent `before` has and `after` does not: one removed from
-/// the team, rather than retired, never runs again either (ADR 0030).
-pub(crate) fn forget_removed_agents_keys(
+/// Deletes the keys of each custom server an agent has in `before` and not in `after`: one taken
+/// away by a save, or whose agent was removed from the team rather than retired, never runs again
+/// either (ADR 0030; re-review N8).
+pub(crate) fn forget_removed_keys(
     tools: &ToolDeps,
     daemon: &DaemonState,
     before: &Team,
     after: &Team,
 ) {
-    for agent in &before.agents {
-        if !after.agents.iter().any(|kept| kept.id == agent.id) {
-            forget_connector_keys(tools, daemon, before, agent.id.as_str());
+    let custom = |team: &Team| -> Vec<(String, String)> {
+        team.agents
+            .iter()
+            .flat_map(|agent| {
+                agent
+                    .mcp_servers
+                    .iter()
+                    .flatten()
+                    .filter_map(custom_server)
+                    .map(|server| (agent.id.to_string(), server.name))
+            })
+            .collect()
+    };
+    let kept = custom(after);
+    for (agent, server) in custom(before) {
+        if !kept.contains(&(agent.clone(), server.clone()))
+            && let Ok(at) = secret_at(daemon, tools, &agent, &server)
+        {
+            let _ = daemon.connector_secrets().delete(&at);
+            daemon.forget_kept(&at);
         }
     }
 }

@@ -917,7 +917,7 @@ fn write_team(deps: &ToolDeps, state: &DaemonState, team: &Team) -> Result<(), F
     let before = deps.files.read_team().ok();
     deps.files.write_team(team).map_err(|e| internal(&e))?;
     if let Some(before) = before {
-        crate::orchestrator::forget_removed_agents_keys(deps, state, &before, team);
+        crate::orchestrator::forget_removed_keys(deps, state, &before, team);
     }
     append(deps, team_updated(team, None))
 }
@@ -2923,6 +2923,36 @@ pub(super) mod tests {
         connected(&harness, "dev-b", &server, &json!({}));
         let mut team = team_file(&harness);
         team["agents"].as_array_mut().expect("agents").remove(2);
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": team }),
+            "emptyResult",
+        );
+        let load = |agent: &str| {
+            store
+                .load(&kept_at(&harness, agent, "fixture"))
+                .expect("the store reads")
+        };
+        assert!(load("dev-b").is_none());
+        assert!(load("dev-a").is_some());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn removing_a_server_by_a_save_deletes_its_keys() {
+        // A save that takes one custom server from an agent, rather than `connector.disconnect`,
+        // leaves nothing kept for it either (re-review N8).
+        let (harness, store) = keeping("connector-remove-server");
+        let server = fixture_server("remove-server");
+        connected(&harness, "dev-a", &server, &json!({}));
+        connected(&harness, "dev-b", &server, &json!({}));
+        let mut team = team_file(&harness);
+        assert_eq!(team["agents"][2]["id"], "dev-b");
+        team["agents"][2]
+            .as_object_mut()
+            .expect("an agent")
+            .remove("mcp_servers");
         call(
             &harness.daemon,
             "team.save",

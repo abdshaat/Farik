@@ -199,7 +199,7 @@ fn apply(
     deps.files
         .write_team(&applied.team)
         .map_err(|e| internal(&e))?;
-    crate::orchestrator::forget_removed_agents_keys(deps, state, &before, &applied.team);
+    crate::orchestrator::forget_removed_keys(deps, state, &before, &applied.team);
     for agent_id in &applied.retired {
         crate::orchestrator::status_effects(
             deps,
