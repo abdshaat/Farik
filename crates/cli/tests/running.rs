@@ -97,6 +97,9 @@ fn warned(err: &str) -> bool {
     err.contains("~/.git-credentials")
         && err.contains("a git hidden in a script")
         && err.contains(".farik/local/daemon.json, whose token lets them act as you through farik")
+        // ADR 0030: the token also gets a connector's keys, as does its process's environment.
+        && err.contains("and get the keys you gave a connector")
+        && err.contains("/proc/<pid>/environ")
 }
 
 fn lock_is_free(repository: &TempRepo) {
