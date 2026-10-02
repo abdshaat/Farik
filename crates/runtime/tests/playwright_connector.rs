@@ -287,13 +287,18 @@ impl RunningPreview for BridgePreview {
     }
 }
 
-/// How many requests the sink has answered.
-fn sink_hits(sink: &str) -> usize {
-    docker(&["logs", sink])
-        .1
+/// The sink's whole log, for a failure message.
+fn sink_log(sink: &str) -> String {
+    docker(&["logs", sink]).1
+}
+
+/// The `url:` line of each request the sink has answered.
+fn sink_requests(sink: &str) -> Vec<String> {
+    sink_log(sink)
         .lines()
         .filter(|line| line.contains("url:"))
-        .count()
+        .map(str::to_string)
+        .collect()
 }
 
 /// The connector's arguments with one confinement flag, and its value, left out.
@@ -480,7 +485,11 @@ fn the_browser_reaches_only_the_preview() {
         away.contains("ERR_PROXY_CONNECTION_FAILED"),
         "(b) redirect: {away}"
     );
-    assert_eq!(sink_hits(&sink), 0, "(b) a request left the namespace");
+    assert!(
+        sink_requests(&sink).is_empty(),
+        "(b) a request left the namespace: {}",
+        sink_log(&sink)
+    );
 
     // (c) The bridge, and `--allowed-origins` alone: it blocks the direct navigation, and not the
     // redirect, which reaches example.com, as the server's README says. That is why the proxy is.
@@ -491,10 +500,16 @@ fn the_browser_reaches_only_the_preview() {
         direct.contains("ERR_BLOCKED_BY_CLIENT"),
         "(c) direct: {direct}"
     );
+    // Only the redirect's own request counts: a second one (a favicon, a retry) is the browser's.
+    let redirects = sink_requests(&sink)
+        .iter()
+        .filter(|line| line.ends_with("url:/"))
+        .count();
     assert_eq!(
-        sink_hits(&sink),
+        redirects,
         1,
-        "(c) the redirect, and only the redirect, reached example.com"
+        "(c) the redirect reached example.com once; the sink's log: {}",
+        sink_log(&sink)
     );
     let _ = std::fs::remove_dir_all(&root);
 }
