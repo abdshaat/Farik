@@ -10,8 +10,15 @@ import type { McpServer } from "./setup/TeamSetup.tsx";
 export type Tag = "network" | "external_effect" | "denied";
 type Listed = { name: string; description: string; usable: boolean };
 type Key = { name: string; value: string };
-/** A field of step 1 a refusal can be said at. */
-type Field = "name" | "command" | "url" | "header" | "keys" | "other";
+/** A field of step 1 a refusal can be said at; `arg-<n>` is the command's part n, from 0. */
+type Field =
+	| "name"
+	| "command"
+	| `arg-${number}`
+	| "url"
+	| "header"
+	| "keys"
+	| "other";
 
 /** Each label, in the order it is offered, with its words (SPEC 5.6). */
 export const TAGS: [Tag, keyof typeof en, keyof typeof en][] = [
@@ -44,8 +51,9 @@ function holdsSecret(url: string): boolean {
 
 /** Where on step 1 a team refusal at `/agents/<n>/mcp_servers/<m>/<field>` belongs. */
 function fieldOf(path: string): Field {
-	const field = path.split("/")[5];
+	const [field, index] = path.split("/").slice(5);
 	if (field === "name") return "name";
+	if (field === "args" && index !== undefined) return `arg-${Number(index)}`;
 	if (field === "command" || field === "args") return "command";
 	if (field === "url") return "url";
 	if (field === "headers") return "header";
@@ -61,6 +69,7 @@ const BY_CODE: Record<string, keyof typeof en> = {
 	header_key_unknown: "addHeaderWrong",
 	header_holds_secret: "addHeaderSecret",
 	command_not_absolute: "addCommandNotAbsolute",
+	arg_holds_secret: "addArgSecret",
 	tag_unknown_tool: "addTagUnknown",
 };
 
@@ -69,7 +78,7 @@ const codeOf = (message: string) => /^([a-z_]+): /.exec(message)?.[1] ?? "";
 
 /** A refusal's words at its field. The team's own sentence leads with its code; the page never shows it. */
 function wordsFor(r: Refusal, field: Field, fill: Record<string, string>) {
-	const byField: Record<Field, keyof typeof en> = {
+	const byField: Record<string, keyof typeof en> = {
 		name: "addNameWrong",
 		command: "addCommandWrong",
 		url: "addUrlWrong",
@@ -77,7 +86,10 @@ function wordsFor(r: Refusal, field: Field, fill: Record<string, string>) {
 		keys: "addKeyWrong",
 		other: "refuseOther",
 	};
-	return t(BY_CODE[codeOf(r.message)] ?? byField[field], fill);
+	return t(
+		BY_CODE[codeOf(r.message)] ?? byField[field] ?? "addCommandWrong",
+		fill,
+	);
 }
 
 /** A failed list or connect, in plain words at the fields it names; never the daemon's own words. */
@@ -128,9 +140,9 @@ export function ConnectorAdd({
 	const [transport, setTransport] = useState<"stdio" | "http">(
 		again?.transport ?? "stdio",
 	);
-	const [command, setCommand] = useState(
-		[again?.command ?? "", ...(again?.args ?? [])].join(" ").trim(),
-	);
+	const [command, setCommand] = useState(again?.command ?? "");
+	// Each part after the program in a field of its own, so one holding a space is kept whole.
+	const [args, setArgs] = useState<string[]>(again?.args ?? []);
 	const [url, setUrl] = useState(again?.url ?? "");
 	// The field holds the first header; Connect again keeps the others as the team file has them.
 	const [first, ...others] = Object.entries(again?.headers ?? {});
@@ -157,8 +169,6 @@ export function ConnectorAdd({
 	const secretInUrl = http && holdsSecret(url);
 	const [headerName, ...rest] = header.split(":");
 	const headerOk = !header.trim() || (rest.length > 0 && headerName?.trim());
-	const words = command.trim().split(/\s+/);
-	// ponytail: the command splits on spaces; an argument holding a space needs `farik connect`.
 	const wire = {
 		name: server.trim(),
 		transport,
@@ -174,7 +184,7 @@ export function ConnectorAdd({
 						},
 					}),
 				}
-			: { command: words[0], args: words.slice(1) }),
+			: { command: command.trim(), args: args.filter((a) => a !== "") }),
 		credentialKeys: named.map((k) => k.name.trim()),
 	};
 	const keysWire = Object.fromEntries(
@@ -235,6 +245,8 @@ export function ConnectorAdd({
 		tools.length - usable.length,
 	);
 	const file = done?.storedIn === "file";
+	const setArg = (i: number, value: string) =>
+		setArgs(args.map((old, j) => (j === i ? value : old)));
 	const setKey = (i: number, k: Partial<Key>) =>
 		setKeys(keys.map((old, j) => (j === i ? { ...old, ...k } : old)));
 
@@ -300,14 +312,46 @@ export function ConnectorAdd({
 							)}
 						</>
 					) : (
-						<TextField
-							id="connector-command"
-							label={t("addCommand")}
-							hint={t("addCommandHint")}
-							value={command}
-							error={refused.command ?? ""}
-							onChange={setCommand}
-						/>
+						<>
+							<TextField
+								id="connector-command"
+								label={t("addCommand")}
+								hint={t("addCommandHint")}
+								value={command}
+								error={refused.command ?? ""}
+								onChange={setCommand}
+							/>
+							<fieldset className={styles.group}>
+								<legend className={styles.subheading}>{t("addArgs")}</legend>
+								<p className={styles.muted}>{t("addArgsHint")}</p>
+								{args.map((a, i) => (
+									// biome-ignore lint/suspicious/noArrayIndexKey: a part is its place in the command
+									<div key={i} className={styles.keyRow}>
+										<TextField
+											id={`connector-arg-${i}`}
+											label={t("addArg", { count: i + 1 })}
+											value={a}
+											error={refused[`arg-${i}`] ?? ""}
+											onChange={(value) => setArg(i, value)}
+										/>
+										<Button
+											kind="quiet"
+											onClick={() => setArgs(args.filter((_, j) => j !== i))}
+										>
+											{t("addKeyRemove")}{" "}
+											<span className={styles.hidden}>
+												{t("addArgRemoveLabel", { count: i + 1 })}
+											</span>
+										</Button>
+									</div>
+								))}
+								<span>
+									<Button onClick={() => setArgs([...args, ""])}>
+										{t("addArgMore")}
+									</Button>
+								</span>
+							</fieldset>
+						</>
 					)}
 					{!secretInUrl && (
 						<fieldset className={styles.group}>

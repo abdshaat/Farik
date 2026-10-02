@@ -128,9 +128,13 @@ async function startedAdding(key = "pat-secret-1", sandboxed = true) {
 	});
 	const field = (label: string) => within(dialog).getByLabelText(label);
 	fireEvent.change(field(en.addName), { target: { value: "airtable" } });
-	fireEvent.change(field(en.addCommand), {
-		target: { value: "npx -y airtable-connector" },
-	});
+	fireEvent.change(field(en.addCommand), { target: { value: "npx" } });
+	for (const [i, part] of ["-y", "airtable-connector"].entries()) {
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.addArgMore }),
+		);
+		fireEvent.change(field(`Part ${i + 1}`), { target: { value: part } });
+	}
 	fireEvent.change(field(en.addKeyName), {
 		target: { value: "AIRTABLE_API_KEY" },
 	});
@@ -477,6 +481,81 @@ describe("connectors on the agent page", () => {
 			Authorization: "Bearer {LINEAR_KEY}",
 			"X-Workspace": "corner-bakery",
 		});
+	});
+
+	it("connector_add_takes_each_part_of_a_command_in_its_own_field", async () => {
+		// Split on spaces, a path holding one could not be entered (re-review N6).
+		const { container, s } = await opened([]);
+		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(
+			screen.getByRole("button", { name: en.connectorCustomAdd }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Add a custom connector to Theo",
+		});
+		const field = (label: string) => within(dialog).getByLabelText(label);
+		fireEvent.change(field(en.addName), { target: { value: "files" } });
+		fireEvent.change(field(en.addCommand), { target: { value: "node" } });
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.addArgMore }),
+		);
+		fireEvent.change(field("Part 1"), {
+			target: { value: "/home/u/My Servers/x.js" },
+		});
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.addArgMore }),
+		);
+		fireEvent.change(field("Part 2"), { target: { value: "--read-only" } });
+		fireEvent.change(field(en.addKeyName), { target: { value: "FILES_KEY" } });
+		await expectNoAxeViolations(container);
+		fireEvent.click(within(dialog).getByRole("button", { name: en.addNext }));
+		const asked = await sent(s, "connector.tools");
+		const server = (asked.params as { server: object }).server;
+		expect(server).toMatchObject({
+			command: "node",
+			args: ["/home/u/My Servers/x.js", "--read-only"],
+		});
+
+		// A refusal at one part is said at that part, in plain words.
+		await s.fail(asked, -32005, "the team file is not valid", {
+			errors: [
+				{
+					path: "/agents/1/mcp_servers/0/args/1",
+					message: "arg_holds_secret: argument 2 looks like a key",
+					code: "invalid",
+				},
+			],
+		});
+		expect(field("Part 2").getAttribute("aria-invalid")).toBe("true");
+		expect(field("Part 1").getAttribute("aria-invalid")).not.toBe("true");
+		expect(within(dialog).getByText(en.addArgSecret)).toBeTruthy();
+		expect(within(dialog).queryByText(/arg_holds_secret/)).toBeNull();
+		await expectNoAxeViolations(container);
+
+		// A part is removed by its own button.
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Remove part 2" }),
+		);
+		expect(within(dialog).queryByLabelText("Part 2")).toBeNull();
+	});
+
+	it("connect_again_shows_each_part_of_the_command", async () => {
+		await opened([
+			{ agent: "theo", server: "airtable", state: "connect_again" },
+		]);
+		fireEvent.click(
+			within(row("airtable")).getByRole("button", {
+				name: en.connectorAgainButton,
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Add airtable to Theo",
+		});
+		const value = (label: string) =>
+			(within(dialog).getByLabelText(label) as HTMLInputElement).value;
+		expect(value(en.addCommand)).toBe("npx");
+		expect(value("Part 1")).toBe("-y");
+		expect(value("Part 2")).toBe("airtable-connector");
 	});
 
 	it("connector_add_offers_three_labels_and_defaults_to_asks", async () => {

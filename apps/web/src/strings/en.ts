@@ -1154,7 +1154,13 @@ export const en = {
 	addUrlChoiceNote: "The service runs it for you.",
 	addCommand: "Command",
 	addCommandHint:
-		"Copy it from the connector’s instructions. It runs on this computer with your rights, so use only one you trust.",
+		"The program the connector’s instructions start with, like npx, or its full path, starting with /. It runs on this computer with your rights, so use only one you trust.",
+	addArgs: "What comes after it",
+	addArgsHint:
+		"Copy each part that follows the program in the connector’s instructions into a field of its own, without quotes.",
+	addArg: "Part {count}",
+	addArgRemoveLabel: "part {count}",
+	addArgMore: "Add a part",
 	addUrl: "Web address",
 	addUrlHint: "Copy it from the service’s instructions.",
 	addUrlSecret:
@@ -1211,6 +1217,8 @@ export const en = {
 		"Write a name, a colon, then the value, like Authorization: Bearer {API_KEY}, naming only the keys below.",
 	addCommandNotAbsolute:
 		"Farik cannot find a program by a path like this one. Give the program’s name alone, like npx, or its full path, starting with /.",
+	addArgSecret:
+		"This puts a key itself in your project’s shared settings. Leave it out here, and type the key under Keys, named as the connector’s instructions name it.",
 	addHeaderSecret:
 		"This puts the key itself in your project’s shared settings. Write {API_KEY} where the key goes, and type the key under Keys.",
 	addTagUnknown:
