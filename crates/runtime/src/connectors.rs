@@ -10,6 +10,7 @@ use farik_core::team::{CustomServer, CustomTransport};
 
 use crate::claude::Secret;
 use crate::credential::{CredentialError, map_keyring_error, read_keychain};
+use crate::sign_in::OAuthGrant;
 
 /// The keychain entry's service.
 pub const SERVICE: &str = "farik";
@@ -144,6 +145,8 @@ pub struct ConnectorEntry {
     pub spec_sha256: String,
     /// Each key's name and value.
     pub keys: BTreeMap<String, Secret>,
+    /// The agent's sign-in to the service, when it signed in instead of pasting a key.
+    pub oauth: Option<OAuthGrant>,
 }
 
 impl fmt::Debug for ConnectorEntry {
@@ -157,6 +160,7 @@ impl fmt::Debug for ConnectorEntry {
             .debug_struct("ConnectorEntry")
             .field("spec_sha256", &self.spec_sha256)
             .field("keys", &keys)
+            .field("oauth", &self.oauth)
             .finish()
     }
 }
@@ -169,7 +173,11 @@ impl ConnectorEntry {
             .iter()
             .map(|(name, secret)| (name.clone(), secret.expose().into()))
             .collect();
-        serde_json::json!({ "spec_sha256": self.spec_sha256, "keys": keys })
+        let mut stored = serde_json::json!({ "spec_sha256": self.spec_sha256, "keys": keys });
+        if let Some(grant) = &self.oauth {
+            stored["oauth"] = grant.to_json();
+        }
+        stored
     }
 
     /// The entry a stored form holds. The error never quotes the form, which holds the keys.
@@ -189,9 +197,14 @@ impl ConnectorEntry {
                 Ok((name.clone(), Secret::new(secret.to_string())))
             })
             .collect::<Result<_, CredentialError>>()?;
+        let oauth = match &value["oauth"] {
+            serde_json::Value::Null => None,
+            stored => Some(OAuthGrant::from_json(stored).ok_or_else(unreadable)?),
+        };
         Ok(ConnectorEntry {
             spec_sha256: spec_sha256.to_string(),
             keys,
+            oauth,
         })
     }
 
@@ -613,7 +626,8 @@ pub fn launch_spec(
     })
 }
 
-/// The headers the http `server` is sent with the keys in `entry`: each template filled.
+/// The headers the http `server` is sent with the keys in `entry`: each template filled, and
+/// `Authorization: Bearer <access token>` when the entry holds a sign-in.
 ///
 /// # Errors
 ///
@@ -629,10 +643,18 @@ pub fn launch_headers(
             server.name
         )));
     };
-    headers
+    let mut sent: BTreeMap<String, Secret> = headers
         .iter()
         .map(|(name, template)| Ok((name.clone(), Secret::new(filled(template, &entry.keys)?))))
-        .collect()
+        .collect::<Result<_, ConnectorError>>()?;
+    if let Some(grant) = &entry.oauth {
+        sent.retain(|name, _| !name.eq_ignore_ascii_case("authorization"));
+        sent.insert(
+            "Authorization".to_string(),
+            Secret::new(format!("Bearer {}", grant.access_token.expose())),
+        );
+    }
+    Ok(sent)
 }
 
 /// The entry kept for `server` at `at`, when it was connected as the team file has it now: its
@@ -720,7 +742,7 @@ fn usable_tool_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-/// The tools `server` lists when started, or reached, with `keys`. A stdio server runs in `folder`
+/// The tools `server` lists when started, or reached, with `keys`, and `bearer` as its `Authorization`. A stdio server runs in `folder`
 /// with only [`KEPT_ENV`] and its keys; the whole listing gives up after thirty seconds.
 ///
 /// # Errors
@@ -730,6 +752,7 @@ fn usable_tool_name(name: &str) -> bool {
 pub async fn list_tools(
     server: &CustomServer,
     keys: &BTreeMap<String, Secret>,
+    bearer: Option<&Secret>,
     folder: &std::path::Path,
 ) -> Result<Vec<ListedTool>, ConnectorError> {
     use rmcp::ServiceExt as _;
@@ -767,8 +790,11 @@ pub async fn list_tools(
                 ().serve(transport).await
             }
             CustomTransport::Http { url, headers, .. } => {
-                let config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str())
+                let mut config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str())
                     .custom_headers(filled_headers(headers, keys)?);
+                if let Some(bearer) = bearer {
+                    config = config.auth_header(bearer.expose());
+                }
                 ().serve(rmcp::transport::StreamableHttpClientTransport::from_config(config)).await
             }
         }
@@ -818,6 +844,7 @@ mod tests {
                 "API_KEY".to_string(),
                 Secret::new("ghp-secret-value".to_string()),
             )]),
+            oauth: None,
         }
     }
 
@@ -1325,6 +1352,94 @@ mod tests {
             filled("Bearer {API_KEY} {TOKEN}", &keys),
             Ok("Bearer {TOKEN} t".to_string())
         );
+    }
+
+    /// An entry that signed in, its tokens recognisable.
+    fn signed_in_entry() -> ConnectorEntry {
+        ConnectorEntry {
+            spec_sha256: "abc".to_string(),
+            keys: BTreeMap::new(),
+            oauth: Some(OAuthGrant {
+                issuer: "https://auth.example".to_string(),
+                resource: "https://mcp.example/mcp".to_string(),
+                client_id: "client-1".to_string(),
+                token_endpoint: "https://auth.example/token".to_string(),
+                revocation_endpoint: Some("https://auth.example/revoke".to_string()),
+                access_token: Secret::new("access-secret-value".to_string()),
+                refresh_token: Some(Secret::new("refresh-secret-value".to_string())),
+                issued_at: "2026-10-02T10:00:00Z".parse().expect("a time"),
+                expires_at: Some("2026-10-02T11:00:00Z".parse().expect("a time")),
+                scopes: vec!["read".to_string(), "offline_access".to_string()],
+                lapsed: false,
+            }),
+        }
+    }
+
+    #[test]
+    fn an_oauth_entry_round_trips_and_never_prints() {
+        let dir = scratch("oauth-round-trip");
+        let store = FileConnectorSecrets::new(dir.join("connectors.json"));
+        let theo = at("theo", "notion");
+        let entry = signed_in_entry();
+        store.save(&theo, &entry).expect("kept");
+        assert_eq!(store.load(&theo), Ok(Some(entry.clone())));
+        // A lapsed grant, and one with neither a refresh token, an expiry nor a revocation endpoint.
+        let mut bare = entry.clone();
+        if let Some(grant) = &mut bare.oauth {
+            grant.lapsed = true;
+            grant.refresh_token = None;
+            grant.expires_at = None;
+            grant.revocation_endpoint = None;
+        }
+        store.save(&theo, &bare).expect("kept");
+        assert_eq!(store.load(&theo), Ok(Some(bare)));
+        for printed in [
+            format!("{entry:?}"),
+            format!("{:?}", entry.oauth),
+            format!("{:#?}", entry.oauth),
+        ] {
+            assert!(printed.contains("***"), "{printed}");
+            assert!(!printed.contains("access-secret-value"), "{printed}");
+            assert!(!printed.contains("refresh-secret-value"), "{printed}");
+        }
+    }
+
+    #[test]
+    fn an_entry_stored_before_has_no_oauth() {
+        let entry = ConnectorEntry::from_text(r#"{"spec_sha256":"abc","keys":{}}"#)
+            .expect("an entry from before");
+        assert_eq!(entry.oauth, None);
+        assert_eq!(entry.spec_sha256, "abc");
+        // And one with no sign-in is stored as it was, with no `oauth` member.
+        assert_eq!(
+            super::ConnectorEntry::to_json(&entry),
+            serde_json::json!({ "spec_sha256": "abc", "keys": {} })
+        );
+    }
+
+    #[test]
+    fn launch_headers_send_the_bearer() {
+        let server = CustomServer {
+            name: "notion".to_string(),
+            transport: CustomTransport::Http {
+                url: "https://mcp.example/mcp".to_string(),
+                headers: BTreeMap::from([("X-Workspace".to_string(), "a".to_string())]),
+                oauth: Some(farik_core::team::OAuthSettings {
+                    client_id: None,
+                    callback_port: None,
+                    scopes: Vec::new(),
+                }),
+            },
+            credential_keys: Vec::new(),
+            tools: BTreeMap::new(),
+        };
+        let headers = launch_headers(&server, &signed_in_entry()).expect("headers");
+        assert_eq!(
+            headers.get("Authorization").map(Secret::expose),
+            Some("Bearer access-secret-value")
+        );
+        assert_eq!(headers.get("X-Workspace").map(Secret::expose), Some("a"));
+        assert_eq!(headers.len(), 2);
     }
 
     #[test]

@@ -94,7 +94,7 @@ fn tool<'a>(tools: &'a [ListedTool], name: &str) -> &'a ListedTool {
 #[tokio::test]
 async fn lists_a_stdio_servers_tools() {
     let server = stdio_server("lists", STDIO_SERVER, &[]);
-    let tools = list_tools(&server, &BTreeMap::new(), &own_folder())
+    let tools = list_tools(&server, &BTreeMap::new(), None, &own_folder())
         .await
         .expect("the tools are listed");
     assert_eq!(
@@ -124,7 +124,7 @@ async fn the_server_sees_its_keys_and_not_the_model_key() {
     }
     let server = stdio_server("env", STDIO_SERVER, &["API_KEY"]);
     let folder = scratch("env-folder");
-    let tools = list_tools(&server, &keys(&[("API_KEY", "k")]), &folder)
+    let tools = list_tools(&server, &keys(&[("API_KEY", "k")]), None, &folder)
         .await
         .expect("the tools are listed");
     assert_eq!(
@@ -201,14 +201,14 @@ async fn fills_http_headers_from_keys() {
         credential_keys: vec!["API_KEY".to_string()],
         tools: BTreeMap::from([("whoami".to_string(), ConnectorTag::Network)]),
     };
-    let tools = list_tools(&server, &keys(&[("API_KEY", "k")]), &own_folder())
+    let tools = list_tools(&server, &keys(&[("API_KEY", "k")]), None, &own_folder())
         .await
         .expect("the tools are listed");
     assert_eq!(tool(&tools, "whoami").description, "Bearer k");
 
     // A key the header names, with no value kept for it, is refused before anything is sent.
     assert_eq!(
-        list_tools(&server, &BTreeMap::new(), &own_folder()).await,
+        list_tools(&server, &BTreeMap::new(), None, &own_folder()).await,
         Err(ConnectorError::KeyMissing("API_KEY".to_string()))
     );
 }
@@ -216,7 +216,7 @@ async fn fills_http_headers_from_keys() {
 #[tokio::test]
 async fn marks_a_tool_name_claude_code_would_rewrite() {
     let server = stdio_server("marks", STDIO_SERVER, &[]);
-    let tools = list_tools(&server, &BTreeMap::new(), &own_folder())
+    let tools = list_tools(&server, &BTreeMap::new(), None, &own_folder())
         .await
         .expect("the tools are listed");
     assert!(tool(&tools, "search").usable);
@@ -237,7 +237,7 @@ async fn gives_up_after_thirty_seconds() {
     let watched = pid_file.clone();
     let (no_keys, folder) = (BTreeMap::new(), own_folder());
     let (listed, pid) = tokio::join!(
-        list_tools(&server, &no_keys, &folder),
+        list_tools(&server, &no_keys, None, &folder),
         tokio::task::spawn_blocking(move || {
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
             loop {
@@ -285,6 +285,7 @@ async fn a_servers_own_error_text_is_not_repeated() {
     let failed = list_tools(
         &server,
         &keys(&[("API_KEY", "k-secret-value")]),
+        None,
         &own_folder(),
     )
     .await

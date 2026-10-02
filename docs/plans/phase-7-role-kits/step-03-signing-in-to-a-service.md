@@ -229,7 +229,7 @@ Files: `connectors.rs`, `sign_in.rs`. Produces `ConnectorEntry.oauth`, `refreshe
 - `refresh_sends_the_kept_resource`: `/token` gets `resource=<grant.resource>` and `client_id`; an answer without `refresh_token` keeps the old one.
 - `revokes_the_refresh_token`: `/revoke` gets the refresh token with `token_type_hint=refresh_token`; a grant without one sends the access token; a `/revoke` answering 500 is not an error.
 
-- [ ] `feat(runtime): keep, refresh and revoke an agent's sign-in`
+- [x] `feat(runtime): keep, refresh and revoke an agent's sign-in`
 
 ### Task 5: Signed-in connectors in sessions
 

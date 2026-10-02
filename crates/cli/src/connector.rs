@@ -61,7 +61,7 @@ pub(crate) fn connect(
     let folder = working_folder(&state, &project.root, &at)
         .map_err(|error| format!("{}: {}", server.name, folder_refusal(&error)))?;
     let listed = runtime()?
-        .block_on(list_tools(&server, &keys, &folder))
+        .block_on(list_tools(&server, &keys, None, &folder))
         .map_err(|error| not_listed(&error))?;
     let tools = labelled(&listed, &tags)?;
     let (entry, server) = custom_entry(&project.team, asked.agent, &wire, Value::Object(tools))
@@ -74,6 +74,7 @@ pub(crate) fn connect(
             &ConnectorEntry {
                 spec_sha256: spec.clone(),
                 keys,
+                oauth: None,
             },
         )
         .map_err(|error| words(&error))?;

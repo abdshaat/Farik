@@ -2728,6 +2728,7 @@ mod tests {
                 crate::claude::Secret::new("k".to_string()),
             )]
             .into(),
+            oauth: None,
         };
         for agent in ["dev-a", "dev-b"] {
             store.save(&at(agent), &entry).expect("kept");

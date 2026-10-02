@@ -203,6 +203,7 @@ impl Project {
                     .iter()
                     .map(|key| (key.clone(), Secret::new(CONNECTOR_KEY.to_string())))
                     .collect(),
+                oauth: None,
             };
             store.save(&at, &entry).expect("kept");
         }

@@ -1816,6 +1816,7 @@ mod tests {
                         crate::claude::Secret::new(KEY_VALUE.to_string()),
                     )]
                     .into(),
+                    oauth: None,
                 };
                 store.save(&at, &entry).expect("kept");
             }
@@ -1967,6 +1968,7 @@ mod tests {
             let entry = crate::connectors::ConnectorEntry {
                 spec_sha256: farik_core::team::spec_sha256(&server),
                 keys: std::collections::BTreeMap::new(),
+                oauth: None,
             };
             daemon
                 .state

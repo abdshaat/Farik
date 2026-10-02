@@ -5,12 +5,15 @@
 #[path = "support/oauth_fixture.rs"]
 mod oauth_fixture;
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use base64::Engine;
 use chrono::Utc;
-use farik_core::team::OAuthSettings;
-use farik_runtime::sign_in::{OAuthGrant, SignInError, start_sign_in};
+use farik_core::team::{CustomServer, CustomTransport, OAuthSettings};
+use farik_runtime::claude::Secret;
+use farik_runtime::connectors::list_tools;
+use farik_runtime::sign_in::{OAuthGrant, SignInError, refreshed, revoke, start_sign_in};
 use oauth_fixture::{Fixture, Iss, Methods, callback, follow};
 use sha2::{Digest, Sha256};
 
@@ -384,7 +387,11 @@ async fn gives_up_starting_after_fifteen_seconds() {
     let starting = tokio::spawn(async move { start_sign_in(&url, &auto(), Utc::now()).await });
     // The clock is paused only once the held request is waiting: with it paused earlier, a
     // moment spent on real network I/O would let the clock jump.
-    while fixture.count("/.well-known/oauth-protected-resource/mcp") == 0 {
+    for _ in 0..300 {
+        if fixture.count("/.well-known/oauth-protected-resource/mcp") > 0 || starting.is_finished()
+        {
+            break;
+        }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     tokio::time::pause();
@@ -429,4 +436,294 @@ async fn refuses_an_endpoint_that_is_not_https() {
         refused,
         SignInError::Failed("http://mcp.example.com/mcp is not https".to_string())
     );
+}
+
+/// A grant the fixture honours, which expires `expires_in` from `now`.
+fn kept(
+    fixture: &Fixture,
+    now: chrono::DateTime<Utc>,
+    expires_in: Option<chrono::Duration>,
+) -> OAuthGrant {
+    let (access, refresh) = fixture.mint();
+    OAuthGrant {
+        issuer: fixture.origin.clone(),
+        resource: fixture.mcp_url.clone(),
+        client_id: "client-kept".to_string(),
+        token_endpoint: format!("{}/token", fixture.origin),
+        revocation_endpoint: Some(format!("{}/revoke", fixture.origin)),
+        access_token: Secret::new(access),
+        refresh_token: Some(Secret::new(refresh)),
+        issued_at: now,
+        expires_at: expires_in.map(|span| now + span),
+        scopes: Vec::new(),
+        lapsed: false,
+    }
+}
+
+const MINUTE: chrono::Duration = chrono::Duration::minutes(1);
+
+#[tokio::test]
+async fn lists_tools_with_the_signed_in_token() {
+    let fixture = Fixture::start().await;
+    let grant = kept(&fixture, Utc::now(), Some(MINUTE * 60));
+    let server = CustomServer {
+        name: "fixture".to_string(),
+        transport: CustomTransport::Http {
+            url: fixture.mcp_url.clone(),
+            headers: BTreeMap::new(),
+            oauth: Some(auto()),
+        },
+        credential_keys: Vec::new(),
+        tools: BTreeMap::new(),
+    };
+    let folder = std::env::temp_dir();
+    let tools = list_tools(
+        &server,
+        &BTreeMap::new(),
+        Some(&grant.access_token),
+        &folder,
+    )
+    .await
+    .expect("listed with the token");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "whoami");
+    assert_eq!(
+        tools[0].description,
+        format!("Bearer {}", grant.access_token.expose())
+    );
+    list_tools(&server, &BTreeMap::new(), None, &folder)
+        .await
+        .expect_err("without the token the server answers 401");
+}
+
+#[tokio::test]
+async fn refreshes_a_token_about_to_expire() {
+    let fixture = Fixture::start().await;
+    let now = Utc::now();
+    let grant = kept(&fixture, now, Some(MINUTE * 4));
+    let fresh = refreshed(&grant, now, Duration::from_mins(35), Duration::from_secs(3))
+        .await
+        .expect("refreshed")
+        .expect("it was due");
+    assert_ne!(fresh.access_token.expose(), grant.access_token.expose());
+    assert_ne!(
+        fresh.refresh_token.as_ref().map(Secret::expose),
+        grant.refresh_token.as_ref().map(Secret::expose),
+        "the refresh token rotated"
+    );
+    assert!(fresh.access_token.expose().starts_with("at-"));
+    assert!(fresh.expires_at.expect("expiry") > now + MINUTE * 35);
+    assert_eq!(fresh.issued_at, now);
+    assert_eq!(fresh.client_id, grant.client_id);
+    assert!(!fresh.lapsed);
+    let sent = &fixture.requests("/token")[0].form;
+    assert_eq!(sent["grant_type"], "refresh_token");
+    assert_eq!(
+        sent["refresh_token"],
+        grant.refresh_token.as_ref().expect("one").expose()
+    );
+}
+
+#[tokio::test]
+async fn leaves_a_fresh_token_alone() {
+    let fixture = Fixture::start().await;
+    let now = Utc::now();
+    let grant = kept(&fixture, now, Some(MINUTE * 120));
+    let outcome = refreshed(&grant, now, Duration::from_mins(35), Duration::from_secs(3)).await;
+    assert_eq!(outcome, Ok(None));
+    assert_eq!(fixture.count("/token"), 0);
+    // With no expiry known, a token is trusted for fifty minutes.
+    let unknown = kept(&fixture, now, None);
+    let soon = refreshed(
+        &unknown,
+        now + MINUTE * 49,
+        Duration::from_secs(60),
+        Duration::from_secs(3),
+    )
+    .await;
+    assert_eq!(soon, Ok(None));
+    let later = refreshed(
+        &unknown,
+        now + MINUTE * 51,
+        Duration::from_secs(60),
+        Duration::from_secs(3),
+    )
+    .await;
+    assert!(matches!(later, Ok(Some(_))), "{later:?}");
+}
+
+#[tokio::test]
+async fn a_refused_refresh_lapses() {
+    let now = Utc::now();
+    for (status, error) in [
+        (400, "invalid_grant"),
+        (401, "invalid_client"),
+        (400, "unauthorized_client"),
+    ] {
+        let fixture = Fixture::start().await;
+        let grant = kept(&fixture, now, Some(MINUTE));
+        fixture.set(|flags| flags.refresh_error = Some((status, error.to_string())));
+        let outcome = refreshed(
+            &grant,
+            now,
+            Duration::from_secs(600),
+            Duration::from_secs(3),
+        )
+        .await;
+        assert_eq!(outcome, Err(SignInError::Lapsed), "{error}");
+    }
+    let fixture = Fixture::start().await;
+    let grant = kept(&fixture, now, Some(MINUTE));
+    fixture.set(|flags| flags.refresh_error = Some((500, "server_error".to_string())));
+    let outcome = refreshed(
+        &grant,
+        now,
+        Duration::from_secs(600),
+        Duration::from_secs(3),
+    )
+    .await;
+    assert!(
+        matches!(outcome, Err(SignInError::Failed(_))),
+        "{outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_refresh_that_does_not_finish_in_time_fails() {
+    let fixture = Fixture::start().await;
+    let now = Utc::now();
+    let grant = kept(&fixture, now, Some(MINUTE));
+    fixture.hold("token");
+    let asked = tokio::spawn(async move {
+        refreshed(
+            &grant,
+            now,
+            Duration::from_secs(600),
+            Duration::from_secs(3),
+        )
+        .await
+    });
+    for _ in 0..300 {
+        if fixture.count("/token") > 0 || asked.is_finished() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        fixture.count("/token") > 0,
+        "the refresh reached the server"
+    );
+    tokio::time::pause();
+    let outcome = asked.await.expect("task");
+    assert!(
+        matches!(outcome, Err(SignInError::Failed(_))),
+        "{outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_grant_without_a_refresh_token_lapses_once_expired() {
+    let fixture = Fixture::start().await;
+    let now = Utc::now();
+    let mut valid = kept(&fixture, now, Some(MINUTE * 2));
+    valid.refresh_token = None;
+    assert_eq!(
+        refreshed(
+            &valid,
+            now,
+            Duration::from_secs(600),
+            Duration::from_secs(3)
+        )
+        .await,
+        Ok(None),
+        "still valid"
+    );
+    let mut expired = kept(&fixture, now, Some(-MINUTE));
+    expired.refresh_token = None;
+    assert_eq!(
+        refreshed(
+            &expired,
+            now,
+            Duration::from_secs(600),
+            Duration::from_secs(3)
+        )
+        .await,
+        Err(SignInError::Lapsed)
+    );
+    assert_eq!(fixture.count("/token"), 0);
+}
+
+#[tokio::test]
+async fn refresh_sends_the_kept_resource() {
+    let fixture = Fixture::start().await;
+    let now = Utc::now();
+    let grant = kept(&fixture, now, Some(MINUTE));
+    fixture.set(|flags| flags.keep_refresh_token = true);
+    let fresh = refreshed(
+        &grant,
+        now,
+        Duration::from_secs(600),
+        Duration::from_secs(3),
+    )
+    .await
+    .expect("refreshed")
+    .expect("due");
+    let sent = &fixture.requests("/token")[0].form;
+    assert_eq!(sent["resource"], grant.resource);
+    assert_eq!(sent["client_id"], grant.client_id);
+    assert_eq!(
+        fresh.refresh_token.as_ref().map(Secret::expose),
+        grant.refresh_token.as_ref().map(Secret::expose),
+        "an answer without a refresh token keeps the old one"
+    );
+}
+
+#[tokio::test]
+async fn revokes_the_refresh_token() {
+    let fixture = Fixture::start().await;
+    let now = Utc::now();
+    let grant = kept(&fixture, now, Some(MINUTE * 60));
+    revoke(&grant).await;
+    let sent = &fixture.requests("/revoke")[0].form;
+    assert_eq!(
+        sent["token"],
+        grant.refresh_token.as_ref().expect("one").expose()
+    );
+    assert_eq!(sent["token_type_hint"], "refresh_token");
+    assert_eq!(sent["client_id"], grant.client_id);
+
+    let mut access_only = kept(&fixture, now, Some(MINUTE * 60));
+    access_only.refresh_token = None;
+    revoke(&access_only).await;
+    let sent = &fixture.requests("/revoke")[1].form;
+    assert_eq!(sent["token"], access_only.access_token.expose());
+    assert_eq!(sent["token_type_hint"], "access_token");
+
+    fixture.set(|flags| flags.revoke_status = 500);
+    revoke(&grant).await;
+    assert_eq!(fixture.count("/revoke"), 3, "a 500 is not an error");
+}
+
+#[tokio::test]
+async fn a_kept_grant_is_only_sent_to_https_endpoints() {
+    let fixture = Fixture::start().await;
+    let now = Utc::now();
+    let mut grant = kept(&fixture, now, Some(MINUTE));
+    grant.token_endpoint = "http://auth.example/token".to_string();
+    grant.revocation_endpoint = Some("http://auth.example/revoke".to_string());
+    let outcome = refreshed(
+        &grant,
+        now,
+        Duration::from_secs(600),
+        Duration::from_secs(3),
+    )
+    .await;
+    assert_eq!(
+        outcome,
+        Err(SignInError::Failed(
+            "http://auth.example/token is not https".to_string()
+        ))
+    );
+    revoke(&grant).await;
+    assert_eq!(fixture.count("/token") + fixture.count("/revoke"), 0);
 }

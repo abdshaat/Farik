@@ -944,6 +944,7 @@ fn gives_a_session_the_connectors_kept_where_this_computer_keeps_them() {
             &ConnectorEntry {
                 spec_sha256: spec_sha256(&server),
                 keys: std::collections::BTreeMap::<String, Secret>::new(),
+                oauth: None,
             },
         )
         .expect("kept");

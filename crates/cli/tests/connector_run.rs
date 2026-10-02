@@ -134,6 +134,7 @@ impl Served {
             let entry = ConnectorEntry {
                 spec_sha256: spec_sha256(&server),
                 keys: [("API_KEY".to_string(), Secret::new(KEY_VALUE.to_string()))].into(),
+                oauth: None,
             };
             store.save(&at, &entry).expect("kept");
         }

@@ -515,7 +515,7 @@ async fn listed(
     )
     .and_then(|at| state.connector_folder(&at))
     .map_err(|error| Failure::new(REFUSED, crate::connectors::folder_refusal(&error)))?;
-    list_tools(&server, &keys_of(params), &folder)
+    list_tools(&server, &keys_of(params), None, &folder)
         .await
         .map_err(not_listed)
 }
@@ -547,6 +547,7 @@ async fn connector_connect(
     let kept = ConnectorEntry {
         spec_sha256: spec.clone(),
         keys,
+        oauth: None,
     };
     let (secrets, at) = (
         state.connector_secrets(),
@@ -3397,6 +3398,7 @@ pub(super) mod tests {
                 &ConnectorEntry {
                     spec_sha256: farik_core::team::spec_sha256(&linear),
                     keys: [("API_KEY".to_string(), Secret::new(KEY.to_string()))].into(),
+                    oauth: None,
                 },
             )
             .expect("kept");

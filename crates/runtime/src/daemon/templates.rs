@@ -648,6 +648,7 @@ mod tests {
                 crate::claude::Secret::new("k".to_string()),
             )]
             .into(),
+            oauth: None,
         };
         store.save(&at, &entry).expect("kept");
         call(

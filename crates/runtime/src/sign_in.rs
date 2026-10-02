@@ -205,6 +205,21 @@ impl Guarded {
         builder.body(body).map_err(OAuthHttpClientError::from)
     }
 
+    /// Sends a form POST to `url`, which must be https or loopback, and does not follow redirects.
+    pub(crate) async fn post_form(
+        &self,
+        url: &str,
+        pairs: &[(&str, &str)],
+    ) -> Result<http::Response<Vec<u8>>, OAuthHttpClientError> {
+        let request = self
+            .stop
+            .post(url)
+            .form(pairs)
+            .build()
+            .map_err(OAuthHttpClientError::from)?;
+        self.send(request, false).await
+    }
+
     /// What was refused as not https, if anything.
     pub(crate) fn refusal(&self) -> Option<String> {
         self.refused
@@ -753,4 +768,171 @@ async fn start(
         started: tokio::time::Instant::now(),
         started_at: now,
     })
+}
+
+/// How long a grant with no known expiry is trusted for before it is refreshed.
+const UNKNOWN_EXPIRY_TRUST: chrono::Duration = chrono::Duration::minutes(50);
+/// How long asking a service to forget a grant may take.
+const REVOKE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The `error` codes that mean the service ended the sign-in.
+const ENDED: [&str; 3] = ["invalid_grant", "invalid_client", "unauthorized_client"];
+
+/// The grant refreshed, when it will not last `valid_for` more from `now`: `Ok(None)` when it
+/// will. A grant with no refresh token is `Ok(None)` while its access token holds, and lapses once
+/// it has expired. The rotated refresh token is the answer's; one left out keeps the old.
+///
+/// # Errors
+/// `Lapsed` when the service ended the sign-in (`invalid_grant`, `invalid_client` or
+/// `unauthorized_client`); `Failed` for anything else, including `timeout` passing.
+pub async fn refreshed(
+    grant: &OAuthGrant,
+    now: DateTime<Utc>,
+    valid_for: Duration,
+    timeout: Duration,
+) -> Result<Option<OAuthGrant>, SignInError> {
+    if grant.lapsed {
+        return Err(SignInError::Lapsed);
+    }
+    let due = match grant.expires_at {
+        Some(expires_at) => {
+            expires_at < now + chrono::Duration::from_std(valid_for).unwrap_or_default()
+        }
+        None => now - grant.issued_at > UNKNOWN_EXPIRY_TRUST,
+    };
+    if !due {
+        return Ok(None);
+    }
+    let Some(refresh) = &grant.refresh_token else {
+        return if grant.expires_at.is_some_and(|expires_at| expires_at <= now) {
+            Err(SignInError::Lapsed)
+        } else {
+            Ok(None)
+        };
+    };
+    let host = host_of(&grant.token_endpoint);
+    let guard = Guarded::new()?;
+    let form = [
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh.expose()),
+        ("client_id", grant.client_id.as_str()),
+        ("resource", grant.resource.as_str()),
+    ];
+    let asking = guard.post_form(&grant.token_endpoint, &form);
+    let answer = match tokio::time::timeout(timeout, asking).await {
+        Err(_) => {
+            return Err(SignInError::Failed(format!(
+                "{host} did not answer in {} seconds",
+                timeout.as_secs()
+            )));
+        }
+        Ok(Err(_)) => {
+            return Err(SignInError::Failed(guard.refusal().unwrap_or_else(|| {
+                format!("{host} could not be reached to refresh the sign-in")
+            })));
+        }
+        Ok(Ok(answer)) => answer,
+    };
+    let body: serde_json::Value = serde_json::from_slice(answer.body()).unwrap_or_default();
+    if let Some(error) = body["error"].as_str() {
+        return Err(if ENDED.contains(&error) {
+            SignInError::Lapsed
+        } else {
+            SignInError::Failed(format!(
+                "{host} refused to refresh the sign-in (HTTP {})",
+                answer.status().as_u16()
+            ))
+        });
+    }
+    let Some(access) = body["access_token"]
+        .as_str()
+        .filter(|_| answer.status().is_success())
+    else {
+        return Err(SignInError::Failed(format!(
+            "{host} refused to refresh the sign-in (HTTP {})",
+            answer.status().as_u16()
+        )));
+    };
+    let mut fresh = grant.clone();
+    fresh.access_token = Secret::new(access.to_string());
+    if let Some(rotated) = body["refresh_token"].as_str() {
+        fresh.refresh_token = Some(Secret::new(rotated.to_string()));
+    }
+    fresh.issued_at = now;
+    fresh.expires_at = body["expires_in"]
+        .as_u64()
+        .and_then(|seconds| i64::try_from(seconds).ok())
+        .map(|seconds| now + chrono::Duration::seconds(seconds));
+    if let Some(scope) = body["scope"].as_str() {
+        fresh.scopes = scope.split_whitespace().map(ToString::to_string).collect();
+    }
+    Ok(Some(fresh))
+}
+
+/// Asks the service to forget `grant` (RFC 7009): its refresh token, else its access token. Best
+/// effort: five seconds, and no failure is reported.
+pub async fn revoke(grant: &OAuthGrant) {
+    let Some(endpoint) = &grant.revocation_endpoint else {
+        return;
+    };
+    let (token, hint) = match &grant.refresh_token {
+        Some(refresh) => (refresh, "refresh_token"),
+        None => (&grant.access_token, "access_token"),
+    };
+    let Ok(guard) = Guarded::new() else {
+        return;
+    };
+    let form = [
+        ("token", token.expose()),
+        ("token_type_hint", hint),
+        ("client_id", grant.client_id.as_str()),
+    ];
+    let _ = tokio::time::timeout(REVOKE_TIMEOUT, guard.post_form(endpoint, &form)).await;
+}
+
+impl OAuthGrant {
+    /// The stored form, which holds both tokens.
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "issuer": self.issuer,
+            "resource": self.resource,
+            "client_id": self.client_id,
+            "token_endpoint": self.token_endpoint,
+            "revocation_endpoint": self.revocation_endpoint,
+            "access_token": self.access_token.expose(),
+            "refresh_token": self.refresh_token.as_ref().map(Secret::expose),
+            "issued_at": self.issued_at.to_rfc3339(),
+            "expires_at": self.expires_at.map(|at| at.to_rfc3339()),
+            "scopes": self.scopes,
+            "lapsed": self.lapsed,
+        })
+    }
+
+    /// The grant a stored form holds; `None` when it is not one. Never quotes the form.
+    pub(crate) fn from_json(value: &serde_json::Value) -> Option<OAuthGrant> {
+        let text = |name: &str| value[name].as_str().map(ToString::to_string);
+        let time = |name: &str| {
+            value[name]
+                .as_str()
+                .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+                .map(|at| at.with_timezone(&Utc))
+        };
+        Some(OAuthGrant {
+            issuer: text("issuer")?,
+            resource: text("resource")?,
+            client_id: text("client_id")?,
+            token_endpoint: text("token_endpoint")?,
+            revocation_endpoint: text("revocation_endpoint"),
+            access_token: Secret::new(text("access_token")?),
+            refresh_token: text("refresh_token").map(Secret::new),
+            issued_at: time("issued_at")?,
+            expires_at: time("expires_at"),
+            scopes: value["scopes"]
+                .as_array()?
+                .iter()
+                .filter_map(|scope| scope.as_str().map(ToString::to_string))
+                .collect(),
+            lapsed: value["lapsed"].as_bool().unwrap_or(false),
+        })
+    }
 }
