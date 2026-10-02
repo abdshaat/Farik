@@ -984,7 +984,8 @@
         "input": { "type": "string" },
         "server": { "type": "string", "minLength": 1 },
         "tag": { "$ref": "#/$defs/connectorTag" },
-        "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+        "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "allowance": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "A connector call that ran inside its allowance (ADR 0037) names the number it ran inside, the calls each period its agent makes of the tool without asking. A call a grant allowed names approval instead." }
       }
     },
     "toolDeniedBody": {

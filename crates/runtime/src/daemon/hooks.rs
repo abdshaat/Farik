@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 
 use super::{DaemonError, DaemonState, SessionRegistration};
+use crate::allowances::allowance_period;
 use crate::tools::design::design_plan_gate;
 use crate::tools::refusal::Refusal;
 use crate::tools::{ToolDeps, ToolError, tool_descriptors};
@@ -137,7 +138,13 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
     };
     let verdict = match &session.stop_reason {
         Some(reason) => Err(Denial::from(format!("{SESSION_STOPPED}: {reason}"))),
-        None => judge(request, &session.registration, session.tool_calls, deps),
+        None => judge(
+            request,
+            &session.registration,
+            session.tool_calls,
+            deps,
+            state,
+        ),
     };
     let verdict = verdict.map_err(|denial| {
         if let Some(stop) = denial.stop {
@@ -147,6 +154,12 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
         denial.reason
     });
     let connector = connector_of(request, &session.registration);
+    // A connector call that used a grant or an allowance is one more of the agent's this period.
+    let counted = verdict
+        .as_ref()
+        .ok()
+        .filter(|pass| pass.approval.is_some() || pass.allowance.is_some())
+        .and(connector_tool(&request.tool_name));
     let decision = record_decision(
         deps,
         ids_of(deps, &session.registration),
@@ -156,8 +169,21 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
     );
     if decision.allow {
         session.tool_calls += 1;
+        if let Some((server, tool)) = counted {
+            state
+                .allowance_counts()
+                .raise(&session.registration.agent_id, server, tool);
+        }
     }
     decision
+}
+
+/// What let a call through, beyond that it was allowed: the human's grant it uses up, or the
+/// allowance it ran inside (ADR 0037).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Pass {
+    approval: Option<u64>,
+    allowance: Option<u32>,
 }
 
 /// Why a call is denied, and the stop the denial asks of the session when it asks one: an agent
@@ -219,7 +245,8 @@ fn judge(
     registration: &SessionRegistration,
     tool_calls: u32,
     deps: &ToolDeps,
-) -> Result<Option<u64>, Denial> {
+    state: &DaemonState,
+) -> Result<Pass, Denial> {
     let team = deps
         .files
         .read_team()
@@ -258,16 +285,16 @@ fn judge(
     // A skill is loaded by name, which is no tier's business (ADR 0034).
     if request.tool_name == SKILL_TOOL {
         return judge_skill(&request.tool_input, registration)
-            .map(|()| None)
+            .map(|()| Pass::default())
             .map_err(Denial::from);
     }
     // A connector's call is judged by its tag alone, whatever the session's tiers (5.6).
     if !request.tool_name.starts_with(FARIK_PREFIX) && connector_tool(&request.tool_name).is_some()
     {
-        return judge_connector(request, registration, deps, &team);
+        return judge_connector(request, registration, deps, state, &team);
     }
     judge_call(request, registration, deps, &team)
-        .map(|()| None)
+        .map(|()| Pass::default())
         .map_err(Denial::from)
 }
 
@@ -443,16 +470,19 @@ fn connector_of(
     Some((server.to_string(), tag))
 }
 
-/// Whether a connector's call may go ahead, and the approval it uses when a grant allows it, by
+/// Whether a connector's call may go ahead, and the grant or allowance it uses, by
 /// `evaluate_connector_call` (5.6): no tier is asked, and `preauthorized_external_tools` is never
 /// consulted. An `external_effect` call meets the Designer's plan gate first, then the human's open
-/// grant for it is looked up; with none, it asks (ADR 0031).
+/// grant for it is looked up, then, with none, the agent's calls of the tool this period are
+/// counted against its allowance; with neither, it asks (ADR 0031, ADR 0037). The caller holds the
+/// sessions lock, so the count and the call it allows are one step.
 fn judge_connector(
     request: &HookRequest,
     registration: &SessionRegistration,
     deps: &ToolDeps,
+    state: &DaemonState,
     team: &Team,
-) -> Result<Option<u64>, Denial> {
+) -> Result<Pass, Denial> {
     let Some((server, tool)) = connector_tool(&request.tool_name) else {
         return Err(Denial::from(not_allowed(&request.tool_name)));
     };
@@ -461,14 +491,26 @@ fn judge_connector(
         .iter()
         .find(|connector| connector.server == server);
     let mut granted = None;
+    let mut used = 0;
     if connector.and_then(|connector| connector.tools.get(tool))
         == Some(&ConnectorTag::ExternalEffect)
     {
         plan_gate(deps, team, registration, PermissionTier::ExternalEffect)?;
         granted = grant_for(deps, registration, server, tool, &request.tool_input)?;
+        // Zero asks every time, and a grant is used before an allowance: neither needs the count.
+        if granted.is_none()
+            && connector
+                .and_then(|connector| connector.allowances.get(tool))
+                .is_some_and(|calls| *calls > 0)
+        {
+            used = calls_made(deps, state, &registration.agent_id, server, tool)?;
+        }
     }
-    match evaluate_connector_call(tool, &request.tool_input, connector, granted, 0) {
-        Ok(pass) => Ok(pass.approval),
+    match evaluate_connector_call(tool, &request.tool_input, connector, granted, used) {
+        Ok(pass) => Ok(Pass {
+            approval: pass.approval,
+            allowance: pass.allowance,
+        }),
         Err(ConnectorRefusal::ApprovalNeeded) => {
             Err(ask(deps, registration, server, tool, &request.tool_input))
         }
@@ -496,6 +538,24 @@ fn judge_connector(
             ),
         })),
     }
+}
+
+/// The calls `agent` has made of `tool` of `server` this period, from the daemon's counts.
+fn calls_made(
+    deps: &ToolDeps,
+    state: &DaemonState,
+    agent: &str,
+    server: &str,
+    tool: &str,
+) -> Result<u32, Denial> {
+    let unreadable =
+        |error: farik_store::StoreError| Denial::from(format!("allowance_unreadable: {error}"));
+    let period =
+        allowance_period(&deps.log, &deps.projections, deps.clock.now()).map_err(unreadable)?;
+    state
+        .allowance_counts()
+        .used(&deps.log, &period, agent, server, tool)
+        .map_err(unreadable)
 }
 
 /// The open grant this session may use for this exact call: the human's, for the session's agent
@@ -691,7 +751,7 @@ fn record_decision(
     ids: EventIds,
     request: &HookRequest,
     connector: Option<(String, Option<ConnectorTag>)>,
-    verdict: Result<Option<u64>, String>,
+    verdict: Result<Pass, String>,
 ) -> HookDecision {
     let (server, tag) = match connector {
         Some((server, tag)) => (Some(server), tag.map(tag_wire)),
@@ -700,14 +760,17 @@ fn record_decision(
     let tool = request.tool_name.clone();
     let tool_use_id = request.tool_use_id.clone();
     let (body, decision) = match verdict {
-        Ok(approval) => (
+        Ok(pass) => (
             EventBody::ToolCalled(ToolCalledBody {
                 tool,
                 tool_use_id,
                 input: cut(request.tool_input.to_string()),
                 server: server.and_then(|name| name.try_into().ok()),
                 tag,
-                approval: approval.and_then(std::num::NonZeroU64::new),
+                approval: pass.approval.and_then(std::num::NonZeroU64::new),
+                allowance: pass
+                    .allowance
+                    .and_then(|calls| std::num::NonZeroU64::new(u64::from(calls))),
             }),
             HookDecision {
                 allow: true,
@@ -772,7 +835,7 @@ mod tests {
 
     use super::{HookDecision, HookRequest, cut, decide_pre_tool_use, record_post_tool_use};
     use crate::daemon::fixtures::{DEV_SESSION, POST_READ, PRE_READ, PRE_WRITE, TestDaemon};
-    use crate::tools::fixtures::{a_team_of_three, with_the_designer};
+    use crate::tools::fixtures::{a_team_of_three, at, with_the_designer};
 
     fn denied_for(decision: &HookDecision, kind: &str) {
         assert!(!decision.allow, "{decision:?}");
@@ -1613,6 +1676,17 @@ mod tests {
     /// `github_session` on `task`. `github` also has `close_issue`, and the session is given
     /// `gitlab` too, both tagged `external_effect`.
     fn task_session(daemon: &TestDaemon, session: &str, agent: &str, task: &str) {
+        allowing_session(daemon, session, agent, task, None);
+    }
+
+    /// `task_session`, with `github`'s `create_issue` allowed `calls` each period unasked.
+    fn allowing_session(
+        daemon: &TestDaemon,
+        session: &str,
+        agent: &str,
+        task: &str,
+        calls: Option<u32>,
+    ) {
         use farik_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
 
         use crate::daemon::SessionRegistration;
@@ -1645,7 +1719,9 @@ mod tests {
                     .into_iter()
                     .map(|(tool, tag)| (tool.to_string(), tag))
                     .collect(),
-                    allowances: std::collections::BTreeMap::new(),
+                    allowances: calls
+                        .map(|calls| [("create_issue".to_string(), calls)].into())
+                        .unwrap_or_default(),
                 },
                 SessionConnector {
                     server: "gitlab".to_string(),
@@ -1973,6 +2049,297 @@ mod tests {
             "{decisions:?}"
         );
         assert_eq!(daemon.events(EventKind::ToolCalled).len(), 1);
+    }
+
+    /// `dev-a`'s `session-github`, allowed `calls` of `create_issue` each period unasked.
+    fn allowing_github(daemon: &TestDaemon, calls: u32) {
+        allowing_session(daemon, "session-github", "dev-a", "FRK-1", Some(calls));
+    }
+
+    /// The `allowance` the last `tool.called` ran inside.
+    fn ran_inside(daemon: &TestDaemon) -> Option<u32> {
+        let called = daemon.events(EventKind::ToolCalled);
+        let EventBody::ToolCalled(body) = &called.last().expect("recorded").body else {
+            panic!("a tool.called body");
+        };
+        body.allowance
+            .map(|calls| u32::try_from(calls.get()).expect("at most 1000"))
+    }
+
+    /// `dev-a`'s `create_issue` through `session-github`, with an input of its own each time.
+    fn issue(daemon: &TestDaemon, n: u32) -> HookDecision {
+        create_issue(daemon, "session-github", &json!({ "title": n }))
+    }
+
+    /// A `tool.called` of `agent` for `tool` of `server`, recorded at `when`, as the hook would.
+    fn called_at(
+        daemon: &TestDaemon,
+        agent: &str,
+        server: &str,
+        tool: &str,
+        when: chrono::DateTime<chrono::Utc>,
+    ) {
+        daemon.project.record_by(
+            Some(agent),
+            when,
+            "FRK-1",
+            "tool.called",
+            &json!({ "tool": tool, "input": "{}", "server": server, "tag": "external_effect" }),
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn runs_a_call_inside_its_allowance_without_asking() {
+        let daemon = TestDaemon::new("hook-allowance-inside", |_| {});
+        allowing_github(&daemon, 2);
+        for n in 1..=2 {
+            let allowed = issue(&daemon, n);
+            assert!(allowed.allow, "{n}: {allowed:?}");
+            assert_eq!(ran_inside(&daemon), Some(2), "{n}");
+        }
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn asks_for_the_first_call_beyond_it() {
+        let daemon = TestDaemon::new("hook-allowance-beyond", |_| {});
+        allowing_github(&daemon, 2);
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        denied_for(&issue(&daemon, 3), "approval_needed");
+        assert_eq!(daemon.events(EventKind::ToolApprovalRequested).len(), 1);
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 2);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_per_agent_and_per_tool() {
+        let daemon = TestDaemon::new("hook-allowance-per", |_| {});
+        allowing_github(&daemon, 2);
+        // Another agent's calls of the tool, and this agent's of another, are not its count.
+        for _ in 0..2 {
+            called_at(
+                &daemon,
+                "dev-b",
+                "github",
+                "mcp__github__create_issue",
+                at(),
+            );
+            called_at(&daemon, "dev-a", "github", "mcp__github__close_issue", at());
+        }
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        denied_for(&issue(&daemon, 3), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn resets_with_the_sprint() {
+        let daemon = TestDaemon::new("hook-allowance-sprint", |_| {});
+        allowing_github(&daemon, 2);
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        denied_for(&issue(&daemon, 3), "approval_needed");
+        // The calls before the sprint started are not its.
+        daemon.project.open_sprint("S1", None, &[]);
+        // The ask stopped that session; the agent's next one makes its calls.
+        allowing_session(&daemon, "session-next", "dev-a", "FRK-1", Some(2));
+        let next = |n: u32| create_issue(&daemon, "session-next", &json!({ "title": n }));
+        assert!(next(4).allow);
+        assert!(next(5).allow);
+        denied_for(&next(6), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_per_utc_day_with_no_sprint_open() {
+        use chrono::{TimeZone, Utc};
+
+        let daemon = TestDaemon::new("hook-allowance-day", |_| {});
+        allowing_github(&daemon, 2);
+        let yesterday = Utc
+            .with_ymd_and_hms(2026, 9, 21, 23, 59, 0)
+            .single()
+            .expect("a time");
+        let today = Utc
+            .with_ymd_and_hms(2026, 9, 22, 0, 1, 0)
+            .single()
+            .expect("a time");
+        called_at(
+            &daemon,
+            "dev-a",
+            "github",
+            "mcp__github__create_issue",
+            yesterday,
+        );
+        called_at(
+            &daemon,
+            "dev-a",
+            "github",
+            "mcp__github__create_issue",
+            today,
+        );
+        assert!(
+            issue(&daemon, 1).allow,
+            "yesterday's call does not count, today's does"
+        );
+        denied_for(&issue(&daemon, 2), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_from_the_sprints_end_on_the_day_it_ended() {
+        use chrono::{TimeZone, Utc};
+
+        let at_hour = |hour| {
+            Utc.with_ymd_and_hms(2026, 9, 22, hour, 0, 0)
+                .single()
+                .expect("a time")
+        };
+        let daemon = TestDaemon::new("hook-allowance-ended", |_| {}).on_the_clock(at_hour(17));
+        allowing_github(&daemon, 2);
+        daemon.project.record_at(
+            at_hour(8),
+            "",
+            "sprint.started",
+            &json!({ "sprint_id": "S1", "budget_usd": null, "started_by": "human" }),
+        );
+        called_at(
+            &daemon,
+            "dev-a",
+            "github",
+            "mcp__github__create_issue",
+            at_hour(9),
+        );
+        called_at(
+            &daemon,
+            "dev-a",
+            "github",
+            "mcp__github__create_issue",
+            at_hour(10),
+        );
+        daemon.project.record_at(
+            at_hour(15),
+            "",
+            "sprint.ended",
+            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
+        );
+        called_at(
+            &daemon,
+            "dev-a",
+            "github",
+            "mcp__github__create_issue",
+            at_hour(16),
+        );
+        assert!(
+            issue(&daemon, 1).allow,
+            "the sprint's two calls are not today's"
+        );
+        denied_for(&issue(&daemon, 2), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_restart_reads_the_count_from_the_log() {
+        let daemon = TestDaemon::new("hook-allowance-restart", |_| {});
+        allowing_github(&daemon, 2);
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        // A daemon started afresh over the same log.
+        let restarted = std::sync::Arc::new(crate::daemon::DaemonState::new(
+            std::sync::Arc::clone(&daemon.project.deps),
+        ));
+        let again = TestDaemon {
+            state: restarted,
+            ..daemon
+        };
+        allowing_github(&again, 2);
+        denied_for(&issue(&again, 3), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_by_server_and_full_tool_name() {
+        let daemon = TestDaemon::new("hook-allowance-server", |_| {});
+        allowing_github(&daemon, 2);
+        // gitlab's tool of the same bare name, and a bare name that is no connector's.
+        for _ in 0..2 {
+            called_at(
+                &daemon,
+                "dev-a",
+                "gitlab",
+                "mcp__gitlab__create_issue",
+                at(),
+            );
+            called_at(&daemon, "dev-a", "github", "create_issue", at());
+        }
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        denied_for(&issue(&daemon, 3), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_a_call_a_grant_allowed() {
+        let daemon = TestDaemon::new("hook-allowance-grant", |_| {});
+        allowing_github(&daemon, 2);
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        // Beyond it, the human allows one more, which is made and counted too.
+        let asked_for = json!({ "title": 3 });
+        let approval = asked(&daemon, "session-github", &asked_for);
+        grant(&daemon, approval);
+        allowing_session(&daemon, "session-next", "dev-a", "FRK-1", Some(3));
+        let allowed = create_issue(&daemon, "session-next", &asked_for);
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(used(&daemon), Some(approval));
+        // Three calls made: the allowance of 3 is spent, so a fourth asks.
+        asked(&daemon, "session-next", &json!({ "title": 4 }));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lets_one_of_two_calls_at_the_last_place_run() {
+        let daemon = TestDaemon::new("hook-allowance-race", |_| {})
+            .slowed(std::time::Duration::from_millis(50));
+        allowing_github(&daemon, 2);
+        assert!(issue(&daemon, 1).allow);
+        let (first, second) = (
+            daemon.call(
+                "session-github",
+                "mcp__github__create_issue",
+                &json!({ "title": "a" }),
+            ),
+            daemon.call(
+                "session-github",
+                "mcp__github__create_issue",
+                &json!({ "title": "b" }),
+            ),
+        );
+        let barrier = std::sync::Barrier::new(2);
+        let decisions: Vec<HookDecision> = std::thread::scope(|scope| {
+            let calls: Vec<_> = [&first, &second]
+                .into_iter()
+                .map(|request| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        decide_pre_tool_use(request, &daemon.state)
+                    })
+                })
+                .collect();
+            calls
+                .into_iter()
+                .map(|call| call.join().expect("the call ends"))
+                .collect()
+        });
+        assert_eq!(
+            decisions.iter().filter(|decision| decision.allow).count(),
+            1,
+            "{decisions:?}"
+        );
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 2);
     }
 
     #[test]

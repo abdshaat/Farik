@@ -137,7 +137,7 @@ Files: `allowances.rs`, `daemon.rs` (`DaemonState`'s `AllowanceCounts`), `daemon
 - `lets_one_of_two_calls_at_the_last_place_run`: two hook requests at once with one place left: one is allowed and one asks.
 - `registers_each_connectors_allowances`: the session's registration carries the entry's allowances.
 
-- [ ] `feat(runtime): count a connector's calls against its allowance`
+- [x] `feat(runtime): count a connector's calls against its allowance`
 
 ### Task 5: Each allowance's use
 

@@ -179,6 +179,9 @@ pub struct DaemonState {
     entry_locks: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// The sign-ins under way or finished and not yet used, by attempt, in memory only (ADR 0033).
     sign_ins: Mutex<BTreeMap<String, signed_in::Attempt>>,
+    /// The calls made in the period connector allowances count in (ADR 0037). Whoever holds the
+    /// sessions lock takes it second, so a count and the call it allows are one step.
+    allowance_counts: Mutex<crate::allowances::AllowanceCounts>,
 }
 
 /// What a kept entry says of the agent's sign-in to the service.
@@ -245,6 +248,7 @@ impl DaemonState {
             state_dir: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
             sign_ins: Mutex::new(BTreeMap::new()),
+            allowance_counts: Mutex::default(),
         }
     }
 
@@ -266,6 +270,7 @@ impl DaemonState {
             state_dir: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
             sign_ins: Mutex::new(BTreeMap::new()),
+            allowance_counts: Mutex::default(),
         }
     }
 
@@ -590,6 +595,11 @@ impl DaemonState {
         self.sessions
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The allowance counts, locked. Taken after the sessions lock where both are held.
+    pub(crate) fn allowance_counts(&self) -> MutexGuard<'_, crate::allowances::AllowanceCounts> {
+        crate::locked(&self.allowance_counts)
     }
 }
 

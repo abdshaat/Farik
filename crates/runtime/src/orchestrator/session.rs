@@ -127,12 +127,7 @@ pub(super) async fn run_session(
                 .iter()
                 .any(|given| given.name == server.name)
         })
-        .map(|server| SessionConnector {
-            server: server.name,
-            origin: None,
-            tools: server.tools,
-            allowances: std::collections::BTreeMap::new(),
-        })
+        .map(session_connector)
         .collect();
     let browser = match give_browser(deps, team, &ask, &mut spec, &ids).await? {
         Ok(Some((browser, connector))) => {
@@ -213,6 +208,17 @@ pub(super) async fn run_session(
         leave_note(deps, contract, ask.agent, &end)?;
     }
     Ok(end)
+}
+
+/// A custom or kit connector as its session's registration holds it: its tags, and the allowances
+/// the entry gives its calls (ADR 0037).
+fn session_connector(server: CustomServer) -> SessionConnector {
+    SessionConnector {
+        server: server.name,
+        origin: None,
+        tools: server.tools,
+        allowances: server.allowances,
+    }
 }
 
 /// The connector a session is given, when it is given one (step 12): the agent has it on, and
@@ -2768,6 +2774,30 @@ mod tests {
     /// `dev-a`'s one service, `github`, written whole as a kit's.
     fn with_a_kit_server(wire: &mut serde_json::Value) {
         wire["agents"][1]["mcp_servers"] = json!([crate::tools::fixtures::a_kit_server()]);
+    }
+
+    #[test]
+    fn registers_each_connectors_allowances() {
+        use farik_core::governor::permissions::ConnectorTag;
+        use farik_core::team::{CustomServer, CustomTransport};
+
+        let server = CustomServer {
+            name: "higgsfield".to_string(),
+            transport: CustomTransport::Stdio {
+                command: "sh".to_string(),
+                args: Vec::new(),
+            },
+            credential_keys: Vec::new(),
+            tools: [("make".to_string(), ConnectorTag::ExternalEffect)].into(),
+            kit: true,
+            allowances: [("make".to_string(), 20)].into(),
+        };
+        let registered = super::session_connector(server);
+        assert_eq!(registered.server, "higgsfield");
+        assert_eq!(
+            registered.allowances,
+            std::collections::BTreeMap::from([("make".to_string(), 20)])
+        );
     }
 
     #[test]

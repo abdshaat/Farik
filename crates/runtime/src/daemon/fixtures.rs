@@ -85,6 +85,29 @@ impl TestDaemon {
         self
     }
 
+    /// The same daemon on a clock that says it is `now`. Only `DEV_SESSION` is registered on it
+    /// afresh.
+    pub(crate) fn on_the_clock(mut self, now: chrono::DateTime<chrono::Utc>) -> Self {
+        let deps = &self.project.deps;
+        let state = Arc::new(DaemonState::new(Arc::new(ToolDeps {
+            log: Arc::clone(&deps.log),
+            projections: Arc::clone(&deps.projections),
+            files: Arc::clone(&deps.files),
+            transitions: Arc::clone(&deps.transitions),
+            git: self.project.repo.adapter(),
+            clock: Arc::new(farik_protocol::clock::FixedClock::new(now)),
+            ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
+        })));
+        state.set_state_dir(std::path::PathBuf::from(format!(
+            "{}-state",
+            self.project.repo.path.display()
+        )));
+        self.state = state;
+        self.register(DEV_SESSION, "dev-a", Some("FRK-1"), DEFAULT_SESSION_LIMITS);
+        self
+    }
+
     /// Registers a session of `agent` in the worktree, given every Farik tool, so that its tiers
     /// alone decide which it may call.
     pub(crate) fn register(
