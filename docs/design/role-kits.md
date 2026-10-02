@@ -59,6 +59,7 @@ Adding a role in the team builder, or opening its card on the Team page, lists t
 | 02 Approving a connector's calls | Split from step 01: an `external_effect` call waits for the human like a question, who allows that one call or refuses it, from Today or the command line |
 | 03 Signing in to a service | OAuth sign-in for remote servers, per agent, before the first kit (the founder, 2026-10-01); planned when it is next |
 | 04 Skills per agent | Moved from the ecosystem (ADR 0029): skill folders at agent, role and team level, loaded into sessions |
+| 04b Skills on the agent page | Split from step 04: the agent page's Skills section and its add, edit and review dialogs |
 | 05 Kit format and loader | `kit.schema.json` and its generated types, and the allowances and applied tags in `team.schema.json`; `kit.yaml` per role, loaded with the role; a kit connector connected by name through step 01's commands and screens, its tags applied; the pinned tool list of shipped kits and its drift test; allowances per tool and per agent, the count projected from `tool.called`, on the board and the Costs page, `ConnectorAllowance` mocked up first; the UI/UX Designer's built-in Playwright connector moved into its `kit.yaml` |
 | 06 Product Manager and Scrum Master kits | Their skills and connectors, each connector's server chosen and pinned, its setup copy written and checked in the web app |
 | 07 Architect and Developer kits | The same, including the browser-testing connector as a host process and the security-review skill |
