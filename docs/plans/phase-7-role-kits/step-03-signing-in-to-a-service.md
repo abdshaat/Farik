@@ -1,6 +1,6 @@
 # Phase 7, step 03: Signing in to a service
 
-Status: draft
+Status: executed 2026-10-02; the landing review waits
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6.7, 8.2, 8.5, 8.6; F9
 Depends on: step 01 of this phase (committed; the custom connector, `ConnectorEntry`, `ConnectorSecrets`, the launch route and the headers helper, `spec_sha256`), step 02 (committed; nothing of it is consumed, it lands first)
@@ -293,7 +293,7 @@ Files: `ConnectorAdd.tsx`, `AgentEdit.tsx`, `connectors.test.tsx`, `strings/en.t
 
 `docs/SPEC.md`: 6.7 (signing in, the grant per agent, refresh, revocation, "Sign in again"), 8.2 (the bearer through the headers helper), 8.5 (`issuer` on `connector.connected`), 8.6 (the callback's security, tokens never in a file Farik writes but the private store), F9 (the two RPCs, `attempt`, `auth`, `revokes`, `sign_in_again`). `docs/plans/project-plan.md`: phase 7's row 03, corrected if execution changed it. `docs/design/role-kits.md`: its steps table.
 
-- [ ] `docs(spec): record signing in to a service`
+- [x] `docs(spec): record signing in to a service`
 
 ## Verification
 
