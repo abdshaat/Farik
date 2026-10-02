@@ -31,9 +31,9 @@ jobs:
           cache: pnpm
       - run: git --version
       - run: docker pull alpine:3.22
-      # The Designer's browser, the Playwright connector's image, by the digest playwright.yaml pins.
+      # The Designer's browser, the Playwright connector's image, by the digest the Designer's kit pins.
       - run: |
-          docker pull "$(sed -n 's/^image: //p' crates/roles/connectors/playwright.yaml)"
+          docker pull "$(sed -n 's/^ *image: //p' crates/roles/roles/ui_ux_designer/kit.yaml)"
       # The browser journey's Chromium, which Playwright downloads rather than finds on the runner.
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @farik/web exec playwright install --with-deps chromium

@@ -326,6 +326,24 @@ mod tests {
     }
 
     #[test]
+    fn every_repository_path_a_workflow_reads_exists() {
+        // A moved file leaves a step reading nothing, and CI fails only on GitHub.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let folder = root.join(".github/workflows");
+        let mut missing = Vec::new();
+        for entry in std::fs::read_dir(&folder).expect("the folder is there") {
+            let text = std::fs::read_to_string(entry.expect("an entry").path())
+                .expect("the workflow is readable");
+            for word in text.split(|c: char| c.is_whitespace() || "\"'()".contains(c)) {
+                if word.starts_with("crates/") && !root.join(word).exists() {
+                    missing.push(word.to_owned());
+                }
+            }
+        }
+        assert!(missing.is_empty(), "workflows read missing paths: {missing:?}");
+    }
+
+    #[test]
     fn every_workflow_is_valid_yaml() {
         // GitHub rejects an invalid workflow without running a single step, so CI fails in 0 s.
         let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows");
