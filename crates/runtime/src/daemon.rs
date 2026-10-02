@@ -877,10 +877,42 @@ async fn connector_launch(
     State(state): State<Arc<DaemonState>>,
     Json(asked): Json<LaunchAsk>,
 ) -> Response {
-    match tokio::task::spawn_blocking(move || launch(&state, &asked)).await {
-        Ok(Ok(answer)) => Json(answer).into_response(),
-        Ok(Err((status, reason))) => (status, reason).into_response(),
-        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    let (session, server) = (asked.session.clone(), asked.server.clone());
+    let held = Arc::clone(&state);
+    let launched = tokio::task::spawn_blocking(move || launch(&held, &asked));
+    match tokio::time::timeout(KEY_STORE_DEADLINE, launched).await {
+        Ok(Ok(Ok(answer))) => Json(answer).into_response(),
+        Ok(Ok(Err((status, reason)))) => (status, reason).into_response(),
+        Ok(Err(error)) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        // A store answering later would find the helper gone, and Claude Code would connect an
+        // http server without its headers (re-review N1): refused, and taken away, first.
+        Err(_) => {
+            take_from_session(&state, &session, &server);
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!(
+                    "secret_store_unavailable: the key store did not answer for {server} within \
+                     {} seconds",
+                    KEY_STORE_DEADLINE.as_secs()
+                ),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// How long the launch route waits for the key store: less than the helper's eight seconds
+/// (`EXCHANGE_TIMEOUT`), so the route refuses before the helper gives up.
+const KEY_STORE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Takes `server` from `session`'s registration, so the hook denies its calls
+/// `connector_not_in_session`.
+fn take_from_session(state: &DaemonState, session: &str, server: &str) {
+    if let Some(session) = state.sessions().get_mut(session) {
+        session
+            .registration
+            .connectors
+            .retain(|connector| connector.server != server);
     }
 }
 
@@ -892,13 +924,8 @@ type Refusal = (StatusCode, String);
 /// its headers when the helper fails, and would offer its tools (finding I2).
 fn launch(state: &DaemonState, asked: &LaunchAsk) -> Result<Value, Refusal> {
     let answer = launch_answer(state, asked);
-    if answer.is_err()
-        && let Some(session) = state.sessions().get_mut(&asked.session)
-    {
-        session
-            .registration
-            .connectors
-            .retain(|connector| connector.server != asked.server);
+    if answer.is_err() {
+        take_from_session(state, &asked.session, &asked.server);
     }
     answer
 }
@@ -1669,6 +1696,23 @@ mod tests {
     /// A daemon whose team gives `dev-a` the custom servers, with `session-custom` registered
     /// with both, and their entries kept as they are now in `store` (`None`: a failing store).
     fn launching(name: &str, connected: bool, failing: bool) -> TestDaemon {
+        launching_through(name, connected, |store| {
+            if failing {
+                Arc::new(FailingStore)
+            } else {
+                store
+            }
+        })
+    }
+
+    /// [`launching`], its entries kept in a store in memory that `through` wraps.
+    fn launching_through(
+        name: &str,
+        connected: bool,
+        through: impl FnOnce(
+            Arc<dyn crate::connectors::ConnectorSecrets>,
+        ) -> Arc<dyn crate::connectors::ConnectorSecrets>,
+    ) -> TestDaemon {
         use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
         use farik_core::governor::permissions::SessionConnector;
 
@@ -1706,11 +1750,7 @@ mod tests {
                 store.save(&at, &entry).expect("kept");
             }
         }
-        if failing {
-            daemon.state.set_connector_secrets(Arc::new(FailingStore));
-        } else {
-            daemon.state.set_connector_secrets(store);
-        }
+        daemon.state.set_connector_secrets(through(store));
         daemon.state.register_session(SessionRegistration {
             session_id: "session-custom".to_string(),
             agent_id: "dev-a".to_string(),
@@ -1887,6 +1927,64 @@ mod tests {
             decision.reason.starts_with("connector_not_in_session:"),
             "{decision:?}"
         );
+    }
+
+    /// A store whose reads wait until `release` is dropped: a keychain asking to be unlocked.
+    struct SlowStore {
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+        inner: Arc<dyn crate::connectors::ConnectorSecrets>,
+    }
+
+    impl crate::connectors::ConnectorSecrets for SlowStore {
+        fn load(
+            &self,
+            at: &crate::connectors::SecretAt,
+        ) -> Result<Option<crate::connectors::ConnectorEntry>, crate::credential::CredentialError>
+        {
+            let _ = crate::locked(&self.release).recv();
+            self.inner.load(at)
+        }
+
+        fn save(
+            &self,
+            at: &crate::connectors::SecretAt,
+            entry: &crate::connectors::ConnectorEntry,
+        ) -> Result<crate::connectors::SecretStore, crate::credential::CredentialError> {
+            self.inner.save(at, entry)
+        }
+
+        fn delete(
+            &self,
+            at: &crate::connectors::SecretAt,
+        ) -> Result<(), crate::credential::CredentialError> {
+            self.inner.delete(at)
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_store_slower_than_the_helper_takes_the_server_from_the_session() {
+        // The helper gives up after eight seconds and Claude Code connects the http server
+        // without its headers; a store that answered after that left it in the session
+        // (re-review N1). The route gives up first, and takes it away.
+        let (release, wait) = std::sync::mpsc::channel();
+        let daemon = launching_through("launch-slow-store", true, |inner| {
+            Arc::new(SlowStore {
+                release: std::sync::Mutex::new(wait),
+                inner,
+            })
+        });
+        // `farik connector headers` gives up after eight seconds (`EXCHANGE_TIMEOUT`).
+        let (status, body) = tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            launch(&daemon, "session-custom", "linear"),
+        )
+        .await
+        .expect("the route answers before the helper gives up");
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert!(body.starts_with("secret_store_unavailable:"), "{body}");
+        assert_eq!(given(&daemon, "session-custom"), ["github"]);
+        drop(release);
     }
 
     /// The servers `session` is given now.
