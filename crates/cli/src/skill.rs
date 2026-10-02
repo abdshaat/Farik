@@ -14,7 +14,7 @@ use farik_roles::{
 };
 use farik_runtime::skills::{
     SkillLevel, SkillState, confirm_skill, confirmed_sentence, confirmed_skills, read_skill_folder,
-    remove_skill, removed_sentence, save_skill, saved_sentence, skill_folder, skill_rows,
+    remove_skill, removed_sentence, save_skill, saved_sentence, skill_folder_unlinked, skill_rows,
 };
 use farik_store::EventQuery;
 use serde_json::json;
@@ -178,7 +178,8 @@ fn shown(
 ///
 /// A sentence saying there is no such skill, or the refusal of its folder.
 pub(crate) fn show(project: &Project, name: &str, whom: &Whom<'_>) -> Result<Report, String> {
-    let folder = skill_folder(&project.root, &whom.level(), name);
+    let folder = skill_folder_unlinked(&project.root, &whom.level(), name)
+        .map_err(|refusal| refusal.to_string())?;
     if std::fs::symlink_metadata(&folder).is_err() {
         return Err(format!("{} has no skill {name}", whom.level().whom()));
     }
@@ -346,8 +347,9 @@ pub(crate) fn confirm(
     whom.exists(project)?;
     let level = whom.level();
     let given = given.to_ascii_lowercase();
-    let files = read_skill_folder(&skill_folder(&project.root, &level, name))
+    let folder = skill_folder_unlinked(&project.root, &level, name)
         .map_err(|refusal| refusal.to_string())?;
+    let files = read_skill_folder(&folder).map_err(|refusal| refusal.to_string())?;
     let hash = skill_sha256(&files);
     let is_whole = given.len() == 64 && given == hash;
     let is_prefix = given.len() == 12 && hash.starts_with(&given);

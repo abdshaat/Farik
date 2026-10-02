@@ -62,6 +62,44 @@ fn pinned(repository: &TempRepo, agent: &str) -> Vec<String> {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_skill_show_refuses_a_linked_skills_folder() {
+    let repository = a_team("skill-show-linked");
+    let outside = a_skill("skill-show-linked", "api-style", "OUTSIDE");
+    let skills = repository.path.join(".farik/skills");
+    std::fs::create_dir_all(&skills).expect("a folder");
+    std::os::unix::fs::symlink(&outside, skills.join("api-style")).expect("a link");
+    let ran = skill(&repository, &["show", "api-style", "--team"], "", false);
+    assert_ne!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert!(!ran.out.contains("OUTSIDE"), "{}", ran.out);
+    assert!(
+        ran.err.contains("skill_path_invalid") || ran.err.contains(".farik/skills/api-style"),
+        "{}",
+        ran.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_skill_add_escapes_a_skills_control_characters() {
+    let repository = a_team("skill-add-escapes");
+    let folder = a_skill("skill-add-escapes", "api-style", "\u{1b}[2Jhidden");
+    let args = ["add", folder.to_str().expect("a path"), "--agent", "dev-a"];
+    let ran = skill(&repository, &args, "n\n", true);
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    let asked = ran
+        .out
+        .find("Add api-style for dev-a? [y/N]")
+        .expect("it asks");
+    let before = &ran.out[..asked];
+    assert!(before.contains("\\u001b[2Jhidden"), "escaped: {before:?}");
+    assert!(
+        !before.contains('\u{1b}'),
+        "no ESC byte reaches the terminal: {before:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn farik_skill_add_shows_then_asks() {
     let repository = a_team("skill-add-asks");
     let folder = a_skill("skill-add-asks", "api-style", "THE WHOLE BODY");
