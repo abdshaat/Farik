@@ -406,6 +406,32 @@ impl fmt::Debug for LaunchSpec {
 /// the model credential.
 pub const KEPT_ENV: [&str; 4] = ["PATH", "HOME", "LANG", "TMPDIR"];
 
+/// The folder a stdio connector runs in: `.farik/local/connectors/<agent>/<server>` under the
+/// project `root`, made owner-only when it is not there. Never a session's worktree, which agents
+/// write to: there `npx` would run a planted `node_modules/.bin`, `python -m` a planted module, and
+/// a relative argument a planted script, on the host with the agent's keys (finding C1).
+///
+/// # Errors
+///
+/// The folder could not be made.
+pub fn working_folder(
+    root: &std::path::Path,
+    agent: &str,
+    server: &str,
+) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt as _;
+
+    let folder = root
+        .join(".farik/local/connectors")
+        .join(agent)
+        .join(server);
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&folder)?;
+    Ok(folder)
+}
+
 /// How long a server has to list its tools.
 const LISTING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -538,8 +564,8 @@ fn usable_tool_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-/// The tools `server` lists when started, or reached, with `keys`. A stdio server runs with only
-/// [`KEPT_ENV`] and its keys; the whole listing gives up after thirty seconds.
+/// The tools `server` lists when started, or reached, with `keys`. A stdio server runs in `folder`
+/// with only [`KEPT_ENV`] and its keys; the whole listing gives up after thirty seconds.
 ///
 /// # Errors
 ///
@@ -548,6 +574,7 @@ fn usable_tool_name(name: &str) -> bool {
 pub async fn list_tools(
     server: &CustomServer,
     keys: &BTreeMap<String, Secret>,
+    folder: &std::path::Path,
 ) -> Result<Vec<ListedTool>, ConnectorError> {
     use rmcp::ServiceExt as _;
 
@@ -558,7 +585,11 @@ pub async fn list_tools(
         let client = match &server.transport {
             CustomTransport::Stdio { command, args } => {
                 let mut process = tokio::process::Command::new(command);
-                process.args(args).env_clear().kill_on_drop(true);
+                process
+                    .args(args)
+                    .current_dir(folder)
+                    .env_clear()
+                    .kill_on_drop(true);
                 for name in KEPT_ENV {
                     if let Some(value) = std::env::var_os(name) {
                         process.env(name, value);

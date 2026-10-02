@@ -382,7 +382,13 @@ async fn listed(deps: &Arc<ToolDeps>, params: &Value) -> Result<Vec<ListedTool>,
         )
     })
     .await?;
-    list_tools(&server, &keys_of(params))
+    let folder = crate::connectors::working_folder(
+        deps.files.root(),
+        params["agent"].as_str().unwrap_or_default(),
+        &server.name,
+    )
+    .map_err(|error| Failure::new(REFUSED, format!("its folder could not be made: {error}")))?;
+    list_tools(&server, &keys_of(params), &folder)
         .await
         .map_err(not_listed)
 }

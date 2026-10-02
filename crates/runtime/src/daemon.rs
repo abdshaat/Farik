@@ -861,7 +861,17 @@ fn launch(state: &DaemonState, asked: &LaunchAsk) -> Result<Value, Refusal> {
     Ok(match &server.transport {
         CustomTransport::Stdio { .. } => {
             let spec = launch_spec(&server, &entry).map_err(refused)?;
-            serde_json::json!({ "command": spec.command, "args": spec.args, "env": exposed(&spec.env) })
+            let root = state.deps().map(|deps| deps.files.root().to_path_buf());
+            let folder = root
+                .ok_or_else(|| failed(NO_PROJECT.to_string()))
+                .and_then(|root| {
+                    crate::connectors::working_folder(&root, &at.agent_id, &server.name)
+                        .map_err(|error| failed(format!("its folder could not be made: {error}")))
+                })?;
+            serde_json::json!({
+                "command": spec.command, "args": spec.args, "env": exposed(&spec.env),
+                "cwd": folder.display().to_string()
+            })
         }
         CustomTransport::Http { .. } => {
             let headers = launch_headers(&server, &entry).map_err(refused)?;
@@ -1667,10 +1677,21 @@ mod tests {
         let (status, body) = launch(&daemon, "session-custom", "github").await;
         assert_eq!(status, StatusCode::OK, "{body}");
         let answer: Value = serde_json::from_str(&body).expect("JSON");
+        // It runs in a folder Farik keeps for it, never the session's worktree (finding C1).
+        let folder = daemon
+            .project
+            .deps
+            .files
+            .root()
+            .join(".farik/local/connectors/dev-a/github");
         assert_eq!(
             answer,
-            json!({ "command": "github-mcp", "args": ["stdio"], "env": { "API_KEY": KEY_VALUE } })
+            json!({
+                "command": "github-mcp", "args": ["stdio"], "env": { "API_KEY": KEY_VALUE },
+                "cwd": folder.display().to_string()
+            })
         );
+        assert!(folder.is_dir(), "{}", folder.display());
         let (status, body) = launch(&daemon, "session-custom", "linear").await;
         assert_eq!(status, StatusCode::OK, "{body}");
         let answer: Value = serde_json::from_str(&body).expect("JSON");

@@ -38,8 +38,8 @@ fn strings(value: &Value, field: &str) -> Option<BTreeMap<String, String>> {
         .collect()
 }
 
-/// Starts the server with only its keys and `KEPT_ENV` from this process's environment, in place
-/// of this process, so that Claude Code speaks to it directly. Answers 1, saying why, only when it
+/// Starts the server in the folder the daemon names, with only its keys and `KEPT_ENV` from this
+/// process's environment, in place of this process, so that Claude Code speaks to it directly. Answers 1, saying why, only when it
 /// could not.
 pub fn run(daemon_file: &Path, session: &str, server: &str, io: &mut CliIo<'_>) -> i32 {
     let started: Result<(), String> = launch(daemon_file, session, server).and_then(|answer| {
@@ -47,12 +47,17 @@ pub fn run(daemon_file: &Path, session: &str, server: &str, io: &mut CliIo<'_>) 
         let args: Option<Vec<&str>> = answer["args"]
             .as_array()
             .and_then(|args| args.iter().map(Value::as_str).collect());
-        let (Some(command), Some(args), Some(keys)) = (command, args, strings(&answer, "env"))
-        else {
-            return Err("the daemon's answer names no command".to_string());
+        let (Some(command), Some(args), Some(keys), Some(folder)) = (
+            command,
+            args,
+            strings(&answer, "env"),
+            answer["cwd"].as_str(),
+        ) else {
+            return Err("the daemon's answer names no command or folder".to_string());
         };
         let mut process = std::process::Command::new(command);
-        process.args(args).env_clear();
+        // The folder Farik keeps for the server, never the worktree Claude Code started this in.
+        process.args(args).current_dir(folder).env_clear();
         for name in KEPT_ENV {
             if let Some(value) = io.env.get(name) {
                 process.env(name, value);

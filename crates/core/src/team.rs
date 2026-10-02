@@ -315,6 +315,18 @@ fn entry_errors(server: &McpServerWire) -> Vec<(String, String)> {
             format!("A connector {what} needs its {required}."),
         );
     }
+    if let Some(command) = server.command.as_deref().map(String::as_str)
+        && command.contains('/')
+        && !command.starts_with('/')
+    {
+        refuse(
+            "command",
+            format!(
+                "command_not_absolute: {command} would be looked for in the folder the connector \
+                 runs in. Give the program's name alone, found on PATH, or its full path."
+            ),
+        );
+    }
     if let Some(url) = &server.url
         && url_holds_secret(url)
     {
@@ -1991,6 +2003,32 @@ mod tests {
             paths(&with_servers(json!([server]))),
             ["/agents/0/mcp_servers/0/url"]
         );
+    }
+
+    #[test]
+    fn refuses_a_relative_command_with_a_folder() {
+        // A command such as `./server` or `bin/mcp` resolves in the folder the server runs in, not
+        // through PATH; it is no program the user picked by name (finding C1).
+        for command in ["./server", "bin/mcp", "../x/mcp"] {
+            let mut server = a_stdio_server();
+            server["command"] = json!(command);
+            let refused = refusals(&with_servers(json!([server])));
+            assert_eq!(refused.len(), 1, "{command}: {refused:?}");
+            assert_eq!(refused[0].0, "/agents/0/mcp_servers/0/command", "{command}");
+            assert!(
+                refused[0].1.starts_with("command_not_absolute: "),
+                "{command}: {}",
+                refused[0].1
+            );
+        }
+        for command in ["npx", "/usr/local/bin/github-mcp"] {
+            let mut server = a_stdio_server();
+            server["command"] = json!(command);
+            assert!(
+                validate_team(&with_servers(json!([server]))).is_ok(),
+                "{command}: a bare name goes through PATH, and a full path is the user's"
+            );
+        }
     }
 
     #[test]

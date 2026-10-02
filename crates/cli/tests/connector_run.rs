@@ -41,7 +41,8 @@ fn at() -> DateTime<Utc> {
 }
 
 /// `dev-a`'s team, its custom servers changed by `change`: `printenv`, started on the host as the
-/// `env` program so it prints what it was given, and `linear`, at a web address.
+/// `env` program so it prints what it was given; `linear`, at a web address; and `whereami`, the
+/// `pwd` program, which prints the folder it runs in.
 fn a_team(change: impl FnOnce(&mut Value)) -> Team {
     let mut wire = a_team_wire();
     wire["agents"] = json!([
@@ -60,6 +61,11 @@ fn a_team(change: impl FnOnce(&mut Value)) -> Team {
             "url": "https://mcp.linear.example/mcp",
             "headers": { "Authorization": "Bearer {API_KEY}" },
             "credential_keys": ["API_KEY"],
+            "tools": { "search": "network" }
+        },
+        {
+            "name": "whereami", "source": "custom", "transport": "stdio",
+            "command": "pwd", "credential_keys": [],
             "tools": { "search": "network" }
         }
     ]);
@@ -187,6 +193,8 @@ impl Served {
             .args(["connector", verb, "--daemon"])
             .arg(&self.daemon_file)
             .args(["--session", SESSION, "--server", server])
+            // Where Claude Code starts it: the session's worktree.
+            .current_dir(&self.repo.path)
             .env_clear()
             .envs(env.iter().copied())
             .stdin(std::process::Stdio::null())
@@ -344,4 +352,31 @@ fn the_launcher_refuses_a_server_the_session_was_not_given() {
     let (code, out, _) = served.headers("printenv");
     assert_ne!(code, 0);
     assert_eq!(out, "");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn connector_run_starts_the_server_in_a_folder_farik_keeps() {
+    // Claude Code starts the launcher in the task's worktree, which agents write to: a server
+    // started there would run `node_modules/.bin` or a `server.py` an agent left (finding C1).
+    let served = Served::new("connector-run-folder");
+    let env = session_env("/tmp");
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect();
+    let output = served.binary("run", "whereami", &env);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let printed = String::from_utf8(output.stdout).expect("text");
+    let folder = served
+        .repo
+        .path
+        .canonicalize()
+        .expect("the repository")
+        .join(".farik/local/connectors/dev-a/whereami");
+    assert_eq!(printed.trim_end(), folder.display().to_string());
 }

@@ -83,7 +83,7 @@
         "name",
         "source"
       ],
-      "description": "One connector an agent's task sessions get (spec 5.6). A builtin one is its name alone. A custom one says how it is started (stdio: command and args) or reached (http: url and headers), the names of the agent's keys it is given, and the label of each of its tools. validate_team checks what this schema does not, each at its own field: transport is required with source custom and absent with builtin; command and args go with stdio only; url and headers with http only; command with stdio and url with http are required; a url holds no userinfo or query (url_holds_secret); a header names only a key in credential_keys (header_key_unknown); a custom name is not farik or a builtin's (connector_name_reserved); and one name appears once on an agent (connector_name_twice).",
+      "description": "One connector an agent's task sessions get (spec 5.6). A builtin one is its name alone. A custom one says how it is started (stdio: command and args) or reached (http: url and headers), the names of the agent's keys it is given, and the label of each of its tools. validate_team checks what this schema does not, each at its own field: transport is required with source custom and absent with builtin; command and args go with stdio only; url and headers with http only; command with stdio and url with http are required; a command holding a / starts with one (command_not_absolute); a url holds no userinfo or query (url_holds_secret); a header names only a key in credential_keys (header_key_unknown); a custom name is not farik or a builtin's (connector_name_reserved); and one name appears once on an agent (connector_name_twice).",
       "properties": {
         "name": {
           "type": "string",
@@ -110,7 +110,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 500,
-          "description": "The program a stdio connector is started with, found on PATH."
+          "description": "The program a stdio connector is started with: a name found on PATH, or a full path. validate_team refuses a relative path such as ./server or bin/mcp (command_not_absolute), which would be looked for in the folder the connector runs in."
         },
         "args": {
           "type": "array",
