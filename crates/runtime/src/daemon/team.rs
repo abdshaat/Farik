@@ -3608,7 +3608,7 @@ pub(super) mod tests {
         connector["tools"] =
             json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
         let kit = json!({ "role": "software_developer", "skills": [], "connectors": [connector] });
-        farik_roles::parse_kit(
+        farik_roles::parse_fixture_kit(
             farik_core::contract::Role::SoftwareDeveloper,
             &kit.to_string(),
             &[],

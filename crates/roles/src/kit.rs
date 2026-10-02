@@ -234,6 +234,32 @@ pub fn parse_kit(
     role_skills: &[String],
     skills: &[(&str, &[(&str, &str)])],
 ) -> Result<Kit, KitError> {
+    parse(role, yaml, role_skills, skills, false)
+}
+
+/// [`parse_kit`] for a test's fixture kit, which starts its stand-in server with `sh`: every
+/// check but the one on a `stdio` command. Nothing Farik ships goes through it.
+///
+/// # Errors
+///
+/// As [`parse_kit`].
+#[doc(hidden)]
+pub fn parse_fixture_kit(
+    role: Role,
+    yaml: &str,
+    role_skills: &[String],
+    skills: &[(&str, &[(&str, &str)])],
+) -> Result<Kit, KitError> {
+    parse(role, yaml, role_skills, skills, true)
+}
+
+fn parse(
+    role: Role,
+    yaml: &str,
+    role_skills: &[String],
+    skills: &[(&str, &[(&str, &str)])],
+    any_command: bool,
+) -> Result<Kit, KitError> {
     let invalid = |detail: String| KitError::Invalid {
         role_id: role.to_string(),
         detail,
@@ -251,7 +277,7 @@ pub fn parse_kit(
             "the schema passed but the typed kit could not be built: {error}"
         ))
     })?;
-    let mut refused = Refusals(Vec::new());
+    let mut refused = Refusals(Vec::new(), any_command);
     if file.role.to_string() != role.to_string() {
         refused.add(
             "/role".to_string(),
@@ -299,7 +325,7 @@ pub fn parse_kit(
 }
 
 /// The refusals of one kit file, each `<json pointer>: <code>: <words>`.
-struct Refusals(Vec<String>);
+struct Refusals(Vec<String>, bool);
 
 impl Refusals {
     fn add(&mut self, pointer: impl Into<String>, code: &str, words: &str) {
@@ -472,7 +498,7 @@ fn load_server(
     for (field, message) in server_errors(&wire) {
         refused.add(at(&field), code_of(&message), &message);
     }
-    if transport == "stdio" {
+    if transport == "stdio" && !refused.1 {
         check_pinned(
             &connector["command"],
             &strings(&connector["args"]),

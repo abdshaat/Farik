@@ -108,7 +108,7 @@ pub(crate) fn a_developer_kit(skills: &[(&str, &str)], search: Option<&str>) -> 
         "skills": skills.iter().map(|(name, _)| name).collect::<Vec<_>>(),
         "connectors": connectors,
     });
-    farik_roles::parse_kit(
+    farik_roles::parse_fixture_kit(
         farik_core::contract::Role::SoftwareDeveloper,
         &file.to_string(),
         &[],

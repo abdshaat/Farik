@@ -744,7 +744,7 @@ fn a_kit(script: &std::path::Path, oauth_url: Option<&str>) -> farik_runtime::Ki
             json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
     }
     let file = json!({ "role": "software_developer", "skills": [], "connectors": [connector] });
-    let kit = farik_roles::parse_kit(
+    let kit = farik_roles::parse_fixture_kit(
         farik_core::contract::Role::SoftwareDeveloper,
         &file.to_string(),
         &[],
@@ -866,6 +866,62 @@ fn refuses_flags_the_kit_decides() {
         assert!(entry(&repository, "dev-a").is_none(), "{extra:?}");
         assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).is_none());
     }
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_flag_without_its_form() {
+    let repository = a_team("connect-flag-form");
+    let before = files_of(&repository).read_team().expect("the team reads");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let url = "https://mcp.example.com/mcp";
+    for (extra, code, said) in [
+        (vec!["--url", url, "--arg", "x"], 1, "--arg needs --command"),
+        (
+            vec!["--command", "sh", "--header", "A: b"],
+            1,
+            "--header needs --url",
+        ),
+        (
+            vec!["--command", "sh", "--sign-in"],
+            2,
+            "cannot be used with",
+        ),
+        (
+            vec!["--url", url, "--client-id", "a"],
+            1,
+            "--client-id needs --sign-in",
+        ),
+        (
+            vec!["--url", url, "--sign-in", "--callback-port", "33418"],
+            1,
+            "--callback-port needs --client-id",
+        ),
+        (
+            vec!["--url", url, "--scope", "read"],
+            1,
+            "--scope needs --sign-in",
+        ),
+    ] {
+        let mut args = vec!["connect", "dev-a", "fixture"];
+        args.extend_from_slice(&extra);
+        let kept = Arc::clone(&store) as Arc<dyn ConnectorSecrets>;
+        let state = config_of(&repository);
+        let ran = run_with(&repository.path, &args, move |io| {
+            io.connector_secrets = kept;
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
+        });
+        assert_eq!(ran.code, code, "{extra:?}: {}{}", ran.out, ran.err);
+        assert!(ran.err.contains(said), "{extra:?}: {}", ran.err);
+        assert!(entry(&repository, "dev-a").is_none(), "{extra:?}");
+        assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).is_none());
+    }
+    assert_eq!(
+        files_of(&repository).read_team().expect("the team reads"),
+        before,
+        "the team file is unchanged"
+    );
 }
 
 #[test]

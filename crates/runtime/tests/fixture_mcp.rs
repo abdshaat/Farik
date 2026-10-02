@@ -318,7 +318,7 @@ fn fixture_kit(test: &str) -> farik_roles::Kit {
             "tools": { "search": "network", "env": "external_effect", "delete_repo": "denied" },
         }],
     });
-    farik_roles::parse_kit(
+    farik_roles::parse_fixture_kit(
         farik_core::contract::Role::SoftwareDeveloper,
         &file.to_string(),
         &[],
