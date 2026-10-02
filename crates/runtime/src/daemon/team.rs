@@ -4103,6 +4103,36 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn changing_allowances_keeps_a_tool_left_out() {
+        let (harness, _) = keeping("allow-change-left-out");
+        harness.project.set_kit(fixture_kit_with(
+            "allow-change-left-out",
+            &json!({ "make": "external_effect", "post": "external_effect" }),
+            &json!({
+                "make": { "calls": 20, "what": "pictures" },
+                "post": { "calls": 4, "what": "posts" }
+            }),
+        ));
+        call(
+            &harness.daemon,
+            "connector.connect",
+            &allowance_params("dev-a", &json!({ "make": 5, "post": 1 })),
+            "connectorConnectResult",
+        );
+        call(
+            &harness.daemon,
+            "connector.allowances",
+            &json!({ "agent": "dev-a", "server": "fixture", "allowances": { "make": 30 } }),
+            "emptyResult",
+        );
+        assert_eq!(
+            entry(&harness, 1, "fixture").expect("kept")["allowances"],
+            json!({ "make": 30, "post": 1 })
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn changing_allowances_checks_them_as_connect_does() {
         let (harness, _) = keeping_an_allowance_kit("allow-change-checked");
         connected(&harness, "dev-a", &kit_server(), &json!({}));
