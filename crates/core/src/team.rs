@@ -327,6 +327,27 @@ fn entry_errors(server: &McpServerWire) -> Vec<(String, String)> {
             ),
         );
     }
+    refused.extend(secret_errors(server));
+    refused
+}
+
+/// An entry's refusals for a value the committed team file must not hold: a key in its
+/// arguments, its address, or a header.
+fn secret_errors(server: &McpServerWire) -> Vec<(String, String)> {
+    let mut refused = Vec::new();
+    let mut refuse = |field: &str, message: String| refused.push((field.to_string(), message));
+    let args: Vec<&str> = server.args.iter().map(|arg| arg.as_str()).collect();
+    for index in args_holding_secrets(&args) {
+        refuse(
+            &format!("args/{index}"),
+            format!(
+                "arg_holds_secret: argument {} looks like a key, and the team file is shared. \
+                 Name the key in credential_keys and give it when you connect: the connector \
+                 reads it from its environment.",
+                index + 1
+            ),
+        );
+    }
     if let Some(url) = &server.url
         && url_holds_secret(url)
     {
@@ -375,31 +396,104 @@ fn url_holds_secret(url: &str) -> bool {
     authority.contains('@') || rest.contains('?')
 }
 
-/// Why the header `header` with `template` is refused, when it is: it holds a credential's value
-/// itself, or names a key the connector is not given.
+/// Why the header `header` with `template` is refused, when it is: it names a key the connector
+/// is not given, or it carries a credential and holds a value itself, alone or beside a `{KEY}`.
 fn header_error(header: &str, template: &str, keys: &[&str]) -> Option<String> {
-    if names_a_secret(header) && !template.contains('{') {
+    if !header_names_only(template, keys) {
         return Some(format!(
-            "header_holds_secret: {header} holds its value itself, and the team file is shared. \
-             Write {{KEY}} where the key goes, with KEY in credential_keys, and give the key when \
-             you connect."
-        ));
-    }
-    (!header_names_only(template, keys)).then(|| {
-        format!(
             "header_key_unknown: {header} may hold {{KEY}} only for a key this connector is given \
              in credential_keys."
+        ));
+    }
+    (names_a_secret(header) && (!template.contains('{') || holds_a_value(template))).then(|| {
+        format!(
+            "header_holds_secret: {header} holds a value itself, and the team file is shared. \
+             Write {{KEY}} where each key goes, with KEY in credential_keys, and give the key when \
+             you connect."
         )
     })
 }
 
-/// Whether a header's name says it carries a credential: `Authorization`, or a name holding
-/// `key`, `token`, `secret` or `auth`, in any case.
+/// Whether a header's name says it carries a credential: `Authorization`, `Cookie`, or a name
+/// holding `key`, `token`, `secret` or `auth`, in any case.
 fn names_a_secret(header: &str) -> bool {
     let header = header.to_ascii_lowercase();
-    ["key", "token", "secret", "auth"]
+    ["key", "token", "secret", "auth", "cookie"]
         .iter()
         .any(|word| header.contains(word))
+}
+
+/// Whether a credential header's template holds text that may be a value (re-review N4). Split at
+/// spaces and `;`, each piece is a `{KEY}`, a `name={KEY}`, or, first, a scheme of letters alone,
+/// such as `Bearer`.
+fn holds_a_value(template: &str) -> bool {
+    template
+        .split([' ', ';'])
+        .filter(|piece| !piece.is_empty())
+        .enumerate()
+        .any(|(index, piece)| match piece.split_once('{') {
+            None => index > 0 || !piece.chars().all(|c| c.is_ascii_alphabetic()),
+            Some((before, after)) => {
+                let name = before.strip_suffix('=').unwrap_or(before);
+                let names = before.is_empty()
+                    || (before.ends_with('=')
+                        && !name.is_empty()
+                        && name
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')));
+                !names
+                    || after
+                        .split_once('}')
+                        .is_none_or(|(_, rest)| !rest.is_empty())
+            }
+        })
+}
+
+/// The index of each argument that holds a key's value (re-review N4): one given to a flag whose
+/// name ends in `key`, `token`, `password` or `secret`, as `--api-key abc` or `--token=abc`, or one
+/// shaped like a well-known service's key, such as `sk-…` or `ghp_…`.
+fn args_holding_secrets(args: &[&str]) -> Vec<usize> {
+    let names_a_key = |flag: &str| {
+        let flag = flag.to_ascii_lowercase();
+        ["key", "token", "password", "secret"]
+            .iter()
+            .any(|word| flag.ends_with(word))
+    };
+    let mut held = Vec::new();
+    for (index, arg) in args.iter().enumerate() {
+        let flag = arg.strip_prefix("--").or_else(|| arg.strip_prefix('-'));
+        let holds = match flag.map(|flag| flag.split_once('=')) {
+            Some(Some((name, value))) => names_a_key(name) && !value.is_empty(),
+            Some(None) => {
+                if names_a_key(flag.unwrap_or_default())
+                    && args
+                        .get(index + 1)
+                        .is_some_and(|next| !next.starts_with('-'))
+                {
+                    held.push(index + 1);
+                }
+                false
+            }
+            None => [
+                "sk-",
+                "ghp_",
+                "gho_",
+                "ghs_",
+                "github_pat_",
+                "glpat-",
+                "xoxb-",
+                "xoxp-",
+            ]
+            .iter()
+            .any(|prefix| arg.starts_with(prefix)),
+        };
+        if holds {
+            held.push(index);
+        }
+    }
+    held.sort_unstable();
+    held.dedup();
+    held
 }
 
 /// Whether every `{` in a header template opens a `{KEY}` for one of `keys`.
@@ -2082,6 +2176,86 @@ mod tests {
             "Authorization": "Bearer {API_KEY}", "X-Team": "farik", "Accept": "text/plain"
         });
         assert!(validate_team(&with_servers(json!([server]))).is_ok());
+    }
+
+    #[test]
+    fn refuses_a_secret_beside_a_placeholder_or_in_a_cookie() {
+        // A placeholder does not make a header safe: what is written beside it is shared too
+        // (re-review N4).
+        for (header, template) in [
+            ("Authorization", "Bearer ghp_x {API_KEY}"),
+            ("Authorization", "{API_KEY} ghp_x"),
+            ("Cookie", "session=abc123"),
+            ("Cookie", "theme=dark; session=abc123"),
+            ("Cookie", "session={API_KEY}; csrf=abc123"),
+        ] {
+            let mut server = an_http_server();
+            server["headers"] = json!({ header: template });
+            let refused = refusals(&with_servers(json!([server])));
+            assert_eq!(refused.len(), 1, "{template}: {refused:?}");
+            assert_eq!(
+                refused[0].0,
+                format!("/agents/0/mcp_servers/0/headers/{header}"),
+                "{template}"
+            );
+            assert!(
+                refused[0].1.starts_with("header_holds_secret: "),
+                "{template}: {}",
+                refused[0].1
+            );
+        }
+        let mut server = an_http_server();
+        server["headers"] = json!({
+            "Authorization": "Bearer {API_KEY}",
+            "Cookie": "session={API_KEY}; csrf={API_KEY}",
+            "X-Api-Key": "{API_KEY}",
+        });
+        assert!(validate_team(&with_servers(json!([server]))).is_ok());
+    }
+
+    #[test]
+    fn refuses_a_secret_in_a_commands_arguments() {
+        // `npx srv --api-key sk-…` would be written to the committed team file (re-review N4).
+        for (args, at) in [
+            (json!(["srv", "--api-key", "abc123"]), 2),
+            (json!(["srv", "--api-key=abc123"]), 1),
+            (json!(["--token", "t0k3n", "srv"]), 1),
+            (json!(["srv", "--password", "hunter2"]), 2),
+            (json!(["srv", "--client-secret=s"]), 1),
+            (json!(["srv", "sk-proj-abc123"]), 1),
+            (json!(["srv", "ghp_abc123"]), 1),
+        ] {
+            let mut server = a_stdio_server();
+            server["args"] = args.clone();
+            let refused = refusals(&with_servers(json!([server])));
+            assert_eq!(refused.len(), 1, "{args}: {refused:?}");
+            assert_eq!(
+                refused[0].0,
+                format!("/agents/0/mcp_servers/0/args/{at}"),
+                "{args}"
+            );
+            assert!(
+                refused[0].1.starts_with("arg_holds_secret: "),
+                "{args}: {}",
+                refused[0].1
+            );
+            // The refusal reaches the screen and the log: it never quotes the value.
+            for value in ["abc123", "t0k3n", "hunter2", "sk-proj", "ghp_"] {
+                assert!(!refused[0].1.contains(value), "{}", refused[0].1);
+            }
+        }
+        for args in [
+            json!(["-y", "@example/github-mcp"]),
+            json!(["srv", "--keyboard", "us", "--token-file", "/home/u/t"]),
+            json!(["srv", "--api-key", "--verbose"]),
+        ] {
+            let mut server = a_stdio_server();
+            server["args"] = args.clone();
+            assert!(
+                validate_team(&with_servers(json!([server]))).is_ok(),
+                "{args}"
+            );
+        }
     }
 
     #[test]
