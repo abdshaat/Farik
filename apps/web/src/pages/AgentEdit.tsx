@@ -72,6 +72,32 @@ function withPlaywright(agent: Edited, on: boolean): Edited {
 	return mcpServers.length ? { ...rest, mcpServers } : rest;
 }
 
+/**
+ * The draft's own edits laid over the agent as last read. What the page changes outside Save, a
+ * custom connector added or removed and the agent's status, stays as the daemon last said (I3).
+ */
+function rebased(draft: Edited, saved: Edited): Edited {
+	const builtins = (draft.mcpServers ?? []).filter(
+		(c) => c.source !== "custom",
+	);
+	const kept = saved.mcpServers ?? [];
+	const mcpServers = [
+		...kept.flatMap((c) =>
+			c.source === "custom" ? [c] : builtins.filter((b) => b.name === c.name),
+		),
+		...builtins.filter((b) => !kept.some((c) => c.name === b.name)),
+	];
+	const { mcpServers: _, ...rest } = {
+		...saved,
+		displayName: draft.displayName,
+		...(draft.persona !== undefined && { persona: draft.persona }),
+		model: draft.model,
+		grants: draft.grants,
+		revokes: draft.revokes,
+	};
+	return mcpServers.length ? { ...rest, mcpServers } : rest;
+}
+
 /** One agent's page, once the team has loaded. */
 export function AgentEdit() {
 	const { id } = useParams();
@@ -124,7 +150,7 @@ function Editor({
 	const [draft, setDraft] = useState<Edited>();
 	const [busy, setBusy] = useState(false);
 	const [refused, setRefused] = useState<string>();
-	const agent = draft ?? saved;
+	const agent = draft ? rebased(draft, saved) : saved;
 	const next: TeamFile = {
 		...team,
 		agents: team.agents.map((a) => (a.id === saved.id ? agent : a)),

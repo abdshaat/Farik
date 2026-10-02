@@ -152,6 +152,48 @@ async function listed(key = "pat-secret-1") {
 	return { ...page, asked };
 }
 
+/** The team.get answer for `team`, as the daemon gives it after a connect or a disconnect. */
+const teamGot = (team: object, connectors: object[] = CONNECTORS) => ({
+	team,
+	agents: EFFECTIVE,
+	judges: { auto: null, architect: null, scrum_master: null },
+	max_agents: 7,
+	connectors,
+});
+
+/** Theo's team with `servers` in place of Theo's custom connectors. */
+const theoWith = (servers: object[]) => ({
+	...TEAM,
+	agents: [
+		TEAM.agents[0],
+		{
+			...agent("theo", "Theo", "software_developer", "developer"),
+			mcp_servers: servers,
+		},
+	],
+});
+
+/** The persona typed, so the page holds a draft of Theo. */
+function editPersona() {
+	fireEvent.change(screen.getByLabelText("How Theo talks"), {
+		target: { value: "Short and kind." },
+	});
+}
+
+/** Save pressed: Theo's entry in the team `team.save` sent. */
+async function savedTheo(s: FakeSocket) {
+	fireEvent.click(screen.getByRole("button", { name: en.agentSave }));
+	const save = await sent(s, "team.save");
+	const team = (
+		save.params as {
+			team: {
+				agents: { persona?: string; mcp_servers?: { name: string }[] }[];
+			};
+		}
+	).team;
+	return team.agents[1];
+}
+
 describe("connectors on the agent page", () => {
 	afterEach(() => localStorage.clear());
 
@@ -197,6 +239,91 @@ describe("connectors on the agent page", () => {
 		// The page reads the team again rather than guessing what is left.
 		await waitFor(() => expect(teamAskedTimes(s)).toBeGreaterThan(before));
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	});
+
+	it("agent_edit_saves_without_bringing_back_a_removed_connector", async () => {
+		const { container, s } = await opened();
+		editPersona();
+		fireEvent.click(
+			within(row("airtable")).getByRole("button", { name: "Remove airtable" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Remove airtable from Theo?",
+		});
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Remove airtable" }),
+		);
+		await s.reply(await sent(s, "connector.disconnect"), {});
+		await answerQuery(s, "team.get", teamGot(theoWith([LINEAR, NOTION])));
+		await waitFor(() =>
+			expect(screen.queryByText("airtable", { selector: "strong" })).toBeNull(),
+		);
+		await expectNoAxeViolations(container);
+		const theo = await savedTheo(s);
+		expect(theo?.persona).toBe("Short and kind.");
+		expect(theo?.mcp_servers?.map((c) => c.name)).toEqual(["linear", "notion"]);
+	});
+
+	it("agent_edit_saves_without_dropping_an_added_connector", async () => {
+		const { container, s } = await opened();
+		editPersona();
+		const github = {
+			...AIRTABLE,
+			name: "github",
+			args: ["-y", "github-connector"],
+		};
+		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(
+			screen.getByRole("button", { name: en.connectorCustomAdd }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Add a custom connector to Theo",
+		});
+		const field = (label: string) => within(dialog).getByLabelText(label);
+		fireEvent.change(field(en.addName), { target: { value: "github" } });
+		fireEvent.change(field(en.addCommand), {
+			target: { value: "npx -y github-connector" },
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: en.addNext }));
+		await s.reply(await sent(s, "connector.tools"), {
+			tools: [{ name: "search", description: "", usable: true }],
+		});
+		fireEvent.click(
+			await within(dialog).findByRole("button", { name: "Add github to Theo" }),
+		);
+		await s.reply(await sent(s, "connector.connect"), {
+			stored_in: "keychain",
+			tools: { search: "external_effect" },
+		});
+		const before = teamAskedTimes(s);
+		fireEvent.click(
+			await within(dialog).findByRole("button", { name: "Back to Theo" }),
+		);
+		// The page reads the team again once ConnectorAdd closes.
+		await waitFor(() => expect(teamAskedTimes(s)).toBeGreaterThan(before));
+		await answerQuery(
+			s,
+			"team.get",
+			teamGot(theoWith([AIRTABLE, LINEAR, NOTION, github]), [
+				...CONNECTORS,
+				{
+					agent: "theo",
+					server: "github",
+					state: "connected",
+					stored_in: "keychain",
+				},
+			]),
+		);
+		await waitFor(() => expect(row("github")).toBeTruthy());
+		await expectNoAxeViolations(container);
+		const theo = await savedTheo(s);
+		expect(theo?.persona).toBe("Short and kind.");
+		expect(theo?.mcp_servers?.map((c) => c.name)).toEqual([
+			"airtable",
+			"linear",
+			"notion",
+			"github",
+		]);
 	});
 
 	it("agent_edit_says_a_refused_remove_in_plain_words", async () => {
