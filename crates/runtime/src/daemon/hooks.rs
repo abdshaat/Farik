@@ -336,12 +336,15 @@ fn judge_call(
 }
 
 /// Whether a `Skill` call names one of the session's skills as `farik:<name>` and holds nothing
-/// but that and an optional string `args` (ADR 0034): a bare name would load Claude Code's own
+/// but that and an optional string `args` holding no `@`, which Claude Code would attach as a file
+/// past this hook (ADR 0034): a bare name would load Claude Code's own
 /// skill of that name, and any other field is not one Farik has judged.
 fn judge_skill(input: &Value, registration: &SessionRegistration) -> Result<(), String> {
     let named = input.as_object().is_some_and(|fields| {
         fields.keys().all(|key| key == "skill" || key == "args")
-            && fields.get("args").is_none_or(Value::is_string)
+            && fields
+                .get("args")
+                .is_none_or(|args| args.as_str().is_some_and(|text| !text.contains('@')))
             && fields
                 .get("skill")
                 .and_then(Value::as_str)
@@ -353,7 +356,7 @@ fn judge_skill(input: &Value, registration: &SessionRegistration) -> Result<(), 
     }
     Err(format!(
         "skill_not_in_session: a session uses its own skills as farik:<name> with nothing but an \
-         optional args, and this one has {}",
+         optional args without @, and this one has {}",
         if registration.skills.is_empty() {
             "none".to_string()
         } else {
@@ -1350,6 +1353,10 @@ mod tests {
             json!({}),
             json!({ "skill": "farik:api-style", "extra": 1 }),
             json!({ "skill": "farik:api-style", "args": 5 }),
+            json!({ "skill": "farik:api-style", "args": "@~/.ssh/id_rsa" }),
+            json!({ "skill": "farik:api-style", "args": "see @x" }),
+            json!({ "skill": "farik:api-style", "args": "x\u{3002}@y" }),
+            json!({ "skill": "farik:api-style", "args": "ana@example.com" }),
             json!("farik:api-style"),
         ] {
             denied_for(&call(input.clone()), "skill_not_in_session");
