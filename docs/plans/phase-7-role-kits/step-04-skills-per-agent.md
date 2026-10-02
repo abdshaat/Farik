@@ -187,7 +187,7 @@ Files: `crates/roles/src/skill_check.rs`, `crates/roles/src/lib.rs`. Produces `c
 - `refuses_folders_out_of_bounds`: a 33 KiB `SKILL.md`, a 65 KiB file, 257 KiB in all, and 17 files each give `TooLarge` or `TooManyFiles`; a file holding NUL gives `FileNotText`; `.hidden`, `a/b/c/d.md` and `../x` each give `PathInvalid`; `a/b/c.md` passes.
 - `every_shipped_role_skill_passes`: each `role.yaml` skill passes `check_skill`, and `core_skill_names` equals the set of skill names gathered from `load_role` over every shipped role (not a literal count).
 
-- [ ] `feat(roles): check a skill against the Agent Skills format and Farik's limits`
+- [x] `feat(roles): check a skill against the Agent Skills format and Farik's limits`
 
 ### Task 3: Reading, confirming and assembling skills
 

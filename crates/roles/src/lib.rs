@@ -20,9 +20,12 @@ mod connectors;
 pub mod generated;
 /// Which role reviews a task (D7).
 mod reviewer;
+/// Checking a skill a user adds.
+mod skill_check;
 
 pub use connectors::{ConnectorDefinition, builtin_connector};
 pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
+pub use skill_check::{CheckedSkill, SkillRefusal, check_skill, core_skill_names};
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/role.schema.json");
 
