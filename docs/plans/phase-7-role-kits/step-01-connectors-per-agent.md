@@ -1,6 +1,6 @@
 # Phase 7, step 01: Connectors per agent
 
-Status: built; landing review pending
+Status: done (landed and landing-reviewed 2026-10-01; three fix waves and three re-reviews)
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 5.6, 6.7, 8.2, 8.5, 8.6; F9
 Depends on: phase 6 (merged in #19), whose step 05 keeps the model credential in the keychain (`crates/runtime/src/credential.rs`, with ADR 0022's file fallback) and whose step 12 built the connector base (ADR 0026)
@@ -315,3 +315,10 @@ As built (fix wave C, 2026-10-01, the re-review's C1 and N1 to N8):
 - N6: `ConnectorAdd` takes the program and each part after it in fields of their own ("What comes after it", "Add a part"); a refusal at `args/<n>` is said at that part; `arg_holds_secret` has plain words. Tests: `connector_add_takes_each_part_of_a_command_in_its_own_field`, `connect_again_shows_each_part_of_the_command`.
 - N7: every header is a line of its own, changeable and removable, on a new connector and on Connect again; a name an earlier line has is said at the later line. Test: `connect_again_shows_every_header_and_lets_one_go`.
 - N8: `forget_removed_keys` (was `forget_removed_agents_keys`) deletes the keys of every custom server an agent had before a save and not after, not only of agents that are gone (`removing_a_server_by_a_save_deletes_its_keys`).
+
+As built (follow-ups, 2026-10-01, re-review 2's m1, m3, m4 and m5; m2 accepted as it was, harmless and older than this step):
+- m1: `working_folder` takes the project's root and refuses `state_inside_project` when the state folder, links followed, is inside it (an `XDG_CONFIG_HOME` pointing into the project), so no stdio server is listed or started; the page words it (`addStateInsideProject`) and `farik connect` prints it. Setup refuses the home folder itself as a project. Tests: `no_connector_runs_in_a_state_folder_inside_the_project`, `farik_connect_starts_nothing_when_farik_settings_are_inside_the_project`, `connector_add_says_when_farik_settings_folder_is_inside_the_project`, and `refuses_paths_outside_home_and_bad_names` with home a git project.
+- m3: names are split into words at `-` and `_`. A flag names a key by its last word (`token`, `password`, `pass`, `secret`, `auth`, `pat`, `credentials`, …) or by `api-key`, `access-key` or `secret-key`, not after `no-`; a number is not a key's value, and a value starting `--` is a flag. An argument is also a key as `NAME=value`, as a credential header with its value (after `--header`), or as `sk_live_`, `rk_live_`, `AKIA…`. Header words gain `password`, `pass`, `credential(s)`, and a scheme may hold digits (`OAuth2`). Test: `tells_a_key_from_a_setting_that_only_looks_like_one`, one table of both lists.
+- m4: `a_project_reached_through_a_link_has_its_targets_id` catches N3a; the same table's `Bearer abcdef {API_KEY}` row catches N4b.
+- m5: a command holding a space and not starting with `/` is said at Command at once, and Next waits; an empty part is not sent, and a refusal at `args/<n>` is moved to the part shown. Tests: `connector_add_says_early_when_a_whole_command_is_pasted_into_command`, `connector_add_says_a_refusal_at_the_part_it_names_after_an_empty_one`.
+- SPEC 6.7 says that connecting a server again while a session runs it removes its folder, which fails closed, Farik running one session at a time.
