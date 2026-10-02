@@ -13,10 +13,14 @@ export type SkillFolder = {
 /** Which skill: the team's, or one agent's. */
 export type SkillAt = { level: "team" | "agent"; name: string };
 
+/** A skill Farik ships for a role, which `skill.get` answers with no hash. */
+export type SkillShipped = { level: "role"; name: string; role: string };
+
 /** The `skill.get` params for `skill` of `agent`. */
-export const skillParams = (agent: string, skill: SkillAt) => ({
+export const skillParams = (agent: string, skill: SkillAt | SkillShipped) => ({
 	level: skill.level,
 	...(skill.level === "agent" && { agent }),
+	...(skill.level === "role" && { role: skill.role }),
 	name: skill.name,
 });
 
@@ -43,21 +47,32 @@ export async function sendSkill(
 }
 
 /** The folder of `skill`, read once: loading, the folder, or the code that refused it. */
-export function useSkillFolder(agent: string, skill: SkillAt) {
+export function useSkillFolder(agent: string, skill: SkillAt | SkillShipped) {
 	const { client } = useConnection();
 	const { level, name } = skill;
+	const role = skill.level === "role" ? skill.role : undefined;
 	const [got, setGot] = useState<SkillFolder | { refused: string }>();
 	useEffect(() => {
 		if (!client) return;
 		let live = true;
-		client.query("skill.get", skillParams(agent, { level, name })).then(
-			(folder) => live && setGot(folder as SkillFolder),
-			(e) => live && setGot({ refused: refusedWith(e) }),
-		);
+		client
+			.query(
+				"skill.get",
+				skillParams(
+					agent,
+					level === "role"
+						? { level, name, role: role ?? "" }
+						: { level, name },
+				),
+			)
+			.then(
+				(folder) => live && setGot(folder as SkillFolder),
+				(e) => live && setGot({ refused: refusedWith(e) }),
+			);
 		return () => {
 			live = false;
 		};
-	}, [client, agent, level, name]);
+	}, [client, agent, level, name, role]);
 	return got;
 }
 

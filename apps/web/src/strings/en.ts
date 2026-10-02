@@ -1484,6 +1484,12 @@ export const en = {
 	skillReviewButton: "Review",
 	skillReplacedByOwn: "{name}’s own {skill} replaces this one for {name}",
 	skillReplacedByTeam: "Your team’s {skill} replaces this one",
+	skillReplacedByOwnRole: "{name}’s own {skill} replaces this one",
+	skillReadButton: "Read",
+	skillClose: "Close",
+	skillReadTitle: "Read {skill}",
+	skillReadNote:
+		"Farik comes with this skill, and its text is shown here to read. It cannot be changed here.",
 	skillToReview: "Changed in the project. Review before {name} uses it",
 	skillMissing: "is in the team file but its folder is gone",
 	skillRemoveTitle: "Remove {skill}?",
@@ -1513,9 +1519,12 @@ export const en = {
 	skillNext: "Next",
 	skillCancel: "Cancel",
 	skillBack: "Back",
-	skillRead: "Farik will follow these instructions. Read them before adding.",
+	skillRead:
+		"Farik will follow these instructions and use these files. Read them before adding.",
 	skillIgnores: "Farik ignores: {fields}",
 	skillReplaces: "This replaces {role}’s own {skill} for {whom}.",
+	skillReplacesFarik:
+		"This replaces the skill Farik comes with of that name, {skill}, for {whom}.",
 	skillWholeTeam: "your whole team",
 	skillAddNow: "Add skill",
 	skillReplaceNow: "Replace and add skill",
@@ -1532,6 +1541,7 @@ export const en = {
 	skillWhyRuns: "it runs commands when it loads",
 	skillWhyAttaches: "it pulls in files when it loads",
 	skillWhyLarge: "it is too large",
+	skillWhyNotText: "a file in it is not plain text",
 	skillWhyOther: "Farik cannot accept something in it",
 	skillSize: "{kb} KB",
 	skillRunsCommands:
@@ -1539,6 +1549,8 @@ export const en = {
 	skillAttachesFiles:
 		"This skill pulls in files when it loads, which Farik doesn’t allow. Name a file without the @.",
 	skillTooLarge: "Instructions are limited to 32 KB.",
+	skillNotText:
+		"A file in this skill is not plain text, which Farik cannot use.",
 	skillNameInvalid:
 		"A name is lower-case words joined by hyphens, 64 characters at most.",
 	skillNameMismatch: "The name in the file is not the name of the skill.",

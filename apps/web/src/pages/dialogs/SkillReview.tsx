@@ -5,12 +5,13 @@ import { said } from "../../app/refusals.ts";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
 import { kb, type SkillAt, sendSkill, useSkillFolder } from "../skills.ts";
-import { visibly } from "./ToolApproval.tsx";
+import { FileFrame, inOrder } from "./FileFrame.tsx";
 
 const WHY: Record<string, Parameters<typeof t>[0]> = {
 	skill_runs_commands: "skillWhyRuns",
 	skill_attaches_files: "skillWhyAttaches",
 	skill_too_large: "skillWhyLarge",
+	skill_file_not_text: "skillWhyNotText",
 };
 
 /** A skill that came with the project, read whole before it is used (spec 6.7). */
@@ -35,7 +36,10 @@ export function SkillReview({
 	const got = useSkillFolder(agent, skill);
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
-	const replaces = shipped.includes(skill.name);
+	// A name another role ships is learned from the daemon's refusal; the person then chooses.
+	const [taken, setTaken] = useState(false);
+	const ours = shipped.includes(skill.name);
+	const replaces = ours || taken;
 	const at = { level: skill.level, ...(skill.level === "agent" && { agent }) };
 	const send = async (command: string, body: object) => {
 		if (!client) return;
@@ -44,6 +48,7 @@ export function SkillReview({
 		const code = await sendSkill(client, { command, body: { ...at, ...body } });
 		setBusy(false);
 		if (code === undefined) onClose(true);
+		else if (code === "skill_name_taken") setTaken(true);
 		else setRefusal(said(code, {}, "skillOtherRefusal"));
 	};
 	const remove = () => send("skill_remove", { name: skill.name });
@@ -91,26 +96,9 @@ export function SkillReview({
 					<>
 						<h3>{t("skillReviewWhole")}</h3>
 						<p className={styles.toolHint}>{t("skillReviewShown")}</p>
-						{Object.entries(got.files)
-							.sort(([a], [b]) =>
-								a === "SKILL.md"
-									? -1
-									: b === "SKILL.md"
-										? 1
-										: a.localeCompare(b),
-							)
-							.map(([path, text]) => (
-								<section
-									key={path}
-									aria-label={path}
-									data-trust="untrusted"
-									className={styles.untrusted}
-									// biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll box must take focus to scroll by keyboard
-									tabIndex={0}
-								>
-									<pre>{visibly(text)}</pre>
-								</section>
-							))}
+						{inOrder(got.files).map(([path, text]) => (
+							<FileFrame key={path} path={path} text={text} />
+						))}
 						<h3>{t("skillReviewFiles")}</h3>
 						<ul>
 							{Object.entries(got.files).map(([path, text]) => (
@@ -122,7 +110,7 @@ export function SkillReview({
 						{replaces && (
 							<p>
 								<strong>
-									{t("skillReplaces", {
+									{t(ours ? "skillReplaces" : "skillReplacesFarik", {
 										role,
 										skill: skill.name,
 										whom: skill.level === "agent" ? who : t("skillWholeTeam"),

@@ -5,7 +5,7 @@ import { said } from "../../app/refusals.ts";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
 import { kb, type SkillAt, type SkillFolder, sendSkill } from "../skills.ts";
-import { visibly } from "./ToolApproval.tsx";
+import { FileFrame, inOrder } from "./FileFrame.tsx";
 
 /** The skill being edited, as its folder read. */
 export type Editing = SkillAt & { folder: SkillFolder };
@@ -45,6 +45,7 @@ const FIELD: Record<string, "name" | "description" | "instructions"> = {
 	skill_runs_commands: "instructions",
 	skill_attaches_files: "instructions",
 	skill_too_large: "instructions",
+	skill_file_not_text: "instructions",
 };
 
 /**
@@ -87,20 +88,23 @@ export function SkillEdit({
 	const [reading, setReading] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
+	// A name another role ships is learned from the daemon's refusal; the person then chooses.
+	const [taken, setTaken] = useState<string>();
 	const upload = useRef<HTMLInputElement>(null);
 
 	const file = asFile
 		? text
 		: `---\nname: ${skill.trim()}\ndescription: ${JSON.stringify(description.trim())}\n---\n${body}`;
 	const named = asFile
-		? (
-				/^name: *([^\n]*)$/m.exec(text.split("\n---")[0] ?? "")?.[1] ?? ""
-			).trim()
+		? (/^name: *([^\n]*)$/m.exec(text.split("\n---")[0] ?? "")?.[1] ?? "")
+				.trim()
+				.replace(/^(["'])(.*)\1$/, "$2")
 		: skill.trim();
 	const others = Object.entries(editing?.folder.files ?? {}).filter(
 		([path]) => path !== "SKILL.md",
 	);
-	const replaces = shipped.includes(named);
+	const ours = shipped.includes(named);
+	const replaces = ours || taken === named;
 	const whom = level === "agent" ? who : t("skillWholeTeam");
 	const ready = asFile
 		? text.trim() !== ""
@@ -112,7 +116,8 @@ export function SkillEdit({
 	/** The refusal as an `error` prop for the field it belongs under. */
 	const err = (at: string, whole = false) =>
 		refused && (whole ? field : field === at) ? { error: refused } : {};
-	const renamed = editing && named && named !== editing.name;
+	const renamed =
+		editing && ((named && named !== editing.name) || level !== editing.level);
 
 	const add = async () => {
 		if (!client) return;
@@ -130,6 +135,7 @@ export function SkillEdit({
 		});
 		setBusy(false);
 		if (code === undefined) return onClose(true);
+		if (code === "skill_name_taken") return setTaken(named);
 		setRefusal(code);
 		setReading(false);
 	};
@@ -142,6 +148,7 @@ export function SkillEdit({
 	return (
 		<Dialog
 			open
+			fillsPhone
 			title={
 				editing
 					? t("skillEditTitle", { skill: editing.name })
@@ -176,15 +183,11 @@ export function SkillEdit({
 			{reading ? (
 				<div className={styles.toolApproval}>
 					<p>{t("skillRead")}</p>
-					<section
-						aria-label={t("skillReviewWhole")}
-						data-trust="untrusted"
-						className={styles.untrusted}
-						// biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll box must take focus to scroll by keyboard
-						tabIndex={0}
-					>
-						<pre>{visibly(file)}</pre>
-					</section>
+					{inOrder({ "SKILL.md": file, ...Object.fromEntries(others) }).map(
+						([path, text]) => (
+							<FileFrame key={path} path={path} text={text} />
+						),
+					)}
 					{ignored.length > 0 && (
 						<p className={styles.muted}>
 							{t("skillIgnores", { fields: ignored.join(", ") })}
@@ -193,7 +196,11 @@ export function SkillEdit({
 					{replaces && (
 						<p>
 							<strong>
-								{t("skillReplaces", { role, skill: named, whom })}
+								{t(ours ? "skillReplaces" : "skillReplacesFarik", {
+									role,
+									skill: named,
+									whom,
+								})}
 							</strong>
 						</p>
 					)}

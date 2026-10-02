@@ -50,6 +50,7 @@ const WORDS: Record<string, keyof typeof en> = {
 	skill_runs_commands: "skillRunsCommands",
 	skill_attaches_files: "skillAttachesFiles",
 	skill_too_large: "skillTooLarge",
+	skill_file_not_text: "skillNotText",
 	skill_name_invalid: "skillNameInvalid",
 	skill_name_mismatch: "skillNameMismatch",
 	skill_description_invalid: "skillDescriptionInvalid",

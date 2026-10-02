@@ -7,7 +7,9 @@ import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import { ConnectorAdd, hostOf, labelsSaid } from "./ConnectorAdd.tsx";
 import { type Editing, SkillEdit } from "./dialogs/SkillEdit.tsx";
+import { SkillRead } from "./dialogs/SkillRead.tsx";
 import { SkillReview } from "./dialogs/SkillReview.tsx";
+import { visibly } from "./dialogs/ToolApproval.tsx";
 import styles from "./pages.module.css";
 import { useAdvanced } from "./Settings.tsx";
 import {
@@ -21,6 +23,7 @@ import {
 	refusedWith,
 	type SkillAt,
 	type SkillFolder,
+	type SkillShipped,
 	sendSkill,
 	skillParams,
 } from "./skills.ts";
@@ -457,6 +460,7 @@ function Editor({
 				agent={saved.id}
 				name={name}
 				role={roleName(agent.role)}
+				roleId={agent.role}
 				onChanged={again}
 			/>
 			{removing && (
@@ -658,11 +662,14 @@ function SkillsSection({
 	agent,
 	name,
 	role,
+	roleId,
 	onChanged,
 }: {
 	agent: string;
 	name: string;
 	role: string;
+	/** The role's id, which `skill.get` asks a shipped skill by. */
+	roleId: string;
 	/** Reads the team again, which holds each skill's pin. */
 	onChanged: () => void;
 }) {
@@ -674,6 +681,7 @@ function SkillsSection({
 		| { kind: "edit"; editing?: Editing }
 		| { kind: "review"; skill: SkillAt }
 		| { kind: "remove"; skill: SkillAt }
+		| { kind: "read"; skill: SkillShipped }
 	>();
 	const [refused, setRefused] = useState<string>();
 	const [busy, setBusy] = useState(false);
@@ -745,6 +753,26 @@ function SkillsSection({
 											<span>
 												<strong>{r.name}</strong>
 											</span>
+											{r.level === "role" && (
+												<span className={styles.actions}>
+													<Button
+														kind="quiet"
+														onClick={() =>
+															setDialog({
+																kind: "read",
+																skill: {
+																	level: "role",
+																	name: r.name,
+																	role: roleId,
+																},
+															})
+														}
+													>
+														{t("skillReadButton")}{" "}
+														<span className={styles.hidden}>{r.name}</span>
+													</Button>
+												</span>
+											)}
 											{skill && (
 												<span className={styles.actions}>
 													{r.state === "review" && (
@@ -784,7 +812,7 @@ function SkillsSection({
 												</strong>
 											</p>
 										) : (
-											<p>{r.description}</p>
+											<p>{visibly(r.description)}</p>
 										)}
 										{r.state === "review" && (
 											<p>
@@ -794,9 +822,16 @@ function SkillsSection({
 										{r.state === "replaced" && (
 											<p className={styles.muted}>
 												{t(
-													r.level === "role"
-														? "skillReplacedByTeam"
-														: "skillReplacedByOwn",
+													r.level !== "role"
+														? "skillReplacedByOwn"
+														: rows.some(
+																	(o) =>
+																		o.level === "agent" &&
+																		o.name === r.name &&
+																		o.state === "in_use",
+																)
+															? "skillReplacedByOwnRole"
+															: "skillReplacedByTeam",
 													{ name, skill: r.name },
 												)}
 											</p>
@@ -836,6 +871,13 @@ function SkillsSection({
 					skill={dialog.skill}
 					shipped={shipped}
 					onClose={done}
+				/>
+			)}
+			{dialog?.kind === "read" && (
+				<SkillRead
+					agent={agent}
+					skill={dialog.skill}
+					onClose={() => setDialog(undefined)}
 				/>
 			)}
 			{dialog?.kind === "remove" && (
