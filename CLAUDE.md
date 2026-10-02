@@ -6,7 +6,7 @@ Farik is a production-grade harness system for multi-agent systems: it runs its 
 
 - Workflow: `docs/standards/workflow.md`. Brainstorm, plan, execute under TDD, verify, review, finish. In that order.
 - Code: `docs/standards/code.md`. Naming (branches, commits, files, identifiers, wire formats, events), style, and the toolchain.
-- Models: Opus 5.5 plans and judges (brainstorm, plans, mockups, readiness, landing and re-reviews); Sonnet 5.5 executes a plan that has passed readiness (ADR 0032).
+- Models: Opus 5.5 plans and reviews (brainstorm, plans, mockups, readiness reviews, one review per task); Sonnet 5.5 executes a passed plan and the fixes a review reports (ADR 0032).
 - Decisions: `docs/decisions/`. Read the existing ADRs before proposing a change that touches architecture, tooling, or process. Add one when you make such a change.
 
 If the superpowers plugin is installed, its skills implement this workflow; use them, except `writing-plans`: write a step plan by copying `docs/plans/step-template.md` (ADR 0008, ADR 0010). If the plugin is not installed, follow the workflow document by hand. Either way the rules below hold.
