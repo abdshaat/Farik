@@ -901,8 +901,13 @@ pub(super) fn append(deps: &ToolDeps, body: EventBody) -> Result<(), Failure> {
 }
 
 /// Writes `team` and records `team.updated`.
-fn write_team(deps: &ToolDeps, team: &Team) -> Result<(), Failure> {
+/// Writes `team` and records `team.updated`; an agent it no longer has loses its connector keys.
+fn write_team(deps: &ToolDeps, state: &DaemonState, team: &Team) -> Result<(), Failure> {
+    let before = deps.files.read_team().ok();
     deps.files.write_team(team).map_err(|e| internal(&e))?;
+    if let Some(before) = before {
+        crate::orchestrator::forget_removed_agents_keys(deps, state, &before, team);
+    }
     append(deps, team_updated(team, None))
 }
 
@@ -984,7 +989,7 @@ pub(super) async fn call(
             off_the_worker(move || {
                 let _writing = holder.team_writes();
                 let (_, team) = checked(&deps, &params["team"], false)?;
-                write_team(&deps, &team)
+                write_team(&deps, &holder, &team)
             })
             .await?;
             // A saved rule can free work at once: the policy switched off frees the Backlog.
@@ -1013,7 +1018,7 @@ pub(super) async fn call(
                 let setup = marker.exists();
                 let (_, team) = checked(&held, &params["team"], setup)?;
                 let library = library(&params["criteria"])?;
-                write_team(&held, &team)?;
+                write_team(&held, &holder, &team)?;
                 write_criteria(&held, &library)?;
                 match std::fs::remove_file(&marker) {
                     Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
@@ -2892,6 +2897,31 @@ pub(super) mod tests {
                 { "agent": "dev-b", "server": "fixture", "state": "connected", "stored_in": "keychain" },
             ])
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn removing_an_agent_deletes_its_connector_keys() {
+        // Removed, not retired: nothing is kept for an agent the team no longer has.
+        let (harness, store) = keeping("connector-remove-agent");
+        let server = fixture_server("remove-agent");
+        connected(&harness, "dev-a", &server, &json!({}));
+        connected(&harness, "dev-b", &server, &json!({}));
+        let mut team = team_file(&harness);
+        team["agents"].as_array_mut().expect("agents").remove(2);
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": team }),
+            "emptyResult",
+        );
+        let load = |agent: &str| {
+            store
+                .load(&kept_at(&harness, agent, "fixture"))
+                .expect("the store reads")
+        };
+        assert!(load("dev-b").is_none());
+        assert!(load("dev-a").is_some());
     }
 
     /// A keychain that is not there.

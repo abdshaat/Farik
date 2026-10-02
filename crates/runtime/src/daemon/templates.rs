@@ -199,6 +199,7 @@ fn apply(
     deps.files
         .write_team(&applied.team)
         .map_err(|e| internal(&e))?;
+    crate::orchestrator::forget_removed_agents_keys(deps, state, &before, &applied.team);
     for agent_id in &applied.retired {
         crate::orchestrator::status_effects(
             deps,
@@ -619,6 +620,44 @@ mod tests {
 
         assert!(applied.is_ok(), "{applied:?}");
         assert!(woken, "the wait ends");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn applying_deletes_a_removed_agents_connector_keys() {
+        use crate::connectors::{
+            ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
+        };
+
+        let (harness, folder) = templated("templates-remove-keys", |wire| {
+            wire["agents"][3]["mcp_servers"] = json!([{
+                "name": "github", "source": "custom", "transport": "stdio",
+                "command": "github-mcp", "credential_keys": ["API_KEY"],
+                "tools": { "search": "network" }
+            }]);
+        });
+        saved(&folder, &pair());
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        assert!(harness.daemon.set_connector_secrets(store.clone()));
+        let at =
+            SecretAt::of(harness.project.deps.files.root(), "kai", "github").expect("an address");
+        let entry = ConnectorEntry {
+            spec_sha256: "h".to_string(),
+            keys: [(
+                "API_KEY".to_string(),
+                crate::claude::Secret::new("k".to_string()),
+            )]
+            .into(),
+        };
+        store.save(&at, &entry).expect("kept");
+        call(
+            &harness.daemon,
+            "template.apply",
+            &json!({ "slug": "pair", "digest": digest(&harness, "pair") }),
+            "templateAppliedResult",
+        );
+        // Kai never worked, so the template removes Kai, and Kai's keys with Kai.
+        assert_eq!(store.load(&at), Ok(None));
     }
 
     #[test]

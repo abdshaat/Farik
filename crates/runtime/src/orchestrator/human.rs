@@ -992,6 +992,21 @@ pub(crate) fn status_effects(
     Ok(events)
 }
 
+/// Deletes the connector keys of each agent `before` has and `after` does not: one removed from
+/// the team, rather than retired, never runs again either (ADR 0030).
+pub(crate) fn forget_removed_agents_keys(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    before: &Team,
+    after: &Team,
+) {
+    for agent in &before.agents {
+        if !after.agents.iter().any(|kept| kept.id == agent.id) {
+            forget_connector_keys(tools, daemon, before, agent.id.as_str());
+        }
+    }
+}
+
 /// Deletes the keys kept for each custom server `agent_id` has in `team`, which a retired agent
 /// never uses again (ADR 0030). A store that fails to delete one leaves it, as a refused connect
 /// does: it is sent to nothing, since the agent runs no session.

@@ -34,7 +34,7 @@ mod design;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod human;
-pub(crate) use human::{status_effects, update_agent_held};
+pub(crate) use human::{forget_removed_agents_keys, status_effects, update_agent_held};
 mod integrate;
 mod messages;
 mod recover;
