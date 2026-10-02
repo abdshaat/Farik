@@ -46,7 +46,7 @@ Redirect and callback:
 - **The redirect is `http://localhost:<port>/callback`**, and the listener binds `127.0.0.1:<port>`, and `[::1]:<port>` when the machine has IPv6, never `0.0.0.0`. `localhost`, not `127.0.0.1`, because authorization servers match a registered URI exactly and Claude Code had to return to `localhost` for that reason (its MCP page: v2.1.229 sent `127.0.0.1` and v2.1.231 went back).
 - **The port.** With DCR, Farik binds `127.0.0.1:0`, then `[::1]` on the same port; if that is taken it tries again with a new port, up to 5 times. With a pre-registered `client_id` it is `callback_port`, which the service's app registration names, or 33418 when none is given. A port that cannot be bound (another attempt's, another program's, a privileged one) fails `start_sign_in` with `sign_in_failed: port <n> is in use on this computer`. With a fixed port, a second agent's attempt on it is refused so; only the same agent and server's attempt is ended and replaced.
 - **The listener answers the first `GET /callback` whose `state` is the attempt's** (random, single-use), and closes. Any other path is 404, and a callback with another `state` is 400; neither ends the attempt. Farik compares `state` before calling rmcp.
-- **The page it serves** says the outcome in a sentence from Farik's reason code and quotes nothing the service sent (no `error_description`). It links nowhere, runs no script, and is served with `Content-Type: text/html; charset=utf-8`, `Content-Security-Policy: default-src 'none'`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+- **The page it serves** says the outcome in a sentence from Farik's reason code and quotes nothing the service sent (no `error_description`). It shows the Farik mark (inline, 48 px), the outcome as its headline and a second sentence, as the board draws it. It links nowhere, runs no script, and is served with `Content-Type: text/html; charset=utf-8`, `Content-Security-Policy: default-src 'none'; img-src data:`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 - **An attempt lasts 10 minutes**, then fails `sign_in_timed_out`. A new attempt for the same agent and server ends the old one.
 
 Callback security:
@@ -73,7 +73,7 @@ The protocol:
   - Attempts and their tokens live in daemon memory only, and no RPC answer carries a token. No reason message repeats a server's response body, only the step (discovery, registration, token) and the HTTP status, as step 01's `list_tools` does.
 - **`team.get`'s connector rows** gain `auth: keys | oauth`, `revokes?` (signed-in rows) and the state `sign_in_again`.
 - **`connector.connected`** gains `issuer` when signed in. No new event kind: signing in again is connecting again.
-- **The CLI.** `farik connect <agent> <name> --url <url> --sign-in [--client-id <id>] [--callback-port <port>] [--scope <s>]... [--tag …]...`: `--sign-in` conflicts with `--key` and `--command`. It prints `Sign in to <issuer host> in your browser: <url>`, opens it, waits 10 minutes, prints `Signed in to <issuer>.`, then the tools and the store line as step 01 does.
+- **The CLI.** `farik connect <agent> <name> --url <url> --sign-in [--client-id <id>] [--callback-port <port>] [--scope <s>]... [--tag …]...`: `--sign-in` conflicts with `--key` and `--command`. It writes `Sign in to <issuer host> in your browser: <url>` to the error stream, opens it, waits 10 minutes, writes `Signed in to <issuer>.` there, then prints the tools and the store line as step 01 does.
 
 What a non-technical user sees:
 - **On `ConnectorAdd`, step 1 tries signing in first** for a web address. Next calls `connector.sign_in`.
@@ -268,7 +268,7 @@ Files: `daemon/team.rs`, `daemon/web.rs`, `orchestrator/human.rs`, `rpc.schema.j
 
 Files: `cli/src/connector.rs`, `cli/src/lib.rs`. Produces `connect_with`; the tests pass an opener that follows the address.
 
-- `farik_connect_signs_in_and_keeps_the_grant`: against the fixture, prints `Sign in to 127.0.0.1 in your browser:` with the address, then `Signed in to <issuer>.`, and keeps a grant; the command sent to a running daemon holds no token. With an opener that does nothing (a failed `xdg-open`), the address is still printed and a follow by the test completes it.
+- `farik_connect_signs_in_and_keeps_the_grant`: against the fixture, writes `Sign in to 127.0.0.1 in your browser:` with the address, then `Signed in to <issuer>.`, to the error stream, so `--json` leaves the output as the JSON alone, and keeps a grant; the command sent to a running daemon holds no token. With an opener that does nothing (a failed `xdg-open`), the address is still printed and a follow by the test completes it.
 - `farik_connect_sign_in_takes_no_key`: `--sign-in --key A` and `--sign-in --command x` are refused by the argument parser.
 - `farik_connect_says_when_a_service_offers_no_sign_in`: `NotOffered` prints "<host> does not offer signing in; give its key with --key".
 
@@ -301,9 +301,24 @@ Files: `ConnectorAdd.tsx`, `AgentEdit.tsx`, `connectors.test.tsx`, `strings/en.t
 cargo xtask check
 # expected: xtask check: ok
 cargo xtask check --integration
-# expected: xtask check: ok, with a_live_session_calls_a_signed_in_connector passed
+# expected: xtask check: ok
 ```
+
+The integration run reports `a_live_session_calls_a_signed_in_connector` as `ok` without having run it: it returns at once unless `FARIK_LIVE_TESTS=1`. The founder runs it once, with a credential and `FARIK_LIVE_TESTS=1`, before the pull request is marked ready, and pastes the output into the pull request. Until then this step does not claim the probe passed.
 
 `a_live_session_calls_a_signed_in_connector` (Task 5): a real Claude Code session is given the fixture's server with a grant kept. The stream's `system/init` line lists `mcp__fixture__<tool>`, the call succeeds, and the fixture saw `Authorization: Bearer <access token>` from the headers helper. This is also the probe of `headersHelper` that step 01 left undone.
 
 The pull request lists every new dependency with its licence from `cargo tree -e normal -p farik-runtime` run after Task 3, not from this plan's names. The founder's live check, recorded in the pull request: sign in to Linear (`https://mcp.linear.app/mcp`, DCR, which advertises `iss` and revocation) from the web app as one agent, list its tools, run one session that calls a `network` tool, then Remove. Optional second check: sign in to Stripe (`https://mcp.stripe.com`, its sign-in at `access.stripe.com`, no revocation), list its tools read-only, then Remove and read the settings sentence.
+
+## Execution notes
+
+- **The landing review (ADR 0032)** found no critical gap. Its fix commits close the Important findings (a retried connect revoking the grant it had just kept; the attempt's agent binding, the revoke after a dropped server or a retirement, and the redirect hop's refusal, each untested) and the Minor ones.
+- **Tests written after their code, accepted on mutation evidence (hard rule 1):** Task 4's bearer line (`lists_tools_with_the_signed_in_token`), and Task 5's `two_launches_refresh_once` and `a_refresh_that_fails_leaves_out_only_an_expired_token`. The reviewer re-ran the mutations. R1 (the bearer `auth_header` removed) failed `lists_tools_with_the_signed_in_token`; M3 (no lock in `refresh_under_lock`) failed `two_launches_refresh_once` and `remove_during_a_refresh_keeps_nothing`; M12 (`expired = false`) failed `a_refresh_that_fails_leaves_out_only_an_expired_token`. The code was not retyped.
+- **A replaced grant is revoked only when it is another's:** not when its `client_id` is the new grant's (some services end every grant of a client when one is revoked, Google's among them) nor when its access token is the same (a retried connect). The test `connect_again_with_the_same_client_keeps_both_alive` and its command-line twin hold it.
+- **A refreshed grant is not saved over a change made outside the lock.** The command line writes to the store without the daemon's lock, so `refresh_under_lock` reads the entry again just before it saves; one gone or changed is not written, and the token just rotated is revoked (`a_delete_from_outside_during_a_refresh_keeps_nothing`). The command line still takes no part in the daemon's lock; routing it through the daemon when one runs is a larger change, left for later.
+- **Session setup keeps a token that still holds when the refresh is slow** (`a_slow_refresh_keeps_a_token_that_still_holds`); the launch route keeps its 503.
+- **Only the registration follows a redirect:** `rmcp` asks for metadata without following one, so the hop check is held by a registration that redirects to plain http (`refuses_an_endpoint_that_is_not_https`). The issuer check in `check_metadata` is behind `rmcp`'s own, and is held by a unit test.
+- **The `--json` output** is the JSON alone: the sign-in's two prompt lines go to stderr.
+- **A service that offers no sign-in, with no key typed, lists its tools on the first Next** (`connector_add_lists_at_once_when_nothing_is_offered_or_needed`). A header that holds a `{KEY}` cannot be on the page at that point, so nothing guards for it.
+- **Later hardening (not now):** when the authorization endpoint's host differs from the issuer's, name that host on the "Sign in with" button, so that a service whose metadata names an honest authorization page with its own token endpoint cannot pass as its issuer. `connector.sign_in` would answer it as `authorize_host`. It adds no refusal. A malicious-server mix-up is defended only by `iss` until then, as the specification accepts.
+- `a_live_session_calls_a_signed_in_connector` has not run: it needs the founder's credential (see Verification).
