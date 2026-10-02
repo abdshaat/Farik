@@ -113,14 +113,14 @@ pub struct CliIo<'a> { /* as now */ pub kits: KitSource }
 
 ### Task 1: The connector screens, mocked up
 
-An Opus session (ADR 0032) draws these on the canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf, page "Team and settings"), each at desktop and phone width, in the canvas's tokens, muted and light, one colour per job, and copies them into `docs/design/mockups/`. The services are examples: Notion for Mira, a Product Manager, and Higgsfield for Lena, a Marketing Specialist.
+An Opus session (ADR 0032) draws these on the canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf, page "Team and settings"), each at desktop and phone width, in the canvas's tokens, muted and light, one colour per job, and copies them into `docs/design/mockups/`. The services are examples: Notion for Mira, a Product Manager, and Higgsfield for Kai, a Marketing Specialist.
 
 - **`AgentEdit`**, Connectors: "From the Product Manager's kit" with Notion ("Reads your product docs, so plans start from what you already wrote"), "Connect"; a connected row with "Remove"; a "Connect again" row with "Farik updated this service. Connect it again to keep using it."; a row "Farik no longer offers this service" with "Remove" only; then "Added by you" as it is.
 - **`ConnectorAdd` from a kit**, three states: the key form (about, why, setup, "Get your key", one field "Your Notion key", "Connect" and "Cancel"); the sign-in form ("Sign in with Higgsfield"); "Done" ("Mira can now: search pages, read a page. Mira asks you first before: create a page. Farik never offers: delete a page.", each tool by its kit label).
-- **`ConnectorAllowance`** (step 05b): after Higgsfield's sign-in, "How many may Lena make each sprint without asking?", one row per tool with an allowance ("Images", 20, a number field from 0 to 1,000), "0 means Lena asks every time", and "Tools that publish or post always ask."; the same as a dialog from Lena's row, "Change how many".
-- **`Board`** (05b): beside the sprint's progress, "Lena: 14 of 20 images this sprint"; at the allowance, "20 of 20 images. Lena asks you before making more."; past it, "21 of 20 images" with "Extra images were ones you approved."
+- **`ConnectorAllowance`** (step 05b): after Higgsfield's sign-in, "How many may Kai make each sprint without asking?", one row per tool with an allowance ("Images", 20, a number field from 0 to 1,000), "0 means Kai asks every time", and "Tools that publish or post always ask."; the same as a dialog from Kai's row, "Change how many".
+- **`Board`** (05b): beside the sprint's progress, "Kai: 14 of 20 images this sprint"; at the allowance, "20 of 20 images. Kai asks you before making more."; past it, "21 of 20 images" with "Extra images were ones you approved."
 - **`Costs`** (05b): a section "Made on other services", each row the agent, the service, "14 of 20 images", and the period ("this sprint" or "today"), with "Farik counts what agents made, not what the service charges. Check your bill there."
-- **`ToolApproval`** (05b): for a tool past its allowance, the line "Lena has made 20 of 20 images this sprint." and the link "Change how many".
+- **`ToolApproval`** (05b): for a tool past its allowance, the line "Kai has made 20 of 20 images this sprint." and the link "Change how many".
 
 Gate (O1): the founder approves the boards, or says to approve them automatically, and the approval is written into this plan's header and step 05b's with its date.
 

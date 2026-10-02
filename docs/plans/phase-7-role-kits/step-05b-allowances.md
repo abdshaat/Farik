@@ -157,7 +157,7 @@ Files: as the file map's Task 6 line. Built from step 05's approved boards.
 - `connector_add_asks_how_many_for_a_kit_with_allowances`: after the key, the allowance step shows each tool's `what` and the kit's default, and Connect sends the numbers.
 - `connector_add_skips_the_step_without_allowances`.
 - `connector_allowance_changes_the_number`: the dialog from the agent page sends `connector.allowances` and refuses 1001 at its field; on `connector_not_in_kit` it shows "Connect again".
-- `board_shows_each_allowance_beside_the_sprint`: "Lena: 14 of 20 pictures this sprint"; the asking line at 20 of 20; at 21 of 20, "21 of 20 pictures", the asking line and "Extra pictures were ones you approved."
+- `board_shows_each_allowance_beside_the_sprint`: "Kai: 14 of 20 pictures this sprint"; the asking line at 20 of 20; at 21 of 20, "21 of 20 pictures", the asking line and "Extra pictures were ones you approved."
 - `costs_lists_what_was_made_on_other_services`: the rows, the period and the bill sentence.
 - `tool_approval_says_the_count_for_a_tool_with_an_allowance`: the line and "Change how many".
 - `allowance_screens_never_name_the_plumbing`: Farik's strings in `strings/en.ts` for these screens and the fixture kit's `what`s hold no "MCP", "OAuth" or "token". Service tool names are not checked.
