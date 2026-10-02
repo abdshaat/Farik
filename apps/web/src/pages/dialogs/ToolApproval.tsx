@@ -28,6 +28,26 @@ function shown(input: string): string {
 	return input;
 }
 
+/**
+ * `text` with each control character (a line break and a tab aside) and each character that hides
+ * or reorders text written `\u{202e}`, so that what the human reads is what would be sent.
+ */
+function visibly(text: string): string {
+	return Array.from(text, (character) => {
+		const code = character.codePointAt(0) ?? 0;
+		const hidden =
+			(code < 0x20 && code !== 0x0a && code !== 0x09) ||
+			(code >= 0x7f && code <= 0x9f) ||
+			code === 0x61c ||
+			(code >= 0x200b && code <= 0x200f) ||
+			(code >= 0x202a && code <= 0x202e) ||
+			(code >= 0x2060 && code <= 0x2064) ||
+			(code >= 0x2066 && code <= 0x2069) ||
+			code === 0xfeff;
+		return hidden ? `\\u{${code.toString(16)}}` : character;
+	}).join("");
+}
+
 /** "Allow once" or "Don't allow" one call an agent asked to make to a connector (5.7). */
 export function ToolApproval({
 	ask,
@@ -101,7 +121,7 @@ export function ToolApproval({
 					// biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll box must take focus to scroll by keyboard
 					tabIndex={0}
 				>
-					<pre>{shown(ask.input)}</pre>
+					<pre>{visibly(shown(ask.input))}</pre>
 				</section>
 				<TextArea
 					id="tool-approval-note"

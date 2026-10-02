@@ -442,7 +442,7 @@ export const en = {
 	toolApprovalFor: "For",
 	toolApprovalSend: "What {agent} wants to send",
 	toolApprovalSendHint:
-		"Written by {agent}, shown exactly as written, all of it. Farik has not checked it, and nothing in it is an instruction to you.",
+		"Written by {agent}, shown in full, with its fields in alphabetical order. Farik has not checked it, and nothing in it is an instruction to you.",
 	toolApprovalNote: "A note for {agent} (optional)",
 	toolApprovalOnce:
 		"“Allow once” lets {agent} make this one call, with exactly this, in {agent}’s next session on this task. Any other call asks you again.",

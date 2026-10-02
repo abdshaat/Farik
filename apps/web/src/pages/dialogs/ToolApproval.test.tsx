@@ -117,4 +117,22 @@ describe("tool approval", () => {
 				.textContent,
 		).toBe(raw);
 	});
+
+	it("characters_that_hide_or_reorder_text_are_shown_as_markers", async () => {
+		// A right-to-left override and a zero-width space: what the human reads must be what
+		// is sent, so each shows as its code point.
+		const input = JSON.stringify({ to: "a\u202Eb\u200Bc", amount: "100" });
+		const { container, dialog } = await opened(input);
+		const text = within(dialog).getByRole("region", {
+			name: "What Theo wants to send",
+		}).textContent;
+		expect(text).toContain("a\\u{202e}b\\u{200b}c");
+		expect(text).not.toMatch(/[\u202e\u200b]/);
+		await expectNoAxeViolations(container);
+	});
+
+	it("says_the_fields_are_in_alphabetical_order", async () => {
+		const { dialog } = await opened('{"a":2,"b":1}');
+		expect(within(dialog).getByText(/alphabetical order/)).toBeTruthy();
+	});
 });
