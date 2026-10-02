@@ -302,3 +302,56 @@ async fn a_servers_own_error_text_is_not_repeated() {
     assert!(!said.contains("k-secret-value"), "{said}");
     assert!(!said.contains("bad key"), "{said}");
 }
+
+/// The Developer's kit with the stdio fixture server as its one service, `fixture`, tagging
+/// `search`, `env` and `delete_repo`: what a kit's pins look like against a server that lists
+/// them (and `repo.delete`, a name no kit can tag, which Farik can't use).
+fn fixture_kit(test: &str) -> farik_roles::Kit {
+    let script = scratch(test).join("server.sh");
+    std::fs::write(&script, STDIO_SERVER).expect("the script is written");
+    let file = serde_json::json!({
+        "role": "software_developer", "skills": [],
+        "connectors": [{
+            "name": "fixture", "transport": "stdio", "command": "sh",
+            "args": [script.display().to_string()],
+            "title": "Fixture", "about": "A stand-in.", "why": "To pin.", "setup": "Nothing to do.",
+            "tools": { "search": "network", "env": "external_effect", "delete_repo": "denied" },
+        }],
+    });
+    farik_roles::parse_kit(
+        farik_core::contract::Role::SoftwareDeveloper,
+        &file.to_string(),
+        &[],
+        &[],
+    )
+    .expect("the fixture kit loads")
+}
+
+#[tokio::test]
+async fn pin_drift_is_empty_for_the_fixture_server() {
+    let kit = fixture_kit("pins");
+    let Some(farik_roles::KitConnector::Server { entry, .. }) = kit.connectors.first() else {
+        panic!("the fixture kit has a service");
+    };
+    let mut entry = entry.clone();
+    entry.source = farik_core::team::McpServerSource::Kit;
+    let server = farik_core::team::custom_server(&entry).expect("a kit entry");
+    let listed = list_tools(&server, &BTreeMap::new(), None, &own_folder())
+        .await
+        .expect("the tools are listed");
+    // A tool whose name Claude Code would rewrite is not one Farik offers, so no pin names it.
+    let usable: Vec<String> = listed
+        .iter()
+        .filter(|tool| tool.usable)
+        .map(|tool| tool.name.clone())
+        .collect();
+    let drift = farik_roles::pin_drift(&server.tools, &usable);
+    assert_eq!((drift.added, drift.removed), (Vec::new(), Vec::new()));
+    // A pin the service does not list is dropped, and a tool it lists with no pin is added.
+    let mut pins = server.tools.clone();
+    pins.insert("sync_everything".to_string(), ConnectorTag::Denied);
+    pins.remove("env");
+    let drift = farik_roles::pin_drift(&pins, &usable);
+    assert_eq!(drift.removed, ["sync_everything"]);
+    assert_eq!(drift.added, ["env"]);
+}

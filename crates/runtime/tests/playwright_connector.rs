@@ -252,8 +252,8 @@ fn the_pinned_image_lists_the_pinned_tools() {
         .collect();
     assert!(
         untagged.is_empty(),
-        "the pinned image lists tools playwright.yaml does not tag; add each as denied: \
-         {untagged:?}"
+        "the pinned image lists tools the Designer's kit does not tag; add each as denied in \
+         roles/ui_ux_designer/kit.yaml: {untagged:?}"
     );
 }
 

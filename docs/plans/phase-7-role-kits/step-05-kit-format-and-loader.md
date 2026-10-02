@@ -225,7 +225,7 @@ Files: as the file map's Task 8 lines.
 - `live_kit_pins_hold` (live): every shipped `stdio` and `http` kit connector lists exactly its pins; fails naming the connector and the unset variable.
 - `playwright_connector.rs`'s list test reads the kit and its failure says "add each as denied in roles/ui_ux_designer/kit.yaml".
 
-- [ ] `test(runtime): pin every kit connector's tools`
+- [x] `test(runtime): pin every kit connector's tools`
 
 ### Task 9: Spec and plan
 
