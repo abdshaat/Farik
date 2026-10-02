@@ -307,6 +307,20 @@ describe("connectors on the agent page", () => {
 		});
 	});
 
+	it("connector_add_sends_an_untouched_tool_as_asks", async () => {
+		// A label the user never chose is "Changes things, asks you", on the wire too (W2).
+		const { container, s, dialog } = await listed();
+		await expectNoAxeViolations(container);
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Add airtable to Theo" }),
+		);
+		const connect = await sent(s, "connector.connect");
+		expect((connect.params as { tags: object }).tags).toEqual({
+			list_bases: "external_effect",
+			delete_records: "external_effect",
+		});
+	});
+
 	it("connector_add_clears_the_key_field_after_sending", async () => {
 		const { container, s, dialog } = await listed("pat-secret-1");
 		fireEvent.click(

@@ -297,3 +297,4 @@ As built (fix wave A, 2026-10-01, the landing review's runtime, core and CLI fin
 
 As built (fix wave B, 2026-10-01, the landing review's page findings and the one runtime item wave A left):
 - Removing an agent, by `team.save` or by a saved team applied, deletes its connector keys, as retiring does: `forget_removed_agents_keys` compares the team before and after the write. Tests: `removing_an_agent_deletes_its_connector_keys`, `applying_deletes_a_removed_agents_connector_keys`.
+- W2: `connector_add_sends_an_untouched_tool_as_asks` asserts the `tags` `connector.connect` sends for tools the user never labelled; the default sent as `network` now fails it.
