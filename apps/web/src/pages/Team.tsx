@@ -47,6 +47,8 @@ export type ConnectorState = {
 	agent: string;
 	server: string;
 	state: "connected" | "connect_again" | "store_unavailable";
+	/** Where its keys are kept, whenever some are. */
+	storedIn?: "keychain" | "file";
 };
 type Holder = { agentId: string; displayName: string; role: Agent["role"] };
 /** Who checks plans under each choice of judge, or null where nobody active holds it. */

@@ -214,7 +214,12 @@ function Editor({
 	const paused = saved.status === "paused";
 	const custom = (saved.mcpServers ?? []).filter((c) => c.source === "custom");
 	const stateOf = (server: string) =>
-		connectors.find((c) => c.agent === saved.id && c.server === server)?.state;
+		connectors.find((c) => c.agent === saved.id && c.server === server);
+	const removeBody = {
+		keychain: "connectorRemoveBodyKeychain",
+		file: "connectorRemoveBodyFile",
+		none: "connectorRemoveBody",
+	} as const;
 	const [adding, setAdding] = useState<{ again?: McpServer }>();
 	const [removing, setRemoving] = useState<string>();
 	const [removeRefused, setRemoveRefused] = useState<string>();
@@ -389,7 +394,8 @@ function Editor({
 								<CustomRow
 									key={c.name}
 									server={c}
-									state={stateOf(c.name)}
+									state={stateOf(c.name)?.state}
+									storedIn={stateOf(c.name)?.storedIn}
 									name={name}
 									onAgain={() => setAdding({ again: c })}
 									onRemove={() => {
@@ -422,7 +428,12 @@ function Editor({
 						</>
 					}
 				>
-					<p>{t("connectorRemoveBody", { server: removing, name })}</p>
+					<p>
+						{t(removeBody[stateOf(removing)?.storedIn ?? "none"], {
+							server: removing,
+							name,
+						})}
+					</p>
 					<p className={styles.muted}>{t("connectorRemoveOthers")}</p>
 					{removeRefused && (
 						<p role="alert" className={styles.alert}>
@@ -500,12 +511,14 @@ function Editor({
 function CustomRow({
 	server,
 	state,
+	storedIn,
 	name,
 	onAgain,
 	onRemove,
 }: {
 	server: McpServer;
 	state: ConnectorState["state"] | undefined;
+	storedIn: ConnectorState["storedIn"];
 	name: string;
 	onAgain: () => void;
 	onRemove: () => void;
@@ -533,6 +546,13 @@ function CustomRow({
 					</Button>
 				</span>
 			</div>
+			{storedIn && (
+				<p>
+					{t(storedIn === "file" ? "connectorFile" : "connectorKeychain", {
+						name,
+					})}
+				</p>
+			)}
 			<p className={styles.muted}>
 				{tags.length === 1
 					? t("connectorOneTool", { labels })

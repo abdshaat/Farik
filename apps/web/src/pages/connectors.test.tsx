@@ -326,6 +326,55 @@ describe("connectors on the agent page", () => {
 		]);
 	});
 
+	it("agent_edit_says_where_each_connectors_keys_are_kept", async () => {
+		const { container } = await opened([
+			{
+				agent: "theo",
+				server: "airtable",
+				state: "connected",
+				stored_in: "keychain",
+			},
+			{
+				agent: "theo",
+				server: "linear",
+				state: "connect_again",
+				stored_in: "file",
+			},
+			{ agent: "theo", server: "notion", state: "store_unavailable" },
+		]);
+		const keychain = "Theo’s keys are in your keychain.";
+		const file = "Theo’s keys are in a private file on this computer.";
+		expect(within(row("airtable")).getByText(keychain)).toBeTruthy();
+		expect(within(row("linear")).getByText(file)).toBeTruthy();
+		// Nothing read, nothing said.
+		expect(within(row("notion")).queryByText(/keys are in/)).toBeNull();
+		await expectNoAxeViolations(container);
+
+		// Remove says which store it deletes the keys from.
+		for (const [server, from] of [
+			["airtable", "from your keychain."],
+			["linear", "from the private file on this computer."],
+			["notion", "from this computer."],
+		] as const) {
+			fireEvent.click(
+				within(row(server)).getByRole("button", { name: `Remove ${server}` }),
+			);
+			const dialog = await screen.findByRole("dialog", {
+				name: `Remove ${server} from Theo?`,
+			});
+			expect(
+				within(dialog).getByText(
+					`Theo stops using ${server} from the next piece of work. Farik deletes the keys you gave it for Theo ${from}`,
+				),
+			).toBeTruthy();
+			await expectNoAxeViolations(container);
+			fireEvent.click(
+				within(dialog).getByRole("button", { name: en.connectorKeep }),
+			);
+			await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		}
+	});
+
 	it("agent_edit_says_a_refused_remove_in_plain_words", async () => {
 		const { container, s } = await opened();
 		fireEvent.click(

@@ -1116,6 +1116,12 @@ export const en = {
 	connectorRemoveTitle: "Remove {server} from {name}?",
 	connectorRemoveBody:
 		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from this computer.",
+	connectorRemoveBodyKeychain:
+		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from your keychain.",
+	connectorRemoveBodyFile:
+		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from the private file on this computer.",
+	connectorKeychain: "{name}’s keys are in your keychain.",
+	connectorFile: "{name}’s keys are in a private file on this computer.",
 	connectorRemoveOthers:
 		"Nobody else on the team is affected. To use it again, add it again and type the keys.",
 	connectorKeep: "Keep it",
