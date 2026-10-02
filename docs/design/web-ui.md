@@ -170,7 +170,7 @@ On 2026-09-26 the founder asked for every page to be mocked up before any code. 
 | First run | `SetupProject`, `SetupScan`, the team (`Welcome`), `SetupPermissions`, `SetupSpending`, `SetupFinish`, `SetupAdvanced`, `Connect` | 04 (the connect page), 05, 06 |
 | Team and settings | `Team`, `AgentEdit`, `Settings` | 04, 06 |
 | Phone (360 to 390 px) | Today (`Phone`), `PhoneGate`, `PhoneBoard`, `PhoneChannel` | 04 to 10 |
-| Website | `Site`, the public site on the domain (ADR 0017) | Phase 11 step 04 |
+| Website | `Site`, the public site on the domain (ADR 0017) | Phase 11 step 01 |
 
 The mockups are not the spec. Where one disagrees with `docs/SPEC.md`, the spec wins, and the step plan that builds that screen records the difference. The `Connect` screen's two "Mockup: …" buttons only switch between its states, for review.
 
