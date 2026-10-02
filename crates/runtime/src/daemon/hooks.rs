@@ -1617,7 +1617,9 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_grant_is_used_once_under_concurrency() {
-        let daemon = TestDaemon::new("hook-grant-concurrent", |_| {});
+        // A clock that sleeps in every append puts a check-then-write race inside its window.
+        let daemon = TestDaemon::new("hook-grant-concurrent", |_| {})
+            .slowed(std::time::Duration::from_millis(50));
         with_github(&daemon);
         let input = json!({ "title": "x" });
         let approval = asked(&daemon, "session-github", &input);

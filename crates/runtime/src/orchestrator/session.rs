@@ -2751,8 +2751,7 @@ mod tests {
         let canonical = farik_core::team::canonical_json(&asked);
         assert!(
             prompt.contains(&format!(
-                "<untrusted source=\"tool_input\">\n{}\n</untrusted>",
-                canonical
+                "<untrusted source=\"tool_input\">\n{canonical}\n</untrusted>"
             )),
             "{prompt}"
         );

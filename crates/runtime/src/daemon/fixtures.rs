@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use farik_core::budget::{DEFAULT_SESSION_LIMITS, SessionLimits};
+use farik_protocol::clock::Clock;
 use farik_protocol::event::{EventKind, FarikEvent};
 use farik_store::git::fixtures::TempRepo;
 use farik_store::open_event_log;
@@ -68,6 +69,36 @@ impl TestDaemon {
         };
         daemon.register(DEV_SESSION, "dev-a", Some("FRK-1"), DEFAULT_SESSION_LIMITS);
         daemon
+    }
+
+    /// The same daemon on a clock that sleeps `delay` each time it is read, which every append
+    /// does before it writes: a race between a check and the write after it falls inside the
+    /// sleep, where a test can see it. Only `DEV_SESSION` is registered on it afresh.
+    pub(crate) fn slowed(mut self, delay: std::time::Duration) -> Self {
+        struct Slow(Arc<dyn Clock + Send + Sync>, std::time::Duration);
+        impl Clock for Slow {
+            fn now(&self) -> chrono::DateTime<chrono::Utc> {
+                std::thread::sleep(self.1);
+                self.0.now()
+            }
+        }
+        let deps = &self.project.deps;
+        let state = Arc::new(DaemonState::new(Arc::new(ToolDeps {
+            log: Arc::clone(&deps.log),
+            projections: Arc::clone(&deps.projections),
+            files: Arc::clone(&deps.files),
+            transitions: Arc::clone(&deps.transitions),
+            git: self.project.repo.adapter(),
+            clock: Arc::new(Slow(Arc::clone(&deps.clock), delay)),
+            ids: deps.ids.clone(),
+        })));
+        state.set_state_dir(std::path::PathBuf::from(format!(
+            "{}-state",
+            self.project.repo.path.display()
+        )));
+        self.state = state;
+        self.register(DEV_SESSION, "dev-a", Some("FRK-1"), DEFAULT_SESSION_LIMITS);
+        self
     }
 
     /// Registers a session of `agent` in the worktree, given every Farik tool, so that its tiers
