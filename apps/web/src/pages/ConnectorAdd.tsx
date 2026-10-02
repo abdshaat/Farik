@@ -313,8 +313,12 @@ export function ConnectorAdd({
 		}
 		setBusy(false);
 	};
-	/** Asks the service whether it signs the user in: what Next does for a web address with no key typed. */
-	const ask = async () => {
+	/**
+	 * Asks the service whether it signs the user in: what Next does for a web address with no key
+	 * typed. A service that offers no sign-in, and so needs a key the user has not typed, is
+	 * listed at once when `thenList`: there is nothing to wait for.
+	 */
+	const ask = async (thenList = false) => {
 		if (!client) return;
 		setBusy(true);
 		setRefused({});
@@ -331,9 +335,10 @@ export function ConnectorAdd({
 			});
 		} catch (e) {
 			const code = codeOf(refusalsOf(e)[0]?.message ?? "");
-			if (code === "sign_in_not_offered")
+			if (code === "sign_in_not_offered") {
 				setSign({ kind: "keys", probed: true });
-			else if (code === "sign_in_not_supported")
+				if (thenList) await list();
+			} else if (code === "sign_in_not_supported")
 				setSign({
 					kind: "keys",
 					probed: true,
@@ -405,7 +410,7 @@ export function ConnectorAdd({
 		window.open(address, "_blank", "noopener");
 	/** Next: ask the service first when a web address has no key typed; else list the tools. */
 	const next = () => {
-		if (http && sign.kind === "idle" && named.length === 0) return ask();
+		if (http && sign.kind === "idle" && named.length === 0) return ask(true);
 		return list();
 	};
 	const connect = async () => {
@@ -584,7 +589,7 @@ export function ConnectorAdd({
 										{failedWords(sign.code, sign.issuer)}
 									</p>
 									<span>
-										<Button kind="primary" busy={busy} onClick={ask}>
+										<Button kind="primary" busy={busy} onClick={() => ask()}>
 											{t("addTryAgain")}
 										</Button>
 									</span>

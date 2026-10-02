@@ -1364,6 +1364,20 @@ describe("signing in to a service", () => {
 		}
 	});
 
+	it("connector_add_lists_at_once_when_nothing_is_offered_or_needed", async () => {
+		// A web address that offers no sign-in, with no key typed and none asked for: the tools
+		// are listed without a second Next.
+		const one = await askedToSignIn();
+		await one.s.fail(
+			one.asked,
+			-32005,
+			"sign_in_not_offered: this server does not offer signing in",
+		);
+		const listing = await sent(one.s, "connector.tools");
+		expect(listing.params.keys).toEqual({});
+		expect(one.s.calls("connector.sign_in")).toHaveLength(1);
+	});
+
 	it("agent_edit_shows_signed_in_and_sign_in_again", async () => {
 		const { container, s } = await openedSignedIn();
 		const notion = row("notion");
