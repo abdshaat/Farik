@@ -75,23 +75,7 @@ impl TestDaemon {
     /// does before it writes: a race between a check and the write after it falls inside the
     /// sleep, where a test can see it. Only `DEV_SESSION` is registered on it afresh.
     pub(crate) fn slowed(mut self, delay: std::time::Duration) -> Self {
-        struct Slow(Arc<dyn Clock + Send + Sync>, std::time::Duration);
-        impl Clock for Slow {
-            fn now(&self) -> chrono::DateTime<chrono::Utc> {
-                std::thread::sleep(self.1);
-                self.0.now()
-            }
-        }
-        let deps = &self.project.deps;
-        let state = Arc::new(DaemonState::new(Arc::new(ToolDeps {
-            log: Arc::clone(&deps.log),
-            projections: Arc::clone(&deps.projections),
-            files: Arc::clone(&deps.files),
-            transitions: Arc::clone(&deps.transitions),
-            git: self.project.repo.adapter(),
-            clock: Arc::new(Slow(Arc::clone(&deps.clock), delay)),
-            ids: deps.ids.clone(),
-        })));
+        let state = Arc::new(DaemonState::new(slowed_deps(&self.project, delay)));
         state.set_state_dir(std::path::PathBuf::from(format!(
             "{}-state",
             self.project.repo.path.display()
@@ -205,6 +189,28 @@ impl TestDaemon {
     pub(crate) fn events(&self, kind: EventKind) -> Vec<FarikEvent> {
         self.project.events(&[kind])
     }
+}
+
+/// `project`'s tool dependencies on a clock that sleeps `delay` each time it is read, which every
+/// append does before it writes (see `TestDaemon::slowed`).
+pub(crate) fn slowed_deps(project: &TestProject, delay: std::time::Duration) -> Arc<ToolDeps> {
+    struct Slow(Arc<dyn Clock + Send + Sync>, std::time::Duration);
+    impl Clock for Slow {
+        fn now(&self) -> chrono::DateTime<chrono::Utc> {
+            std::thread::sleep(self.1);
+            self.0.now()
+        }
+    }
+    let deps = &project.deps;
+    Arc::new(ToolDeps {
+        log: Arc::clone(&deps.log),
+        projections: Arc::clone(&deps.projections),
+        files: Arc::clone(&deps.files),
+        transitions: Arc::clone(&deps.transitions),
+        git: project.repo.adapter(),
+        clock: Arc::new(Slow(Arc::clone(&deps.clock), delay)),
+        ids: deps.ids.clone(),
+    })
 }
 
 /// The reply frame to `method` with `params`, as the web page's socket is answered: for a test

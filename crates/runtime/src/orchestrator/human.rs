@@ -428,6 +428,14 @@ fn decide_tool_call(
     note: Option<String>,
     granted: bool,
 ) -> Result<CommandReport, CommandError> {
+    // The check that nobody has decided and the write of the decision are one step: the browser
+    // and a command can both arrive at once, and `open_approvals` is lowered once per decision
+    // event, so a second decision would zero the count while another approval still waits.
+    // ponytail: one lock for every approval, per approval if deciders ever queue behind it.
+    static DECIDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _deciding = DECIDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let unknown = || CommandError::Refused {
         reason: format!(
             "unknown_approval: event {approval} is no connector call waiting for you to allow it"
@@ -1590,7 +1598,7 @@ mod tests {
         .await;
         assert_eq!(
             report.said,
-            format!("Allowed create_issue once for dev-a (approval {approval}).")
+            format!("Allowed create_issue once for dev-a (approval {approval}).\nInput: {{}}")
         );
         let granted = last(&harness, EventKind::ToolApprovalGranted).expect("recorded");
         assert_eq!(report.events, vec![granted.envelope.seq]);
@@ -1615,7 +1623,7 @@ mod tests {
         .await;
         assert_eq!(
             report.said,
-            format!("Not allowed: create_issue for dev-a (approval {other}).")
+            format!("Not allowed: create_issue for dev-a (approval {other}).\nInput: {{}}")
         );
         let refused = last(&harness, EventKind::ToolApprovalRefused).expect("recorded");
         let EventBody::ToolApprovalRefused(body) = &refused.body else {
@@ -1664,6 +1672,48 @@ mod tests {
         }
         assert_eq!(harness.events(&[EventKind::ToolApprovalGranted]).len(), 1);
         assert_eq!(harness.events(&[EventKind::ToolApprovalRefused]).len(), 1);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn two_decisions_racing_on_one_approval_let_one_through() {
+        let harness = Harness::new("human-tool-race", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let first = an_approval_asked(&harness);
+        // A second approval on the same task, which nobody decides.
+        an_approval_asked(&harness);
+        // A clock that sleeps in every append puts the gap between the check and the write where
+        // both deciders are inside it.
+        let deps = crate::daemon::fixtures::slowed_deps(
+            &harness.project,
+            std::time::Duration::from_millis(50),
+        );
+        let barrier = std::sync::Barrier::new(2);
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let decisions: Vec<_> = [true, false]
+                .into_iter()
+                .map(|granted| {
+                    let (deps, barrier) = (&deps, &barrier);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        super::decide_tool_call(deps, first, None, granted)
+                    })
+                })
+                .collect();
+            decisions
+                .into_iter()
+                .map(|decision| decision.join().expect("the decision ends"))
+                .collect()
+        });
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let decided = harness.events(&[
+            EventKind::ToolApprovalGranted,
+            EventKind::ToolApprovalRefused,
+        ]);
+        assert_eq!(decided.len(), 1, "one decision is in force");
+        // The task still waits on the approval nobody has decided.
+        assert!(harness.row("FRK-1").waiting_on_human);
     }
 
     #[tokio::test]
