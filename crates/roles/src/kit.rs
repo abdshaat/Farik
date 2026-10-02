@@ -199,6 +199,31 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
                 )],
             ),
         ],
+        Role::ScrumMaster => vec![
+            (
+                "planning-a-sprint",
+                &[(
+                    "SKILL.md",
+                    include_str!("../roles/scrum_master/skills/planning-a-sprint/SKILL.md"),
+                )],
+            ),
+            (
+                "running-ceremonies",
+                &[(
+                    "SKILL.md",
+                    include_str!("../roles/scrum_master/skills/running-ceremonies/SKILL.md"),
+                )],
+            ),
+            (
+                "writing-escalation-digests",
+                &[(
+                    "SKILL.md",
+                    include_str!(
+                        "../roles/scrum_master/skills/writing-escalation-digests/SKILL.md"
+                    ),
+                )],
+            ),
+        ],
         _ => Vec::new(),
     }
 }
@@ -963,6 +988,27 @@ mod tests {
                 "prioritising-the-backlog",
                 "scoping-a-release",
                 "using-product-sources",
+            ]
+        );
+        for skill in &kit.skills {
+            assert!(
+                skill.session_files.contains_key("SKILL.md"),
+                "{}",
+                skill.name
+            );
+        }
+    }
+
+    #[test]
+    fn scrum_master_kit_carries_its_skills() {
+        let kit = load_kit(Role::ScrumMaster).expect("the Scrum Master's kit");
+        let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "planning-a-sprint",
+                "running-ceremonies",
+                "writing-escalation-digests",
             ]
         );
         for skill in &kit.skills {

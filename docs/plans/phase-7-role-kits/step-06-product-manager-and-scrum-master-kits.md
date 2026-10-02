@@ -72,7 +72,7 @@ Files: `scrum_master/skills/{planning-a-sprint,running-ceremonies,writing-escala
 - `writing-escalation-digests`, "Use when escalations are open at planning": oldest first; for each, what the human must decide, in one line, and since when; nothing already answered.
 - `scrum_master_kit_carries_its_skills`: the three names in order, each with its `SKILL.md`. RED: none.
 
-- [ ] `feat(roles): give the Scrum Master's kit its skills`
+- [x] `feat(roles): give the Scrum Master's kit its skills`
 
 ### Task 3: The Product Manager's three services
 
