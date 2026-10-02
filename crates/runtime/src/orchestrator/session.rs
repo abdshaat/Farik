@@ -2544,12 +2544,21 @@ mod tests {
         harness: &Harness,
         probes: &[&str],
     ) -> (Arc<ExecutorWitness>, SessionEnd) {
+        probed_session_with(harness, probes, None).await
+    }
+
+    /// The same, the probes calling with `input` when it is given.
+    async fn probed_session_with(
+        harness: &Harness,
+        probes: &[&str],
+        input: Option<serde_json::Value>,
+    ) -> (Arc<ExecutorWitness>, SessionEnd) {
         let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
-        let witness = Arc::new(ExecutorWitness::probing(
-            adapter,
-            Arc::clone(&harness.daemon),
-            probes,
-        ));
+        let witness = ExecutorWitness::probing(adapter, Arc::clone(&harness.daemon), probes);
+        let witness = Arc::new(match input {
+            Some(input) => witness.with_input(input),
+            None => witness,
+        });
         let orchestrator = harness.orchestrator(witness.clone());
         let deps = &orchestrator.deps;
         let team = deps.tools.files.read_team().expect("the team");
@@ -2683,8 +2692,8 @@ mod tests {
         assert_eq!(started.len(), 1, "the task no longer waits");
         assert!(
             started[0].system_prompt.contains(&format!(
-                "You may call `{create}` once with the input you asked for (approval \
-                 {approval})."
+                "You may call `{create}` once, with exactly the input you asked for (approval \
+                 {approval})"
             )),
             "{}",
             started[0].system_prompt
@@ -2700,5 +2709,55 @@ mod tests {
             panic!("a call");
         };
         assert_eq!(body.approval.map(std::num::NonZeroU64::get), Some(approval));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_next_session_is_shown_the_input_and_replays_it_through() {
+        let harness = Harness::new("session-approval-replay", with_custom_servers);
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        connect(&harness, &["github"], |_| {});
+        let create = "mcp__github__create_issue";
+        // Keys out of order, a line break, a quote, and a non-ASCII letter: what an agent could not write again from memory.
+        let asked = json!({
+            "title": "Fix \"login\"",
+            "body": "line one\nline two é",
+            "labels": ["bug", "p1"],
+        });
+        probed_session_with(&harness, &[create], Some(asked.clone())).await;
+        let approval = harness.events(&[EventKind::ToolApprovalRequested])[0]
+            .envelope
+            .seq;
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator
+            .handle(farik_protocol::command::Command::ToolApprove {
+                approval,
+                note: Some("only this".to_string()),
+            })
+            .await
+            .expect("allowed");
+
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let witness = Arc::new(
+            ExecutorWitness::probing(adapter.clone(), Arc::clone(&harness.daemon), &[create])
+                .replaying(),
+        );
+        harness
+            .orchestrator(witness.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        let prompt = &adapter.started()[0].system_prompt;
+        let canonical = farik_core::team::canonical_json(&asked);
+        assert!(
+            prompt.contains(&format!(
+                "<untrusted source=\"tool_input\">\n{}\n</untrusted>",
+                canonical
+            )),
+            "{prompt}"
+        );
+        assert!(prompt.contains("only this"), "{prompt}");
+        let decided = &witness.decided()[0];
+        assert!(decided[0].allow, "{decided:?}");
     }
 }

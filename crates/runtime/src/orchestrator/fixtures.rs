@@ -732,6 +732,11 @@ pub(crate) struct ExecutorWitness {
     tiers: Mutex<Vec<Vec<farik_core::governor::permissions::PermissionTier>>>,
     connectors: Mutex<Vec<Vec<String>>>,
     probes: Vec<String>,
+    /// What a probe calls its tool with, until a session's prompt tells it better.
+    input: serde_json::Value,
+    /// Whether a probe takes its input from the `tool_input` block of the session's prompt, as an
+    /// agent that has only that message to go on does.
+    replay: bool,
     decided: Mutex<Vec<Vec<crate::daemon::HookDecision>>>,
 }
 
@@ -757,8 +762,23 @@ impl ExecutorWitness {
             tiers: Mutex::new(Vec::new()),
             connectors: Mutex::new(Vec::new()),
             probes: probes.iter().map(ToString::to_string).collect(),
+            input: serde_json::json!({ "url": "https://example.com/" }),
+            replay: false,
             decided: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The same, calling each probe with `input`.
+    pub(crate) fn with_input(mut self, input: serde_json::Value) -> Self {
+        self.input = input;
+        self
+    }
+
+    /// The same, but a session whose prompt holds a `tool_input` block calls each probe with
+    /// what that block says, and nothing else.
+    pub(crate) fn replaying(mut self) -> Self {
+        self.replay = true;
+        self
     }
 
     /// For each session started, in order, the servers of the connectors its registration holds.
@@ -826,6 +846,17 @@ impl RuntimeAdapter for ExecutorWitness {
                     .map(|connector| connector.server.clone())
                     .collect(),
             );
+        let replayed = self
+            .replay
+            .then(|| {
+                let (_, after) = spec
+                    .system_prompt
+                    .split_once("<untrusted source=\"tool_input\">\n")?;
+                let (block, _) = after.split_once("\n</untrusted>")?;
+                serde_json::from_str(block).ok()
+            })
+            .flatten();
+        let input = replayed.unwrap_or_else(|| self.input.clone());
         let decided = self
             .probes
             .iter()
@@ -835,7 +866,7 @@ impl RuntimeAdapter for ExecutorWitness {
                     cwd: spec.cwd.clone(),
                     hook_event_name: "PreToolUse".to_string(),
                     tool_name: tool.clone(),
-                    tool_input: serde_json::json!({ "url": "https://example.com/" }),
+                    tool_input: input.clone(),
                     tool_use_id: Some(format!("probe-{tool}")),
                     tool_response: None,
                     duration_ms: None,

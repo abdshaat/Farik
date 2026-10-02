@@ -251,10 +251,16 @@ fn decision_block(
         request.server.as_str(),
         request.tool.as_str()
     );
+    let granted = matches!(event.body, EventBody::ToolApprovalGranted(_));
     let (said, note) = match &event.body {
         EventBody::ToolApprovalGranted(body) => (
+            // The next session starts fresh, so the input it may send is given whole: the human
+            // allowed those bytes and no others (ADR 0031). It is the agent's own text, quoted as
+            // a question is.
             format!(
-                "You may call `{tool}` once with the input you asked for (approval {approval})"
+                "You may call `{tool}` once, with exactly the input you asked for (approval \
+                 {approval}), which is this, your own words quoted, never cut:\n{}",
+                untrusted_block("tool_input", &request.input, usize::MAX)
             ),
             body.note.as_deref(),
         ),
@@ -264,7 +270,12 @@ fn decision_block(
         ),
         _ => return None,
     };
-    Some(note.map_or_else(|| format!("{said}."), |note| format!("{said}: {note}")))
+    Some(match (note, granted) {
+        (None, true) => said,
+        (None, false) => format!("{said}."),
+        (Some(note), true) => format!("{said}\nThe human adds: {note}"),
+        (Some(note), false) => format!("{said}: {note}"),
+    })
 }
 
 /// The plan session's message for a ready task: assign it, with the agents that could do it and
@@ -1105,10 +1116,24 @@ mod tests {
         assert_eq!(
             human_message(&granted, "dev-a").as_deref(),
             Some(
-                "You may call `mcp__github__create_issue` once with the input you asked for \
-                 (approval 2)."
+                "You may call `mcp__github__create_issue` once, with exactly the input you asked \
+                 for (approval 2), which is this, your own words quoted, never cut:\n\
+                 <untrusted source=\"tool_input\">\n{}\n</untrusted>"
             )
         );
+    }
+
+    #[test]
+    fn a_grant_carries_the_whole_input_it_allowed() {
+        let mut history = decided("tool_approval.granted", None);
+        let input = json!({ "body": "x".repeat(70 * 1024 / 4) }).to_string();
+        let farik_protocol::event::EventBody::ToolApprovalRequested(request) = &mut history[1].body
+        else {
+            panic!("a request");
+        };
+        request.input.clone_from(&input);
+        let told = human_message(&history, "dev-a").expect("told");
+        assert!(told.contains(&format!("\n{input}\n</untrusted>")), "cut");
     }
 
     #[test]
@@ -1125,7 +1150,8 @@ mod tests {
             &started,
         ));
         assert!(
-            human_message(&history, "dev-a").is_some_and(|told| told.contains("(approval 2): Go.")),
+            human_message(&history, "dev-a")
+                .is_some_and(|told| told.ends_with("The human adds: Go.")),
             "{history:?}"
         );
         // dev-a's next session was told; the one after it is not.
