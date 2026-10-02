@@ -291,7 +291,7 @@ describe("connectors on the agent page", () => {
 		const field = (label: string) => within(dialog).getByLabelText(label);
 		fireEvent.change(field(en.addName), { target: { value: "github" } });
 		fireEvent.change(field(en.addCommand), {
-			target: { value: "npx -y github-connector" },
+			target: { value: "github-connector" },
 		});
 		fireEvent.click(within(dialog).getByRole("button", { name: en.addNext }));
 		await s.reply(await sent(s, "connector.tools"), {
@@ -537,6 +537,70 @@ describe("connectors on the agent page", () => {
 			within(dialog).getByRole("button", { name: "Remove part 2" }),
 		);
 		expect(within(dialog).queryByLabelText("Part 2")).toBeNull();
+	});
+
+	it("connector_add_says_early_when_a_whole_command_is_pasted_into_command", async () => {
+		// Re-review 2 m5: "npx -y foo" in Command was sent, and failed in general words.
+		await opened([]);
+		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(
+			screen.getByRole("button", { name: en.connectorCustomAdd }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Add a custom connector to Theo",
+		});
+		const field = (label: string) => within(dialog).getByLabelText(label);
+		const next = within(dialog).getByRole("button", { name: en.addNext });
+		fireEvent.change(field(en.addName), { target: { value: "files" } });
+		fireEvent.change(field(en.addCommand), {
+			target: { value: "npx -y @x/srv" },
+		});
+		expect(within(dialog).getByText(en.addCommandWhole)).toBeTruthy();
+		expect(field(en.addCommand).getAttribute("aria-invalid")).toBe("true");
+		expect(next.hasAttribute("disabled")).toBe(true);
+		// A full path may hold a space.
+		fireEvent.change(field(en.addCommand), {
+			target: { value: "/home/u/My Servers/srv" },
+		});
+		expect(within(dialog).queryByText(en.addCommandWhole)).toBeNull();
+		expect(next.hasAttribute("disabled")).toBe(false);
+	});
+
+	it("connector_add_says_a_refusal_at_the_part_it_names_after_an_empty_one", async () => {
+		// Re-review 2 m5: an empty part is not sent, so the daemon counts the parts after it
+		// one lower.
+		const { s } = await opened([]);
+		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(
+			screen.getByRole("button", { name: en.connectorCustomAdd }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Add a custom connector to Theo",
+		});
+		const field = (label: string) => within(dialog).getByLabelText(label);
+		fireEvent.change(field(en.addName), { target: { value: "files" } });
+		fireEvent.change(field(en.addCommand), { target: { value: "srv" } });
+		const more = within(dialog).getByRole("button", { name: en.addArgMore });
+		fireEvent.click(more);
+		fireEvent.click(more);
+		fireEvent.change(field("Part 2"), { target: { value: "sk-abc" } });
+		fireEvent.change(field(en.addKeyName), { target: { value: "FILES_KEY" } });
+		fireEvent.click(within(dialog).getByRole("button", { name: en.addNext }));
+		const asked = await sent(s, "connector.tools");
+		expect(
+			(asked.params as { server: { args: string[] } }).server.args,
+		).toEqual(["sk-abc"]);
+		await s.fail(asked, -32005, "the team file is not valid", {
+			errors: [
+				{
+					path: "/agents/1/mcp_servers/0/args/0",
+					message: "arg_holds_secret: argument 1 looks like a key",
+					code: "invalid",
+				},
+			],
+		});
+		expect(field("Part 2").getAttribute("aria-invalid")).toBe("true");
+		expect(field("Part 1").getAttribute("aria-invalid")).not.toBe("true");
 	});
 
 	it("connector_add_says_when_farik_settings_folder_is_inside_the_project", async () => {

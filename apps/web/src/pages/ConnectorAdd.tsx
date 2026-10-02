@@ -190,6 +190,20 @@ export function ConnectorAdd({
 		lineWrong(i) || (refused[`header:${lines[i]?.name ?? ""}`] ?? "");
 	const headerOk = headers.every((_, i) => !lineWrong(i));
 	const sentHeaders = lines.filter((l) => l.name);
+	// An empty part is not sent: the place of each sent part, so a refusal at `args/<n>` lands on
+	// the part the user sees (re-review 2 m5).
+	const sentArgs = args.flatMap((a, i) => (a === "" ? [] : [i]));
+	// A program's name holds no space; a whole line pasted into Command is said at once. A full
+	// path may hold one.
+	const commandWhole =
+		!http && !command.trim().startsWith("/") && /\s/.test(command.trim());
+	const atParts = (at: Partial<Record<Field, string>>) =>
+		Object.fromEntries(
+			Object.entries(at).map(([field, words]) => {
+				const n = /^arg-(\d+)$/.exec(field)?.[1];
+				return [n === undefined ? field : `arg-${sentArgs[Number(n)]}`, words];
+			}),
+		) as Partial<Record<Field, string>>;
 	const wire = {
 		name: server.trim(),
 		transport,
@@ -202,14 +216,17 @@ export function ConnectorAdd({
 						),
 					}),
 				}
-			: { command: command.trim(), args: args.filter((a) => a !== "") }),
+			: { command: command.trim(), args: sentArgs.map((i) => args[i]) }),
 		credentialKeys: named.map((k) => k.name.trim()),
 	};
 	const keysWire = Object.fromEntries(
 		named.map((k) => [k.name.trim(), k.value]),
 	);
 	const ready =
-		server.trim() && (http ? url.trim() : command.trim()) && !secretInUrl;
+		server.trim() &&
+		(http ? url.trim() : command.trim()) &&
+		!secretInUrl &&
+		!commandWhole;
 
 	const list = async () => {
 		if (!client) return;
@@ -225,7 +242,7 @@ export function ConnectorAdd({
 			setTags({});
 			setStep(1);
 		} catch (e) {
-			setRefused(refusalsAt(e, fill));
+			setRefused(atParts(refusalsAt(e, fill)));
 		}
 		setBusy(false);
 	};
@@ -249,7 +266,7 @@ export function ConnectorAdd({
 			setDone(answer);
 			setStep(2);
 		} catch (e) {
-			setRefused(refusalsAt(e, fill));
+			setRefused(atParts(refusalsAt(e, fill)));
 			setStep(0);
 		}
 		setBusy(false);
@@ -367,7 +384,9 @@ export function ConnectorAdd({
 								label={t("addCommand")}
 								hint={t("addCommandHint")}
 								value={command}
-								error={refused.command ?? ""}
+								error={
+									commandWhole ? t("addCommandWhole") : (refused.command ?? "")
+								}
 								onChange={setCommand}
 							/>
 							<fieldset className={styles.group}>

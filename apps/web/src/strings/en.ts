@@ -1222,6 +1222,8 @@ export const en = {
 		"Write a name, a colon, then the value, like Authorization: Bearer {API_KEY}, naming only the keys below.",
 	addCommandNotAbsolute:
 		"Farik cannot find a program by a path like this one. Give the program’s name alone, like npx, or its full path, starting with /.",
+	addCommandWhole:
+		"Put only the program here, like npx. Put each part after it below, in a field of its own.",
 	addStateInsideProject:
 		"Farik keeps its settings inside this project’s folder, so a connector here would run among the project’s files. Whoever set up Farik on this computer can keep its settings elsewhere.",
 	addArgSecret:
