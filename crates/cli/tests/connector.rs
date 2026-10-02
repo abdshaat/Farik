@@ -192,9 +192,16 @@ fn farik_connect_labels_with_tag_flags_and_defaults_to_external_effect() {
         store.clone(),
     );
     assert_ne!(ran.code, 0);
-    assert!(ran.err.contains("tag_unknown_tool: delete_rep"), "{}", ran.err);
+    assert!(
+        ran.err.contains("tag_unknown_tool: delete_rep"),
+        "{}",
+        ran.err
+    );
     assert!(ran.err.contains("search, env, delete_repo"), "{}", ran.err);
-    assert_eq!(store.load(&kept_at(&repository, "dev-b", "fixture")), Ok(None));
+    assert_eq!(
+        store.load(&kept_at(&repository, "dev-b", "fixture")),
+        Ok(None)
+    );
     assert_eq!(entry(&repository, "dev-b"), None);
 }
 
