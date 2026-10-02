@@ -3,6 +3,7 @@
 Date: 2026-10-02
 Status: accepted (the founder, in conversation, 2026-10-02; the relay's shape ruled by the controller the same day)
 Amended 2026-10-02 by the readiness reviews of steps 03b and 03c and the founder's decisions of that day: Google is deferred until after the launch, with its decided design recorded below; Slack's app stays private to the founder's workspace until the Slack Marketplace lists it, a launch dependency; the relay binds a code to its ticket; a homepage and a privacy policy move forward to step 03e. The section "Amendment of 2026-10-02" holds the details; the text above it is corrected to match.
+Amended again 2026-10-02, later the same day, by the founder: route 3, the relay, is deferred with Slack. See "Second amendment of 2026-10-02"; the text above it is left as decided.
 
 Resolves step 03's O2 (`docs/plans/phase-7-role-kits/step-03-signing-in-to-a-service.md`). ADR 0033, written in step 03's Task 2, keeps its registration order; this ADR adds two routes before its refusal.
 
@@ -103,3 +104,7 @@ Made by the readiness reviews of steps 03b and 03c and the founder's decisions o
 **The relay (step 03c).** The code is bound to its ticket through the `redirect_uri` path; a dependency failure answers `server_error` and logs nothing of the error; the function runs on Node.js 24 with an 8-second limit; TLS uses an enhanced security policy with `STRICT` access mode; each secret carries a resource policy; Lambda's concurrency quota is raised to 1000 before the first deploy, since a new account's 10 refuses the reserved 20.
 
 **A homepage and a privacy policy** move forward from phase 11 step 01 to phase 7 step 03e, on the same `infra` package, so Slack's listing (and, after the launch, Google's verification) can start early.
+
+## Second amendment of 2026-10-02
+
+The founder, the same day: "Connecting slack is a later step keep it simple for now." With Google already deferred, route 3 served only Slack, so it is deferred. Steps 03c (the relay), 03d (signing in through it) and 03e (the homepage and privacy policy) leave phase 7 and become phase 11 steps 01 to 03 (project plan revision 30), their reviewed plans kept and marked deferred. The relay's design above stands for when they are built. Meanwhile pasted keys cover Slack: the Scrum Master's bridge takes a token from a Slack app the user makes in their own workspace, or runs without the bridge. Phase 7 needs no AWS account, domain, mailbox or Slack app; the "cloud service before its launch" consequence moves with the relay to phase 11, and Farik's GitHub App, whose homepage is the repository's page, is phase 7's only app registration.
