@@ -1859,6 +1859,7 @@ mod tests {
             git: daemon.project.repo.adapter(),
             clock: Arc::clone(&deps.clock),
             ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
         })));
         let seqs: Vec<u64> = (0..3).map(|_| paused_through(&log)).collect();
         assert_eq!(seqs, [1, 2, 3]);
@@ -1898,6 +1899,7 @@ mod tests {
             git: daemon.project.repo.adapter(),
             clock: Arc::clone(&deps.clock),
             ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
         })));
         let (handle, secret) = on_a_socket(&state, &daemon.project.repo.path).await;
         let mut socket = open(handle.info.port, &secret).await;

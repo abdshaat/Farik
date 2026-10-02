@@ -71,6 +71,7 @@ pub(crate) fn browsing(wire: &mut Value) {
 pub(crate) struct TestProject {
     pub(crate) repo: TempRepo,
     pub(crate) deps: Arc<ToolDeps>,
+    kits: Arc<std::sync::Mutex<Vec<farik_roles::Kit>>>,
 }
 
 impl TestProject {
@@ -100,6 +101,8 @@ impl TestProject {
             Arc::clone(&clock),
             ids.clone(),
         ));
+        let kits: Arc<std::sync::Mutex<Vec<farik_roles::Kit>>> = Arc::default();
+        let held = Arc::clone(&kits);
         let deps = Arc::new(ToolDeps {
             log,
             projections,
@@ -108,8 +111,23 @@ impl TestProject {
             git: repo.adapter(),
             clock,
             ids,
+            kits: Arc::new(move |role| {
+                let swapped = held
+                    .lock()
+                    .ok()
+                    .and_then(|kits| kits.iter().find(|kit| kit.role == role).cloned());
+                swapped.map_or_else(|| farik_roles::load_kit(role), Ok)
+            }),
         });
-        Self { repo, deps }
+        Self { repo, deps, kits }
+    }
+
+    /// Swaps in `kit` as its role's kit, for this project alone and from now on.
+    pub(crate) fn set_kit(&self, kit: farik_roles::Kit) {
+        if let Ok(mut kits) = self.kits.lock() {
+            kits.retain(|held| held.role != kit.role);
+            kits.push(kit);
+        }
     }
 
     /// A session of `agent` on `task`, with no executor.

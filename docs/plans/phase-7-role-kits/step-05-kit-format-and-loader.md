@@ -179,7 +179,7 @@ Files: as the file map's Task 4 lines. Produces `KitSource`, `ToolDeps.kits`, `C
 - `team_get_lists_each_roles_kit_and_each_rows_source`: `kits` holds the fixture's copy, its `labels` and `auth: keys`, no `container` connector, and a kit row says `source: kit`.
 - `disconnects_a_kit_connector_and_deletes_its_keys`: `connector.disconnect` removes the entry and that agent's keys alone.
 
-- [ ] `feat(runtime): connect a kit's connector by name`
+- [x] `feat(runtime): connect a kit's connector by name`
 
 ### Task 5: Kits in sessions
 

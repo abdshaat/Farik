@@ -1390,6 +1390,27 @@ fn connect_server(
         .ok_or_else(|| CommandError::Refused {
             reason: format!("connector_not_custom: {name} is not a custom server"),
         })?;
+    if custom.kit {
+        // The service must be exactly the kit's, for this agent's role: a team file or a clone
+        // that widened a tag, or a service of another role's kit, is refused (ADR 0036).
+        let role = after
+            .agents
+            .iter()
+            .find(|held| held.id.as_str() == agent)
+            .map(|held| farik_core::contract::Role::from(held.role))
+            .ok_or_else(|| CommandError::NotFound {
+                what: format!("the agent {agent}"),
+            })?;
+        let kit = (tools.kits)(role).map_err(failed)?;
+        if !crate::daemon::matches_kit(&kit, &custom) {
+            return Err(CommandError::Refused {
+                reason: format!(
+                    "connector_not_in_kit: {name} is not what the kit of the {role} says it is; \
+                     connect it by name"
+                ),
+            });
+        }
+    }
     if farik_core::team::spec_sha256(&custom) != spec_sha256 {
         return Err(CommandError::Refused {
             reason: format!(

@@ -168,6 +168,7 @@ impl TestDaemon {
             git: self.project.repo.adapter(),
             clock: Arc::clone(&deps.clock),
             ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
         }));
         state.register_session(SessionRegistration {
             session_id: DEV_SESSION.to_string(),
@@ -214,6 +215,7 @@ pub(crate) fn slowed_deps(project: &TestProject, delay: std::time::Duration) -> 
         git: project.repo.adapter(),
         clock: Arc::new(Slow(Arc::clone(&deps.clock), delay)),
         ids: deps.ids.clone(),
+        kits: Arc::clone(&deps.kits),
     })
 }
 

@@ -167,6 +167,9 @@ pub struct CliIo<'a> {
     /// real keychain, and the keychain then the file in `main`.
     #[cfg(unix)]
     pub credential_stores: CredentialStores,
+    /// Where each role's kit comes from (ADR 0036): the shipped kits here and in `main`, which a
+    /// test replaces with a fixture kit whose server is its own.
+    pub kits: farik_runtime::KitSource,
     /// Where each agent's connector keys are kept (ADR 0030): in memory here, so that no test
     /// touches a real keychain, and the keychain then `connectors.json` in `main`.
     #[cfg(unix)]
@@ -251,6 +254,7 @@ impl<'a> CliIo<'a> {
                 let memory: Arc<dyn CredentialStore> = Arc::new(MemoryStore::default());
                 Arc::new(move || vec![Arc::clone(&memory)])
             },
+            kits: Arc::new(farik_roles::load_kit),
             #[cfg(unix)]
             connector_secrets: Arc::new(MemoryConnectorSecrets::default()),
             #[cfg(feature = "e2e")]

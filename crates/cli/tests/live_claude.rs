@@ -199,6 +199,7 @@ impl Project {
             git: repo.adapter(),
             clock,
             ids,
+            kits: Arc::new(farik_roles::load_kit),
         })));
         // The user's state folder, outside the repository, where each server runs.
         let state_dir = PathBuf::from(format!("{}-state", repo.path.display()));

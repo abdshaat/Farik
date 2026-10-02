@@ -125,4 +125,6 @@ pub use session::{
 pub use stream::StreamParser;
 #[cfg(unix)]
 pub use templates::{TemplateError, TemplateListing, Templates};
-pub use tools::{FarikTool, ToolContext, ToolDeps, ToolError, call_tool, tool_descriptors};
+pub use tools::{
+    FarikTool, KitSource, ToolContext, ToolDeps, ToolError, call_tool, tool_descriptors,
+};

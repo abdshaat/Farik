@@ -126,6 +126,7 @@ impl Served {
             git: repo.adapter(),
             clock,
             ids,
+            kits: Arc::new(farik_roles::load_kit),
         })));
         let store = Arc::new(MemoryConnectorSecrets::default());
         for server in servers(&team) {

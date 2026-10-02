@@ -161,6 +161,7 @@ impl Harness {
             git: self.project.repo.adapter(),
             clock: Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
             ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
         });
         tools.transitions.set_previews(Arc::clone(&self.previews));
         Orchestrator::new(OrchestratorDeps {

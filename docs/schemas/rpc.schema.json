@@ -864,7 +864,8 @@
               "agent",
               "server",
               "state",
-              "auth"
+              "auth",
+              "source"
             ],
             "properties": {
               "agent": {
@@ -901,6 +902,89 @@
                   "file"
                 ],
                 "description": "Where the agent's keys for this server are kept, when an entry is: the computer's keychain, or a private file only the user can read. Absent when none is kept or the store could not be read."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "custom",
+                  "kit"
+                ],
+                "description": "Where the server came from: the user's own, or a service of the agent's role's kit (ADR 0036)."
+              }
+            }
+          }
+        },
+        "kits": {
+          "type": "array",
+          "description": "Each role on the team whose kit has a service to connect by name, with the copy the page shows (ADR 0036). A container connector, which Farik runs itself, is not listed, and nor is a role with no service.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "connectors"
+            ],
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "connectors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "title",
+                    "about",
+                    "why",
+                    "setup",
+                    "labels",
+                    "auth",
+                    "credential_keys"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "about": {
+                      "type": "string"
+                    },
+                    "why": {
+                      "type": "string"
+                    },
+                    "setup": {
+                      "type": "string"
+                    },
+                    "key_page": {
+                      "type": "string",
+                      "description": "Where the key is made; present when the service takes keys."
+                    },
+                    "labels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "A tool to what it does in the user's words."
+                    },
+                    "auth": {
+                      "type": "string",
+                      "enum": [
+                        "keys",
+                        "oauth"
+                      ]
+                    },
+                    "credential_keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -912,6 +996,7 @@
         "judges",
         "max_agents",
         "connectors",
+        "kits",
         "sandboxed"
       ]
     },
@@ -3655,8 +3740,38 @@
       }
     },
     "connectorServer": {
+      "description": "A service as the user connects it, before its tools are labelled: either a custom MCP server, an mcp_servers entry of team.schema.json without tools (name, transport, and command and args, or url and headers, credential_keys, and oauth for a web address the user signs in to; source, when given, is custom), held to validate_team as the agent's entry; or a service of the agent's role's kit, { name, source: kit }, a form of its own that carries nothing else, so a browser cannot send fields the kit decides (ADR 0036).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "const": "custom"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/kitServer"
+        }
+      ]
+    },
+    "kitServer": {
       "type": "object",
-      "description": "A custom MCP server as the user describes it, before its tools are labelled: an mcp_servers entry of team.schema.json without source and tools (name, transport, and command and args, or url and headers, credential_keys, and oauth for a web address the user signs in to). The daemon holds it to validate_team as the agent's entry."
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,39}$"
+        },
+        "source": {
+          "const": "kit"
+        }
+      },
+      "description": "A service of the agent's role's kit, by name: the daemon builds its entry from the kit (kit_entry), its tags included. connector.connect with it takes tags {} (kit_names_these otherwise); a name the agent's role's kit does not have is connector_not_in_kit."
     },
     "connectorKeys": {
       "type": "object",

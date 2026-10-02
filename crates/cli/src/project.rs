@@ -209,6 +209,7 @@ pub(crate) fn tool_deps(project: &Project, io: &CliIo<'_>) -> Result<Arc<ToolDep
         git: Git::open(project.root.clone()),
         clock: Arc::clone(&io.clock),
         ids,
+        kits: Arc::clone(&io.kits),
     }))
 }
 

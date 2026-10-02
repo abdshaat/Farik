@@ -120,6 +120,7 @@ impl Served {
             git: repo.adapter(),
             clock,
             ids,
+            kits: Arc::new(farik_roles::load_kit),
         })));
         state.register_session(SessionRegistration {
             session_id: SESSION.to_string(),
