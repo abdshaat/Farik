@@ -919,6 +919,22 @@ mod tests {
     }
 
     #[test]
+    fn a_project_reached_through_a_link_has_its_targets_id() {
+        // Re-review 2 m4 (N3a): setup gives the root with its links followed, the CLI the folder
+        // it runs in, so both must find one id.
+        let dir = scratch("linked");
+        let root = dir.join("app");
+        std::fs::create_dir_all(&root).expect("the root is made");
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&root, &link).expect("the link is made");
+        let state = dir.join("state");
+        assert_eq!(
+            local_project_id(&state, &link).expect("an id"),
+            local_project_id(&state, &root).expect("an id")
+        );
+    }
+
+    #[test]
     fn an_id_not_of_32_hex_digits_is_refused() {
         let dir = scratch("bad-id");
         let (state, app) = (dir.join("state"), dir.join("app"));
