@@ -202,7 +202,7 @@ Files: as the file map's Task 6 lines. Tests set `io.kits` in `run_with`'s closu
 - `refuses_a_name_the_kit_lacks`: `connector_not_in_kit`, naming the kit's connectors.
 - `signs_in_to_a_kit_connector_with_oauth`: against step 03's fixture authorization server, without `--sign-in`.
 
-- [ ] `feat(cli): connect a kit's connector by name`
+- [x] `feat(cli): connect a kit's connector by name`
 
 ### Task 7: The screens
 

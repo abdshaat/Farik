@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::io::BufRead as _;
 
 use farik_core::contract::ValidationError;
-use farik_core::team::{CustomTransport, spec_sha256};
+use farik_core::team::{CustomServer, CustomTransport, spec_sha256};
 use farik_protocol::command::Command;
 use farik_runtime::claude::Secret;
 use farik_runtime::connectors::{
@@ -14,7 +14,7 @@ use farik_runtime::connectors::{
     working_folder,
 };
 use farik_runtime::credential::CredentialError;
-use farik_runtime::daemon::{custom_entry, labelled};
+use farik_runtime::daemon::{custom_entry, kit_entry, labelled};
 use farik_runtime::sign_in::{SignInError, revoke, start_sign_in};
 use serde_json::{Map, Value, json};
 
@@ -75,6 +75,10 @@ pub(crate) fn connect_with(
     io: &mut CliIo<'_>,
     open: &dyn Fn(&str),
 ) -> Result<Report, String> {
+    if asked.command.is_none() && asked.url.is_none() {
+        return connect_kit(project, asked, io, open);
+    }
+    needs_its_form(asked)?;
     if asked.sign_in {
         return connect_signed_in(project, asked, io, open);
     }
@@ -83,16 +87,186 @@ pub(crate) fn connect_with(
     let (_, server) =
         custom_entry(&project.team, asked.agent, &wire, json!({})).map_err(|e| errors(&e))?;
     let keys = read_keys(asked.keys, io)?;
+    keep_keys(
+        project,
+        io,
+        asked.agent,
+        &server,
+        keys,
+        &|listed| labelled(listed, &tags),
+        &|tools| custom_entry(&project.team, asked.agent, &wire, Value::Object(tools)),
+    )
+}
+
+/// The flags that only make sense with a form of the command, which a name alone (a kit's service)
+/// answers `kit_names_these` to instead.
+fn needs_its_form(asked: &Asked<'_>) -> Result<(), String> {
+    let wrong = [
+        (
+            !asked.args.is_empty() && asked.command.is_none(),
+            "--arg needs --command",
+        ),
+        (
+            !asked.headers.is_empty() && asked.url.is_none(),
+            "--header needs --url",
+        ),
+        (
+            asked.sign_in && asked.url.is_none(),
+            "--sign-in needs --url",
+        ),
+        (
+            asked.client_id.is_some() && !asked.sign_in,
+            "--client-id needs --sign-in",
+        ),
+        (
+            asked.callback_port.is_some() && asked.client_id.is_none(),
+            "--callback-port needs --client-id",
+        ),
+        (
+            !asked.scopes.is_empty() && !asked.sign_in,
+            "--scope needs --sign-in",
+        ),
+    ];
+    match wrong.iter().find(|(is_wrong, _)| *is_wrong) {
+        Some((_, why)) => Err((*why).to_string()),
+        None => Ok(()),
+    }
+}
+
+/// `farik connect <agent> <name>`: the service `name` of the agent's role's kit, which says how
+/// it starts, which keys it takes and what each tool may do (ADR 0036). Each key is read in order
+/// from standard input after a line saying where it is made; a service the user signs in to is
+/// signed in to, as `--sign-in` does.
+fn connect_kit(
+    project: &Project,
+    asked: &Asked<'_>,
+    io: &mut CliIo<'_>,
+    open: &dyn Fn(&str),
+) -> Result<Report, String> {
+    let name = asked.name;
+    let given: Vec<&str> = [
+        (!asked.args.is_empty(), "--arg"),
+        (!asked.headers.is_empty(), "--header"),
+        (!asked.keys.is_empty(), "--key"),
+        (!asked.tags.is_empty(), "--tag"),
+        (asked.sign_in, "--sign-in"),
+        (asked.client_id.is_some(), "--client-id"),
+        (asked.callback_port.is_some(), "--callback-port"),
+        (!asked.scopes.is_empty(), "--scope"),
+    ]
+    .into_iter()
+    .filter_map(|(is_given, flag)| is_given.then_some(flag))
+    .collect();
+    if !given.is_empty() {
+        return Err(format!(
+            "kit_names_these: the kit says how {name} starts, which keys it takes and what each \
+             tool may do; leave out {}",
+            given.join(", ")
+        ));
+    }
+    let held = project
+        .team
+        .agents
+        .iter()
+        .find(|held| held.id.as_str() == asked.agent)
+        .ok_or_else(|| format!("there is no agent {}", asked.agent))?;
+    let kit = (io.kits)(farik_core::contract::Role::from(held.role))
+        .map_err(|error| error.to_string())?;
+    let build = || kit_entry(&kit, &project.team, asked.agent, name);
+    let (_, server) = build().map_err(|refused| {
+        let has: Vec<&str> = kit
+            .connectors
+            .iter()
+            .filter(|connector| matches!(connector, farik_roles::KitConnector::Server { .. }))
+            .map(farik_roles::KitConnector::name)
+            .collect();
+        let said = errors(&refused);
+        if said.contains("connector_not_in_kit") {
+            let list = if has.is_empty() {
+                "the kit has no service to connect by name".to_string()
+            } else {
+                format!("the kit has {}", has.join(", "))
+            };
+            format!("{said}; {list}")
+        } else {
+            said
+        }
+    })?;
+    let tools_of = |_: &[farik_runtime::connectors::ListedTool]| {
+        Ok(build()
+            .map(|(entry, _)| entry["tools"].as_object().cloned().unwrap_or_default())
+            .unwrap_or_default())
+    };
+    let build_with = |_: Map<String, Value>| build();
+    if matches!(
+        &server.transport,
+        CustomTransport::Http { oauth: Some(_), .. }
+    ) {
+        return keep_sign_in(
+            project,
+            io,
+            open,
+            asked.agent,
+            &server,
+            &tools_of,
+            &build_with,
+        );
+    }
+    let page = kit.connectors.iter().find_map(|connector| match connector {
+        farik_roles::KitConnector::Server { entry, copy, .. } if entry.name.as_str() == name => {
+            copy.key_page.clone()
+        }
+        _ => None,
+    });
+    let mut keys = BTreeMap::new();
+    for key in &server.credential_keys {
+        if let Some(page) = &page {
+            crate::say(
+                &mut io.stderr,
+                &format!("Make a key at {page}, then paste {key}:"),
+            );
+        }
+        keys.extend(read_keys(std::slice::from_ref(key), io)?);
+    }
+    keep_keys(
+        project,
+        io,
+        asked.agent,
+        &server,
+        keys,
+        &tools_of,
+        &build_with,
+    )
+}
+
+/// What decides the tools an entry is written with: the labels the user gave, or the kit's.
+type ToolsOf<'a> =
+    &'a dyn Fn(&[farik_runtime::connectors::ListedTool]) -> Result<Map<String, Value>, String>;
+
+/// How the entry is built once its tools are known.
+type Build<'a> =
+    &'a dyn Fn(Map<String, Value>) -> Result<(Value, CustomServer), Vec<ValidationError>>;
+
+/// The server's tools listed with `keys`, each decided by `tools_of`, the keys kept beside the
+/// definition's hash, then `connector_connect` handled here or sent.
+fn keep_keys(
+    project: &Project,
+    io: &mut CliIo<'_>,
+    agent: &str,
+    server: &CustomServer,
+    keys: BTreeMap<String, Secret>,
+    tools_of: ToolsOf<'_>,
+    build: Build<'_>,
+) -> Result<Report, String> {
     let state = state_of(io)?;
-    let at = secret_at(&state, project, asked.agent, &server.name)?;
+    let at = secret_at(&state, project, agent, &server.name)?;
     let folder = working_folder(&state, &project.root, &at)
         .map_err(|error| format!("{}: {}", server.name, folder_refusal(&error)))?;
     let listed = runtime()?
-        .block_on(list_tools(&server, &keys, None, &folder))
+        .block_on(list_tools(server, &keys, None, &folder))
         .map_err(|error| not_listed(&error))?;
-    let tools = labelled(&listed, &tags)?;
-    let (entry, server) = custom_entry(&project.team, asked.agent, &wire, Value::Object(tools))
-        .map_err(|e| errors(&e))?;
+    let tools = tools_of(&listed)?;
+    let (entry, server) = build(tools).map_err(|e| errors(&e))?;
     let spec = spec_sha256(&server);
     let stored_in = io
         .connector_secrets
@@ -108,7 +282,7 @@ pub(crate) fn connect_with(
     let said = crate::human::said(command(
         project,
         Command::ConnectorConnect {
-            agent: asked.agent.to_string(),
+            agent: agent.to_string(),
             server: entry.as_object().cloned().unwrap_or_default(),
             spec_sha256: spec,
             issuer: None,
@@ -159,8 +333,6 @@ fn connect_signed_in(
     io: &mut CliIo<'_>,
     open: &dyn Fn(&str),
 ) -> Result<Report, String> {
-    let url = asked.url.unwrap_or_default();
-    let host = host_of(url);
     let mut wire = wire_of(asked)?;
     let mut oauth = Map::new();
     if let Some(client) = asked.client_id {
@@ -176,15 +348,39 @@ fn connect_signed_in(
     let tags = tags_of(asked.tags)?;
     let (_, server) =
         custom_entry(&project.team, asked.agent, &wire, json!({})).map_err(|e| errors(&e))?;
+    keep_sign_in(
+        project,
+        io,
+        open,
+        asked.agent,
+        &server,
+        &|listed| labelled(listed, &tags),
+        &|tools| custom_entry(&project.team, asked.agent, &wire, Value::Object(tools)),
+    )
+}
+
+/// Signs `agent` in to the service of the web-address server `server`, lists its tools with the
+/// token, decides them with `tools_of`, keeps the grant where keys are, and connects it.
+fn keep_sign_in(
+    project: &Project,
+    io: &mut CliIo<'_>,
+    open: &dyn Fn(&str),
+    agent: &str,
+    server: &CustomServer,
+    tools_of: ToolsOf<'_>,
+    build: Build<'_>,
+) -> Result<Report, String> {
     let CustomTransport::Http {
+        url,
         oauth: Some(settings),
         ..
     } = &server.transport
     else {
         return Err(format!("{} does not sign in", server.name));
     };
+    let host = host_of(url);
     let state = state_of(io)?;
-    let at = secret_at(&state, project, asked.agent, &server.name)?;
+    let at = secret_at(&state, project, agent, &server.name)?;
     let folder = working_folder(&state, &project.root, &at)
         .map_err(|error| format!("{}: {}", server.name, folder_refusal(&error)))?;
     let runtime = runtime()?;
@@ -208,15 +404,14 @@ fn connect_signed_in(
     crate::say(&mut io.stderr, &format!("Signed in to {issuer}."));
     let listed = runtime
         .block_on(list_tools(
-            &server,
+            server,
             &BTreeMap::new(),
             Some(&grant.access_token),
             &folder,
         ))
         .map_err(|error| not_listed(&error))?;
-    let tools = labelled(&listed, &tags)?;
-    let (entry, server) = custom_entry(&project.team, asked.agent, &wire, Value::Object(tools))
-        .map_err(|e| errors(&e))?;
+    let tools = tools_of(&listed)?;
+    let (entry, server) = build(tools).map_err(|e| errors(&e))?;
     let spec = spec_sha256(&server);
     // A sign-in this one replaces is asked to be forgotten, so it does not linger at the service.
     let replaced = io
@@ -246,7 +441,7 @@ fn connect_signed_in(
     let said = crate::human::said(command(
         project,
         Command::ConnectorConnect {
-            agent: asked.agent.to_string(),
+            agent: agent.to_string(),
             server: entry.as_object().cloned().unwrap_or_default(),
             spec_sha256: spec,
             issuer: Some(issuer),

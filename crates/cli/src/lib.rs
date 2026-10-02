@@ -378,7 +378,7 @@ enum Commands {
     /// Give one agent an MCP server, with its keys read from standard input, and label its tools
     /// (5.6, ADR 0030).
     #[cfg(unix)]
-    #[command(group(clap::ArgGroup::new("start").required(true).args(["command", "url"])))]
+    #[command(group(clap::ArgGroup::new("start").required(false).args(["command", "url"])))]
     Connect {
         /// The agent's id.
         agent: String,
@@ -388,28 +388,28 @@ enum Commands {
         #[arg(long)]
         command: Option<String>,
         /// One argument to that program; repeat it for each.
-        #[arg(long = "arg", requires = "command", allow_hyphen_values = true)]
+        #[arg(long = "arg", allow_hyphen_values = true)]
         args: Vec<String>,
         /// The server's web address.
         #[arg(long)]
         url: Option<String>,
         /// A header, as 'Name: template', where {KEY} is a key's value; repeat it for each.
-        #[arg(long = "header", requires = "url")]
+        #[arg(long = "header")]
         headers: Vec<String>,
         /// A key's name; its value is read from standard input. Repeat it for each.
         #[arg(long = "key")]
         keys: Vec<String>,
         /// Sign in to the server's service in your browser instead of giving a key (ADR 0033).
-        #[arg(long, requires = "url", conflicts_with_all = ["keys", "command"])]
+        #[arg(long, conflicts_with_all = ["keys", "command"])]
         sign_in: bool,
         /// The client the service's app registration gave Farik, when it offers no registration.
-        #[arg(long, requires = "sign_in")]
+        #[arg(long)]
         client_id: Option<String>,
         /// The port that client's redirect address names (33418 when left out).
-        #[arg(long, requires = "client_id")]
+        #[arg(long)]
         callback_port: Option<u16>,
         /// What to ask the service for; repeat it for each. Left out, the service chooses.
-        #[arg(long = "scope", requires = "sign_in")]
+        #[arg(long = "scope")]
         scopes: Vec<String>,
         /// A tool's label: `<tool>=network`, `<tool>=external_effect` or `<tool>=denied`. A tool
         /// left unlabelled is `external_effect`.

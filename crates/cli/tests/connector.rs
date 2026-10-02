@@ -719,3 +719,230 @@ fn farik_disconnect_asks_the_service_to_forget_the_sign_in() {
     assert_eq!(revoked.len(), 1);
     assert_eq!(revoked[0].form["token"], refresh.expose());
 }
+
+/// The Developer's kit with one service, `fixture`: the stdio fixture server at `script` with one
+/// key, or, given `oauth_url`, the sign-in fixture's web address. Its tags: `search` network,
+/// `env` external effect, `delete_repo` denied (and `whoami` network for the sign-in one).
+fn a_kit(script: &std::path::Path, oauth_url: Option<&str>) -> farik_runtime::KitSource {
+    let mut connector = json!({
+        "name": "fixture", "title": "Fixture", "about": "A stand-in service.",
+        "why": "Lets the Developer search it.", "setup": "Make a key on its page and paste it.",
+    });
+    if let Some(url) = oauth_url {
+        connector["transport"] = json!("http");
+        connector["url"] = json!(url);
+        connector["oauth"] = json!({});
+        connector["tools"] = json!({ "whoami": "network" });
+    } else {
+        connector["transport"] = json!("stdio");
+        connector["command"] = json!("sh");
+        connector["args"] = json!([script.display().to_string()]);
+        connector["credential_keys"] = json!(["API_KEY"]);
+        connector["key_page"] = json!("https://fixture.example/keys");
+        connector["labels"] = json!({ "search": "search the fixture" });
+        connector["tools"] =
+            json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
+    }
+    let file = json!({ "role": "software_developer", "skills": [], "connectors": [connector] });
+    let kit = farik_roles::parse_kit(
+        farik_core::contract::Role::SoftwareDeveloper,
+        &file.to_string(),
+        &[],
+        &[],
+    )
+    .expect("the fixture kit loads");
+    Arc::new(move |role| {
+        if role == farik_core::contract::Role::SoftwareDeveloper {
+            Ok(kit.clone())
+        } else {
+            farik_roles::load_kit(role)
+        }
+    })
+}
+
+/// `farik connect <agent> <name> <extra>` against `kits`, with `stdin` on standard input.
+fn connect_by_name(
+    repository: &TempRepo,
+    kits: farik_runtime::KitSource,
+    agent: &str,
+    name: &str,
+    extra: &[&str],
+    stdin: &str,
+    store: Arc<dyn ConnectorSecrets>,
+) -> project::Ran {
+    let mut args = vec!["connect", agent, name];
+    args.extend_from_slice(extra);
+    let stdin = stdin.to_string();
+    let state = config_of(repository);
+    run_with(&repository.path, &args, move |io| {
+        io.stdin = Box::new(std::io::Cursor::new(stdin.into_bytes()));
+        io.connector_secrets = store;
+        io.kits = kits;
+        io.env
+            .insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
+    })
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn connects_a_kit_connector_with_its_keys_from_standard_input() {
+    let repository = a_team("connect-kit-stdin");
+    let script = fixture("connect-kit-stdin");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let ran = connect_by_name(
+        &repository,
+        a_kit(&script, None),
+        "dev-a",
+        "fixture",
+        &[],
+        &format!("{KEY}\n"),
+        Arc::clone(&store) as _,
+    );
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.err
+            .contains("Make a key at https://fixture.example/keys, then paste API_KEY:"),
+        "{}",
+        ran.err
+    );
+    for line in [
+        "search: network",
+        "env: external_effect",
+        "delete_repo: denied",
+    ] {
+        assert!(
+            ran.out.lines().any(|found| found == line),
+            "{line}: {}",
+            ran.out
+        );
+    }
+    assert!(
+        ran.out.contains("Kept in your computer's keychain"),
+        "{}",
+        ran.out
+    );
+    assert!(!ran.out.contains(KEY) && !ran.err.contains(KEY));
+    let written = entry(&repository, "dev-a").expect("the entry is written");
+    assert_eq!(written["source"], "kit");
+    assert_eq!(
+        written["tools"],
+        json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" })
+    );
+    let kept = loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).expect("kept");
+    assert_eq!(kept.keys["API_KEY"].expose(), KEY);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_flags_the_kit_decides() {
+    let repository = a_team("connect-kit-flags");
+    let script = fixture("connect-kit-flags");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    for extra in [
+        &["--key", "API_KEY"][..],
+        &["--tag", "search=denied"],
+        &["--arg", "x"],
+        &["--header", "A: b"],
+        &["--scope", "read"],
+        &["--sign-in"],
+        &["--client-id", "abc"],
+        &["--callback-port", "33418"],
+    ] {
+        let ran = connect_by_name(
+            &repository,
+            a_kit(&script, None),
+            "dev-a",
+            "fixture",
+            extra,
+            &format!("{KEY}\n"),
+            Arc::clone(&store) as _,
+        );
+        assert_eq!(ran.code, 1, "{extra:?}: {}{}", ran.out, ran.err);
+        assert!(
+            ran.err.contains("kit_names_these"),
+            "{extra:?}: {}",
+            ran.err
+        );
+        assert!(entry(&repository, "dev-a").is_none(), "{extra:?}");
+        assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).is_none());
+    }
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_name_the_kit_lacks() {
+    let repository = a_team("connect-kit-lacks");
+    let script = fixture("connect-kit-lacks");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let ran = connect_by_name(
+        &repository,
+        a_kit(&script, None),
+        "dev-a",
+        "other",
+        &[],
+        "",
+        Arc::clone(&store) as _,
+    );
+    assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.err.contains("connector_not_in_kit") && ran.err.contains("fixture"),
+        "{}",
+        ran.err
+    );
+    // The Product Manager's kit is not the Developer's.
+    let ran = connect_by_name(
+        &repository,
+        a_kit(&script, None),
+        "pm",
+        "fixture",
+        &[],
+        &format!("{KEY}\n"),
+        Arc::clone(&store) as _,
+    );
+    assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
+    assert!(ran.err.contains("connector_not_in_kit"), "{}", ran.err);
+    assert!(entry(&repository, "pm").is_none());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn signs_in_to_a_kit_connector_with_oauth() {
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = runtime.block_on(oauth_fixture::Fixture::start());
+    let repository = a_team("connect-kit-sign-in");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let config = config_of(&repository);
+    let kits = a_kit(
+        std::path::Path::new("unused"),
+        Some(fixture.mcp_url.as_str()),
+    );
+    let opener = following(&runtime);
+    let kept = Arc::clone(&store) as Arc<dyn ConnectorSecrets>;
+    let ran = run_with(
+        &repository.path,
+        &["connect", "dev-a", "fixture"],
+        move |io| {
+            io.connector_secrets = kept;
+            io.open_url = opener;
+            io.kits = kits;
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+        },
+    );
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.err.contains("in your browser: http://127.0.0.1:"),
+        "{}",
+        ran.err
+    );
+    assert!(
+        ran.out.lines().any(|line| line == "whoami: network"),
+        "{}",
+        ran.out
+    );
+    let written = entry(&repository, "dev-a").expect("the entry is written");
+    assert_eq!(written["source"], "kit");
+    assert_eq!(written["oauth"], json!({}));
+    let kept = loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).expect("kept");
+    assert_eq!(kept.oauth.expect("a grant").issuer, fixture.origin);
+}
