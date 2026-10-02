@@ -272,7 +272,7 @@ Files: `cli/src/connector.rs`, `cli/src/lib.rs`. Produces `connect_with`; the te
 - `farik_connect_sign_in_takes_no_key`: `--sign-in --key A` and `--sign-in --command x` are refused by the argument parser.
 - `farik_connect_says_when_a_service_offers_no_sign_in`: `NotOffered` prints "<host> does not offer signing in; give its key with --key".
 
-- [ ] `feat(cli): sign an agent in to a service`
+- [x] `feat(cli): sign an agent in to a service`
 
 ### Task 8: The screens
 

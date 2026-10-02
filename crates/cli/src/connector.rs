@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::io::BufRead as _;
 
 use farik_core::contract::ValidationError;
-use farik_core::team::spec_sha256;
+use farik_core::team::{CustomTransport, spec_sha256};
 use farik_protocol::command::Command;
 use farik_runtime::claude::Secret;
 use farik_runtime::connectors::{
@@ -15,6 +15,7 @@ use farik_runtime::connectors::{
 };
 use farik_runtime::credential::CredentialError;
 use farik_runtime::daemon::{custom_entry, labelled};
+use farik_runtime::sign_in::{SignInError, revoke, start_sign_in};
 use serde_json::{Map, Value, json};
 
 use crate::project::Project;
@@ -34,6 +35,11 @@ pub(crate) struct Asked<'a> {
     pub(crate) headers: &'a [String],
     pub(crate) keys: &'a [String],
     pub(crate) tags: &'a [String],
+    /// Sign in to the server's service instead of giving keys.
+    pub(crate) sign_in: bool,
+    pub(crate) client_id: Option<&'a str>,
+    pub(crate) callback_port: Option<u16>,
+    pub(crate) scopes: &'a [String],
 }
 
 /// `farik connect`: the entry held to the team's rules, each key read from standard input, the
@@ -51,6 +57,27 @@ pub(crate) fn connect(
     asked: &Asked<'_>,
     io: &mut CliIo<'_>,
 ) -> Result<Report, String> {
+    // An opener that fails is no error: the address is printed too, and the user can open it.
+    let opener = std::sync::Arc::clone(&io.open_url);
+    connect_with(project, asked, io, &move |url| {
+        let _ = opener(url);
+    })
+}
+
+/// [`connect`], opening the sign-in page with `open`, which a test passes to follow it.
+///
+/// # Errors
+///
+/// As [`connect`], and a service that does not offer, or does not complete, a sign-in.
+pub(crate) fn connect_with(
+    project: &Project,
+    asked: &Asked<'_>,
+    io: &mut CliIo<'_>,
+    open: &dyn Fn(&str),
+) -> Result<Report, String> {
+    if asked.sign_in {
+        return connect_signed_in(project, asked, io, open);
+    }
     let wire = wire_of(asked)?;
     let tags = tags_of(asked.tags)?;
     let (_, server) =
@@ -89,6 +116,17 @@ pub(crate) fn connect(
         "connect",
         io,
     ))?;
+    Ok(connected_report(&listed, &entry, said, stored_in))
+}
+
+/// What `farik connect` prints once the server is kept: each tool with its label, what the
+/// command said, and where the keys or the sign-in were kept, last.
+fn connected_report(
+    listed: &[farik_runtime::connectors::ListedTool],
+    entry: &Value,
+    said: Report,
+    stored_in: SecretStore,
+) -> Report {
     let mut lines: Vec<String> = listed
         .iter()
         .map(|tool| match entry["tools"][&tool.name].as_str() {
@@ -104,11 +142,149 @@ pub(crate) fn connect(
         }
         .to_string(),
     );
-    Ok(Report {
+    Report {
         lines,
         json: json!({ "tools": entry["tools"], "stored_in": stored_in, "said": said.json["said"] }),
         json_lines: None,
-    })
+    }
+}
+
+/// `farik connect --sign-in`: the server's sign-in found out, its page printed and opened, the
+/// way back waited for up to ten minutes, the server's tools listed with the token and labelled,
+/// the grant kept where keys are, then `connector_connect` handled here or sent, which names who
+/// signed in and holds no token (ADR 0033).
+fn connect_signed_in(
+    project: &Project,
+    asked: &Asked<'_>,
+    io: &mut CliIo<'_>,
+    open: &dyn Fn(&str),
+) -> Result<Report, String> {
+    let url = asked.url.unwrap_or_default();
+    let host = host_of(url);
+    let mut wire = wire_of(asked)?;
+    let mut oauth = Map::new();
+    if let Some(client) = asked.client_id {
+        oauth.insert("client_id".to_string(), json!(client));
+    }
+    if let Some(port) = asked.callback_port {
+        oauth.insert("callback_port".to_string(), json!(port));
+    }
+    if !asked.scopes.is_empty() {
+        oauth.insert("scopes".to_string(), json!(asked.scopes));
+    }
+    wire["oauth"] = Value::Object(oauth);
+    let tags = tags_of(asked.tags)?;
+    let (_, server) =
+        custom_entry(&project.team, asked.agent, &wire, json!({})).map_err(|e| errors(&e))?;
+    let CustomTransport::Http {
+        oauth: Some(settings),
+        ..
+    } = &server.transport
+    else {
+        return Err(format!("{} does not sign in", server.name));
+    };
+    let state = state_of(io)?;
+    let at = secret_at(&state, project, asked.agent, &server.name)?;
+    let folder = working_folder(&state, &project.root, &at)
+        .map_err(|error| format!("{}: {}", server.name, folder_refusal(&error)))?;
+    let runtime = runtime()?;
+    let signing = runtime
+        .block_on(start_sign_in(url, settings, chrono::Utc::now()))
+        .map_err(|error| refused(&error, &host))?;
+    crate::say(
+        &mut io.stdout,
+        &format!(
+            "Sign in to {} in your browser: {}",
+            host_of(signing.issuer()),
+            signing.authorize_url()
+        ),
+    );
+    open(signing.authorize_url());
+    let issuer = signing.issuer().to_string();
+    let grant = runtime
+        .block_on(signing.finish())
+        .map_err(|error| refused(&error, &host))?;
+    crate::say(&mut io.stdout, &format!("Signed in to {issuer}."));
+    let listed = runtime
+        .block_on(list_tools(
+            &server,
+            &BTreeMap::new(),
+            Some(&grant.access_token),
+            &folder,
+        ))
+        .map_err(|error| not_listed(&error))?;
+    let tools = labelled(&listed, &tags)?;
+    let (entry, server) = custom_entry(&project.team, asked.agent, &wire, Value::Object(tools))
+        .map_err(|e| errors(&e))?;
+    let spec = spec_sha256(&server);
+    // A sign-in this one replaces is asked to be forgotten, so it does not linger at the service.
+    let replaced = io
+        .connector_secrets
+        .load(&at)
+        .ok()
+        .flatten()
+        .and_then(|old| old.oauth);
+    let stored_in = io
+        .connector_secrets
+        .save(
+            &at,
+            &ConnectorEntry {
+                spec_sha256: spec.clone(),
+                keys: BTreeMap::new(),
+                oauth: Some(grant),
+            },
+        )
+        .map_err(|error| words(&error))?;
+    if let Some(old) = replaced {
+        runtime.block_on(revoke(&old));
+    }
+    let said = crate::human::said(command(
+        project,
+        Command::ConnectorConnect {
+            agent: asked.agent.to_string(),
+            server: entry.as_object().cloned().unwrap_or_default(),
+            spec_sha256: spec,
+            issuer: Some(issuer),
+        },
+        "connect",
+        io,
+    ))?;
+    Ok(connected_report(&listed, &entry, said, stored_in))
+}
+
+/// The host of `url`, for a sentence: no scheme, no userinfo, no port.
+fn host_of(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let authority = authority.rsplit('@').next().unwrap_or_default();
+    match authority.rsplit_once(':') {
+        Some((host, port)) if !host.ends_with(']') && port.chars().all(|c| c.is_ascii_digit()) => {
+            host.to_string()
+        }
+        _ => authority.to_string(),
+    }
+}
+
+/// Why a sign-in did not happen, in a sentence that quotes nothing the service sent.
+fn refused(error: &SignInError, host: &str) -> String {
+    match error {
+        SignInError::NotOffered => {
+            format!("{host} does not offer signing in; give its key with --key")
+        }
+        SignInError::NotSupported => format!(
+            "{host} does not let Farik sign in by itself yet; if it gives you a key, use --key"
+        ),
+        SignInError::PkceNotSupported => {
+            format!("{host}'s sign-in is not one Farik will use")
+        }
+        SignInError::Denied(_) => format!("you said no on {host}'s page, so nothing was connected"),
+        SignInError::Mismatch => format!(
+            "something did not match on the way back from {host}, so Farik stopped to keep you safe"
+        ),
+        SignInError::TimedOut => "the sign-in took longer than 10 minutes".to_string(),
+        SignInError::Lapsed => format!("{host} ended the sign-in"),
+        SignInError::Failed(why) => why.clone(),
+    }
 }
 
 /// `farik disconnect`: `connector_disconnect` handled here or sent, which takes the entry out of
@@ -133,9 +309,19 @@ pub(crate) fn disconnect(
         io,
     ))?;
     let at = secret_at(&state_of(io)?, project, agent, name)?;
+    // Loaded first, so that a sign-in can be asked to be forgotten once the entry is gone.
+    let grant = io
+        .connector_secrets
+        .load(&at)
+        .ok()
+        .flatten()
+        .and_then(|entry| entry.oauth);
     io.connector_secrets
         .delete(&at)
         .map_err(|error| words(&error))?;
+    if let Some(grant) = grant {
+        runtime()?.block_on(revoke(&grant));
+    }
     Ok(said)
 }
 

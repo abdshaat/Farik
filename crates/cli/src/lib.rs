@@ -395,6 +395,18 @@ enum Commands {
         /// A key's name; its value is read from standard input. Repeat it for each.
         #[arg(long = "key")]
         keys: Vec<String>,
+        /// Sign in to the server's service in your browser instead of giving a key (ADR 0033).
+        #[arg(long, requires = "url", conflicts_with_all = ["keys", "command"])]
+        sign_in: bool,
+        /// The client the service's app registration gave Farik, when it offers no registration.
+        #[arg(long, requires = "sign_in")]
+        client_id: Option<String>,
+        /// The port that client's redirect address names (33418 when left out).
+        #[arg(long, requires = "client_id")]
+        callback_port: Option<u16>,
+        /// What to ask the service for; repeat it for each. Left out, the service chooses.
+        #[arg(long = "scope", requires = "sign_in")]
+        scopes: Vec<String>,
         /// A tool's label: `<tool>=network`, `<tool>=external_effect` or `<tool>=denied`. A tool
         /// left unlabelled is `external_effect`.
         #[arg(long = "tag")]
@@ -910,6 +922,10 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             url,
             headers,
             keys,
+            sign_in,
+            client_id,
+            callback_port,
+            scopes,
             tags,
         } => open_project(&io.cwd, now).and_then(|project| {
             connector::connect(
@@ -923,6 +939,10 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
                     headers,
                     keys,
                     tags,
+                    sign_in: *sign_in,
+                    client_id: client_id.as_deref(),
+                    callback_port: *callback_port,
+                    scopes,
                 },
                 io,
             )

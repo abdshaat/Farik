@@ -24,6 +24,10 @@ use serde_json::{Value, json};
 
 use project::{LiveDriver, a_team, events, files_of, log_of, run_with, scratch};
 
+/// An authorization server and a protected MCP server, as the runtime's tests run them.
+#[path = "../../runtime/tests/support/oauth_fixture.rs"]
+mod oauth_fixture;
+
 const KEY: &str = "a-key-typed-at-the-terminal";
 
 /// The stdio MCP server of the runtime's tests, written for `test`: its tools are `search`, `env`,
@@ -415,4 +419,211 @@ fn farik_disconnect_deletes_the_keys_and_the_entry() {
         |_| {},
     );
     assert_eq!(ran.code, 1, "{}", ran.out);
+}
+
+/// An opener that follows the address as a browser would, on `runtime`.
+fn following(runtime: &tokio::runtime::Runtime) -> farik::Opener {
+    let handle = runtime.handle().clone();
+    Arc::new(move |url: &str| {
+        let url = url.to_string();
+        handle.spawn(async move {
+            oauth_fixture::follow(&url).await;
+        });
+        Ok(())
+    })
+}
+
+/// `farik connect dev-a fixture --url <fixture> --sign-in <extra>`, opened with `opener`.
+fn sign_in(
+    repository: &TempRepo,
+    fixture: &oauth_fixture::Fixture,
+    extra: &[&str],
+    opener: farik::Opener,
+    store: Arc<dyn ConnectorSecrets>,
+) -> project::Ran {
+    let mut args = vec![
+        "connect",
+        "dev-a",
+        "fixture",
+        "--url",
+        fixture.mcp_url.as_str(),
+        "--sign-in",
+    ];
+    args.extend_from_slice(extra);
+    let config = config_of(repository);
+    run_with(&repository.path, &args, move |io| {
+        io.connector_secrets = store;
+        io.open_url = opener;
+        io.env
+            .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+    })
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_signs_in_and_keeps_the_grant() {
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = runtime.block_on(oauth_fixture::Fixture::start());
+    let repository = a_team("connect-sign-in");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let driver = LiveDriver::new(&repository);
+
+    let ran = sign_in(
+        &repository,
+        &fixture,
+        &["--tag", "whoami=network"],
+        following(&runtime),
+        Arc::clone(&store) as _,
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let lines: Vec<&str> = ran.out.lines().collect();
+    assert!(
+        lines[0].starts_with("Sign in to 127.0.0.1 in your browser: http://127.0.0.1:"),
+        "{}",
+        ran.out
+    );
+    assert_eq!(lines[1], format!("Signed in to {}.", fixture.origin));
+    assert!(lines.contains(&"whoami: network"), "{}", ran.out);
+    let kept = loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).expect("kept");
+    let grant = kept.oauth.expect("a grant is kept");
+    assert_eq!(grant.issuer, fixture.origin);
+    // The command a running daemon is sent holds names only, and says who signed in.
+    let commands = driver.commands();
+    assert_eq!(commands.len(), 1, "{commands:?}");
+    let sent = command_to_value(&commands[0]).to_string();
+    for token in [
+        grant.access_token.expose(),
+        grant
+            .refresh_token
+            .as_ref()
+            .expect("a refresh token")
+            .expose(),
+    ] {
+        assert!(!sent.contains(token), "{sent}");
+    }
+    let Command::ConnectorConnect { server, issuer, .. } = &commands[0] else {
+        panic!("connector_connect, not {:?}", commands[0]);
+    };
+    assert_eq!(server["oauth"], json!({}));
+    assert_eq!(issuer.as_deref(), Some(fixture.origin.as_str()));
+
+    // An opener that does nothing, as a failed `xdg-open` does: the address was printed, and the
+    // user can follow it by hand.
+    let repository = a_team("connect-sign-in-by-hand");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let printed = Arc::new(std::sync::Mutex::new(String::new()));
+    let (seen, handle) = (Arc::clone(&printed), runtime.handle().clone());
+    let by_hand: farik::Opener = Arc::new(move |url: &str| {
+        *seen.lock().expect("a lock") = url.to_string();
+        let url = url.to_string();
+        // Followed later, not by the opener, after the address was printed.
+        handle.spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            oauth_fixture::follow(&url).await;
+        });
+        Err("xdg-open is not installed".to_string())
+    });
+    let ran = sign_in(&repository, &fixture, &[], by_hand, Arc::clone(&store) as _);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let address = printed.lock().expect("a lock").clone();
+    assert!(!address.is_empty());
+    assert!(ran.out.contains(&address), "{}", ran.out);
+    assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).is_some());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_sign_in_takes_no_key() {
+    let repository = a_team("connect-sign-in-no-key");
+    for extra in [["--key", "A"], ["--command", "x"]] {
+        let ran = run_with(
+            &repository.path,
+            &[
+                "connect",
+                "dev-a",
+                "fixture",
+                "--url",
+                "https://mcp.example.com/mcp",
+                "--sign-in",
+                extra[0],
+                extra[1],
+            ],
+            |_| {},
+        );
+        assert_ne!(ran.code, 0, "{extra:?}");
+        assert!(
+            ran.err.contains("cannot be used with"),
+            "{extra:?}: {}",
+            ran.err
+        );
+    }
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_says_when_a_service_offers_no_sign_in() {
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = runtime.block_on(oauth_fixture::Fixture::start());
+    fixture.set(|flags| {
+        flags.challenge = false;
+        flags.prm = false;
+        flags.as_metadata = false;
+    });
+    let repository = a_team("connect-sign-in-not-offered");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let ran = sign_in(
+        &repository,
+        &fixture,
+        &[],
+        following(&runtime),
+        Arc::clone(&store) as _,
+    );
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.err
+            .contains("127.0.0.1 does not offer signing in; give its key with --key"),
+        "{}",
+        ran.err
+    );
+    assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).is_none());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_disconnect_asks_the_service_to_forget_the_sign_in() {
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = runtime.block_on(oauth_fixture::Fixture::start());
+    let repository = a_team("disconnect-sign-in");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let ran = sign_in(
+        &repository,
+        &fixture,
+        &[],
+        following(&runtime),
+        Arc::clone(&store) as _,
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let refresh = loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture"))
+        .and_then(|entry| entry.oauth)
+        .and_then(|grant| grant.refresh_token)
+        .expect("a refresh token");
+
+    let held = Arc::clone(&store);
+    let config = config_of(&repository);
+    let ran = run_with(
+        &repository.path,
+        &["disconnect", "dev-a", "fixture"],
+        move |io| {
+            io.connector_secrets = held;
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+        },
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).is_none());
+    let revoked = fixture.requests("/revoke");
+    assert_eq!(revoked.len(), 1);
+    assert_eq!(revoked[0].form["token"], refresh.expose());
 }
