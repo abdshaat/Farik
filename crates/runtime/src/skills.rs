@@ -68,6 +68,30 @@ pub fn skill_folder(root: &Path, level: &SkillLevel, name: &str) -> PathBuf {
     }
 }
 
+/// `skill_folder`, refused `PathInvalid` when the folder or any folder between the project's root
+/// and it (`.farik`, `skills` / `agents`, `<agent>`, `skills`) is a link: a clone can commit links,
+/// and Farik reads, writes and deletes here.
+///
+/// # Errors
+///
+/// `PathInvalid`, naming the first link.
+pub fn skill_folder_unlinked(
+    root: &Path,
+    level: &SkillLevel,
+    name: &str,
+) -> Result<PathBuf, SkillRefusal> {
+    let folder = skill_folder(root, level, name);
+    let mut at = root.to_path_buf();
+    for part in folder.strip_prefix(root).unwrap_or(&folder).components() {
+        at.push(part);
+        if std::fs::symlink_metadata(&at).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            let shown = at.strip_prefix(root).unwrap_or(&at).display().to_string();
+            return Err(SkillRefusal::PathInvalid(shown));
+        }
+    }
+    Ok(folder)
+}
+
 /// Where a project's sessions' plugin folders are written, in the user's state folder `state`:
 /// `skills/<local project id>` (ADR 0034, in the place ADR 0030 keeps a connector's folder).
 #[must_use]
@@ -213,12 +237,14 @@ pub(crate) fn evaluate(
     confirmed: &BTreeMap<(SkillLevel, String), String>,
 ) -> Evaluated {
     let name = pin.name.as_str();
-    let folder = skill_folder(root, level, name);
     let unreadable = |state| Evaluated {
         state,
         checked: None,
         bytes: 0,
         description: String::new(),
+    };
+    let Ok(folder) = skill_folder_unlinked(root, level, name) else {
+        return unreadable(SkillState::Review);
     };
     if matches!(std::fs::symlink_metadata(&folder), Err(error) if error.kind() == io::ErrorKind::NotFound)
     {
@@ -535,8 +561,9 @@ pub fn save_skill(
         return Err(SkillCommandError::LimitReached);
     }
     let sha256 = skill_sha256(files);
-    replace_folder(&skill_folder(tools.files.root(), level, &name), files)
-        .map_err(SkillCommandError::Io)?;
+    let folder = skill_folder_unlinked(tools.files.root(), level, &name)
+        .map_err(SkillCommandError::Refused)?;
+    replace_folder(&folder, files).map_err(SkillCommandError::Io)?;
     tools
         .files
         .write_team(&with_pin(&team, level, &name, Some(&sha256))?)
@@ -574,7 +601,9 @@ pub fn remove_skill(
     if !pins.iter().any(|pin| pin.name.as_str() == name) {
         return Err(SkillCommandError::Unknown);
     }
-    match std::fs::remove_dir_all(skill_folder(tools.files.root(), level, name)) {
+    let folder = skill_folder_unlinked(tools.files.root(), level, name)
+        .map_err(SkillCommandError::Refused)?;
+    match std::fs::remove_dir_all(folder) {
         Err(error) if error.kind() != io::ErrorKind::NotFound => {
             return Err(SkillCommandError::Io(error));
         }
@@ -611,8 +640,9 @@ pub fn confirm_skill(
         .iter()
         .find(|pin| pin.name.as_str() == name)
         .ok_or(SkillCommandError::Unknown)?;
-    let files = read_skill_folder(&skill_folder(tools.files.root(), level, name))
+    let folder = skill_folder_unlinked(tools.files.root(), level, name)
         .map_err(SkillCommandError::Refused)?;
+    let files = read_skill_folder(&folder).map_err(SkillCommandError::Refused)?;
     let hash = skill_sha256(&files);
     if hash != sha256 {
         return Err(SkillCommandError::HashMismatch);
@@ -1025,6 +1055,22 @@ mod tests {
     }
 
     #[test]
+    fn a_linked_skill_folder_is_review() {
+        let root = scratch("linked");
+        let elsewhere = scratch("linked-elsewhere");
+        let (_, sha) = put(&elsewhere, &SkillLevel::Team, "api-style", "body");
+        std::fs::create_dir_all(root.join(".farik/skills")).expect("a folder");
+        std::os::unix::fs::symlink(
+            skill_folder(&elsewhere, &SkillLevel::Team, "api-style"),
+            root.join(".farik/skills/api-style"),
+        )
+        .expect("a link");
+        let team = team_with(&[("api-style", &sha)], &[]);
+        let ok = confirmed(&[(SkillLevel::Team, "api-style", &sha)]);
+        assert!(session_skills(&root, &team, "linus", &ok).skills.is_empty());
+    }
+
+    #[test]
     fn an_agents_skill_replaces_the_teams() {
         let root = scratch("replaces");
         let (_, team_sha) = put(&root, &SkillLevel::Team, "api-style", "the team's");
@@ -1352,6 +1398,55 @@ mod tests {
         // The agent's own list is counted apart.
         save_skill(&project.deps, &dev_a(), &skill_files("s20", "x"), false)
             .expect("the agent's own");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn remove_and_save_refuse_a_linked_skills_folder() {
+        let project = a_project("skills-linked");
+        let root = &project.repo.path;
+        save_skill(
+            &project.deps,
+            &SkillLevel::Team,
+            &skill_files("api-style", "x"),
+            false,
+        )
+        .expect("saved");
+        let outside = std::env::temp_dir().join(format!("farik-linked-out-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&outside).expect("a folder");
+        std::fs::rename(root.join(".farik/skills"), &outside).expect("moved out");
+        std::os::unix::fs::symlink(&outside, root.join(".farik/skills")).expect("a link");
+        assert_eq!(
+            code(remove_skill(&project.deps, &SkillLevel::Team, "api-style")),
+            "skill_path_invalid"
+        );
+        assert!(outside.join("api-style/SKILL.md").exists());
+        assert_eq!(pins(&project, &SkillLevel::Team).len(), 1);
+        assert_eq!(
+            code(save_skill(
+                &project.deps,
+                &SkillLevel::Team,
+                &skill_files("other-skill", "y"),
+                false
+            )),
+            "skill_path_invalid"
+        );
+        let names: Vec<_> = std::fs::read_dir(&outside)
+            .expect("a folder")
+            .map(|entry| entry.expect("an entry").file_name())
+            .collect();
+        assert_eq!(names, ["api-style"], "nothing written outside");
+        assert_eq!(
+            code(confirm_skill(
+                &project.deps,
+                &SkillLevel::Team,
+                "api-style",
+                &skill_sha256(&skill_files("api-style", "x")),
+                false
+            )),
+            "skill_path_invalid"
+        );
     }
 
     #[test]
