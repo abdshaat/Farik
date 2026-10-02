@@ -590,6 +590,85 @@ describe("connectors on the agent page", () => {
 		expect(next.disabled).toBe(true);
 	});
 
+	it("connector_add_words_the_newer_refusals_at_their_fields", async () => {
+		const { container, s, dialog } = await startedAdding();
+		const field = (label: string) => within(dialog).getByLabelText(label);
+		const next = () =>
+			fireEvent.click(within(dialog).getByRole("button", { name: en.addNext }));
+		next();
+		await s.fail(
+			await sent(s, "connector.tools"),
+			-32005,
+			"the team file is not valid",
+			{
+				errors: [
+					{
+						path: "/agents/1/mcp_servers/0/command",
+						message:
+							"command_not_absolute: bin/mcp would be looked for in the folder",
+						code: "invalid",
+					},
+				],
+			},
+		);
+		expect(field(en.addCommand).getAttribute("aria-invalid")).toBe("true");
+		expect(within(dialog).getByText(en.addCommandNotAbsolute)).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(
+			within(dialog).getByRole("radio", { name: new RegExp(en.addUrlChoice) }),
+		);
+		fireEvent.change(field(en.addUrl), {
+			target: { value: "https://connect.airtable.example/v1" },
+		});
+		fireEvent.change(field(en.addHeader), {
+			target: { value: "Authorization: Bearer pat-typed-here" },
+		});
+		next();
+		await s.fail(
+			await sent(s, "connector.tools", 2),
+			-32005,
+			"the team file is not valid",
+			{
+				errors: [
+					{
+						path: "/agents/1/mcp_servers/0/headers/Authorization",
+						message:
+							"header_holds_secret: Authorization holds its value itself",
+						code: "invalid",
+					},
+				],
+			},
+		);
+		expect(field(en.addHeader).getAttribute("aria-invalid")).toBe("true");
+		expect(within(dialog).getByText(en.addHeaderSecret)).toBeTruthy();
+		await expectNoAxeViolations(container);
+		expect(
+			within(dialog).queryByText(
+				/command_not_absolute|header_holds_secret|bin\/mcp/,
+			),
+		).toBeNull();
+	});
+
+	it("connector_add_says_a_tool_list_that_changed", async () => {
+		const { container, s, dialog } = await listed();
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Add airtable to Theo" }),
+		);
+		await s.fail(
+			await sent(s, "connector.connect"),
+			-32005,
+			"tag_unknown_tool: delete_records is not a tool this server lists that Farik can use; its tools are list_bases",
+		);
+		expect(
+			await within(dialog).findByText(
+				"airtable’s tools changed since Farik listed them. Press “Next: list its tools” to list them again, then label each one.",
+			),
+		).toBeTruthy();
+		expect(within(dialog).queryByText(/tag_unknown_tool/)).toBeNull();
+		await expectNoAxeViolations(container);
+	});
+
 	it("connector_add_says_which_store_kept_the_keys", async () => {
 		for (const [storedIn, words] of [
 			[

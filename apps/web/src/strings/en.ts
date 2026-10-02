@@ -1205,6 +1205,12 @@ export const en = {
 		"Farik cannot use this address. Copy it again from the service’s instructions; it starts with https://.",
 	addHeaderWrong:
 		"Write a name, a colon, then the value, like Authorization: Bearer {API_KEY}, naming only the keys below.",
+	addCommandNotAbsolute:
+		"Farik cannot find a program by a path like this one. Give the program’s name alone, like npx, or its full path, starting with /.",
+	addHeaderSecret:
+		"This puts the key itself in your project’s shared settings. Write {API_KEY} where the key goes, and type the key under Keys.",
+	addTagUnknown:
+		"{server}’s tools changed since Farik listed them. Press “Next: list its tools” to list them again, then label each one.",
 	addKeyWrong:
 		"A key name is capital letters, numbers and underscores, starting with a letter, like API_KEY. Up to 8 keys.",
 	addNotListed:

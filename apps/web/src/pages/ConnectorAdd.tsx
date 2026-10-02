@@ -53,15 +53,22 @@ function fieldOf(path: string): Field {
 	return "other";
 }
 
+/** Each refusal code a connector's entry or labels can get, and its words (SPEC 6.7). */
+const BY_CODE: Record<string, keyof typeof en> = {
+	connector_name_reserved: "addNameReserved",
+	connector_name_twice: "addNameTwice",
+	url_holds_secret: "addUrlSecret",
+	header_key_unknown: "addHeaderWrong",
+	header_holds_secret: "addHeaderSecret",
+	command_not_absolute: "addCommandNotAbsolute",
+	tag_unknown_tool: "addTagUnknown",
+};
+
+/** The code a daemon sentence leads with, as `code: words`. */
+const codeOf = (message: string) => /^([a-z_]+): /.exec(message)?.[1] ?? "";
+
 /** A refusal's words at its field. The team's own sentence leads with its code; the page never shows it. */
 function wordsFor(r: Refusal, field: Field, fill: Record<string, string>) {
-	const code = /^([a-z_]+): /.exec(r.message)?.[1];
-	const byCode: Record<string, keyof typeof en> = {
-		connector_name_reserved: "addNameReserved",
-		connector_name_twice: "addNameTwice",
-		url_holds_secret: "addUrlSecret",
-		header_key_unknown: "addHeaderWrong",
-	};
 	const byField: Record<Field, keyof typeof en> = {
 		name: "addNameWrong",
 		command: "addCommandWrong",
@@ -70,7 +77,7 @@ function wordsFor(r: Refusal, field: Field, fill: Record<string, string>) {
 		keys: "addKeyWrong",
 		other: "refuseOther",
 	};
-	return t(byCode[code ?? ""] ?? byField[field], fill);
+	return t(BY_CODE[codeOf(r.message)] ?? byField[field], fill);
 }
 
 /** A failed list or connect, in plain words at the fields it names; never the daemon's own words. */
@@ -83,7 +90,9 @@ function refusalsAt(
 		if (r.path) {
 			const field = fieldOf(r.path);
 			at[field] ??= wordsFor(r, field, fill);
-		} else if (r.message.startsWith("the server did not answer"))
+		} else if (BY_CODE[codeOf(r.message)])
+			at.other = wordsFor(r, "other", fill);
+		else if (r.message.startsWith("the server did not answer"))
 			at.other = t("addTimeout", fill);
 		else if (/^(its tools could not be listed|the key )/.test(r.message))
 			at.other = t("addNotListed", fill);
