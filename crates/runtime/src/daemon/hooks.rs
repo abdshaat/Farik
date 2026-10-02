@@ -467,8 +467,8 @@ fn judge_connector(
         plan_gate(deps, team, registration, PermissionTier::ExternalEffect)?;
         granted = grant_for(deps, registration, server, tool, &request.tool_input)?;
     }
-    match evaluate_connector_call(tool, &request.tool_input, connector, granted) {
-        Ok((_, approval)) => Ok(approval),
+    match evaluate_connector_call(tool, &request.tool_input, connector, granted, 0) {
+        Ok(pass) => Ok(pass.approval),
         Err(ConnectorRefusal::ApprovalNeeded) => {
             Err(ask(deps, registration, server, tool, &request.tool_input))
         }
@@ -1520,6 +1520,7 @@ mod tests {
                 server: "playwright".to_string(),
                 origin: Some("http://localhost:4400".to_string()),
                 tools: definition.tools,
+                allowances: std::collections::BTreeMap::new(),
             }],
             preview: None,
         });
@@ -1644,11 +1645,13 @@ mod tests {
                     .into_iter()
                     .map(|(tool, tag)| (tool.to_string(), tag))
                     .collect(),
+                    allowances: std::collections::BTreeMap::new(),
                 },
                 SessionConnector {
                     server: "gitlab".to_string(),
                     origin: None,
                     tools: [("create_issue".to_string(), ConnectorTag::ExternalEffect)].into(),
+                    allowances: std::collections::BTreeMap::new(),
                 },
             ],
             preview: None,

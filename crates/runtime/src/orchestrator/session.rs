@@ -131,6 +131,7 @@ pub(super) async fn run_session(
             server: server.name,
             origin: None,
             tools: server.tools,
+            allowances: std::collections::BTreeMap::new(),
         })
         .collect();
     let browser = match give_browser(deps, team, &ask, &mut spec, &ids).await? {
@@ -288,6 +289,7 @@ async fn give_browser(
         server: definition.name.clone(),
         origin: Some(running.origin()),
         tools: definition.tools.clone(),
+        allowances: std::collections::BTreeMap::new(),
     };
     Ok(Ok(Some((running, connector))))
 }

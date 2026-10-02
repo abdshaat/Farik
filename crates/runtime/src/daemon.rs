@@ -1994,6 +1994,7 @@ mod tests {
                     server: server.name,
                     origin: None,
                     tools: server.tools,
+                    allowances: std::collections::BTreeMap::new(),
                 })
                 .collect(),
             preview: None,
@@ -2293,6 +2294,7 @@ mod tests {
                 server: server.name,
                 origin: None,
                 tools: server.tools,
+                allowances: std::collections::BTreeMap::new(),
             }],
             preview: None,
         });

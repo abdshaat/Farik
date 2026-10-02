@@ -104,7 +104,7 @@ Files: `crates/core/src/governor/permissions.rs`; `daemon/hooks.rs` (`judge_conn
 - `refuses_a_large_input_inside_the_allowance`: over 64 KiB gives `InputTooLarge`.
 - `a_network_call_ignores_the_allowance`: neither field is set.
 
-- [ ] `feat(core): let a connector call inside its allowance run`
+- [x] `feat(core): let a connector call inside its allowance run`
 
 ### Task 3: Setting allowances
 

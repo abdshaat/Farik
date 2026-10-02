@@ -169,6 +169,23 @@ pub struct SessionConnector {
     pub origin: Option<String>,
     /// Every tool the connector's pinned list tags.
     pub tools: std::collections::BTreeMap<String, ConnectorTag>,
+    /// For each `external_effect` tool with one, how many calls the agent makes each period
+    /// without asking (ADR 0037), by the bare tool name.
+    pub allowances: std::collections::BTreeMap<String, u32>,
+}
+
+/// The most calls an allowance may be: what the schema and the daemon hold it to.
+pub const MAX_ALLOWANCE: u32 = 1000;
+
+/// What let a connector call run (`evaluate_connector_call`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConnectorPass {
+    /// The tool's tag.
+    pub tag: ConnectorTag,
+    /// The seq of the human's grant this call uses up, when a grant allowed it.
+    pub approval: Option<u64>,
+    /// The allowance the call ran inside, when that allowed it and no grant did.
+    pub allowance: Option<u32>,
 }
 
 /// The largest input, in bytes of its compact JSON, that the human is asked to allow: anything
@@ -225,7 +242,9 @@ pub enum ConnectorRefusal {
 /// preview: its origin exactly, or followed by `/`, `?` or `#`. An `external_effect` call also
 /// needs `granted`, the seq of the human's open grant for exactly this call, which the caller
 /// looks up by `ApprovalKey`; it is returned beside the tag, so the call's record can use it up.
-/// A `network` call ignores `granted`. The tag governs whatever the agent's tiers.
+/// Failing that, a tool with an allowance runs while `used`, the agent's calls to it this period
+/// before this one, is under it (ADR 0037): the grant is for exactly this call, so it comes
+/// first. A `network` call ignores both. The tag governs whatever the agent's tiers.
 /// `tool` is the bare tool name, without `mcp__<server>__`.
 ///
 /// # Errors
@@ -233,13 +252,14 @@ pub enum ConnectorRefusal {
 /// `ConnectorNotInSession`, then `ToolNotTagged`, then `ToolDenied` for a `denied` tool, then
 /// `UrlOutsidePreview` with the first `url` found outside the origin, then, for an
 /// `external_effect` tool, `InputTooLarge` for an input over `MAX_APPROVAL_INPUT`, grant or not,
-/// and `ApprovalNeeded` without a grant.
+/// and `ApprovalNeeded` without a grant or an allowance with a place left.
 pub fn evaluate_connector_call(
     tool: &str,
     input: &serde_json::Value,
     connector: Option<&SessionConnector>,
     granted: Option<u64>,
-) -> Result<(ConnectorTag, Option<u64>), ConnectorRefusal> {
+    used: u32,
+) -> Result<ConnectorPass, ConnectorRefusal> {
     let connector = connector.ok_or(ConnectorRefusal::ConnectorNotInSession)?;
     let tag = match connector.tools.get(tool) {
         None => return Err(ConnectorRefusal::ToolNotTagged),
@@ -249,14 +269,25 @@ pub fn evaluate_connector_call(
     if let Some(origin) = &connector.origin {
         check_urls(input, origin)?;
     }
+    let pass = |approval, allowance| ConnectorPass {
+        tag,
+        approval,
+        allowance,
+    };
     if tag == ConnectorTag::Network {
-        return Ok((tag, None));
+        return Ok(pass(None, None));
     }
     if canonical_json(input).len() > MAX_APPROVAL_INPUT {
         return Err(ConnectorRefusal::InputTooLarge);
     }
-    granted
-        .map(|approval| (tag, Some(approval)))
+    if let Some(approval) = granted {
+        return Ok(pass(Some(approval), None));
+    }
+    connector
+        .allowances
+        .get(tool)
+        .filter(|allowed| used < **allowed)
+        .map(|allowed| pass(None, Some(*allowed)))
         .ok_or(ConnectorRefusal::ApprovalNeeded)
 }
 
@@ -490,8 +521,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        AgentGrants, ApprovedCall, CommandRefusal, ConnectorRefusal as Refused, ConnectorTag,
-        MAX_APPROVAL_INPUT, PermissionTier as T, SessionConnector, ToolCallContext,
+        AgentGrants, ApprovedCall, CommandRefusal, ConnectorPass, ConnectorRefusal as Refused,
+        ConnectorTag, MAX_APPROVAL_INPUT, PermissionTier as T, SessionConnector, ToolCallContext,
         ToolCallRequest, ToolDescriptor, ToolRefusal, check_design_plan, default_tiers,
         evaluate_command, evaluate_connector_call, evaluate_tool_call, input_sha256,
     };
@@ -500,6 +531,17 @@ mod tests {
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_string()).collect()
+    }
+
+    /// The decision as it was before allowances: nothing used, so no allowance applies.
+    fn decide(
+        tool: &str,
+        input: &serde_json::Value,
+        connector: Option<&SessionConnector>,
+        granted: Option<u64>,
+    ) -> Result<(ConnectorTag, Option<u64>), Refused> {
+        evaluate_connector_call(tool, input, connector, granted, 0)
+            .map(|pass| (pass.tag, pass.approval))
     }
 
     fn playwright() -> SessionConnector {
@@ -515,6 +557,7 @@ mod tests {
             .into_iter()
             .map(|(tool, tag)| (tool.to_string(), tag))
             .collect(),
+            allowances: std::collections::BTreeMap::new(),
         }
     }
 
@@ -530,7 +573,7 @@ mod tests {
             "/x",
         ] {
             assert_eq!(
-                evaluate_connector_call(
+                decide(
                     "browser_navigate",
                     &json!({ "url": url, "then": [{ "url": url }] }),
                     Some(&github),
@@ -545,9 +588,8 @@ mod tests {
     #[test]
     fn a_preview_connector_still_checks_urls() {
         let connector = playwright();
-        let navigate = |input: serde_json::Value| {
-            evaluate_connector_call("browser_navigate", &input, Some(&connector), None)
-        };
+        let navigate =
+            |input: serde_json::Value| decide("browser_navigate", &input, Some(&connector), None);
         assert_eq!(
             navigate(json!({ "url": "http://localhost:4400/x" })),
             Ok((ConnectorTag::Network, None))
@@ -561,7 +603,7 @@ mod tests {
             Ok((ConnectorTag::Network, None))
         );
         assert_eq!(
-            evaluate_connector_call(
+            decide(
                 "browser_click",
                 &json!({ "ref": "e3" }),
                 Some(&connector),
@@ -606,15 +648,15 @@ mod tests {
             "a url that is not a string"
         );
         assert_eq!(
-            evaluate_connector_call("browser_evaluate", &json!({}), Some(&connector), None),
+            decide("browser_evaluate", &json!({}), Some(&connector), None),
             Err(Refused::ToolDenied)
         );
         assert_eq!(
-            evaluate_connector_call("browser_install", &json!({}), Some(&connector), None),
+            decide("browser_install", &json!({}), Some(&connector), None),
             Err(Refused::ToolNotTagged)
         );
         assert_eq!(
-            evaluate_connector_call(
+            decide(
                 "browser_navigate",
                 &json!({ "url": "http://localhost:4400/" }),
                 None,
@@ -636,13 +678,14 @@ mod tests {
             .into_iter()
             .map(|(tool, tag)| (tool.to_string(), tag))
             .collect(),
+            allowances: std::collections::BTreeMap::new(),
         }
     }
 
     #[test]
     fn external_effect_without_a_grant_needs_approval() {
         assert_eq!(
-            evaluate_connector_call(
+            decide(
                 "create_issue",
                 &json!({ "title": "x" }),
                 Some(&github()),
@@ -655,7 +698,7 @@ mod tests {
     #[test]
     fn external_effect_with_a_grant_runs_and_names_it() {
         assert_eq!(
-            evaluate_connector_call(
+            decide(
                 "create_issue",
                 &json!({ "title": "x" }),
                 Some(&github()),
@@ -668,7 +711,7 @@ mod tests {
     #[test]
     fn denied_is_refused_even_with_a_grant() {
         assert_eq!(
-            evaluate_connector_call("delete_repository", &json!({}), Some(&github()), Some(7)),
+            decide("delete_repository", &json!({}), Some(&github()), Some(7)),
             Err(Refused::ToolDenied)
         );
     }
@@ -683,7 +726,7 @@ mod tests {
         );
         for granted in [None, Some(7)] {
             assert_eq!(
-                evaluate_connector_call(
+                decide(
                     "create_issue",
                     &sized(MAX_APPROVAL_INPUT + 1),
                     Some(&github()),
@@ -694,7 +737,7 @@ mod tests {
             );
         }
         assert_eq!(
-            evaluate_connector_call(
+            decide(
                 "create_issue",
                 &sized(MAX_APPROVAL_INPUT),
                 Some(&github()),
@@ -704,7 +747,7 @@ mod tests {
             "64 KiB exactly is still asked about"
         );
         assert_eq!(
-            evaluate_connector_call(
+            decide(
                 "search_issues",
                 &sized(MAX_APPROVAL_INPUT + 1),
                 Some(&github()),
@@ -726,11 +769,118 @@ mod tests {
         assert_ne!(input_sha256(&json!({ "a": 1, "b": 3 })), expected);
     }
 
+    fn with_allowance(calls: u32) -> SessionConnector {
+        SessionConnector {
+            allowances: [("create_issue".to_string(), calls)].into(),
+            ..github()
+        }
+    }
+
+    #[test]
+    fn runs_a_call_inside_the_allowance() {
+        assert_eq!(
+            evaluate_connector_call(
+                "create_issue",
+                &json!({}),
+                Some(&with_allowance(20)),
+                None,
+                19
+            ),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::ExternalEffect,
+                approval: None,
+                allowance: Some(20)
+            })
+        );
+    }
+
+    #[test]
+    fn asks_for_the_call_beyond_it() {
+        for used in [20, 21] {
+            assert_eq!(
+                evaluate_connector_call(
+                    "create_issue",
+                    &json!({}),
+                    Some(&with_allowance(20)),
+                    None,
+                    used
+                ),
+                Err(Refused::ApprovalNeeded),
+                "{used}"
+            );
+        }
+    }
+
+    #[test]
+    fn asks_at_any_count_for_a_tool_without_one() {
+        assert_eq!(
+            evaluate_connector_call("create_issue", &json!({}), Some(&github()), None, 0),
+            Err(Refused::ApprovalNeeded)
+        );
+    }
+
+    #[test]
+    fn asks_every_time_at_zero() {
+        assert_eq!(
+            evaluate_connector_call(
+                "create_issue",
+                &json!({}),
+                Some(&with_allowance(0)),
+                None,
+                0
+            ),
+            Err(Refused::ApprovalNeeded)
+        );
+    }
+
+    #[test]
+    fn uses_a_grant_before_the_allowance() {
+        assert_eq!(
+            evaluate_connector_call(
+                "create_issue",
+                &json!({}),
+                Some(&with_allowance(20)),
+                Some(7),
+                0
+            ),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::ExternalEffect,
+                approval: Some(7),
+                allowance: None
+            })
+        );
+    }
+
+    #[test]
+    fn refuses_a_large_input_inside_the_allowance() {
+        let big = json!({ "b": "x".repeat(MAX_APPROVAL_INPUT) });
+        assert_eq!(
+            evaluate_connector_call("create_issue", &big, Some(&with_allowance(20)), None, 0),
+            Err(Refused::InputTooLarge)
+        );
+    }
+
+    #[test]
+    fn a_network_call_ignores_the_allowance() {
+        let connector = SessionConnector {
+            allowances: [("search_issues".to_string(), 5)].into(),
+            ..github()
+        };
+        assert_eq!(
+            evaluate_connector_call("search_issues", &json!({}), Some(&connector), None, 0),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::Network,
+                approval: None,
+                allowance: None
+            })
+        );
+    }
+
     #[test]
     fn a_network_tool_ignores_grants() {
         for granted in [None, Some(7)] {
             assert_eq!(
-                evaluate_connector_call("search_issues", &json!({}), Some(&github()), granted),
+                decide("search_issues", &json!({}), Some(&github()), granted),
                 Ok((ConnectorTag::Network, None)),
                 "{granted:?}"
             );
@@ -741,7 +891,7 @@ mod tests {
     fn a_preview_connectors_external_effect_checks_urls_before_asking() {
         let connector = playwright();
         assert_eq!(
-            evaluate_connector_call(
+            decide(
                 "browser_send_email",
                 &json!({ "url": "http://evil.test/" }),
                 Some(&connector),

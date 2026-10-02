@@ -156,6 +156,7 @@ impl Served {
                     server: server.name,
                     origin: None,
                     tools: server.tools,
+                    allowances: std::collections::BTreeMap::new(),
                 })
                 .collect(),
             preview: None,

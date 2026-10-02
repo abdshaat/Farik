@@ -236,6 +236,7 @@ impl Project {
                     server: server.name.clone(),
                     origin: None,
                     tools: server.tools.clone(),
+                    allowances: std::collections::BTreeMap::new(),
                 })
                 .collect(),
             preview: None,
