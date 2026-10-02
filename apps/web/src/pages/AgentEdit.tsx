@@ -1,11 +1,18 @@
 import { Button, Choice, Dialog, Switch, TextField } from "@farik/ui";
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
+import {
+	type AllowanceRow,
+	type Allowances,
+	countSaid,
+	useAllowances,
+} from "./allowances.tsx";
 import { ConnectorAdd, hostOf, labelsSaid } from "./ConnectorAdd.tsx";
+import { ConnectorAllowance } from "./dialogs/ConnectorAllowance.tsx";
 import { type Editing, SkillEdit } from "./dialogs/SkillEdit.tsx";
 import { SkillRead } from "./dialogs/SkillRead.tsx";
 import { SkillReview } from "./dialogs/SkillReview.tsx";
@@ -289,6 +296,16 @@ function Editor({
 	}>();
 	const [removing, setRemoving] = useState<string>();
 	const [removeRefused, setRemoveRefused] = useState<string>();
+	// "Change how many" opens on a service; the approval dialog's link opens it from outside.
+	const allowances = useAllowances();
+	const [search] = useSearchParams();
+	const [changing, setChanging] = useState<string | undefined>(
+		search.get("allowances") ?? undefined,
+	);
+	const allowanceRows = (server: string): AllowanceRow[] =>
+		(allowances?.rows ?? []).filter(
+			(row) => row.agent === saved.id && row.server === server,
+		);
 	const remove = async (server: string) => {
 		if (!client) return;
 		setBusy(true);
@@ -469,6 +486,9 @@ function Editor({
 										state={stateOf(service.name)?.state}
 										storedIn={stateOf(service.name)?.storedIn}
 										name={name}
+										made={allowanceRows(service.name)}
+										period={allowances?.period}
+										onChange={() => setChanging(service.name)}
 										onConnect={() =>
 											setAdding({ ...(held && { again: held }), kit: service })
 										}
@@ -572,6 +592,28 @@ function Editor({
 					)}
 				</Dialog>
 			)}
+			{changing &&
+				(() => {
+					const service = offered.find((one) => one.name === changing);
+					const rows = allowanceRows(changing);
+					return service && rows.length > 0 ? (
+						<ConnectorAllowance
+							agent={saved.id}
+							name={name}
+							service={service}
+							rows={rows}
+							onClose={(changed) => {
+								setChanging(undefined);
+								if (changed) again();
+							}}
+							onAgain={() => {
+								setChanging(undefined);
+								const held = heldFromKit.find((c) => c.name === service.name);
+								setAdding({ ...(held && { again: held }), kit: service });
+							}}
+						/>
+					) : null;
+				})()}
 			{adding?.kit && (
 				<KitConnect
 					agent={saved.id}
@@ -750,6 +792,9 @@ function KitRow({
 	state,
 	storedIn,
 	name,
+	made,
+	period,
+	onChange,
 	onConnect,
 	onRemove,
 }: {
@@ -758,6 +803,10 @@ function KitRow({
 	state: ConnectorState["state"] | undefined;
 	storedIn: ConnectorState["storedIn"];
 	name: string;
+	/** What the agent has made of this service's spending tools this period. */
+	made: AllowanceRow[];
+	period: Allowances["period"] | undefined;
+	onChange: () => void;
 	onConnect: () => void;
 	onRemove: () => void;
 }) {
@@ -779,6 +828,13 @@ function KitRow({
 								})}
 					</p>
 				</>
+			)}
+			{connected && made.length > 0 && (
+				<p>
+					{t(period?.kind === "day" ? "allowRowDay" : "allowRowSprint", {
+						list: made.map(countSaid).join(", "),
+					})}
+				</p>
 			)}
 			{held && state === "connect_again" && (
 				<p>
@@ -802,6 +858,14 @@ function KitRow({
 					<Button onClick={onConnect}>
 						{t("kitConnect")}{" "}
 						<span className={styles.hidden}>{service.title}</span>
+					</Button>
+				)}
+				{connected && made.length > 0 && (
+					<Button kind="quiet" onClick={onChange}>
+						{t("allowChange")}{" "}
+						<span className={styles.hidden}>
+							{t("allowChangeHidden", { name, service: service.title })}
+						</span>
 					</Button>
 				)}
 				{held && state === "connect_again" && (

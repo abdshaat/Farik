@@ -55,6 +55,8 @@ export type KitService = {
 	labels: Record<string, string>;
 	auth: "keys" | "oauth";
 	credentialKeys: string[];
+	/** What the kit lets the user pre-approve: each spending tool with its default calls each sprint (ADR 0037). */
+	allowances?: { tool: string; calls: number; what: string }[];
 };
 /** The services Farik offers one role. */
 export type RoleKit = { role: Agent["role"]; connectors: KitService[] };

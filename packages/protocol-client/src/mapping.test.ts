@@ -80,6 +80,30 @@ describe("mapping", () => {
 		});
 	});
 
+	it("keeps_the_tool_names_inside_allowances_as_given", () => {
+		// A connector's allowances are named by the tools the service chose (ADR 0037).
+		const wire = {
+			agent: "kai",
+			server: "higgsfield",
+			allowances: { generate_image: 30, generate_video: 5 },
+		};
+		const camel = {
+			agent: "kai",
+			server: "higgsfield",
+			allowances: { generate_image: 30, generate_video: 5 },
+		};
+		expect(toSnake(camel)).toEqual(wire);
+		expect(toCamel(wire)).toEqual(camel);
+		// `team.get`'s kit row lists them as objects, whose own keys are the wire's.
+		expect(
+			toCamel({
+				allowances: [{ tool: "generate_image", calls: 20, what: "images" }],
+			}),
+		).toEqual({
+			allowances: [{ tool: "generate_image", calls: 20, what: "images" }],
+		});
+	});
+
 	it("maps_the_sign_in_calls_and_keeps_the_scopes_as_given", () => {
 		// What `connector.sign_in` takes, and what it and `team.get` answer (ADR 0033).
 		const camel = {

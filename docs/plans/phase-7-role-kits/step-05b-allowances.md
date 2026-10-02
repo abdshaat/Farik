@@ -162,7 +162,7 @@ Files: as the file map's Task 6 line. Built from step 05's approved boards.
 - `tool_approval_says_the_count_for_a_tool_with_an_allowance`: the line and "Change how many".
 - `allowance_screens_never_name_the_plumbing`: Farik's strings in `strings/en.ts` for these screens and the fixture kit's `what`s hold no "MCP", "OAuth" or "token". Service tool names are not checked.
 
-- [ ] `feat(web): set and show each connector's allowance`
+- [x] `feat(web): set and show each connector's allowance`
 
 ### Task 7: Spec and plan
 

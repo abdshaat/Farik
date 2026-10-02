@@ -2,12 +2,14 @@ import { Avatar, type AvatarKey, Button } from "@farik/ui";
 import { useState } from "react";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
+import { countSaid, useAllowances } from "./allowances.tsx";
 import board from "./Board.module.css";
 import own from "./Costs.module.css";
 import { DailyLimit } from "./dialogs/DailyLimit.tsx";
 import { dollars } from "./Gate.tsx";
 import styles from "./pages.module.css";
 import { roleName, type Team } from "./setup/TeamSetup.tsx";
+import type { RoleKit } from "./Team.tsx";
 
 type Summary = {
 	todayUsd: number;
@@ -38,7 +40,12 @@ type Metrics = {
 
 /** Today's and this sprint's spending per agent, and the harness metrics (spec F17). */
 export function Costs() {
-	const { data: team } = useQuery<{ team: Team }>("team.get", {});
+	const { data: team } = useQuery<{ team: Team; kits?: RoleKit[] }>(
+		"team.get",
+		{},
+	);
+	// What agents made on other services; the page draws without it.
+	const allowances = useAllowances();
 	const { data: summary } = useQuery<Summary>("costs.summary", {});
 	const { data: activity } = useQuery<{ activity: Activity[] }>(
 		"team.activity",
@@ -157,6 +164,46 @@ export function Costs() {
 					{t("costsConversationsWhy")}
 				</p>
 			</section>
+			{allowances && allowances.rows.length > 0 && (
+				<section className={styles.section} aria-labelledby="made-elsewhere">
+					<h2 id="made-elsewhere">{t("allowBoardHeading")}</h2>
+					<table className={own.table} aria-labelledby="made-elsewhere">
+						<thead>
+							<tr>
+								<th scope="col">{t("allowCostsAgent")}</th>
+								<th scope="col">{t("allowCostsService")}</th>
+								<th scope="col">{t("allowCostsMade")}</th>
+								<th scope="col">{t("allowCostsWhen")}</th>
+							</tr>
+						</thead>
+						<tbody>
+							{allowances.rows.map((row) => (
+								<tr key={`${row.agent}-${row.server}-${row.tool}`}>
+									<th scope="row">
+										{team.team.agents.find((a) => a.id === row.agent)
+											?.displayName ?? row.agent}
+									</th>
+									<td>
+										{(team.kits ?? [])
+											.flatMap((kit) => kit.connectors)
+											.find((service) => service.name === row.server)?.title ??
+											row.server}
+									</td>
+									<td>{countSaid(row)}</td>
+									<td>
+										{t(
+											allowances.period.kind === "day"
+												? "allowCostsDay"
+												: "allowCostsSprint",
+										)}
+									</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+					<p className={styles.muted}>{t("allowCostsBill")}</p>
+				</section>
+			)}
 			<section className={styles.section} aria-labelledby="how-well">
 				<h2 id="how-well">{t("costsHowWell")}</h2>
 				<p className={styles.muted}>

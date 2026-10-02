@@ -47,6 +47,7 @@ export type MethodName =
 	| "template.delete"
 	| "connector.tools"
 	| "connector.connect"
+	| "connector.allowances"
 	| "connector.disconnect"
 	| "connector.sign_in"
 	| "connector.sign_in_status";

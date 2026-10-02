@@ -7,10 +7,12 @@ import { useQuery } from "../app/store.ts";
 import { codeOf } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
+import { type Allowances, useAllowances } from "./allowances.tsx";
 import { type Backlog, moreWaits } from "./Board.tsx";
 import { ChannelPreview } from "./Channel.tsx";
 import { ToolApproval, type ToolAsk } from "./dialogs/ToolApproval.tsx";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
+import type { RoleKit } from "./Team.tsx";
 import styles from "./Today.module.css";
 
 type Activity = { agentId: string; state: string; line: string };
@@ -86,7 +88,12 @@ const DAY_MS = 86_400_000;
 
 /** The home page: the team, the request box, what waits on the human, and what moved. */
 export function Today() {
-	const { data: team } = useQuery<{ team: Team }>("team.get", {});
+	const { data: team } = useQuery<{ team: Team; kits?: RoleKit[] }>(
+		"team.get",
+		{},
+	);
+	// What agents made on other services, for a call that waits past its allowance.
+	const allowances = useAllowances();
 	const { data: activity } = useQuery<{ activity: Activity[] }>(
 		"team.activity",
 		{},
@@ -173,6 +180,12 @@ export function Today() {
 										key={`${item.kind}-${item.approval}`}
 										item={item}
 										agent={agent(item.agentId)}
+										allowances={allowances}
+										service={
+											(team?.kits ?? [])
+												.flatMap((kit) => kit.connectors)
+												.find((one) => one.name === item.server)?.title
+										}
 									/>
 								) : (
 									<WaitingRow
@@ -348,9 +361,14 @@ function WaitingRow({
 function ToolApprovalRow({
 	item,
 	agent,
+	allowances,
+	service,
 }: {
 	item: Waiting;
 	agent: Agent | undefined;
+	allowances: Allowances | undefined;
+	/** The service's title in the kit, when the kit has it. */
+	service: string | undefined;
 }) {
 	const [open, setOpen] = useState(false);
 	const name = agent?.displayName ?? item.agentId ?? "";
@@ -391,6 +409,19 @@ function ToolApprovalRow({
 				<ToolApproval
 					ask={ask}
 					agent={name}
+					agentId={item.agentId ?? ""}
+					allowance={
+						allowances && {
+							row: allowances.rows.find(
+								(row) =>
+									row.agent === item.agentId &&
+									row.server === ask.server &&
+									row.tool === ask.tool,
+							),
+							period: allowances.period,
+							service: service ?? ask.server,
+						}
+					}
 					taskId={item.taskId}
 					title={item.title}
 					onClose={() => setOpen(false)}

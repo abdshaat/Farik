@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 import { refusalsOf } from "../app/refusals.ts";
 import { t } from "../strings/t.ts";
+import { AllowanceFields, listed, numberOf, offersOf } from "./allowances.tsx";
 import { hostOf, type Tag } from "./ConnectorAdd.tsx";
 import styles from "./pages.module.css";
 import type { KitService } from "./Team.tsx";
@@ -14,6 +15,7 @@ type SignIn =
 	| { kind: "asking" }
 	| { kind: "offered"; attempt: string; address: string; issuer: string }
 	| { kind: "waiting"; attempt: string; address: string; issuer: string }
+	| { kind: "signed"; attempt: string; address: string; issuer: string }
 	| { kind: "failed"; code: string };
 
 /** The code a daemon sentence leads with, as `code: words`. */
@@ -56,7 +58,23 @@ export function KitConnect({
 		storedIn: "keychain" | "file";
 		tools: Record<string, Tag>;
 		signedIn: boolean;
+		/** The calls each sprint the user gave each spending tool. */
+		allowed: Record<string, number>;
 	}>();
+	// A kit that gives spending tools a number asks how many between the key or sign-in and done.
+	const offers = offersOf(service);
+	const asksHowMany = offers.length > 0;
+	const [step, setStep] = useState<"connect" | "how">("connect");
+	const [numbers, setNumbers] = useState<Record<string, string>>(
+		Object.fromEntries(
+			(service.allowances ?? []).map((offer) => [
+				offer.tool,
+				String(offer.calls),
+			]),
+		),
+	);
+	const [shown, setShown] = useState(false);
+
 	const fill = { name, service: service.title };
 	const server = { name: service.name, source: "kit" };
 
@@ -71,6 +89,16 @@ export function KitConnect({
 	};
 	const connect = async (attempt?: string) => {
 		if (!client) return;
+		const allowed = Object.fromEntries(
+			offers.map((offer) => [offer.tool, numberOf(numbers[offer.tool] ?? "")]),
+		);
+		if (asksHowMany && Object.values(allowed).some((n) => n === undefined)) {
+			setShown(true);
+			return;
+		}
+		const allowances = asksHowMany
+			? { allowances: allowed as Record<string, number> }
+			: {};
 		setBusy(true);
 		setRefused(undefined);
 		const sending = Object.fromEntries(
@@ -82,13 +110,19 @@ export function KitConnect({
 			const answer = (await client.call(
 				"connector.connect",
 				attempt
-					? { agent, server, attempt, tags: {} }
-					: { agent, server, keys: sending, tags: {} },
+					? { agent, server, attempt, ...allowances, tags: {} }
+					: { agent, server, keys: sending, ...allowances, tags: {} },
 			)) as { storedIn: "keychain" | "file"; tools: Record<string, Tag> };
-			setDone({ ...answer, signedIn: Boolean(attempt) });
+			setDone({
+				...answer,
+				signedIn: Boolean(attempt),
+				allowed: (allowances.allowances ?? {}) as Record<string, number>,
+			});
 		} catch (e) {
 			setRefused(said(e));
 			if (attempt) setSign({ kind: "failed", code: "" });
+			// A refusal of the numbers or the key is mended where it was typed.
+			if (asksHowMany && !attempt) setStep("connect");
 		}
 		setBusy(false);
 	};
@@ -138,7 +172,12 @@ export function KitConnect({
 					attempt: waitingFor,
 				})) as { state: string; reason?: { code: string } };
 				if (!live) return;
-				if (answer.state === "signed_in") return void connect(waitingFor);
+				if (answer.state === "signed_in") {
+					if (!asksHowMany || sign.kind !== "waiting")
+						return void connect(waitingFor);
+					setSign({ ...sign, kind: "signed" });
+					return setStep("how");
+				}
 				if (answer.state === "failed")
 					return setSign({
 						kind: "failed",
@@ -170,21 +209,26 @@ export function KitConnect({
 
 	const keyHost = hostOf(service.keyPage);
 	const file = done?.storedIn === "file";
-	const group = (heading: string, tags: Tag[]) => {
-		const tools = Object.entries(done?.tools ?? {}).filter(([, tag]) =>
-			tags.includes(tag),
-		);
-		return tools.length === 0 ? null : (
+	const steps = asksHowMany
+		? [t("allowStepConnect"), t("allowStepHowMany"), t("allowStepDone")]
+		: [t("kitStepConnect"), t("kitStepDone")];
+	// A spending tool given a number runs up to it unasked; beyond it, and at 0, it asks.
+	const given = offers.filter((offer) => (done?.allowed[offer.tool] ?? 0) > 0);
+	const group = (heading: string, items: string[]) =>
+		items.length === 0 ? null : (
 			<div>
 				<h3 className={styles.subheading}>{heading}</h3>
 				<ul>
-					{tools.map(([tool]) => (
-						<li key={tool}>{toolSaid(service.labels, tool)}</li>
+					{items.map((item) => (
+						<li key={item}>{item}</li>
 					))}
 				</ul>
 			</div>
 		);
-	};
+	const toolsSaid = (tags: Tag[], skip: string[] = []) =>
+		Object.entries(done?.tools ?? {})
+			.filter(([tool, tag]) => tags.includes(tag) && !skip.includes(tool))
+			.map(([tool]) => toolSaid(service.labels, tool));
 
 	return (
 		<Dialog
@@ -193,10 +237,57 @@ export function KitConnect({
 			onClose={() => onClose(done !== undefined)}
 		>
 			<Stepper
-				steps={[t("kitStepConnect"), t("kitStepDone")]}
-				current={done ? 1 : 0}
+				steps={steps}
+				current={done ? steps.length - 1 : step === "how" ? 1 : 0}
 			/>
-			{!done && (
+			{!done && step === "how" && (
+				<>
+					{signsIn && (
+						<p role="status">
+							<strong>{t("allowSignedIn", { service: service.title })}</strong>
+						</p>
+					)}
+					<h3 className={styles.subheading}>{t("allowQuestion", fill)}</h3>
+					<p>{t("allowSpends", { name, service: service.title })}</p>
+					<AllowanceFields
+						offers={offers}
+						values={numbers}
+						shown={shown}
+						onChange={(tool, text) => setNumbers({ ...numbers, [tool]: text })}
+					/>
+					<p className={styles.muted}>{t("allowRange", fill)}</p>
+					<p className={styles.muted}>{t("allowAlwaysAsk")}</p>
+					<p className={styles.muted}>{t("allowDay")}</p>
+					{refused && (
+						<p role="alert" className={styles.alert}>
+							{refused}
+						</p>
+					)}
+					<div className={styles.actions}>
+						<Button
+							kind="primary"
+							busy={busy}
+							onClick={() =>
+								connect(sign.kind === "signed" ? sign.attempt : undefined)
+							}
+						>
+							{t("kitConnect")}
+						</Button>
+						<Button
+							onClick={() => {
+								setShown(false);
+								// The sign-in is done; going back offers its page again.
+								if (sign.kind === "signed")
+									setSign({ ...sign, kind: "offered" });
+								setStep("connect");
+							}}
+						>
+							{t("allowBack")}
+						</Button>
+					</div>
+				</>
+			)}
+			{!done && step === "connect" && (
 				<>
 					<p>{service.about}</p>
 					<h3 className={styles.subheading}>{t("kitWhy", fill)}</h3>
@@ -289,9 +380,9 @@ export function KitConnect({
 								kind="primary"
 								busy={busy}
 								disabled={values.some((value) => !value.trim())}
-								onClick={() => connect()}
+								onClick={() => (asksHowMany ? setStep("how") : connect())}
 							>
-								{t("kitConnect")}
+								{t(asksHowMany ? "allowNext" : "kitConnect")}
 							</Button>
 						)}
 						<Button onClick={() => onClose(false)}>{t("agentCancel")}</Button>
@@ -303,9 +394,28 @@ export function KitConnect({
 					<p role="status">
 						<strong>{t("kitDone", fill)}</strong>
 					</p>
-					{group(t("kitCan", fill), ["network"])}
-					{group(t("kitAsks", fill), ["external_effect"])}
-					{group(t("kitNever"), ["denied"])}
+					{group(t("kitCan", fill), [
+						...toolsSaid(["network"]),
+						...(given.length > 0
+							? [
+									t("allowMakeUpTo", {
+										list: listed(
+											given.map(
+												(offer) => `${done?.allowed[offer.tool]} ${offer.what}`,
+											),
+										),
+									}),
+								]
+							: []),
+					])}
+					{group(t("kitAsks", fill), [
+						...(given.length > 0 ? [t("allowMore")] : []),
+						...toolsSaid(
+							["external_effect"],
+							given.map((offer) => offer.tool),
+						),
+					])}
+					{group(t("kitNever"), toolsSaid(["denied"]))}
 					<p>
 						{done.signedIn
 							? `${t(file ? "addSignedInFile" : "addSignedInKeychain", {

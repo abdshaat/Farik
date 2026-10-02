@@ -1,10 +1,18 @@
 // The one place wire snake_case and the browser's camelCase meet (rule 6).
 // Only keys are mapped; values, including an event's `body.input` and
 // `body.output` JSON strings, are left as they are. So are the names inside a
-// connector's `tools`, `keys`, `tags`, `headers` and `labels` maps, which the user or the
+// connector's `tools`, `keys`, `tags`, `headers`, `labels` and `allowances` maps, which the user or the
 // server chose (`list_bases`, `API_KEY`, `Authorization`), not the wire. So are the paths of a
 // skill's `files` (`SKILL.md`, `references/api_notes.md`).
-const NAMED = new Set(["tools", "keys", "tags", "headers", "files", "labels"]);
+const NAMED = new Set([
+	"tools",
+	"keys",
+	"tags",
+	"headers",
+	"files",
+	"labels",
+	"allowances",
+]);
 const map = (v: unknown, key: (k: string) => string): unknown => {
 	if (Array.isArray(v)) return v.map((x) => map(x, key));
 	if (v !== null && typeof v === "object") {

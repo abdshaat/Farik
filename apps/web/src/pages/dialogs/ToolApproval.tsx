@@ -2,6 +2,7 @@ import { Button, Dialog, TextArea } from "@farik/ui";
 import { useId, useState } from "react";
 import { Link } from "react-router";
 import { t } from "../../strings/t.ts";
+import type { AllowanceRow, Allowances } from "../allowances.tsx";
 import styles from "../pages.module.css";
 import { useCommand } from "./StartSprint.tsx";
 
@@ -52,16 +53,28 @@ export function visibly(text: string): string {
 export function ToolApproval({
 	ask,
 	agent,
+	agentId,
+	allowance,
 	taskId,
 	title,
 	onClose,
 }: {
 	ask: ToolAsk;
 	agent: string;
+	agentId?: string;
+	/** What the agent has made of this tool this period, when the tool has an allowance (ADR 0037). */
+	allowance?:
+		| {
+				row: AllowanceRow | undefined;
+				period: Allowances["period"];
+				service: string;
+		  }
+		| undefined;
 	taskId: string;
 	title: string;
 	onClose: () => void;
 }) {
+	const counted = allowance?.row;
 	const [note, setNote] = useState("");
 	const { busy, refusal, send } = useCommand(onClose);
 	const sendHeading = useId();
@@ -94,7 +107,35 @@ export function ToolApproval({
 			}
 		>
 			<div className={styles.toolApproval}>
-				<p>{t("toolApprovalStopped", { agent })}</p>
+				{counted && allowance ? (
+					<>
+						<p>
+							{t("allowApprovalStopped", {
+								name: agent,
+								what: counted.what,
+								service: allowance.service,
+							})}
+						</p>
+						<p>
+							{t("allowApprovalCount", {
+								name: agent,
+								used: counted.used,
+								of: counted.of,
+								what: counted.what,
+								period: t(
+									allowance.period.kind === "day"
+										? "allowApprovalDay"
+										: "allowApprovalSprint",
+								),
+							})}{" "}
+							<Link to={`/team/${agentId}?allowances=${ask.server}`}>
+								{t("allowChange")}
+							</Link>
+						</p>
+					</>
+				) : (
+					<p>{t("toolApprovalStopped", { agent })}</p>
+				)}
 				<dl>
 					<dt>{t("toolApprovalTool")}</dt>
 					<dd>
@@ -130,7 +171,10 @@ export function ToolApproval({
 					value={note}
 					onChange={setNote}
 				/>
-				<p className={styles.toolHint}>{t("toolApprovalOnce", { agent })}</p>
+				<p className={styles.toolHint}>
+					{t("toolApprovalOnce", { agent })}
+					{counted && ` ${t("allowApprovalOnce")}`}
+				</p>
 				{refusal && <p role="alert">{refusal}</p>}
 			</div>
 		</Dialog>
