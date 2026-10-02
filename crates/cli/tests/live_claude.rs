@@ -332,7 +332,7 @@ fn run(
         daemon_file,
         daemon: handle.info.clone(),
         sessions_dir: local.join("sessions"),
-        skills_dir: local.join("skills-state"),
+        skills_dir: skills_state(&project),
         team_file: project.repo.path.join(".farik/team.yaml"),
         env: BASE_ENV
             .iter()
@@ -541,6 +541,15 @@ fn a_live_session_calls_a_custom_connector() {
     assert!(!run.stream.contains(CONNECTOR_KEY));
 }
 
+/// Where the plugin folders go: outside the repository, as the shipped layout has them
+/// (`<state>/skills/<project id>`). Inside `.farik/local` Claude Code's own deny rule refuses the
+/// read of a skill's reference.
+fn skills_state(project: &Project) -> PathBuf {
+    PathBuf::from(format!("{}-state", project.repo.path.display()))
+        .join("skills")
+        .join("test-project")
+}
+
 /// What the program's `init` line lists as its skills.
 fn init_skills(stream: &str) -> Vec<String> {
     let init: Value = stream
@@ -579,8 +588,7 @@ fn a_live_session_loads_a_skill_on_use() {
     let local = project.repo.path.join(".farik/local");
     // A chat session, which works in the project's root: the harder case, where Claude Code's own
     // deny rule for `.farik/local/**` applies, and the skills' folder lies outside it.
-    let skills_root = local
-        .join("skills-state")
+    let skills_root = skills_state(&project)
         .join(&project.session_id)
         .join("skills");
     project.state.register_session(SessionRegistration {
@@ -641,6 +649,14 @@ fn a_live_session_loads_a_skill_on_use() {
     };
     assert!(called("Skill", "farik:fixture-skill"), "{logged:?}");
     assert!(called("Read", "references/note.md"), "{logged:?}");
+    let answer = run
+        .stream
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|line| line["type"] == "result")
+        .and_then(|line| line["result"].as_str().map(str::to_string))
+        .expect("a result line");
+    assert!(answer.contains("pelican"), "the read succeeded: {answer}");
     let prompt = std::fs::read_to_string(
         local
             .join("sessions")
