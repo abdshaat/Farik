@@ -340,7 +340,10 @@ mod tests {
                 }
             }
         }
-        assert!(missing.is_empty(), "workflows read missing paths: {missing:?}");
+        assert!(
+            missing.is_empty(),
+            "workflows read missing paths: {missing:?}"
+        );
     }
 
     #[test]
