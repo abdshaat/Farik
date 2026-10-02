@@ -180,6 +180,22 @@ fn farik_connect_labels_with_tag_flags_and_defaults_to_external_effect() {
     }
     let connected = events(&repository, &[EventKind::ConnectorConnected]);
     assert_eq!(connected.len(), 1);
+
+    // A misspelled tool is refused, naming the tools there are, rather than ignored.
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let ran = connect(
+        &repository,
+        "dev-b",
+        &script,
+        &["--tag", "delete_rep=denied"],
+        "",
+        store.clone(),
+    );
+    assert_ne!(ran.code, 0);
+    assert!(ran.err.contains("tag_unknown_tool: delete_rep"), "{}", ran.err);
+    assert!(ran.err.contains("search, env, delete_repo"), "{}", ran.err);
+    assert_eq!(store.load(&kept_at(&repository, "dev-b", "fixture")), Ok(None));
+    assert_eq!(entry(&repository, "dev-b"), None);
 }
 
 /// A keychain that is not there.

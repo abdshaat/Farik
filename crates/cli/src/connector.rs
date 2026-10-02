@@ -60,7 +60,7 @@ pub(crate) fn connect(
     let listed = runtime()?
         .block_on(list_tools(&server, &keys, &folder))
         .map_err(|error| not_listed(&error))?;
-    let tools = labelled(&listed, &tags);
+    let tools = labelled(&listed, &tags)?;
     let (entry, server) = custom_entry(&project.team, asked.agent, &wire, Value::Object(tools))
         .map_err(|e| errors(&e))?;
     let spec = spec_sha256(&server);

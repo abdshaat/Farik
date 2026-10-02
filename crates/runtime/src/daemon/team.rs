@@ -327,19 +327,44 @@ pub fn custom_entry(
 
 /// The usable tools of `listed`, each labelled by `tags` (an object of tool name to tag) or else
 /// `external_effect` (SPEC 5.6).
-#[must_use]
-pub fn labelled(listed: &[ListedTool], tags: &Value) -> serde_json::Map<String, Value> {
-    listed
+///
+/// # Errors
+///
+/// `tag_unknown_tool`, naming the usable tools, when `tags` labels a tool that is not one of them:
+/// a misspelled `delete_rep=denied` would leave `delete_repo` unlabelled while its user believes
+/// it denied.
+pub fn labelled(
+    listed: &[ListedTool],
+    tags: &Value,
+) -> Result<serde_json::Map<String, Value>, String> {
+    let usable: Vec<&str> = listed
         .iter()
         .filter(|tool| tool.usable)
-        .map(|tool| {
+        .map(|tool| tool.name.as_str())
+        .collect();
+    if let Some(unknown) = tags
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(name, _)| name)
+        .find(|name| !usable.contains(&name.as_str()))
+    {
+        return Err(format!(
+            "tag_unknown_tool: {unknown} is not a tool this server lists that Farik can use; its \
+             tools are {}",
+            usable.join(", ")
+        ));
+    }
+    Ok(usable
+        .into_iter()
+        .map(|name| {
             let tag = tags
-                .get(&tool.name)
+                .get(name)
                 .cloned()
                 .unwrap_or_else(|| json!("external_effect"));
-            (tool.name.clone(), tag)
+            (name.to_string(), tag)
         })
-        .collect()
+        .collect())
 }
 
 /// The keys `connector.tools` and `connector.connect` carry.
@@ -405,7 +430,7 @@ async fn connector_connect(
 ) -> Result<Value, Failure> {
     let agent = params["agent"].as_str().unwrap_or_default().to_string();
     let listed = listed(deps, params).await?;
-    let tools = labelled(&listed, &params["tags"]);
+    let tools = labelled(&listed, &params["tags"]).map_err(|why| Failure::new(REFUSED, why))?;
     let (held, asked, labels) = (Arc::clone(deps), params.clone(), tools.clone());
     let (entry, server) = off_the_worker(move || {
         described(
@@ -2601,11 +2626,18 @@ pub(super) mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn connect_lists_tags_saves_and_records() {
         let (harness, store) = keeping("connector-connect");
-        let answer = connected(
-            &harness,
+        let mut params = connect_params(
             "dev-a",
             &fixture_server("connect"),
             &json!({ "search": "network", "delete_repo": "denied" }),
+        );
+        // A key the server does not name is never kept (carry T2).
+        params["keys"]["OTHER_KEY"] = json!("another-value");
+        let answer = call(
+            &harness.daemon,
+            "connector.connect",
+            &params,
+            "connectorConnectResult",
         );
         let tools =
             json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
@@ -2643,6 +2675,37 @@ pub(super) mod tests {
             states(&harness),
             json!([{ "agent": "dev-a", "server": "fixture", "state": "connected" }])
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_label_for_a_tool_not_listed_is_refused() {
+        // `delete_rep=denied` must not leave `delete_repo` unlabelled while its user believes it
+        // denied (carry: a misspelled --tag), nor may a tool Farik can't use be labelled.
+        let (harness, store) = keeping("connector-misspelled");
+        for tags in [
+            json!({ "delete_rep": "denied" }),
+            json!({ "repo.delete": "network" }),
+        ] {
+            let (code, message) = refused(
+                &harness,
+                "connector.connect",
+                &connect_params("dev-a", &fixture_server("misspelled"), &tags),
+            );
+            assert_eq!(code, -32005, "{tags}");
+            assert!(message.starts_with("tag_unknown_tool: "), "{message}");
+            assert!(
+                message.contains("search, env, delete_repo"),
+                "names the tools listed: {message}"
+            );
+        }
+        assert!(
+            store
+                .load(&kept_at(&harness, "dev-a", "fixture"))
+                .expect("the store reads")
+                .is_none()
+        );
+        assert_eq!(entry(&harness, 1, "fixture"), None);
     }
 
     #[test]
@@ -2784,6 +2847,29 @@ pub(super) mod tests {
         );
         assert_eq!(code, -32005);
         assert!(load("dev-b").is_some());
+
+        // A connector Farik ships is no custom one to disconnect (carry H3).
+        let mut wire = team_file(&harness);
+        wire["agents"][1]["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+        let team = farik_core::team::validate_team(&wire).expect("a team");
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&team)
+            .expect("written");
+        let (code, _) = refused(
+            &harness,
+            "connector.disconnect",
+            &json!({ "agent": "dev-a", "server": "playwright" }),
+        );
+        assert_eq!(code, -32005);
+        assert!(entry(&harness, 1, "playwright").is_some());
+        assert_eq!(
+            bodies(&harness, EventKind::ConnectorDisconnected).len(),
+            1,
+            "only the custom one"
+        );
 
         // The entry put back by hand, as a revert would: its keys are gone, so it runs nothing.
         let mut wire = team_file(&harness);
