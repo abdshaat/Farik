@@ -30,6 +30,8 @@ Whether `preauthorized_external_tools` reaches connector tools. It lets a built-
 
 **The Designer's plan gate comes first.** Before the Product Manager approves a Designer's plan, the Designer's `external_effect` call is refused as a write is, and not asked about. For a connector confined to the preview, every `url` in the input is checked before any ask or grant, so a grant never takes a call outside the preview.
 
+**The human sees the input wherever they decide, and the agent is given it back.** The browser shows it in full; the terminal shows it in `farik waiting`'s row and in the line `farik tool approve` or `farik tool refuse` prints, with control, bidirectional and zero-width characters escaped. The next session starts fresh and could not write a long input again word for word, so the grant's message quotes the canonical input whole, in an `untrusted` block. A decision is recorded under one lock with the check that none exists, so two decisions at once let one through.
+
 In `farik-core`, `evaluate_connector_call` takes the seq of the open grant the caller found by `ApprovalKey` and returns it beside the tag; it refuses `ApprovalNeeded` without one and `InputTooLarge` over the limit. A `network` call ignores grants.
 
 ## Consequences

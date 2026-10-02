@@ -1,6 +1,6 @@
 # Phase 7, step 02: Approving a connector's calls
 
-Status: built; landing review pending
+Status: done (landed 2026-10-02: one review, one fix report, then the full suite and GitHub Actions)
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 5.6, 5.7, 8.3, 8.5, 8.6; F9
 Depends on: step 01 of this phase (connectors per agent, not yet committed), whose `ConnectorRefusal::ExternalEffectRefused` this step replaces; phase 6 (merged in #19), whose `question.asked` waiting projection and Today page this step extends
@@ -160,6 +160,19 @@ Files: `pages/dialogs/ToolApproval.tsx` and its test, `Today.tsx`, `Today.test.t
 `docs/SPEC.md`: 5.6 (an `external_effect` connector call asks; `preauthorized_external_tools` does not reach connector tools), 5.7 (an approval waits like a question), 8.3 (who can decide), 8.5 (the three events, `approval` on `tool.called`). `docs/plans/project-plan.md`: phase 7's row 02 and the approvals decision bullet, and `docs/design/role-kits.md`'s steps table, both written by the readiness commit, corrected if execution changed them.
 
 - [x] `docs(spec): record approving a connector's calls`
+
+## As-built notes
+
+The landing review (2026-10-02, one Opus reviewer) found one Critical, two Important and six Minor items. The controller's rulings decided what the report left open. Fix report, one line per finding:
+
+- Fix report C1 (09e5750): the grant's message to the next session now quotes the canonical input whole, in an `untrusted` block, framed as the agent's own words; a probe that knows only the message replays the call and is allowed (`the_next_session_is_shown_the_input_and_replays_it_through`, `a_grant_carries_the_whole_input_it_allowed`). A closing `</untrusted` inside an input is written `&lt;/untrusted` by the shared block, so an input holding that exact text would hash differently on replay and ask again; accepted, the frame's safety comes first.
+- Fix report I1 (049dbb7): `farik waiting` prints each tool approval's whole input on an `  input:` line (an `input` field with `--json`), and `farik tool approve` and `refuse` print `Input: <input>` on a second line; the CLI's `printable` now also escapes bidirectional and zero-width characters as `\uXXXX` (`lists_a_connector_calls_whole_input_escaped`, `farik_tool_refuse_shows_the_input_escaped`, `farik_tool_approve_writes_here_when_nothing_drives`). SPEC 5.7 and 8.6 and ADR 0031 say so.
+- Fix report I2 (13d0641): the concurrency test runs on a clock that sleeps 50 ms in every append (`TestDaemon::slowed`), which widens the window; the lock-release mutation, which survived 30 of 30 before, now fails 5 of 5.
+- Fix report m1, m2 (e2ce516): a decided approval leaves `waiting.list` (kills M14); a task-less session's call is refused without asking (kills H3).
+- Fix report m3 (851c0d6): `decide_tool_call` checks and appends under one lock; with a sleeping clock two racing decisions let exactly one through and the task keeps waiting on its other approval (`two_decisions_racing_on_one_approval_let_one_through`). `ponytail:` one lock for every approval.
+- Fix report m4, m5 (942659e): the dialog writes control, bidirectional and zero-width characters as `\u{202e}`; its hint says the fields are in alphabetical order. This is a departure from the approved mockup, which shows the agent's key order; SPEC F9 records it.
+- Fix report m6: no change, by ruling; a duplicate parallel call asks once more and is safe.
+- Fix report, mockup follow-ups: the shared `Dialog` takes `fillsPhone`, which fills the screen at 480 px and below with the buttons pinned, used by `ToolApproval` alone (8345d6e); the team band reads "Waiting on you: may <agent name> use <server>?" while an approval waits (800fa95). The "create record" wording and the heading's count style stay as SPEC records them.
 
 ## Verification
 
