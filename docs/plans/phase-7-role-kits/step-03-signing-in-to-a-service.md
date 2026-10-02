@@ -5,7 +5,7 @@ Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6.7, 8.2, 8.5, 8.6; F9
 Depends on: step 01 of this phase (committed; the custom connector, `ConnectorEntry`, `ConnectorSecrets`, the launch route and the headers helper, `spec_sha256`), step 02 (committed; nothing of it is consumed, it lands first)
 Readiness: fresh-session Opus reviewer, 2026-10-02: not ready, 4 Blocking, all folded; no second round (ADR 0032)
-Mockups approved by: pending (Task 1's gate)
+Mockups approved by: the founder, 2026-10-02 (SignInDone, PhoneSignIn, and the revised AgentEdit and ConnectorAdd)
 
 ## Goal
 
@@ -174,7 +174,7 @@ A Sonnet agent draws these on the canvas (https://claude.ai/artifact/6tNaCmNojhi
 
 Gate (O3): the founder approves the boards, or says to approve them automatically, and the approval is written into this plan's header with its date. Task 8 does not start until then; Tasks 2 to 7 do not depend on the boards.
 
-- [ ] `docs(design): mock up signing in to a service`
+- [x] `docs(design): mock up signing in to a service` (boards committed earlier; approved 2026-10-02)
 
 ### Task 2: Signing in, in the team file
 

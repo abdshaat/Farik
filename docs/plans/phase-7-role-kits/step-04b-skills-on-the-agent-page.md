@@ -5,7 +5,7 @@ Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6.7; F9
 Depends on: step 04 of this phase (its commands `skill_save`, `skill_remove`, `skill_confirm` and its RPCs `skills.list`, `skill.get`; it lands first), phase 6 (merged in #19)
 Readiness confirmed by: fresh-session Opus reviewer, 2026-10-02, as part of step 04's plan (Tasks 1 and 8 there, split out on folding it to keep step 04 under ADR 0008's length): ready with findings, 4 Blocking, all folded; no second round (ADR 0032)
-Mockups approved by: pending (Task 1's gate)
+Mockups approved by: the founder, 2026-10-02
 
 ## Goal
 
