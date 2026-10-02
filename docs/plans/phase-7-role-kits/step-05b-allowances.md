@@ -1,6 +1,6 @@
 # Phase 7, step 05b: Allowances
 
-Status: draft
+Status: executed 2026-10-02; reviewed 2026-10-02
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6.7, 5.5, 5.6, 8.5; F9, F17
 Depends on: step 05 of this phase (its `Kit`, `KitAllowance`, `kit_entry`, `matches_kit`, `ToolDeps.kits`, the `source: kit` entry and the boards of its Task 1; it lands first), step 02 (the grant and the ask), phase 6 (merged in #19)
@@ -178,3 +178,11 @@ cargo xtask check
 ```
 
 No shipped kit has a spending tool until step 08, so the flow is proven here by Tasks 3 to 6's tests against the fixture kit, and in the web app by step 08's Higgsfield check (row 08: "the allowance flow proven end to end").
+
+## Execution notes
+
+Accepted as built, after the task review:
+
+- `registers_each_connectors_allowances` tests the mapping function, not the registration end to end; a kit with an offered allowance in the session harness is heavy for a one-line `.map(session_connector)`.
+- A refused request and the allowance: the agent may send again a call the human refused, once the period changes or the number is raised, and it runs inside the allowance, because `open_grants` remembers no refusals. An allowance is a standing pre-approval of the tool.
+- The board's second always-ask sentence ("So does making a batch of images at once.") is kit-specific and waits for step 08, where the kit can supply it.
