@@ -539,6 +539,32 @@ describe("connectors on the agent page", () => {
 		expect(within(dialog).queryByLabelText("Part 2")).toBeNull();
 	});
 
+	it("connector_add_says_when_farik_settings_folder_is_inside_the_project", async () => {
+		// Re-review 2 m1: no stdio server starts among the project's files, and the page says why.
+		const { s } = await opened([]);
+		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(
+			screen.getByRole("button", { name: en.connectorCustomAdd }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Add a custom connector to Theo",
+		});
+		const field = (label: string) => within(dialog).getByLabelText(label);
+		fireEvent.change(field(en.addName), { target: { value: "files" } });
+		fireEvent.change(field(en.addCommand), { target: { value: "srv" } });
+		fireEvent.change(field(en.addKeyName), { target: { value: "FILES_KEY" } });
+		fireEvent.click(within(dialog).getByRole("button", { name: en.addNext }));
+		const asked = await sent(s, "connector.tools");
+		await s.fail(
+			asked,
+			-32005,
+			"state_inside_project: Farik's settings folder, /home/u/app/.cfg/farik, is inside this project",
+		);
+		expect(
+			await within(dialog).findByText(en.addStateInsideProject),
+		).toBeTruthy();
+	});
+
 	it("connect_again_shows_each_part_of_the_command", async () => {
 		await opened([
 			{ agent: "theo", server: "airtable", state: "connect_again" },

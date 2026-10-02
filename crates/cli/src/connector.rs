@@ -10,7 +10,8 @@ use farik_core::team::spec_sha256;
 use farik_protocol::command::Command;
 use farik_runtime::claude::Secret;
 use farik_runtime::connectors::{
-    ConnectorEntry, ConnectorError, SecretAt, SecretStore, list_tools, working_folder,
+    ConnectorEntry, ConnectorError, SecretAt, SecretStore, folder_refusal, list_tools,
+    working_folder,
 };
 use farik_runtime::credential::CredentialError;
 use farik_runtime::daemon::{custom_entry, labelled};
@@ -57,8 +58,8 @@ pub(crate) fn connect(
     let keys = read_keys(asked.keys, io)?;
     let state = state_of(io)?;
     let at = secret_at(&state, project, asked.agent, &server.name)?;
-    let folder = working_folder(&state, &at)
-        .map_err(|error| format!("{}'s folder cannot be made: {error}", server.name))?;
+    let folder = working_folder(&state, &project.root, &at)
+        .map_err(|error| format!("{}: {}", server.name, folder_refusal(&error)))?;
     let listed = runtime()?
         .block_on(list_tools(&server, &keys, &folder))
         .map_err(|error| not_listed(&error))?;

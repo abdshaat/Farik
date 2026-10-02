@@ -1201,6 +1201,8 @@ fn refuses_paths_outside_home_and_bad_names() {
     let shop = home.join("shop");
     std::fs::create_dir_all(shop.join("src")).expect("the folders");
     farik_store::git::fixtures::git_in(&shop, &["init", "-b", "main"]);
+    // Home a git project itself, as some keep their dotfiles: Farik's settings would be in it.
+    farik_store::git::fixtures::git_in(&home, &["init", "-b", "main"]);
     // No credential kept, and none in the environment.
     let serving = serving_in(&cwd, setup_env(&home, &state), true);
     let description = "A shop for bread, with an order page and a daily menu.";
@@ -1218,6 +1220,11 @@ fn refuses_paths_outside_home_and_bad_names() {
             "project.open",
             open("../"),
             "that folder is outside your home folder",
+        ),
+        (
+            "project.open",
+            open(""),
+            "your home folder itself cannot be a project; choose a folder inside it",
         ),
         ("project.create", create("", &escaped), named),
         ("project.create", create("", "Bad Name"), named),
@@ -1259,6 +1266,7 @@ fn refuses_paths_outside_home_and_bad_names() {
             .exists()
     );
     assert!(!shop.join(".farik/team.yaml").exists());
+    assert!(!home.join(".farik").exists());
     assert!(!state.join("farik/state.json").exists());
     assert_eq!(ran.code, 130, "{out}\n{err}");
 }

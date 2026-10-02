@@ -70,6 +70,7 @@ const BY_CODE: Record<string, keyof typeof en> = {
 	header_holds_secret: "addHeaderSecret",
 	command_not_absolute: "addCommandNotAbsolute",
 	arg_holds_secret: "addArgSecret",
+	state_inside_project: "addStateInsideProject",
 	tag_unknown_tool: "addTagUnknown",
 };
 

@@ -531,17 +531,32 @@ pub const KEPT_ENV: [&str; 4] = ["PATH", "HOME", "LANG", "TMPDIR"];
 
 /// The folder a stdio connector runs in, outside the repository: `connectors/<project id>/<agent>/
 /// <server>` in the user's state folder `state`, removed and made again, empty and owner-only, for
-/// every listing and launch. Never under the project: git checks out a force-added file there on a
+/// every listing and launch, and refused when `state` is inside the project at `root`. Never under
+/// the project: git checks out a force-added file there on a
 /// clone or a pull, and `npx` and `uv` look upward to the repository's root for `.npmrc`,
 /// `node_modules/.bin` and `pyproject.toml`, so a pulled commit chose what ran on the host with the
 /// agent's keys (finding C1).
 ///
 /// # Errors
 ///
-/// The folder could not be removed or made.
-pub fn working_folder(state: &std::path::Path, at: &SecretAt) -> std::io::Result<PathBuf> {
+/// `state` is inside the project, or the folder could not be removed or made.
+pub fn working_folder(
+    state: &std::path::Path,
+    root: &std::path::Path,
+    at: &SecretAt,
+) -> std::io::Result<PathBuf> {
     use std::os::unix::fs::DirBuilderExt as _;
 
+    // Re-review 2 m1: a state folder inside the project, by `XDG_CONFIG_HOME` or a project that
+    // is home itself, would put the folder back in the repository.
+    if state.canonicalize()?.starts_with(root.canonicalize()?) {
+        return Err(std::io::Error::other(format!(
+            "{STATE_INSIDE_PROJECT}: Farik's settings folder, {}, is inside this project, so a connector would run among \
+             the project's files. Keep the project and Farik's settings apart: unset \
+             XDG_CONFIG_HOME, or move the project into a folder of its own.",
+            state.display()
+        )));
+    }
     let folder = state
         .join("connectors")
         .join(&at.project_id)
@@ -556,6 +571,21 @@ pub fn working_folder(state: &std::path::Path, at: &SecretAt) -> std::io::Result
         .mode(0o700)
         .create(&folder)?;
     Ok(folder)
+}
+
+/// The code [`working_folder`] refuses a state folder inside the project with.
+pub const STATE_INSIDE_PROJECT: &str = "state_inside_project";
+
+/// What to say when [`working_folder`] fails: its refusal as it is, which leads with its code,
+/// or that the folder could not be made.
+#[must_use]
+pub fn folder_refusal(error: &std::io::Error) -> String {
+    let said = error.to_string();
+    if said.starts_with(STATE_INSIDE_PROJECT) {
+        said
+    } else {
+        format!("its folder could not be made: {said}")
+    }
 }
 
 /// How long a server has to list its tools.
@@ -975,7 +1005,7 @@ mod tests {
             .expect("the mode is set");
         let state = dir.join("state");
         let at = SecretAt::of(&state, &root, "dev-a", "github").expect("an address");
-        let folder = working_folder(&state, &at).expect("the folder is made");
+        let folder = working_folder(&state, &root, &at).expect("the folder is made");
         assert!(!folder.starts_with(&root), "{}", folder.display());
         let empty_and_owner_only = |folder: &std::path::Path| {
             let held: Vec<_> = std::fs::read_dir(folder)
@@ -997,8 +1027,33 @@ mod tests {
         std::fs::write(folder.join("github_mcp.py"), "print('PLANTED')").expect("planted");
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755))
             .expect("the mode is set");
-        assert_eq!(working_folder(&state, &at).expect("made again"), folder);
+        assert_eq!(
+            working_folder(&state, &root, &at).expect("made again"),
+            folder
+        );
         empty_and_owner_only(&folder);
+    }
+
+    #[test]
+    fn no_connector_runs_in_a_state_folder_inside_the_project() {
+        // Re-review 2 m1: with `XDG_CONFIG_HOME` inside the project, or the project being home,
+        // the folder would sit in the repository, and the walk upward would find its root again.
+        let dir = scratch("state-inside");
+        let root = dir.join("app");
+        std::fs::create_dir_all(&root).expect("the root is made");
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&root, &link).expect("the link is made");
+        for state in [root.join(".cfg/farik"), link.join(".cfg/farik")] {
+            let at = SecretAt::of(&state, &root, "dev-a", "github").expect("an address");
+            let refused = working_folder(&state, &link, &at).expect_err("refused");
+            assert!(
+                refused
+                    .to_string()
+                    .starts_with("state_inside_project: Farik's settings folder"),
+                "{refused}"
+            );
+            assert!(!state.join("connectors").exists(), "nothing is made");
+        }
     }
 
     #[test]
@@ -1020,7 +1075,7 @@ mod tests {
         }
         let state = dir.join("state");
         let at = SecretAt::of(&state, &root, "dev-a", "github").expect("an address");
-        let folder = working_folder(&state, &at).expect("the folder is made");
+        let folder = working_folder(&state, &root, &at).expect("the folder is made");
         assert!(!folder.starts_with(&root), "{}", folder.display());
         for above in folder.ancestors() {
             for name in [".npmrc", "package.json", "pyproject.toml", "node_modules"] {

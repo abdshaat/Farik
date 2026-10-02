@@ -165,6 +165,47 @@ fn farik_connect_reads_keys_from_stdin() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_starts_nothing_when_farik_settings_are_inside_the_project() {
+    // Re-review 2 m1: `XDG_CONFIG_HOME` inside the project puts the connector's folder back in
+    // the repository, where a pulled `.npmrc` chooses what runs.
+    let repository = a_team("connect-state-inside");
+    let script = fixture("connect-state-inside");
+    let ran_marker = repository.path.join("ran");
+    std::fs::write(&script, format!("touch {}\n", ran_marker.display()))
+        .expect("the script is written");
+    let inside = repository.path.join(".cfg");
+    let script = script.display().to_string();
+    let ran = run_with(
+        &repository.path,
+        &[
+            "connect",
+            "dev-a",
+            "fixture",
+            "--command",
+            "sh",
+            "--arg",
+            &script,
+        ],
+        move |io| {
+            io.stdin = Box::new(std::io::Cursor::new(Vec::new()));
+            io.connector_secrets = Arc::new(MemoryConnectorSecrets::default());
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), inside.display().to_string());
+        },
+    );
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.err
+            .contains("state_inside_project: Farik's settings folder"),
+        "{}",
+        ran.err
+    );
+    assert!(!ran_marker.exists(), "the server was started");
+    assert!(entry(&repository, "dev-a").is_none());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn farik_connect_labels_with_tag_flags_and_defaults_to_external_effect() {
     let repository = a_team("connect-tags");
     let script = fixture("connect-tags");

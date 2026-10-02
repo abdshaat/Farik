@@ -430,7 +430,7 @@ async fn listed(
         &server.name,
     )
     .and_then(|at| state.connector_folder(&at))
-    .map_err(|error| Failure::new(REFUSED, format!("its folder could not be made: {error}")))?;
+    .map_err(|error| Failure::new(REFUSED, crate::connectors::folder_refusal(&error)))?;
     list_tools(&server, &keys_of(params), &folder)
         .await
         .map_err(not_listed)

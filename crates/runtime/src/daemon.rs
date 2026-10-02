@@ -278,11 +278,15 @@ impl DaemonState {
     ///
     /// # Errors
     ///
-    /// No state folder was set, so no connector runs, or the folder could not be made.
+    /// No state folder was set, or no project is open, so no connector runs; the state folder is
+    /// inside the project; or the folder could not be made.
     ///
     /// [`working_folder`]: crate::connectors::working_folder
     pub(crate) fn connector_folder(&self, at: &SecretAt) -> std::io::Result<std::path::PathBuf> {
-        crate::connectors::working_folder(self.state_dir()?, at)
+        let deps = self.deps().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "no project is open")
+        })?;
+        crate::connectors::working_folder(self.state_dir()?, deps.files.root(), at)
     }
 
     /// Where the agents' connector keys are kept: until a store is set, an empty one, so that no
@@ -977,7 +981,7 @@ fn launch_answer(state: &DaemonState, asked: &LaunchAsk) -> Result<Value, Refusa
             let spec = launch_spec(&server, &entry).map_err(refused)?;
             let folder = state
                 .connector_folder(&at)
-                .map_err(|error| failed(format!("its folder could not be made: {error}")))?;
+                .map_err(|error| failed(crate::connectors::folder_refusal(&error)))?;
             serde_json::json!({
                 "command": spec.command, "args": spec.args, "env": exposed(&spec.env),
                 "cwd": folder.display().to_string()

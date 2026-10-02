@@ -38,7 +38,7 @@ A cloned project, or a teammate's change to a connector, runs nothing until the 
 
 Two agents with the same server each need the key entered. The user types it twice. In return, removing one agent's access never touches another's.
 
-Without the sandbox, a program running as the user can reach a key three new ways: by running the launcher with `daemon.json`'s token, by calling the launch route directly, or by reading a connector's `/proc/<pid>/environ`. Spec 8.6's no-sandbox warning names them. A user's stdio server also runs on the host with the user's rights: it is the program the user named, found on `PATH` or by its full path, run in an empty folder outside the repository, which neither an agent nor a commit writes to. The hash pins the strings, not what `PATH` finds, which is the user's own.
+Without the sandbox, a program running as the user can reach a key three new ways: by running the launcher with `daemon.json`'s token, by calling the launch route directly, or by reading a connector's `/proc/<pid>/environ`. Spec 8.6's no-sandbox warning names them. A user's stdio server also runs on the host with the user's rights: it is the program the user named, found on `PATH` or by its full path, run in an empty folder outside the repository, which neither an agent nor a commit writes to: Farik refuses to start one when its state folder is inside the project, and refuses the home folder itself as a project. The hash pins the strings, not what `PATH` finds, which is the user's own.
 
 On a computer without a keychain, the keys are in a file that any program running as the user can read, as with ADR 0022.
 
