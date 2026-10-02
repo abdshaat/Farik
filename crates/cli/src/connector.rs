@@ -191,8 +191,9 @@ fn connect_signed_in(
     let signing = runtime
         .block_on(start_sign_in(url, settings, chrono::Utc::now()))
         .map_err(|error| refused(&error, &host))?;
+    // Prompts, not results: on stderr, so that `--json` leaves the output as the JSON alone.
     crate::say(
-        &mut io.stdout,
+        &mut io.stderr,
         &format!(
             "Sign in to {} in your browser: {}",
             host_of(signing.issuer()),
@@ -204,7 +205,7 @@ fn connect_signed_in(
     let grant = runtime
         .block_on(signing.finish())
         .map_err(|error| refused(&error, &host))?;
-    crate::say(&mut io.stdout, &format!("Signed in to {issuer}."));
+    crate::say(&mut io.stderr, &format!("Signed in to {issuer}."));
     let listed = runtime
         .block_on(list_tools(
             &server,
@@ -224,6 +225,7 @@ fn connect_signed_in(
         .ok()
         .flatten()
         .and_then(|old| old.oauth);
+    let kept = grant.clone();
     let stored_in = io
         .connector_secrets
         .save(
@@ -235,7 +237,10 @@ fn connect_signed_in(
             },
         )
         .map_err(|error| words(&error))?;
-    if let Some(old) = replaced {
+    // Not the grant just kept, nor one of its client's (`revocable_after`).
+    if let Some(old) = replaced
+        && old.revocable_after(&kept)
+    {
         runtime.block_on(revoke(&old));
     }
     let said = crate::human::said(command(

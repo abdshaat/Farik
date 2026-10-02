@@ -441,14 +441,27 @@ fn sign_in(
     opener: farik::Opener,
     store: Arc<dyn ConnectorSecrets>,
 ) -> project::Ran {
-    let mut args = vec![
+    sign_in_after(&[], repository, fixture, extra, opener, store)
+}
+
+/// As [`sign_in`], with `before` ahead of the command, as a global flag goes.
+fn sign_in_after(
+    before: &[&str],
+    repository: &TempRepo,
+    fixture: &oauth_fixture::Fixture,
+    extra: &[&str],
+    opener: farik::Opener,
+    store: Arc<dyn ConnectorSecrets>,
+) -> project::Ran {
+    let mut args = before.to_vec();
+    args.extend_from_slice(&[
         "connect",
         "dev-a",
         "fixture",
         "--url",
         fixture.mcp_url.as_str(),
         "--sign-in",
-    ];
+    ]);
     args.extend_from_slice(extra);
     let config = config_of(repository);
     run_with(&repository.path, &args, move |io| {
@@ -477,14 +490,20 @@ fn farik_connect_signs_in_and_keeps_the_grant() {
     );
 
     assert_eq!(ran.code, 0, "{}", ran.err);
-    let lines: Vec<&str> = ran.out.lines().collect();
+    // The prompts go to the error stream, so the result alone is on the output.
+    let lines: Vec<&str> = ran.err.lines().collect();
     assert!(
         lines[0].starts_with("Sign in to 127.0.0.1 in your browser: http://127.0.0.1:"),
         "{}",
-        ran.out
+        ran.err
     );
     assert_eq!(lines[1], format!("Signed in to {}.", fixture.origin));
-    assert!(lines.contains(&"whoami: network"), "{}", ran.out);
+    assert!(
+        ran.out.lines().any(|line| line == "whoami: network"),
+        "{}",
+        ran.out
+    );
+    assert!(!ran.out.contains("Sign in to"), "{}", ran.out);
     let kept = loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).expect("kept");
     let grant = kept.oauth.expect("a grant is kept");
     assert_eq!(grant.issuer, fixture.origin);
@@ -528,8 +547,84 @@ fn farik_connect_signs_in_and_keeps_the_grant() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     let address = printed.lock().expect("a lock").clone();
     assert!(!address.is_empty());
-    assert!(ran.out.contains(&address), "{}", ran.out);
+    assert!(ran.err.contains(&address), "{}", ran.err);
     assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).is_some());
+
+    // With --json the output is the JSON alone, and the address is still given, on stderr.
+    let repository = a_team("connect-sign-in-json");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let ran = sign_in_after(
+        &["--json"],
+        &repository,
+        &fixture,
+        &["--tag", "whoami=network"],
+        following(&runtime),
+        Arc::clone(&store) as _,
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let parsed: Value =
+        serde_json::from_str(&ran.out).unwrap_or_else(|error| panic!("{error}: {}", ran.out));
+    assert_eq!(parsed["tools"]["whoami"], "network");
+    assert!(
+        ran.err.contains("in your browser: http://127.0.0.1:"),
+        "{}",
+        ran.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_again_revokes_the_replaced_grant() {
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = runtime.block_on(oauth_fixture::Fixture::start());
+    let repository = a_team("connect-sign-in-again");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let again = || {
+        sign_in(
+            &repository,
+            &fixture,
+            &[],
+            following(&runtime),
+            Arc::clone(&store) as _,
+        )
+    };
+    assert_eq!(again().code, 0);
+    let old = loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture"))
+        .and_then(|entry| entry.oauth)
+        .and_then(|grant| grant.refresh_token)
+        .expect("a refresh token");
+    assert_eq!(fixture.count("/revoke"), 0);
+    assert_eq!(again().code, 0);
+    let revoked = fixture.requests("/revoke");
+    assert_eq!(revoked.len(), 1);
+    assert_eq!(revoked[0].form["token"], old.expose());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_again_with_the_same_client_revokes_nothing() {
+    // Some services end every grant of a client when one is revoked.
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = runtime.block_on(oauth_fixture::Fixture::start());
+    let repository = a_team("connect-sign-in-same-client");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("a port")
+        .local_addr()
+        .expect("an address")
+        .port()
+        .to_string();
+    for _ in 0..2 {
+        let ran = sign_in(
+            &repository,
+            &fixture,
+            &["--client-id", "fixed", "--callback-port", port.as_str()],
+            following(&runtime),
+            Arc::clone(&store) as _,
+        );
+        assert_eq!(ran.code, 0, "{}", ran.err);
+    }
+    assert_eq!(fixture.count("/revoke"), 0);
 }
 
 #[test]
