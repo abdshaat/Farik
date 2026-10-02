@@ -144,15 +144,7 @@ pub fn activity(
             .iter()
             .find(|item| item.agent_id.as_deref() == Some(id))
         {
-            let line = match &item.approval {
-                // The approved board's words: the team band asks the question the dialog answers.
-                Some(ask) => format!(
-                    "Waiting on you: may {} use {}?",
-                    name_of(team, id),
-                    ask.server
-                ),
-                None => format!("Waiting on you: {}", item.line),
-            };
+            let line = waiting_line(team, id, item);
             all.push(one(
                 ActivityState::Waiting,
                 line,
@@ -173,6 +165,19 @@ pub fn activity(
         ));
     }
     Ok(all)
+}
+
+/// What an agent waiting on the human is doing, in a sentence: for a connector call, the
+/// approved board's question, which the dialog answers.
+fn waiting_line(team: &Team, agent: &str, item: &crate::waiting::Waiting) -> String {
+    match &item.approval {
+        Some(ask) => format!(
+            "Waiting on you: may {} use {}?",
+            name_of(team, agent),
+            ask.server
+        ),
+        None => format!("Waiting on you: {}", item.line),
+    }
 }
 
 /// The task in progress whose latest design plan `agent` proposed and nobody decided yet, with
@@ -423,10 +428,7 @@ mod tests {
             .expect("Linus");
         assert_eq!(linus.state, ActivityState::Waiting);
         assert_eq!(linus.line, "Waiting on you: may Linus use airtable?");
-        assert_eq!(
-            linus.task_id.as_ref().map(|id| id.as_str()).as_deref(),
-            Some("FRK-1")
-        );
+        assert_eq!(linus.task_id.as_ref().map(|id| id.as_str()), Some("FRK-1"));
     }
 
     #[test]
