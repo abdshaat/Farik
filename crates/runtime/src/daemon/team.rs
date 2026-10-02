@@ -3890,6 +3890,42 @@ pub(super) mod tests {
         };
         assert_eq!(source("dev-a"), Some(json!("kit")));
         assert_eq!(source("dev-b"), Some(json!("custom")));
+        // A role with no one on it left is not listed: every Developer retires.
+        // A role whose agents have all retired is not listed: an Architect, who may retire.
+        let mut architect_kit = fixture_kit("kit-team-get-architect");
+        architect_kit.role = farik_core::contract::Role::Architect;
+        harness.project.set_kit(architect_kit);
+        let mut team = team_file(&harness);
+        team["agents"].as_array_mut().expect("agents").push(
+            farik_core::team::fixtures::an_agent_wire("ada", "architect"),
+        );
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&farik_core::team::validate_team(&team).expect("a team"))
+            .expect("the team is written");
+        let roles = |harness: &Harness| {
+            let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+            got["kits"]
+                .as_array()
+                .expect("kits")
+                .iter()
+                .map(|kit| kit["role"].clone())
+                .collect::<Vec<_>>()
+        };
+        assert!(roles(&harness).contains(&json!("architect")));
+        let retired = rpc(
+            &harness.daemon,
+            "command",
+            &json!({ "command": { "command": "agent_update", "body": { "agent_id": "ada", "status": "retired" } } }),
+        );
+        assert!(retired["result"]["said"].is_string(), "{retired}");
+        assert_eq!(
+            roles(&harness),
+            [json!("software_developer")],
+            "a retired agent's role lists no kit"
+        );
     }
 
     #[test]
