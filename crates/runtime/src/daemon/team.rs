@@ -172,6 +172,9 @@ fn skills_list(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
 /// refuse.
 fn skill_get(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     let name = params["name"].as_str().unwrap_or_default();
+    if params["level"] == "role" {
+        return role_skill_get(params, name);
+    }
     let level = match (params["level"].as_str(), params["agent"].as_str()) {
         (Some("team"), None) => crate::skills::SkillLevel::Team,
         (Some("agent"), Some(agent)) => crate::skills::SkillLevel::Agent(agent.to_string()),
@@ -208,14 +211,46 @@ fn skill_get(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     let refused = |refusal: farik_roles::SkillRefusal| Failure::new(REFUSED, refusal.to_string());
     let files = crate::skills::read_skill_folder(&folder).map_err(refused)?;
     let checked = farik_roles::check_skill(name, &files).map_err(refused)?;
+    // `check_skill` refused any file that is not UTF-8, so what is shown is what is hashed.
+    let mut texts = BTreeMap::new();
+    for (path, bytes) in &files {
+        let text = String::from_utf8(bytes.clone())
+            .map_err(|_| refused(farik_roles::SkillRefusal::FileNotText(path.clone())))?;
+        texts.insert(path.clone(), text);
+    }
     Ok(json!({
-        "files": files
-            .iter()
-            .map(|(path, bytes)| (path.clone(), String::from_utf8_lossy(bytes).into_owned()))
-            .collect::<BTreeMap<String, String>>(),
+        "files": texts,
         "sha256": farik_core::skill::skill_sha256(&files),
         "ignored_fields": checked.ignored_fields,
     }))
+}
+
+/// `skill.get { level: "role", role, name }`: the `SKILL.md` Farik ships for `role`, with no hash,
+/// since it is trusted and pinned in the binary. `role` and `name` are checked before any lookup,
+/// and nothing here builds a path.
+fn role_skill_get(params: &Value, name: &str) -> Result<Value, Failure> {
+    if !farik_roles::skill_name_ok(name) {
+        return Err(Failure::new(
+            REFUSED,
+            "skill_name_invalid: a skill's name is lower-case words joined by hyphens, up to 64 characters",
+        ));
+    }
+    let role = serde_json::from_value::<farik_core::contract::Role>(params["role"].clone())
+        .ok()
+        .and_then(|role| farik_roles::load_role(role).ok());
+    let Some(role) = role else {
+        return Err(Failure::new(
+            REFUSED,
+            "a role's skill names a role Farik ships",
+        ));
+    };
+    let Some(skill) = role.skills.iter().find(|skill| skill.name == name) else {
+        return Err(Failure::new(
+            super::web::NOT_FOUND,
+            format!("the role ships no skill {name}"),
+        ));
+    };
+    Ok(json!({ "files": { "SKILL.md": skill.text }, "ignored_fields": [] }))
 }
 
 /// `account.status` on a daemon with a project: the credential read afresh from the environment
@@ -1697,6 +1732,85 @@ pub(super) mod tests {
             shown.contains("-32005") && shown.contains("skill_name_invalid: "),
             "{shown}"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn skill_get_reads_a_shipped_role_skill_without_a_hash() {
+        let harness = Harness::new("rpc-skill-get-role", |_| {});
+        let asked = json!({
+            "level": "role", "role": "software_developer", "name": "implementing-a-contract"
+        });
+        let got = query(&harness.daemon, "skill.get", &asked, "skillGetResult");
+        let shipped = farik_roles::load_role(farik_core::contract::Role::SoftwareDeveloper)
+            .expect("ships")
+            .skills
+            .remove(0);
+        assert_eq!(got["files"], json!({ "SKILL.md": shipped.text }));
+        assert!(got.get("sha256").is_none(), "{got}");
+        assert_eq!(got["ignored_fields"], json!([]));
+        // The role and the name are checked before anything is looked up.
+        for params in [
+            json!({ "level": "role", "role": "../../x", "name": "implementing-a-contract" }),
+            json!({ "level": "role", "role": "human", "name": "implementing-a-contract" }),
+            json!({ "level": "role", "name": "implementing-a-contract" }),
+        ] {
+            let reply = rpc(
+                &harness.daemon,
+                "query",
+                &json!({ "name": "skill.get", "params": params }),
+            );
+            assert_eq!(reply["error"]["code"], -32005, "{params}: {reply}");
+        }
+        let refused = super::skill_get(
+            &harness.project.deps,
+            &json!({ "level": "role", "role": "software_developer", "name": "../x" }),
+        )
+        .expect_err("refused");
+        assert!(format!("{refused:?}").contains("skill_name_invalid: "));
+        // A skill another role ships is not this role's.
+        let reply = rpc(
+            &harness.daemon,
+            "query",
+            &json!({ "name": "skill.get", "params":
+                { "level": "role", "role": "software_developer", "name": "api-style" } }),
+        );
+        assert_eq!(reply["error"]["code"], -32002, "{reply}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_skill_with_a_file_that_is_not_text_is_refused_everywhere() {
+        let harness = Harness::new("rpc-skill-binary", |_| {});
+        let text = "---\nname: api-style\ndescription: Use when.\n---\nbody".as_bytes();
+        let files = BTreeMap::from([
+            ("SKILL.md".to_string(), text.to_vec()),
+            ("references/a.md".to_string(), vec![0xff, 0xfe, b'x']),
+        ]);
+        let level = crate::skills::SkillLevel::Team;
+        let saved = crate::skills::save_skill(&harness.project.deps, &level, &files, false)
+            .expect_err("refused at save");
+        assert_eq!(saved.code(), "skill_file_not_text");
+        // A folder edited outside Farik is refused at read and at confirm, naming the file.
+        save_a_skill(&harness, None, "api-style", "");
+        let folder = harness.project.repo.path.join(".farik/skills/api-style");
+        std::fs::write(folder.join("references/a.md"), [0xff, 0xfe, b'x']).expect("edit");
+        let reply = rpc(
+            &harness.daemon,
+            "query",
+            &json!({ "name": "skill.get", "params": { "level": "team", "name": "api-style" } }),
+        );
+        let message = reply["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            message.starts_with("skill_file_not_text: ") && message.contains("references/a.md"),
+            "{reply}"
+        );
+        let held = crate::skills::read_skill_folder(&folder).expect("readable");
+        let hash = farik_core::skill::skill_sha256(&held);
+        let confirmed =
+            crate::skills::confirm_skill(&harness.project.deps, &level, "api-style", &hash, false)
+                .expect_err("refused at confirm");
+        assert_eq!(confirmed.code(), "skill_file_not_text");
     }
 
     #[test]

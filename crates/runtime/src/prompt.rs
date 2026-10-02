@@ -575,6 +575,7 @@ mod tests {
                 description: "Use when writing a contract.".to_string(),
                 body: "# Writing task contracts\n\nStart with the intent.\n".to_string(),
                 bytes: 0,
+                text: String::new(),
             }],
         }
     }

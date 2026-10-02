@@ -55,6 +55,8 @@ pub struct Skill {
     pub body: String,
     /// The size of the whole `SKILL.md`, frontmatter included, in bytes.
     pub bytes: usize,
+    /// The whole `SKILL.md`, as shipped.
+    pub text: String,
 }
 
 /// A role as Farik ships it (`docs/SPEC.md` section 6).
@@ -309,6 +311,7 @@ fn parse_skill(name: &str, text: &str) -> Result<Skill, String> {
         description: front.description,
         body: body.to_string(),
         bytes: text.len(),
+        text: text.to_string(),
     })
 }
 
