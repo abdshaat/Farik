@@ -12,8 +12,8 @@ ones in the code.
 
 Before you plan, find where the project keeps its brand and its design tokens: a tokens file, a
 theme, CSS custom properties, a component library. Read the brand's written rules if it has them.
-For Farik itself they are the `@farik/brand` package (`packages/brand/tokens/tokens.json`) and
-`docs/brand/brand.md`, and the components in `@farik/ui`.
+For Farik itself they are the `brand` package of the `farik` scope (`packages/brand/tokens/tokens.json`) and
+`docs/brand/brand.md`, and the components in its `ui` package.
 
 ## 2. Never invent a value
 

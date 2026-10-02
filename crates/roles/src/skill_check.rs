@@ -270,10 +270,11 @@ fn path_ok(path: &str) -> bool {
         })
 }
 
-/// `` !` `` anywhere, or a line opening, after whitespace, three or more backticks or tildes and
-/// then `!`.
+/// `` !` `` or ```` ```! ```` anywhere, or a line opening, after whitespace, three or more backticks
+/// or tildes and then `!`.
 fn runs_commands(text: &str) -> bool {
     text.contains("!`")
+        || text.contains("```!")
         || text.lines().any(|line| {
             let line = line.trim_start();
             ['`', '~'].into_iter().any(|fence| {
@@ -283,15 +284,16 @@ fn runs_commands(text: &str) -> bool {
         })
 }
 
-/// An `@` at the start of the text or after whitespace, followed by a non-whitespace character.
+/// An `@` not inside an email-like word: Claude Code attaches `@<path>` after whitespace (JS `\s`,
+/// U+FEFF among it) and after 。、？！, so only an `@` right after an ASCII letter, digit, or one of
+/// `._%+-` is allowed.
 fn attaches_files(text: &str) -> bool {
-    let mut before_is_space = true;
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '@' && before_is_space && chars.peek().is_some_and(|next| !next.is_whitespace()) {
+    let mut before: Option<char> = None;
+    for c in text.chars() {
+        if c == '@' && !before.is_some_and(|b| b.is_ascii_alphanumeric() || "._%+-".contains(b)) {
             return true;
         }
-        before_is_space = c.is_whitespace();
+        before = Some(c);
     }
     false
 }
@@ -438,6 +440,7 @@ mod tests {
             "```!\nls\n```\n",
             "  ~~~!\nls\n~~~\n",
             "````!\nls\n",
+            "Run x ```!\ntouch y\n```\n",
         ] {
             let files = skill(&[("SKILL.md", &md(OK_FRONT, body))]);
             assert_eq!(refusal(&files), SkillRefusal::RunsCommands, "{body:?}");
@@ -453,11 +456,18 @@ mod tests {
             "@references/a.md\n",
             "line\n@x",
             "tab\t@x",
+            "Notes\u{3002}@~/x",
+            "Notes \u{feff}@~/x",
+            "Notes\u{ff01}@~/x",
+            "Notes\u{3001}@~/x",
+            "Notes\u{ff1f}@~/x",
+            "(@~/x)",
+            "\"@~/x\"",
         ] {
             let files = skill(&[("SKILL.md", &md(OK_FRONT, body))]);
             assert_eq!(refusal(&files), SkillRefusal::AttachesFiles, "{body:?}");
         }
-        for body in ["mail ana@example.com\n", "a lone @ here\n", "ends with @"] {
+        for body in ["mail ana@example.com\n", "a.b+c_d-e%f@example.com\n"] {
             let files = skill(&[("SKILL.md", &md(OK_FRONT, body))]);
             assert!(check_skill("api-style", &files).is_ok(), "{body:?}");
         }
