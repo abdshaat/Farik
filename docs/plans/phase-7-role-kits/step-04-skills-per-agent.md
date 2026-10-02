@@ -172,7 +172,7 @@ Files: `team.schema.json`, `crates/core/src/team.rs`, `crates/core/src/skill.rs`
 - `refuses_a_bad_pin`: a name `Bad_Name` and a `sha256` of 63 hex digits are each a schema error at their field; one name twice in a list is `skill_name_twice` at the second; a 21st item is a schema error.
 - `the_skill_hash_sees_every_file_and_ignores_order`: the same files inserted in two orders give one hash; one changed byte, one renamed file, or one added file each changes it.
 
-- [ ] `feat(core): pin a team's and an agent's skills in the team file`
+- [x] `feat(core): pin a team's and an agent's skills in the team file`
 
 ### Task 2: Checking a skill
 

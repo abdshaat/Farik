@@ -38,6 +38,14 @@
     },
     "preview": {
       "$ref": "#/$defs/preview"
+    },
+    "skills": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/skillPin"
+      },
+      "description": "The skills given to the whole team, each pinned by the hash of its folder `.farik/skills/<name>/` (spec 6.7, ADR 0034). Only skill_save, skill_remove and skill_confirm change a pin. A name appears once in a list (validate_team: skill_name_twice)."
     }
   },
   "$defs": {
@@ -265,6 +273,14 @@
             "$ref": "#/$defs/mcpServer"
           },
           "description": "The connectors this agent's task sessions get (spec 5.6). Any agent may have one; team.propose gives the ui_ux_designer playwright."
+        },
+        "skills": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/skillPin"
+          },
+          "description": "The skills given to this agent alone, each pinned by the hash of its folder `.farik/agents/<id>/skills/<name>/` (spec 6.7, ADR 0034). An agent's skill replaces the team's of the same name. A name appears once in a list (validate_team: skill_name_twice)."
         }
       }
     },
@@ -562,6 +578,28 @@
           "description": "Globs a software_developer's task diff is matched against when it enters verifying: a match makes it a UI change, which the ui_ux_designer design-reviews before the reviewer (ADR 0026, spec 5.12). Left out, the seven design globs; an empty list leaves only the contract's ui_change to say so."
         }
       }
+    },
+    "skillPin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sha256"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "maxLength": 64,
+          "description": "The skill's name, equal to its folder's and to the name in its SKILL.md."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "skill_sha256 of the folder: the sha256 of the canonical JSON of {relative path: sha256 of the file's bytes} over every file in it."
+        }
+      },
+      "description": "One skill pinned in the team file (spec 6.7). The pin says what the folder held when the person read it; a skill loads only when the folder, this pin and this computer's confirmation agree."
     }
   }
 }

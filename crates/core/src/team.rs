@@ -21,7 +21,7 @@ pub use crate::generated::team::{
     McpServerSource, McpServerTransport, Model as AgentModel, ModelEffort as Effort,
     PermissionTier as PermissionTierWire, Permissions as TeamPermissions, Policy as TeamPolicy,
     PolicyHumanAcceptsContracts as HumanAcceptsContracts, PolicyIntegration as Integration,
-    Role as RoleWire, Rules as RulesWire, SessionLimits as SessionLimitsWire,
+    Role as RoleWire, Rules as RulesWire, SessionLimits as SessionLimitsWire, SkillPin,
 };
 
 /// Wire fixtures for tests, in this crate and in others.
@@ -186,6 +186,7 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
         }
     }
     errors.extend(connector_errors(&team));
+    errors.extend(skill_errors(&team));
     let judgment = team.judgment();
     if let Some(role) = named_judge(judgment.judge)
         && !team.has_active(role)
@@ -251,6 +252,30 @@ fn connector_errors(team: &Team) -> Vec<ValidationError> {
                 message,
             }));
         }
+    }
+    errors
+}
+
+/// A skill name pinned twice in one list, at the second (spec 6.7): the team's list and each
+/// agent's are each checked alone, since an agent's skill replaces the team's of its name.
+fn skill_errors(team: &Team) -> Vec<ValidationError> {
+    let mut errors = Vec::new();
+    let mut check = |pins: &[SkillPin], at: &str| {
+        let mut names = Vec::new();
+        for (index, pin) in pins.iter().enumerate() {
+            let name = pin.name.as_str();
+            if names.contains(&name) {
+                errors.push(ValidationError {
+                    path: format!("{at}/{index}/name"),
+                    message: format!("skill_name_twice: {name} is already given in this list."),
+                });
+            }
+            names.push(name);
+        }
+    };
+    check(team.skills(), "/skills");
+    for (index, agent) in team.agents.iter().enumerate() {
+        check(&agent.skills, &format!("/agents/{index}/skills"));
     }
     errors
 }
@@ -705,7 +730,12 @@ pub fn spec_sha256(server: &CustomServer) -> String {
 
 /// The sha256 of `text`, in lower-case hex.
 pub(crate) fn sha256_hex(text: &str) -> String {
-    Sha256::digest(text.as_bytes())
+    sha256_bytes_hex(text.as_bytes())
+}
+
+/// The sha256 of `bytes`, in lower-case hex.
+pub(crate) fn sha256_bytes_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
         .iter()
         .fold(String::with_capacity(64), |mut hex, byte| {
             let _ = write!(hex, "{byte:02x}");
@@ -740,6 +770,12 @@ pub struct Preview {
 }
 
 impl Team {
+    /// The skills pinned for the whole team (spec 6.7).
+    #[must_use]
+    pub fn skills(&self) -> &[SkillPin] {
+        &self.skills
+    }
+
     /// The team's preview, if it set one, with `path` defaulted to `/`.
     #[must_use]
     pub fn preview(&self) -> Option<Preview> {
@@ -2558,5 +2594,99 @@ mod tests {
             assert_ne!(spec_sha256(&server(wire)), before, "{field}");
         }
         assert_ne!(spec_sha256(&http), hash);
+    }
+
+    /// `skills` pinned at the top level and on the first agent.
+    fn with_pins(team_pins: Value, agent_pins: Value) -> Value {
+        let mut wire = a_team_wire();
+        wire["skills"] = team_pins;
+        wire["agents"][0]["skills"] = agent_pins;
+        wire
+    }
+
+    fn a_pin(name: &str) -> Value {
+        json!({ "name": name, "sha256": "ab".repeat(32) })
+    }
+
+    #[test]
+    fn accepts_team_and_agent_skill_pins() {
+        let wire = with_pins(json!([a_pin("api-style")]), json!([a_pin("review-notes")]));
+        let read = team(&wire);
+        let back = serde_json::to_value(&read).expect("a team serialises");
+        assert_eq!(back["skills"], wire["skills"]);
+        assert_eq!(back["agents"][0]["skills"], wire["agents"][0]["skills"]);
+        let pins: Vec<(String, String)> = read
+            .skills()
+            .iter()
+            .map(|pin| {
+                (
+                    pin.name.as_str().to_string(),
+                    pin.sha256.as_str().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(pins, [("api-style".to_string(), "ab".repeat(32))]);
+        assert_eq!(read.agents[0].skills.len(), 1);
+        assert!(
+            team(&a_team_wire()).skills().is_empty(),
+            "pins are optional"
+        );
+    }
+
+    #[test]
+    fn refuses_a_bad_pin() {
+        let bad_name = with_pins(
+            json!([{ "name": "Bad_Name", "sha256": "ab".repeat(32) }]),
+            json!([]),
+        );
+        assert!(
+            paths(&bad_name).iter().any(|path| path == "/skills/0/name"),
+            "{:?}",
+            paths(&bad_name)
+        );
+        let short = json!({ "name": "api-style", "sha256": "a".repeat(63) });
+        let bad_hash = with_pins(json!([]), json!([short]));
+        assert!(
+            paths(&bad_hash)
+                .iter()
+                .any(|path| path == "/agents/0/skills/0/sha256"),
+            "{:?}",
+            paths(&bad_hash)
+        );
+        let twice = with_pins(
+            json!([a_pin("api-style"), a_pin("other"), a_pin("api-style")]),
+            json!([]),
+        );
+        let refused = refusals(&twice);
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert_eq!(refused[0].0, "/skills/2/name");
+        assert!(
+            refused[0].1.starts_with("skill_name_twice: "),
+            "{}",
+            refused[0].1
+        );
+        let agent_twice = with_pins(json!([]), json!([a_pin("a"), a_pin("a")]));
+        assert_eq!(paths(&agent_twice), ["/agents/0/skills/1/name"]);
+        let both = with_pins(json!([a_pin("same")]), json!([a_pin("same")]));
+        assert!(
+            validate_team(&both).is_ok(),
+            "a team and an agent may share a name"
+        );
+        let twenty: Vec<Value> = (0..20).map(|n| a_pin(&format!("s{n}"))).collect();
+        assert!(validate_team(&with_pins(json!(twenty.clone()), json!(twenty.clone()))).is_ok());
+        let mut twenty_one = twenty;
+        twenty_one.push(a_pin("s20"));
+        for wire in [
+            with_pins(json!(twenty_one.clone()), json!([])),
+            with_pins(json!([]), json!(twenty_one)),
+        ] {
+            assert!(
+                paths(&wire)
+                    .iter()
+                    .any(|path| path == "/skills" || path == "/agents/0/skills"),
+                "{:?}",
+                paths(&wire)
+            );
+        }
     }
 }
