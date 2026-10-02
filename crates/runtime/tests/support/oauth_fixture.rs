@@ -137,6 +137,17 @@ impl ServerHandler for Tools {
         info
     }
 
+    fn call_tool(
+        &self,
+        _request: rmcp::model::CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<rmcp::model::CallToolResponse, ErrorData>> + Send + '_ {
+        std::future::ready(Ok(rmcp::model::CallToolResult::success(vec![
+            rmcp::model::ContentBlock::text("whoami-ok"),
+        ])
+        .into()))
+    }
+
     fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,

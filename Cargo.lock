@@ -873,6 +873,8 @@ dependencies = [
 name = "farik"
 version = "0.0.0"
 dependencies = [
+ "axum",
+ "base64 0.23.1",
  "chrono",
  "clap",
  "farik-core",
@@ -881,8 +883,11 @@ dependencies = [
  "farik-runtime",
  "farik-store",
  "futures-util",
+ "reqwest",
+ "rmcp",
  "rpassword",
  "serde_json",
+ "sha2 0.11.0",
  "tokio",
  "tokio-tungstenite",
 ]

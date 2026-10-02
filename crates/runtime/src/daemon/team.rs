@@ -594,6 +594,9 @@ async fn connector_disconnect(
         state.connector_secrets(),
         secret_at(state, deps, agent, server).map_err(|error| internal(&error))?,
     );
+    // Held across the delete: a refresh in flight saves before it, never after (ADR 0033).
+    let lock = state.entry_lock(&at);
+    let _held = lock.lock().await;
     off_the_worker(move || {
         secrets
             .delete(&at)
@@ -3277,6 +3280,94 @@ pub(super) mod tests {
                 { "agent": "dev-a", "server": "fixture", "state": "connect_again" },
                 { "agent": "dev-b", "server": "fixture", "state": "connected", "stored_in": "keychain" },
             ])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn remove_during_a_refresh_keeps_nothing() {
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _};
+
+        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+        let fixture = runtime.block_on(crate::oauth_fixture::Fixture::start());
+        let (harness, store) = keeping("connector-remove-refreshing");
+        let mut wire = team_file(&harness);
+        wire["agents"][1]["mcp_servers"] = json!([{
+            "name": "notion", "source": "custom", "transport": "http",
+            "url": fixture.mcp_url, "oauth": {}, "tools": { "whoami": "network" }
+        }]);
+        let team = farik_core::team::validate_team(&wire).expect("a team");
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&team)
+            .expect("written");
+        let server = custom(&entry(&harness, 1, "notion").expect("notion"));
+        let now = chrono::Utc::now();
+        let (access, refresh) = fixture.mint();
+        let at = kept_at(&harness, "dev-a", "notion");
+        store
+            .save(
+                &at,
+                &ConnectorEntry {
+                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    keys: std::collections::BTreeMap::new(),
+                    oauth: Some(crate::sign_in::OAuthGrant {
+                        issuer: fixture.origin.clone(),
+                        resource: fixture.mcp_url.clone(),
+                        client_id: "client-kept".to_string(),
+                        token_endpoint: format!("{}/token", fixture.origin),
+                        revocation_endpoint: None,
+                        access_token: Secret::new(access),
+                        refresh_token: Some(Secret::new(refresh)),
+                        issued_at: now,
+                        expires_at: Some(now - chrono::Duration::minutes(1)),
+                        scopes: Vec::new(),
+                        lapsed: false,
+                    }),
+                },
+            )
+            .expect("kept");
+
+        // A session's setup is refreshing, the service not yet answering.
+        fixture.hold("token");
+        let refreshing = {
+            let (state, at, server) = (Arc::clone(&harness.daemon), at.clone(), server.clone());
+            runtime.spawn(async move {
+                crate::daemon::refreshed_entry(
+                    &state,
+                    &at,
+                    &server,
+                    std::time::Duration::from_mins(35),
+                    std::time::Duration::from_secs(30),
+                )
+                .await
+            })
+        };
+        while fixture.count("/token") == 0 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        // The user presses Remove; the service answers a moment after.
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                fixture.release("token");
+            });
+            call(
+                &harness.daemon,
+                "connector.disconnect",
+                &json!({ "agent": "dev-a", "server": "notion" }),
+                "emptyResult",
+            );
+        });
+        runtime
+            .block_on(refreshing)
+            .expect("the refresh task")
+            .expect("the refresh finished");
+        assert!(
+            store.load(&at).expect("the store reads").is_none(),
+            "the entry removed during the refresh is not put back"
         );
     }
 

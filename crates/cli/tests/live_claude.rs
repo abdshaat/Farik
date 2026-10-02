@@ -28,6 +28,7 @@ use farik_runtime::connectors::{
 };
 use farik_runtime::daemon::{DaemonConfig, DaemonState, SessionRegistration, serve};
 use farik_runtime::session::{McpServerConfig, McpTransport, SessionSkill};
+use farik_runtime::sign_in::OAuthGrant;
 use farik_runtime::transitions::Transitions;
 use farik_runtime::{
     EndReason, RuntimeAdapter, SessionEvent, SessionPurpose, SessionSpec, ToolDeps,
@@ -138,6 +139,15 @@ impl Project {
     /// server `dev-a` then has is given to its session, and connected as it is.
     #[allow(clippy::too_many_lines, reason = "one fixture, built in one place")]
     fn with_team(change: impl FnOnce(&mut Value, &Path)) -> Project {
+        Project::with_team_signed_in(change, |_| None)
+    }
+
+    /// [`Project::with_team`], each custom server connected with the sign-in `grants` gives it.
+    #[allow(clippy::too_many_lines, reason = "one fixture, built in one place")]
+    fn with_team_signed_in(
+        change: impl FnOnce(&mut Value, &Path),
+        grants: impl Fn(&CustomServer) -> Option<OAuthGrant>,
+    ) -> Project {
         let repo = TempRepo::new("live-claude");
         repo.write("note.txt", "hello live\n");
         repo.write(".env", &format!("FARIK_LIVE_SECRET={SECRET}\n"));
@@ -203,7 +213,7 @@ impl Project {
                     .iter()
                     .map(|key| (key.clone(), Secret::new(CONNECTOR_KEY.to_string())))
                     .collect(),
-                oauth: None,
+                oauth: grants(server),
             };
             store.save(&at, &entry).expect("kept");
         }
@@ -540,6 +550,91 @@ fn a_live_session_calls_a_custom_connector() {
     assert!(!called("mcp__fixture__delete_repo"));
     // The key went to the server, and to nothing the session can read.
     assert!(!run.stream.contains(CONNECTOR_KEY));
+}
+
+/// An authorization server and a protected MCP server, as the runtime's tests run them.
+#[path = "../../runtime/tests/support/oauth_fixture.rs"]
+mod oauth_fixture;
+
+#[test]
+#[ignore = "a live Claude Code session needs the founder's credential: FARIK_LIVE_TESTS=1 with \
+            ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand"]
+fn a_live_session_calls_a_signed_in_connector() {
+    if std::env::var("FARIK_LIVE_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set FARIK_LIVE_TESTS=1 to run a live Claude Code session");
+        return;
+    }
+    let env: BTreeMap<String, String> = std::env::vars().collect();
+    let credential = credential_from_env(&env)
+        .expect("FARIK_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
+    // The fixture's server runs on this runtime, kept alive for the whole test.
+    let serving = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = serving.block_on(oauth_fixture::Fixture::start());
+    let (access, refresh) = fixture.mint();
+    let granted = access.clone();
+    let url = fixture.mcp_url.clone();
+    let project = Project::with_team_signed_in(
+        |wire, _| {
+            wire["agents"][1]["mcp_servers"] = json!([{
+                "name": "fixture", "source": "custom", "transport": "http",
+                "url": url, "oauth": {}, "tools": { "whoami": "network" }
+            }]);
+        },
+        |_| {
+            let now = Utc::now();
+            Some(OAuthGrant {
+                issuer: fixture.origin.clone(),
+                resource: fixture.mcp_url.clone(),
+                client_id: "client-live".to_string(),
+                token_endpoint: format!("{}/token", fixture.origin),
+                revocation_endpoint: None,
+                access_token: Secret::new(granted.clone()),
+                refresh_token: Some(Secret::new(refresh.clone())),
+                issued_at: now,
+                expires_at: Some(now + chrono::Duration::hours(2)),
+                scopes: Vec::new(),
+                lapsed: false,
+            })
+        },
+    );
+    let mut spec = project.spec();
+    spec.mcp_servers = vec![McpServerConfig {
+        name: "fixture".to_string(),
+        transport: McpTransport::Helped {
+            url: fixture.mcp_url.clone(),
+        },
+        headers: BTreeMap::new(),
+    }];
+    spec.initial_prompt =
+        "Call the mcp__fixture__whoami tool, then reply with what it returned.".to_string();
+    let run = run(&project, spec, credential, &env);
+    let init = init_tools(&run.stream);
+    assert!(
+        init.iter().any(|tool| tool == "mcp__fixture__whoami"),
+        "the session has no mcp__fixture__whoami: {init:?}\n{}",
+        run.farik_mcp_lines()
+    );
+    assert!(
+        run.events.iter().any(
+            |event| matches!(event, SessionEvent::ToolReturned { tool, output }
+            if tool == "mcp__fixture__whoami" && output.contains("whoami-ok"))
+        ),
+        "{:?}",
+        run.events
+    );
+    // The server was sent the access token, by the headers helper and by nothing else.
+    let sent: Vec<String> = fixture
+        .requests("/mcp")
+        .into_iter()
+        .filter_map(|request| request.authorization)
+        .collect();
+    assert!(
+        sent.iter()
+            .any(|header| *header == format!("Bearer {access}")),
+        "{sent:?}"
+    );
+    // And it reached nothing the session can read.
+    assert!(!run.stream.contains(&access));
 }
 
 /// Where the plugin folders go: outside the repository, as the shipped layout has them

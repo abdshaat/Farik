@@ -111,7 +111,8 @@ pub(super) async fn run_session(
     team: &Team,
     ask: SessionAsk<'_>,
 ) -> Result<SessionEnd, OrchestratorError> {
-    let mut spec = session_spec(deps, team, &ask)?;
+    let left_out = refresh_signed_in(deps, team, &ask).await;
+    let mut spec = session_spec_without(deps, team, &ask, &left_out)?;
     let role = Role::from(ask.agent.role);
     let ids = EventIds {
         task_id: spec.task_id.clone(),
@@ -296,24 +297,94 @@ fn custom_servers(agent: &Agent) -> impl Iterator<Item = CustomServer> + '_ {
     agent.mcp_servers.iter().flatten().filter_map(custom_server)
 }
 
-/// The custom connectors `ask`'s session is given: each of the agent's that was connected on this
-/// machine as the team file has it now (ADR 0030), in a session about a task given more than one
-/// tool. One kept with another hash, or none, or whose store cannot be read, is left out, so it
-/// runs nothing and is sent no key (finding R2-B1); what the store answered is remembered, so the
-/// agent's page says why (`team.get`'s `connect_again` or `store_unavailable`).
-fn custom_connectors(deps: &OrchestratorDeps, ask: &SessionAsk<'_>) -> Vec<CustomServer> {
-    let about_a_task = matches!(
+/// Whether `ask`'s session is given the agent's custom connectors: one about a task, given more
+/// than one tool.
+fn gives_connectors(ask: &SessionAsk<'_>) -> bool {
+    matches!(
         ask.purpose,
         SessionPurpose::Refine
             | SessionPurpose::Plan
             | SessionPurpose::Explore
             | SessionPurpose::Implement
             | SessionPurpose::Verify
+    ) && ask.only_tool.is_none()
+}
+
+/// How long session setup waits for a service to refresh a sign-in.
+const SETUP_REFRESH_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How much longer than its wall clock a session's signed-in token must last.
+const SETUP_VALID_MARGIN: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Refreshes each signed-in connector of `ask`'s agent whose token would expire before the session
+/// ends (ADR 0033), so a session never starts holding a token about to die. The servers it could
+/// not refresh while their token is expired, or whose store failed, are answered, to be left out of
+/// this session alone; a grant the service ended is saved as lapsed, which leaves it out of every
+/// session until the user signs in again.
+async fn refresh_signed_in(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    ask: &SessionAsk<'_>,
+) -> BTreeSet<String> {
+    let mut left_out = BTreeSet::new();
+    if !gives_connectors(ask) {
+        return left_out;
+    }
+    let wall_clock = budget_state(
+        &deps.tools.projections,
+        team,
+        Role::from(ask.agent.role),
+        ask.contract,
+        &SessionLedger::default(),
+        deps.tools.clock.now(),
+    )
+    .map_or(
+        farik_core::budget::DEFAULT_SESSION_LIMITS.max_wall_clock,
+        |budget| budget.session_limits.max_wall_clock,
     );
-    if !about_a_task || ask.only_tool.is_some() {
+    for server in custom_servers(ask.agent).filter(|server| {
+        matches!(
+            &server.transport,
+            CustomTransport::Http { oauth: Some(_), .. }
+        )
+    }) {
+        let Ok(at) =
+            deps.daemon
+                .secret_at(deps.tools.files.root(), ask.agent.id.as_str(), &server.name)
+        else {
+            continue;
+        };
+        if let Err(crate::daemon::Fresh::Failed(_) | crate::daemon::Fresh::Store(_)) =
+            crate::daemon::refreshed_entry(
+                &deps.daemon,
+                &at,
+                &server,
+                wall_clock + SETUP_VALID_MARGIN,
+                SETUP_REFRESH_WAIT,
+            )
+            .await
+        {
+            left_out.insert(server.name.clone());
+        }
+    }
+    left_out
+}
+
+/// The custom connectors `ask`'s session is given: each of the agent's that was connected on this
+/// machine as the team file has it now (ADR 0030), in a session about a task given more than one
+/// tool. One kept with another hash, or none, or whose store cannot be read, is left out, so it
+/// runs nothing and is sent no key (finding R2-B1); what the store answered is remembered, so the
+/// agent's page says why (`team.get`'s `connect_again` or `store_unavailable`).
+fn custom_connectors(
+    deps: &OrchestratorDeps,
+    ask: &SessionAsk<'_>,
+    left_out: &BTreeSet<String>,
+) -> Vec<CustomServer> {
+    if !gives_connectors(ask) {
         return Vec::new();
     }
     custom_servers(ask.agent)
+        .filter(|server| !left_out.contains(&server.name))
         .filter(|server| {
             deps.daemon
                 .secret_at(deps.tools.files.root(), ask.agent.id.as_str(), &server.name)
@@ -737,10 +808,22 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
 /// with what the human said about its task since its last session started. A triage session and a
 /// conversation run on `TRIAGE_MODEL` at low effort, and a ceremony on it at medium effort. A
 /// session asked with one tool is given it alone, whatever the agent's tiers, and no built-in tool.
+#[cfg(test)]
 fn session_spec(
     deps: &OrchestratorDeps,
     team: &Team,
     ask: &SessionAsk<'_>,
+) -> Result<SessionSpec, OrchestratorError> {
+    session_spec_without(deps, team, ask, &BTreeSet::new())
+}
+
+/// [`session_spec`], leaving out the custom connectors `left_out` names, as a refresh that did not
+/// finish does for this session alone.
+fn session_spec_without(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    ask: &SessionAsk<'_>,
+    left_out: &BTreeSet<String>,
 ) -> Result<SessionSpec, OrchestratorError> {
     let files = &deps.tools.files;
     let role_id = Role::from(ask.agent.role);
@@ -798,7 +881,7 @@ fn session_spec(
     };
     let rules = team.rules();
     let permissions = team.permissions();
-    let custom = custom_connectors(deps, ask);
+    let custom = custom_connectors(deps, ask, left_out);
     let connectors = connector_names(deps, team, ask, &custom);
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
@@ -2884,6 +2967,264 @@ mod tests {
                 "{refused:?}"
             );
         }
+    }
+
+    /// `dev-a`'s one custom server, `notion`, signed in to the server at `url`.
+    fn signed_in_server(wire: &mut serde_json::Value, url: &str, oauth: &serde_json::Value) {
+        wire["agents"][1]["mcp_servers"] = json!([{
+            "name": "notion", "source": "custom", "transport": "http",
+            "url": url, "oauth": oauth, "tools": { "whoami": "network" }
+        }]);
+    }
+
+    /// Keeps a grant for `notion` that the fixture honours and that expires `expires_in` from now,
+    /// as the server the team file has after `change`, and answers the grant.
+    fn keep_signed_in(
+        harness: &Harness,
+        fixture: &crate::oauth_fixture::Fixture,
+        expires_in: chrono::Duration,
+        change: impl Fn(&mut farik_core::team::CustomServer),
+    ) -> crate::sign_in::OAuthGrant {
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
+
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        let mut server = agent(&team, "dev-a")
+            .mcp_servers
+            .iter()
+            .flatten()
+            .find_map(farik_core::team::custom_server)
+            .expect("notion");
+        change(&mut server);
+        let now = chrono::Utc::now();
+        let (access, refresh) = fixture.mint();
+        let grant = crate::sign_in::OAuthGrant {
+            issuer: fixture.origin.clone(),
+            resource: fixture.mcp_url.clone(),
+            client_id: "client-kept".to_string(),
+            token_endpoint: format!("{}/token", fixture.origin),
+            revocation_endpoint: Some(format!("{}/revoke", fixture.origin)),
+            access_token: crate::claude::Secret::new(access),
+            refresh_token: Some(crate::claude::Secret::new(refresh)),
+            issued_at: now,
+            expires_at: Some(now + expires_in),
+            scopes: Vec::new(),
+            lapsed: false,
+        };
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        let at = harness
+            .daemon
+            .secret_at(deps.files.root(), "dev-a", "notion")
+            .expect("an address");
+        store
+            .save(
+                &at,
+                &ConnectorEntry {
+                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    keys: std::collections::BTreeMap::new(),
+                    oauth: Some(grant.clone()),
+                },
+            )
+            .expect("kept");
+        assert!(harness.daemon.set_connector_secrets(store));
+        grant
+    }
+
+    /// The grant kept for `dev-a`'s `notion` now.
+    fn grant_kept(harness: &Harness) -> crate::sign_in::OAuthGrant {
+        let at = harness
+            .daemon
+            .secret_at(harness.project.deps.files.root(), "dev-a", "notion")
+            .expect("an address");
+        harness
+            .daemon
+            .connector_secrets()
+            .load(&at)
+            .expect("readable")
+            .expect("kept")
+            .oauth
+            .expect("a grant")
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_session_refreshes_a_token_that_would_expire_during_it() {
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        let harness = Harness::new("session-signed-refresh", |wire| {
+            signed_in_server(wire, &fixture.mcp_url, &json!({}));
+        });
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        // Ten minutes left, and the session may run thirty.
+        let old = keep_signed_in(&harness, &fixture, chrono::Duration::minutes(10), |_| {});
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        run_session(
+            deps,
+            &team,
+            dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+        )
+        .await
+        .expect("the session runs");
+
+        assert_eq!(fixture.count("/token"), 1);
+        assert_eq!(server_names(&adapter.started()[0]), ["notion"]);
+        let kept = grant_kept(&harness);
+        assert_ne!(
+            kept.refresh_token
+                .as_ref()
+                .map(crate::claude::Secret::expose),
+            old.refresh_token
+                .as_ref()
+                .map(crate::claude::Secret::expose),
+            "the rotated refresh token is kept"
+        );
+        assert!(
+            kept.expires_at.expect("an expiry")
+                > chrono::Utc::now() + chrono::Duration::minutes(35)
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_lapsed_sign_in_is_left_out() {
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        fixture.set(|flags| flags.refresh_error = Some((400, "invalid_grant".to_string())));
+        let harness = Harness::new("session-signed-lapsed", |wire| {
+            signed_in_server(wire, &fixture.mcp_url, &json!({}));
+        });
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        keep_signed_in(&harness, &fixture, chrono::Duration::minutes(10), |_| {});
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let witness = Arc::new(ExecutorWitness::probing(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+            &["mcp__notion__whoami"],
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        run_session(
+            deps,
+            &team,
+            dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+        )
+        .await
+        .expect("the session runs");
+
+        assert!(grant_kept(&harness).lapsed, "the lapse is kept");
+        assert!(server_names(&adapter.started()[0]).is_empty());
+        assert_eq!(witness.given_connectors(), [Vec::<String>::new()]);
+        let decided = &witness.decided()[0];
+        assert!(
+            decided[0].reason.starts_with("connector_not_in_session:"),
+            "{decided:?}"
+        );
+        assert!(
+            !adapter.started()[0].system_prompt.contains("`notion`"),
+            "{}",
+            adapter.started()[0].system_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_refresh_that_fails_leaves_out_only_an_expired_token() {
+        // The service errs: a token with minutes left is still used, an expired one is left out
+        // of this session, and neither grant is lapsed.
+        for (minutes, given) in [(10, vec!["notion"]), (-1, Vec::new())] {
+            let fixture = crate::oauth_fixture::Fixture::start().await;
+            fixture.set(|flags| flags.refresh_error = Some((500, "server_error".to_string())));
+            let harness = Harness::new(&format!("session-signed-errs-{minutes}"), |wire| {
+                signed_in_server(wire, &fixture.mcp_url, &json!({}));
+            });
+            harness.in_progress("FRK-1", "dev-a", "dev-b");
+            keep_signed_in(
+                &harness,
+                &fixture,
+                chrono::Duration::minutes(minutes),
+                |_| {},
+            );
+            let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+            let deps = &orchestrator.deps;
+            let team = deps.tools.files.read_team().expect("the team");
+            let contract = deps
+                .tools
+                .files
+                .read_contract(&"FRK-1".parse().expect("a task id"))
+                .expect("the contract");
+            run_session(
+                deps,
+                &team,
+                dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+            )
+            .await
+            .expect("the session runs");
+            assert_eq!(server_names(&adapter.started()[0]), given, "{minutes}");
+            assert!(!grant_kept(&harness).lapsed, "{minutes}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_changed_sign_in_setting_needs_connecting_again() {
+        // The fixture's server runs on this runtime, which `session_spec` cannot be inside of.
+        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+        let fixture = runtime.block_on(crate::oauth_fixture::Fixture::start());
+        // Connected with one scope; the team file now asks for two.
+        let harness = Harness::new("session-signed-scopes", |wire| {
+            signed_in_server(
+                wire,
+                &fixture.mcp_url,
+                &json!({ "scopes": ["read", "write"] }),
+            );
+        });
+        harness.file("FRK-1", "draft", |_| {});
+        keep_signed_in(
+            &harness,
+            &fixture,
+            chrono::Duration::minutes(120),
+            |server| {
+                if let farik_core::team::CustomTransport::Http {
+                    oauth: Some(oauth), ..
+                } = &mut server.transport
+                {
+                    oauth.scopes = vec!["read".to_string()];
+                }
+            },
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let spec = session_spec(
+            deps,
+            &team,
+            &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+        )
+        .expect("the spec");
+        assert!(server_names(&spec).is_empty());
+        assert_eq!(
+            crate::daemon::fixtures::connector_states(&harness.daemon),
+            json!([{ "agent": "dev-a", "server": "notion", "state": "connect_again",
+                     "stored_in": "keychain" }])
+        );
     }
 
     #[tokio::test]

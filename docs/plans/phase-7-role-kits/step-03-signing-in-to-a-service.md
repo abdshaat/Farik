@@ -245,7 +245,7 @@ Files: `orchestrator/session.rs`, `daemon.rs` (`entry_lock`, `Kept::Entry.signed
 - `a_changed_sign_in_setting_needs_connecting_again`: `oauth.scopes` changed in `team.yaml` leaves the server out, `connect_again`.
 - `a_live_session_calls_a_signed_in_connector` (integration, `--integration`): see Verification.
 
-- [ ] `feat(runtime): refresh a sign-in before a session needs it`
+- [x] `feat(runtime): refresh a sign-in before a session needs it`
 
 ### Task 6: Signing in through the daemon
 

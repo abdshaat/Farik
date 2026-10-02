@@ -30,6 +30,10 @@ pub mod daemon;
 pub mod exec;
 /// The forge pull requests live on, driven through the `gh` program.
 pub mod forge;
+/// An OAuth authorization server and a protected MCP server for the sign-in tests.
+#[cfg(all(test, unix))]
+#[path = "../tests/support/oauth_fixture.rs"]
+mod oauth_fixture;
 /// Farik running its team: the board read, the next thing on it done, one session at a time.
 #[cfg(unix)]
 pub mod orchestrator;
