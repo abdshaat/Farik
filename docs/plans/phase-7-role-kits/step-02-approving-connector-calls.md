@@ -1,6 +1,6 @@
 # Phase 7, step 02: Approving a connector's calls
 
-Status: draft
+Status: built; landing review pending
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 5.6, 5.7, 8.3, 8.5, 8.6; F9
 Depends on: step 01 of this phase (connectors per agent, not yet committed), whose `ConnectorRefusal::ExternalEffectRefused` this step replaces; phase 6 (merged in #19), whose `question.asked` waiting projection and Today page this step extends
@@ -53,14 +53,14 @@ crates/core/src/governor/permissions.rs                         modifies: Approv
 crates/runtime/src/daemon/hooks.rs                              modifies: call site (Task 2); ask, grant lookup and use (Task 3)
 crates/runtime/src/orchestrator/session.rs                      modifies: the aborted detail approval_needed (Task 3)
 crates/runtime/src/orchestrator/messages.rs                     modifies: the decision as the human's message (Task 3)
-crates/runtime/src/daemon/team.rs                               modifies: tool_approve, tool_refuse (Task 3)
+crates/runtime/src/orchestrator/human.rs                        modifies: tool_approve, tool_refuse, beside question_answer (Task 3; the plan named daemon/team.rs)
 docs/schemas/{event,command}.schema.json                        modifies: three events, approval on tool.called, two commands (Task 3)
 crates/protocol/src/event.rs, command.rs                        modifies: hand-written EventKind, EventBody, Command (Task 3)
 crates/store/src/waiting.rs, projections.rs                     modifies: open approvals wait on the human; open grants (Task 3)
 crates/store/src/migrations/0012_tool_approvals.sql             creates: open_approvals (Task 3)
 docs/schemas/rpc.schema.json                                    modifies: waiting row kind tool_approval (Task 3)
-crates/cli/src/human.rs, lib.rs                                 modifies: farik tool approve|refuse (Task 4)
-packages/protocol-client/src/mapping.ts                         modifies: the waiting row's camelCase mapping (Task 5)
+crates/cli/src/lib.rs                                           modifies: farik tool approve|refuse, through humans() (Task 4; human.rs needed no change)
+packages/protocol-client/src/mapping.ts                         unchanged: the row's input is a string value, and keys already map (Task 5)
 apps/web/src/pages/dialogs/ToolApproval.tsx, test               creates (Task 5)
 apps/web/src/pages/Today.tsx, Today.test.tsx                    modifies: the row (Task 5)
 apps/web/src/strings/en.ts                                      modifies: the copy (Task 5)
@@ -159,7 +159,7 @@ Files: `pages/dialogs/ToolApproval.tsx` and its test, `Today.tsx`, `Today.test.t
 
 `docs/SPEC.md`: 5.6 (an `external_effect` connector call asks; `preauthorized_external_tools` does not reach connector tools), 5.7 (an approval waits like a question), 8.3 (who can decide), 8.5 (the three events, `approval` on `tool.called`). `docs/plans/project-plan.md`: phase 7's row 02 and the approvals decision bullet, and `docs/design/role-kits.md`'s steps table, both written by the readiness commit, corrected if execution changed them.
 
-- [ ] `docs(spec): approving a connector's calls`
+- [x] `docs(spec): record approving a connector's calls`
 
 ## Verification
 
