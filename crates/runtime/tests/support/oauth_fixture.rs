@@ -57,6 +57,8 @@ pub struct Flags {
     pub revoke_status: u16,
     pub authorization_endpoint: Option<String>,
     pub metadata_redirect: Option<String>,
+    /// Where `/register` redirects to, when it does.
+    pub register_redirect: Option<String>,
     pub no_issuer: bool,
     /// What `/token` answers a refresh with, when it is not a success.
     pub refresh_error: Option<(u16, String)>,
@@ -85,6 +87,7 @@ impl Default for Flags {
             revoke_status: 200,
             authorization_endpoint: None,
             metadata_redirect: None,
+            register_redirect: None,
             no_issuer: false,
             refresh_error: None,
             keep_refresh_token: false,
@@ -344,6 +347,13 @@ async fn route(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Respo
         }
         ("POST", "/register") => {
             shared.wait_if_held("register").await;
+            if let Some(to) = &flags.register_redirect {
+                return (
+                    StatusCode::TEMPORARY_REDIRECT,
+                    [(header::LOCATION, to.clone())],
+                )
+                    .into_response();
+            }
             let Ok(body) = serde_json::from_str::<serde_json::Value>(&request.body) else {
                 return StatusCode::BAD_REQUEST.into_response();
             };

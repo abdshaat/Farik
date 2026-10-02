@@ -56,8 +56,17 @@ async fn signs_in_with_dynamic_registration() {
     assert_eq!(sign_in.issuer(), fixture.origin);
     let url = sign_in.authorize_url().to_string();
     let finishing = tokio::spawn(sign_in.finish());
-    follow(&url).await;
+    let page = follow(&url).await;
     let grant = finishing.await.expect("task").expect("signed in");
+    assert!(
+        page.page.contains("<h1>You&#39;re signed in to "),
+        "{}",
+        page.page
+    );
+    assert!(
+        page.page
+            .contains("<p>You can close this tab and go back to Farik.</p>")
+    );
 
     let registered: serde_json::Value =
         serde_json::from_str(&fixture.requests("/register")[0].body).expect("json");
@@ -265,6 +274,33 @@ async fn refuses_another_issuer_or_a_missing_one_when_promised() {
         SignInError::Mismatch,
         "not Denied"
     );
+
+    let fixture = Fixture::start().await;
+    fixture.set(|flags| {
+        flags.access_denied = true;
+        flags.iss = Iss::Absent;
+        flags.iss_promised = true;
+    });
+    assert_eq!(
+        sign_in_with(&fixture, &auto())
+            .await
+            .expect_err("no issuer on an error, though promised"),
+        SignInError::Mismatch,
+        "not Denied"
+    );
+}
+
+#[tokio::test]
+async fn refuses_metadata_without_an_issuer() {
+    let fixture = Fixture::start().await;
+    fixture.set(|flags| {
+        flags.no_issuer = true;
+    });
+    let refused = start_sign_in(&fixture.mcp_url, &auto(), Utc::now())
+        .await
+        .expect_err("no issuer");
+    assert!(matches!(refused, SignInError::Failed(_)), "{refused:?}");
+    assert_eq!(fixture.count("/register"), 0);
 }
 
 #[tokio::test]
@@ -290,6 +326,19 @@ async fn answers_one_callback_then_closes() {
     let finishing = tokio::spawn(sign_in.finish());
     let other = callback(&format!("http://{addr}/other")).await;
     assert_eq!(other.status, 404);
+    // Only a GET is the callback: a POST with the right state is not.
+    let state = reqwest::Url::parse(&url)
+        .expect("the address")
+        .query_pairs()
+        .find(|(name, _)| name == "state")
+        .map(|(_, value)| value.into_owned())
+        .expect("a state");
+    let posted = reqwest::Client::new()
+        .post(format!("http://{addr}/callback?state={state}&code=x"))
+        .send()
+        .await
+        .expect("answered");
+    assert_eq!(posted.status().as_u16(), 404);
     follow(&url).await;
     finishing.await.expect("task").expect("still completes");
     assert!(
@@ -312,6 +361,13 @@ async fn the_callback_page_quotes_nothing() {
     let finishing = tokio::spawn(sign_in.finish());
     let page = follow(&url).await;
     finishing.await.expect("task").expect_err("denied");
+    assert!(page.page.contains("<img alt=\"Farik\""), "{}", page.page);
+    assert!(
+        page.page
+            .contains("<h1>Farik couldn&#39;t finish signing in:"),
+        "{}",
+        page.page
+    );
     assert!(
         !page.page.contains("<b>x</b>") && !page.page.contains("x</b>"),
         "{}",
@@ -324,7 +380,10 @@ async fn the_callback_page_quotes_nothing() {
     );
     for (name, value) in [
         ("content-type", "text/html; charset=utf-8"),
-        ("content-security-policy", "default-src 'none'"),
+        (
+            "content-security-policy",
+            "default-src 'none'; img-src data:",
+        ),
         ("cache-control", "no-store"),
         ("referrer-policy", "no-referrer"),
     ] {
@@ -428,6 +487,21 @@ async fn refuses_an_endpoint_that_is_not_https() {
         .await
         .expect_err("redirected to http");
     assert!(matches!(refused, SignInError::Failed(_)), "{refused:?}");
+    // A registration that redirects to plain http is refused at that hop, and says so.
+    let fixture = Fixture::start().await;
+    fixture.set(|flags| {
+        flags.register_redirect = Some("http://auth.example/register".to_string());
+    });
+    let refused = start_sign_in(&fixture.mcp_url, &auto(), Utc::now())
+        .await
+        .expect_err("registration redirected to http");
+    let SignInError::Failed(message) = refused else {
+        panic!("{refused:?}")
+    };
+    assert!(
+        message.contains("http://auth.example/register is not https"),
+        "{message}"
+    );
     // The server itself is not https either.
     let refused = start_sign_in("http://mcp.example.com/mcp", &auto(), Utc::now())
         .await

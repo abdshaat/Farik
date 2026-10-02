@@ -335,20 +335,22 @@ impl SignIn {
             .map_err(|_| SignInError::TimedOut)??;
         let outcome = self.complete(&params).await;
         let host = host_of(&self.issuer);
-        let (status, text) = match &outcome {
+        let (status, headline, rest) = match &outcome {
             Ok(_) => (
                 200,
-                format!("You're signed in to {host}. You can close this tab and go back to Farik."),
+                format!("You're signed in to {host}."),
+                "You can close this tab and go back to Farik.",
             ),
             Err(error) => (
                 400,
                 format!(
-                    "Farik couldn't finish signing in: {}. Close this tab and try again in Farik.",
+                    "Farik couldn't finish signing in: {}.",
                     error.sentence(&host)
                 ),
+                "Close this tab and try again in Farik.",
             ),
         };
-        let _ = respond(&mut stream, status, &text).await;
+        let _ = respond(&mut stream, status, &headline, rest).await;
         outcome
     }
 
@@ -434,30 +436,50 @@ impl SignInError {
     }
 }
 
-/// Minimal HTML for a tab: a sentence, no link, no script, nothing the service sent.
-fn page(text: &str) -> String {
-    let text = text
-        .replace('&', "&amp;")
+fn escaped(text: &str) -> String {
+    text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
-        .replace('\'', "&#39;");
+        .replace('\'', "&#39;")
+}
+
+/// Minimal HTML for a tab, as the board draws it: the mark, a headline and a sentence, no link,
+/// no script, nothing the service sent. The mark is inline, so the page fetches nothing.
+fn page(headline: &str, rest: &str) -> String {
+    use base64::Engine as _;
+
+    let mark = base64::engine::general_purpose::STANDARD.encode(include_bytes!(
+        "../../../packages/brand/assets/icons/icon-48.png"
+    ));
+    let rest = if rest.is_empty() {
+        String::new()
+    } else {
+        format!("<p>{}</p>", escaped(rest))
+    };
     format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Farik</title></head>\
-         <body><h1>Farik</h1><p>{text}</p></body></html>"
+         <body><img alt=\"Farik\" width=\"48\" height=\"48\" src=\"data:image/png;base64,{mark}\">\
+         <h1>{}</h1>{rest}</body></html>",
+        escaped(headline)
     )
 }
 
-async fn respond(stream: &mut TcpStream, status: u16, text: &str) -> std::io::Result<()> {
+async fn respond(
+    stream: &mut TcpStream,
+    status: u16,
+    headline: &str,
+    rest: &str,
+) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
         _ => "Not Found",
     };
-    let body = page(text);
+    let body = page(headline, rest);
     let head = format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: text/html; charset=utf-8\r\n\
-         Content-Security-Policy: default-src 'none'\r\nCache-Control: no-store\r\n\
+         Content-Security-Policy: default-src 'none'; img-src data:\r\nCache-Control: no-store\r\n\
          Referrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
@@ -494,11 +516,11 @@ async fn serve_connection(
         words.next().unwrap_or_default(),
     );
     let Ok(url) = Url::parse(&format!("http://localhost{target}")) else {
-        let _ = respond(&mut stream, 404, "Not found.").await;
+        let _ = respond(&mut stream, 404, "Not found.", "").await;
         return;
     };
     if method != "GET" || url.path() != "/callback" {
-        let _ = respond(&mut stream, 404, "Not found.").await;
+        let _ = respond(&mut stream, 404, "Not found.", "").await;
         return;
     }
     let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
@@ -507,6 +529,7 @@ async fn serve_connection(
             &mut stream,
             400,
             "This is not the page Farik is waiting for.",
+            "",
         )
         .await;
         return;
@@ -946,5 +969,36 @@ impl OAuthGrant {
                 .collect(),
             lapsed: value["lapsed"].as_bool().unwrap_or(false),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// rmcp refuses metadata without an issuer before Farik's own check runs, so the check is
+    /// held up directly: the plan lists it as Farik's.
+    #[test]
+    fn refuses_metadata_that_does_not_name_its_issuer() {
+        let mut metadata: AuthorizationMetadata = serde_json::from_value(serde_json::json!({
+            "authorization_endpoint": "https://auth.example/authorize",
+            "token_endpoint": "https://auth.example/token",
+            "registration_endpoint": "https://auth.example/register",
+            "code_challenge_methods_supported": ["S256"],
+        }))
+        .expect("metadata");
+        let settings = OAuthSettings {
+            client_id: None,
+            callback_port: None,
+            scopes: Vec::new(),
+        };
+        assert_eq!(
+            check_metadata(&metadata, &settings),
+            Err(SignInError::Failed(
+                "the service did not say who it is".to_string()
+            ))
+        );
+        metadata.issuer = Some("https://auth.example".to_string());
+        assert_eq!(check_metadata(&metadata, &settings), Ok(()));
     }
 }
