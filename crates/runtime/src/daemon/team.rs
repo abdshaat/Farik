@@ -219,7 +219,7 @@ fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team) -> Vec<Va
             let kept = secret_at(deps, agent, &server.name)
                 .map_or(Kept::Unavailable, |at| state.kept(&at));
             let shown = match kept {
-                Kept::Hash(kept) if kept == spec_sha256(&server) => "connected",
+                kept if kept.runs(&server) => "connected",
                 Kept::Unavailable => "store_unavailable",
                 _ => "connect_again",
             };

@@ -168,12 +168,28 @@ pub struct DaemonState {
 /// What the connector store held for one agent's server the last time Farik read it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Kept {
-    /// An entry, connected as the definition this is the `spec_sha256` of.
-    Hash(String),
+    /// An entry, connected as the definition this is the `spec_sha256` of, with these keys.
+    Entry {
+        /// The hash of the definition connected.
+        spec_sha256: String,
+        /// The names of the keys kept.
+        keys: std::collections::BTreeSet<String>,
+    },
     /// No entry.
     Nothing,
     /// The store could not be read.
     Unavailable,
+}
+
+impl Kept {
+    /// Whether `server` runs from what was kept: connected as the team file has it now, with
+    /// every key it names. Short of a key, its launcher or headers helper would be refused, and
+    /// Claude Code connects an http server without its headers then (finding I2).
+    pub(crate) fn runs(&self, server: &farik_core::team::CustomServer) -> bool {
+        matches!(self, Kept::Entry { spec_sha256, keys }
+            if *spec_sha256 == farik_core::team::spec_sha256(server)
+                && server.credential_keys.iter().all(|key| keys.contains(key)))
+    }
 }
 
 impl DaemonState {
@@ -232,7 +248,10 @@ impl DaemonState {
     /// page rather than leaving the server out unsaid.
     pub(crate) fn read_kept(&self, at: &SecretAt) -> Kept {
         let kept = match self.connector_secrets().load(at) {
-            Ok(Some(entry)) => Kept::Hash(entry.spec_sha256),
+            Ok(Some(entry)) => Kept::Entry {
+                keys: entry.keys.into_keys().collect(),
+                spec_sha256: entry.spec_sha256,
+            },
             Ok(None) => Kept::Nothing,
             Err(_) => Kept::Unavailable,
         };
@@ -816,8 +835,24 @@ async fn connector_launch(
 /// A refusal of the launch route: its status, and the reason's kind, `: `, and what it says.
 type Refusal = (StatusCode, String);
 
-/// The launch route's answer, or its refusal. No refusal names a key's value.
+/// The launch route's answer, or its refusal. A server refused is taken from the session, so the
+/// hook denies its calls `connector_not_in_session`: Claude Code connects an http server without
+/// its headers when the helper fails, and would offer its tools (finding I2).
 fn launch(state: &DaemonState, asked: &LaunchAsk) -> Result<Value, Refusal> {
+    let answer = launch_answer(state, asked);
+    if answer.is_err()
+        && let Some(session) = state.sessions().get_mut(&asked.session)
+    {
+        session
+            .registration
+            .connectors
+            .retain(|connector| connector.server != asked.server);
+    }
+    answer
+}
+
+/// What the launch route answers for `asked`. No refusal names a key's value.
+fn launch_answer(state: &DaemonState, asked: &LaunchAsk) -> Result<Value, Refusal> {
     use crate::connectors::{ConnectorError, confirmed_entry, launch_headers, launch_spec};
     use farik_core::team::CustomTransport;
 
@@ -1752,6 +1787,7 @@ mod tests {
         assert!(body.starts_with("connector_not_confirmed:"), "{body}");
         // So is an entry as connected but without a key the server names: nothing is launched
         // short of its keys.
+        let daemon = launching("launch-key-missing", false, false);
         let team = daemon.project.deps.files.read_team().expect("the team");
         for server in team.agents[1]
             .mcp_servers
@@ -1786,8 +1822,53 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn launch_answers_503_when_the_store_fails() {
         let daemon = launching("launch-store-fails", true, true);
-        let (status, body) = launch(&daemon, "session-custom", "github").await;
+        let (status, body) = launch(&daemon, "session-custom", "linear").await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
         assert!(body.starts_with("secret_store_unavailable:"), "{body}");
+        // Claude Code connects an http server without its headers when the helper fails (finding
+        // I2): the server refused is taken from the session, so the hook denies its calls.
+        assert_eq!(given(&daemon, "session-custom"), ["github"]);
+        let decision = super::hooks::decide_pre_tool_use(
+            &daemon.call("session-custom", "mcp__linear__search", &json!({})),
+            &daemon.state,
+        );
+        assert!(
+            decision.reason.starts_with("connector_not_in_session:"),
+            "{decision:?}"
+        );
+    }
+
+    /// The servers `session` is given now.
+    fn given(daemon: &TestDaemon, session: &str) -> Vec<String> {
+        daemon.state.sessions()[session]
+            .registration
+            .connectors
+            .iter()
+            .map(|connector| connector.server.clone())
+            .collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_refused_launch_takes_the_server_from_the_session() {
+        // Changed since connect: refused, and taken away.
+        let daemon = launching("launch-takes-away", true, false);
+        let team = crate::tools::fixtures::a_team_of_three(|wire| {
+            wire["agents"][1]["mcp_servers"] = custom_servers();
+            wire["agents"][1]["mcp_servers"][1]["url"] = json!("https://attacker.example/mcp");
+        });
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&team)
+            .expect("the team is changed");
+        let (status, _) = launch(&daemon, "session-custom", "linear").await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(given(&daemon, "session-custom"), ["github"]);
+        // A launch that works leaves the session as it was.
+        let (status, body) = launch(&daemon, "session-custom", "github").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(given(&daemon, "session-custom"), ["github"]);
     }
 }

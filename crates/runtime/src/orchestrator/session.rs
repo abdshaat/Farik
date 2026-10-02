@@ -16,7 +16,6 @@ use farik_core::governor::transition_table::TransitionActor;
 use farik_core::pricing::Usage;
 use farik_core::team::{
     Agent, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team, custom_server,
-    spec_sha256,
 };
 use farik_protocol::event::{
     AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
@@ -35,7 +34,6 @@ use crate::channel::post_system;
 use crate::claude::allowed_builtins;
 use crate::connectors::SecretAt;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
-use crate::daemon::Kept;
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
 use crate::preview::{
@@ -315,7 +313,7 @@ fn custom_connectors(deps: &OrchestratorDeps, ask: &SessionAsk<'_>) -> Vec<Custo
     custom_servers(ask.agent)
         .filter(|server| {
             SecretAt::of(deps.tools.files.root(), ask.agent.id.as_str(), &server.name)
-                .is_ok_and(|at| deps.daemon.read_kept(&at) == Kept::Hash(spec_sha256(server)))
+                .is_ok_and(|at| deps.daemon.read_kept(&at).runs(server))
         })
         .collect()
 }
@@ -2341,18 +2339,48 @@ mod tests {
             // `jira`, never connected on this machine.
             let mut jira = wire["agents"][1]["mcp_servers"][1].clone();
             jira["name"] = json!("jira");
-            wire["agents"][1]["mcp_servers"]
+            // `asana`, connected as it is, but its key is not kept: its helper would fail, and
+            // Claude Code would connect it without its headers (finding I2).
+            let mut asana = jira.clone();
+            asana["name"] = json!("asana");
+            let servers = wire["agents"][1]["mcp_servers"]
                 .as_array_mut()
-                .expect("a list")
-                .push(jira);
+                .expect("a list");
+            servers.push(jira);
+            servers.push(asana);
         });
         harness.in_progress("FRK-1", "dev-a", "dev-b");
         // `linear` was connected at another address than the team file now names.
-        connect(&harness, &["github", "linear"], |server| {
-            if let farik_core::team::CustomTransport::Http { url, .. } = &mut server.transport {
+        connect(&harness, &["github", "linear", "asana"], |server| {
+            if let farik_core::team::CustomTransport::Http { url, .. } = &mut server.transport
+                && server.name == "linear"
+            {
                 *url = "https://mcp.linear.example/old".to_string();
             }
         });
+        {
+            use crate::connectors::{ConnectorEntry, SecretAt};
+            let deps = &harness.project.deps;
+            let team = deps.files.read_team().expect("the team");
+            let asana = agent(&team, "dev-a")
+                .mcp_servers
+                .iter()
+                .flatten()
+                .filter_map(farik_core::team::custom_server)
+                .find(|server| server.name == "asana")
+                .expect("asana");
+            harness
+                .daemon
+                .connector_secrets()
+                .save(
+                    &SecretAt::of(deps.files.root(), "dev-a", "asana").expect("an address"),
+                    &ConnectorEntry {
+                        spec_sha256: farik_core::team::spec_sha256(&asana),
+                        keys: std::collections::BTreeMap::new(),
+                    },
+                )
+                .expect("kept");
+        }
         let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
         let witness = Arc::new(ExecutorWitness::probing(
             adapter.clone(),
@@ -2361,6 +2389,7 @@ mod tests {
                 "mcp__github__search_issues",
                 "mcp__linear__search",
                 "mcp__jira__search",
+                "mcp__asana__search",
             ],
         ));
         let orchestrator = harness.orchestrator(witness.clone());
@@ -2383,7 +2412,8 @@ mod tests {
         assert_eq!(server_names(&started[0]), ["github"]);
         assert!(
             !started[0].system_prompt.contains("`linear`")
-                && !started[0].system_prompt.contains("`jira`"),
+                && !started[0].system_prompt.contains("`jira`")
+                && !started[0].system_prompt.contains("`asana`"),
             "{}",
             started[0].system_prompt
         );
