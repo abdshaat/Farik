@@ -375,6 +375,18 @@ describe("connectors on the agent page", () => {
 		}
 	});
 
+	it("agent_edit_advanced_says_where_a_command_runs", async () => {
+		const { container } = await opened();
+		expect(screen.queryByText(/More connectors arrive/)).toBeNull();
+		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		expect(
+			screen.getByText(
+				/It runs in a folder Farik keeps for it, so give a file of yours by its full path, starting with \/\./,
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
 	it("agent_edit_says_a_refused_remove_in_plain_words", async () => {
 		const { container, s } = await opened();
 		fireEvent.click(

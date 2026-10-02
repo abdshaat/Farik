@@ -1095,7 +1095,7 @@ export const en = {
 	connectorOff:
 		"Without it {name} cannot look at your app, so Farik gives {name} no work.",
 	connectorsNote:
-		"On for a UI/UX Designer. You can turn it on for anyone else. More connectors arrive in a later version.",
+		"On for a UI/UX Designer. You can turn it on for anyone else.",
 	connectorsYours: "Added by you",
 	connectorsYoursLead:
 		"connectors Farik has not checked; you labelled their tools",
@@ -1127,7 +1127,7 @@ export const en = {
 	connectorKeep: "Keep it",
 	connectorCustom: "A custom connector",
 	connectorCustomNote:
-		"Any connector, by the command that starts it or its web address. Farik has not checked it, so you label each of its tools yourself. A connector started by a command runs on this computer with your rights, so add only one you trust.",
+		"Any connector, by the command that starts it or its web address. Farik has not checked it, so you label each of its tools yourself. A connector started by a command runs on this computer with your rights, so add only one you trust. It runs in a folder Farik keeps for it, so give a file of yours by its full path, starting with /.",
 	connectorCustomAdd: "Add a custom connector",
 	connectorCustomKeychain:
 		"If your computer asks whether Farik may use the keychain, choose “Always”, or the connector cannot start.",
