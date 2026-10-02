@@ -83,7 +83,7 @@ The task stays `in_progress` from step 1 to step 4. The plan gate adds events, n
 "Just enough, built to grow": the base phase 7 extends, not a special case it replaces.
 
 - **Per agent in the team file.** An agent gains `mcp_servers: [{ name, source }]`. Step 12 accepts one `source`, `builtin`, and one built-in, `playwright`. `team.propose` gives it to the Designer. The agent editor lists an agent's connectors with a switch for each built-in. It is on by default for the Designer only, and any agent may have it.
-- **The built-in's definition** ships in the `farik` binary, at `crates/roles/connectors/playwright.yaml`:
+- **The built-in's definition** ships in the `farik` binary, as the `container` connector `playwright` of the Designer's kit, `roles/ui_ux_designer/kit.yaml` (moved there in phase 7 step 05, ADR 0036; it was `crates/roles/connectors/playwright.yaml`):
   - the server: the official Playwright MCP server's container image, pinned by digest;
   - its arguments: headless, isolated, `--allowed-origins` set to the preview's origin, and an output folder in the session's folder;
   - its tool list, pinned;

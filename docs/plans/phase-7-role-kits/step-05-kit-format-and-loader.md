@@ -231,7 +231,7 @@ Files: as the file map's Task 8 lines.
 
 `docs/SPEC.md` 6.7 (the kit file and its refusals, kit skills, connecting by name, kit entries, stale and dropped entries, the pins, the Designer's browser in its kit, and the copy rule: Farik's own words never say "MCP", "OAuth" or "token"; a service's own label may be quoted in a kit's `setup` and only there, as defined in Decisions), 5.6 (a kit's tags, the built-in's new place), 8.1 (`farik-roles` holds the kits), 8.2 (kit entries in sessions, kit skills), F9. `docs/plans/project-plan.md` row 05, corrected if execution changed it; `docs/design/role-kits.md` (the kit's `labels`, `package_not_pinned`; the quoted-label rule is already there) and `designer-chats-templates.md`, the browser's file.
 
-- [ ] `docs(spec): record the kit format and loader`
+- [x] `docs(spec): record the kit format and loader`
 
 ## Verification
 
