@@ -801,6 +801,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         | "settings.defaults" | "skills.list" | "skill.get" => {
             team::query(state, deps, name, params)
         }
+        "allowances.list" => board::allowances(state, deps),
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
         name if templates::QUERIES.contains(&name) => templates::query(state, deps, name, params),
         _ => gates::query(deps, name, params),

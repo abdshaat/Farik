@@ -6,14 +6,16 @@
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
-use farik_core::contract::{TaskId, TaskStatus};
+use farik_core::contract::{Role, TaskId, TaskStatus};
 use farik_core::sprint::Sprint;
-use farik_core::team::AgentStatus;
+use farik_core::team::{AgentStatus, custom_server};
 use farik_protocol::event::{EventBody, EventKind, FarikEvent, MessageKind};
 use farik_store::{CostScope, CostWindow, EventQuery, HarnessMetrics, TaskProjection};
 use serde_json::{Value, json};
 
+use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, UNKNOWN_QUERY};
+use crate::allowances::{AllowancePeriod, allowance_period};
 use crate::chat::{ChatWaiting, chat_page, chat_waiting};
 use crate::tools::ToolDeps;
 
@@ -457,6 +459,72 @@ fn costs_summary(deps: &ToolDeps) -> Result<Value, Failure> {
             })
             .collect::<Vec<_>>(),
     }))
+}
+
+/// `allowances.list {}`: each allowance of a connected kit connector of an active agent with the
+/// calls made of its tool this period, counted as the hook counts them (ADR 0037): through the
+/// daemon's counts, so the page and the hook never disagree. The period is the open sprint's, or
+/// else the UTC day's.
+pub(super) fn allowances(state: &DaemonState, deps: &ToolDeps) -> Result<Value, Failure> {
+    deps.projections.catch_up().map_err(|e| internal(&e))?;
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    let period = allowance_period(&deps.log, &deps.projections, deps.clock.now())
+        .map_err(|e| internal(&e))?;
+    let connected: Vec<(String, String)> = super::team::connector_states(state, deps, &team)
+        .into_iter()
+        .filter(|row| row["state"] == "connected" && row["source"] == "kit")
+        .map(|row| {
+            (
+                row["agent"].as_str().unwrap_or_default().to_string(),
+                row["server"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    let mut rows = Vec::new();
+    for agent in team
+        .agents
+        .iter()
+        .filter(|agent| agent.status == AgentStatus::Active)
+    {
+        let kit = (deps.kits)(Role::from(agent.role)).ok();
+        for server in agent.mcp_servers.iter().flatten().filter_map(custom_server) {
+            let id = agent.id.as_str();
+            if !connected.contains(&(id.to_string(), server.name.clone())) {
+                continue;
+            }
+            for (tool, of) in &server.allowances {
+                let what = kit
+                    .as_ref()
+                    .and_then(|kit| kit_what(kit, &server.name, tool))
+                    .unwrap_or_default();
+                let used = state
+                    .allowance_counts()
+                    .used(&deps.log, &period, id, &server.name, tool)
+                    .map_err(|e| internal(&e))?;
+                rows.push(json!({
+                    "agent": id, "server": server.name, "tool": tool,
+                    "what": what, "used": used, "of": of,
+                }));
+            }
+        }
+    }
+    let period = match &period {
+        AllowancePeriod::Sprint { sprint_id, .. } => {
+            json!({ "kind": "sprint", "sprint_id": sprint_id })
+        }
+        AllowancePeriod::Day { day, .. } => json!({ "kind": "day", "day": day.to_string() }),
+    };
+    Ok(json!({ "period": period, "rows": rows }))
+}
+
+/// The kit's plural noun for what a call of `tool` of its service `server` makes.
+fn kit_what(kit: &farik_roles::Kit, server: &str, tool: &str) -> Option<String> {
+    kit.connectors.iter().find_map(|connector| match connector {
+        farik_roles::KitConnector::Server {
+            entry, allowances, ..
+        } if entry.name.as_str() == server => allowances.get(tool).map(|offer| offer.what.clone()),
+        _ => None,
+    })
 }
 
 /// `metrics { sprint_id? }`'s wire, built here from `HarnessMetrics`, which has no wire of its own.

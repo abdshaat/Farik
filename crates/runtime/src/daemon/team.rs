@@ -348,7 +348,7 @@ pub(crate) fn secret_at(
 /// Each agent's custom servers in `team` and whether each runs: `connected` when the definition
 /// kept beside its keys is the team file's, `store_unavailable` when the store could not be read
 /// the last time it was, and `connect_again` otherwise.
-fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team) -> Vec<Value> {
+pub(super) fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team) -> Vec<Value> {
     team.agents
         .iter()
         .flat_map(|agent| {
@@ -4229,6 +4229,126 @@ pub(super) mod tests {
             row["allowances"],
             json!([{ "tool": "make", "calls": 20, "what": "pictures" }])
         );
+    }
+
+    /// `dev-a`'s `make` of the fixture kit, called `n` times by the hook, the last of them under
+    /// the human's grant when `granted`.
+    fn made(harness: &Harness, n: u32, granted: bool) {
+        for call in 0..n {
+            let mut body = json!({
+                "tool": "mcp__fixture__make", "input": "{}", "server": "fixture",
+                "tag": "external_effect",
+            });
+            if granted && call + 1 == n {
+                body["approval"] = json!(5);
+            }
+            harness
+                .project
+                .record_by(Some("dev-a"), at(), "", "tool.called", &body);
+        }
+    }
+
+    fn allowance_rows(harness: &Harness) -> Value {
+        query(
+            &harness.daemon,
+            "allowances.list",
+            &json!({}),
+            "allowancesListResult",
+        )
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_each_allowance_with_its_use_and_period() {
+        let (harness, _) = keeping_an_allowance_kit("allow-list");
+        connected(&harness, "dev-a", &kit_server(), &json!({}));
+        harness.open_sprint("S1", &[]);
+        made(&harness, 3, false);
+        assert_eq!(
+            allowance_rows(&harness),
+            json!({
+                "period": { "kind": "sprint", "sprint_id": "S1" },
+                "rows": [{
+                    "agent": "dev-a", "server": "fixture", "tool": "make",
+                    "what": "pictures", "used": 3, "of": 20
+                }]
+            })
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn matches_the_tool_called_events() {
+        let (harness, _) = keeping_an_allowance_kit("allow-list-events");
+        connected(&harness, "dev-a", &kit_server(), &json!({}));
+        made(&harness, 4, true);
+        // Another agent's call, and another tool's, are not dev-a's make.
+        harness.project.record_by(
+            Some("dev-b"),
+            at(),
+            "",
+            "tool.called",
+            &json!({ "tool": "mcp__fixture__make", "input": "{}", "server": "fixture" }),
+        );
+        harness.project.record_by(
+            Some("dev-a"),
+            at(),
+            "",
+            "tool.called",
+            &json!({ "tool": "mcp__fixture__post", "input": "{}", "server": "fixture" }),
+        );
+        let listed = allowance_rows(&harness);
+        assert_eq!(listed["rows"][0]["used"], 4, "{listed}");
+        let counted = harness
+            .project
+            .events(&[EventKind::ToolCalled])
+            .iter()
+            .filter(|event| {
+                event.envelope.ids.agent_id.as_deref() == Some("dev-a")
+                    && matches!(&event.body, farik_protocol::event::EventBody::ToolCalled(body)
+                        if body.tool == "mcp__fixture__make")
+            })
+            .count();
+        assert_eq!(counted, 4, "a granted call is among them");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn says_the_day_with_no_sprint_open() {
+        let (harness, _) = keeping_an_allowance_kit("allow-list-day");
+        connected(&harness, "dev-a", &kit_server(), &json!({}));
+        let listed = allowance_rows(&harness);
+        assert_eq!(
+            listed["period"],
+            json!({ "kind": "day", "day": "2026-09-22" })
+        );
+        assert_eq!(listed["rows"][0]["used"], 0);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn leaves_out_an_unconfirmed_entry_and_a_paused_agent() {
+        let (harness, _) = keeping_an_allowance_kit("allow-list-left-out");
+        connected(&harness, "dev-a", &kit_server(), &json!({}));
+        connected(&harness, "dev-b", &kit_server(), &json!({}));
+        assert_eq!(
+            allowance_rows(&harness)["rows"].as_array().map(Vec::len),
+            Some(2)
+        );
+        let mut team = team_file(&harness);
+        // dev-a's entry edited by hand, and dev-b paused.
+        team["agents"][1]["mcp_servers"][0]["args"]
+            .as_array_mut()
+            .expect("args")
+            .push(json!("--elsewhere"));
+        team["agents"][2]["status"] = json!("paused");
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&farik_core::team::validate_team(&team).expect("a team"))
+            .expect("the team is written");
+        assert_eq!(allowance_rows(&harness)["rows"], json!([]));
     }
 
     #[test]

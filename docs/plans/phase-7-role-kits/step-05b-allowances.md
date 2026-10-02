@@ -148,7 +148,7 @@ Files: `daemon/board.rs`, `rpc.schema.json`.
 - `says_the_day_with_no_sprint_open`: `{ kind: "day", day: "<today, UTC>" }`.
 - `leaves_out_an_unconfirmed_entry_and_a_paused_agent`.
 
-- [ ] `feat(runtime): answer each allowance's use`
+- [x] `feat(runtime): answer each allowance's use`
 
 ### Task 6: The screens
 
