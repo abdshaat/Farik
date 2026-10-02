@@ -415,24 +415,113 @@ fn header_error(header: &str, template: &str, keys: &[&str]) -> Option<String> {
 }
 
 /// Whether a header's name says it carries a credential: `Authorization`, `Cookie`, or a name
-/// holding `key`, `token`, `secret` or `auth`, in any case.
+/// with a word such as `key`, `token`, `secret`, `auth` or `password`, in any case. Words are split
+/// at `-` and `_`, so `X-Monkey` is no credential.
 fn names_a_secret(header: &str) -> bool {
-    let header = header.to_ascii_lowercase();
-    ["key", "token", "secret", "auth", "cookie"]
-        .iter()
-        .any(|word| header.contains(word))
+    header.to_ascii_lowercase().split(['-', '_']).any(|word| {
+        matches!(
+            word,
+            "authorization"
+                | "cookie"
+                | "key"
+                | "apikey"
+                | "token"
+                | "secret"
+                | "auth"
+                | "password"
+                | "passwd"
+                | "pass"
+                | "credential"
+                | "credentials"
+        )
+    })
+}
+
+/// Whether a flag or variable's name says its value is a key (re-review 2 m3): its last word, at
+/// `-` and `_`, is `token`, `password`, `secret`, `auth`, `pat` or `credentials`, or it is
+/// `api-key`, `apikey`, `access-key` or `secret-key`. A lone `key`, `sort-key` or `primary-key`
+/// names a setting; so does `no-auth`.
+fn flag_names_a_key(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let words: Vec<&str> = name.split(['-', '_']).filter(|w| !w.is_empty()).collect();
+    match words.as_slice() {
+        ["no", ..] | [] => false,
+        [.., before, "key"] => matches!(*before, "api" | "access" | "secret"),
+        [.., last] => matches!(
+            *last,
+            "apikey"
+                | "token"
+                | "password"
+                | "passwd"
+                | "pass"
+                | "secret"
+                | "auth"
+                | "pat"
+                | "credential"
+                | "credentials"
+        ),
+    }
+}
+
+/// Whether `value`, given to a flag that names a key, is a key: not empty, and not a number,
+/// which a setting such as `--max-token 4096` takes.
+fn is_a_value(value: &str) -> bool {
+    !value.is_empty() && !value.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Whether one argument holds a key by itself: a well-known service's key, such as `sk-…`,
+/// `sk_live_…`, `ghp_…` or `AKIA…`; a credential header with its value, as `mcp-remote` takes after
+/// `--header`; or `NAME=value` where `NAME` names a key.
+fn arg_is_a_key(arg: &str) -> bool {
+    let prefixed = [
+        "sk-",
+        "sk_live_",
+        "sk_test_",
+        "rk_live_",
+        "rk_test_",
+        "ghp_",
+        "gho_",
+        "ghs_",
+        "github_pat_",
+        "glpat-",
+        "xoxb-",
+        "xoxp-",
+    ]
+    .iter()
+    .any(|prefix| arg.starts_with(prefix));
+    let aws = arg.len() == 20
+        && arg.starts_with("AKIA")
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+    let header = arg.split_once(':').is_some_and(|(name, value)| {
+        !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            && names_a_secret(name)
+            && !value.trim().is_empty()
+    });
+    let variable = arg.split_once('=').is_some_and(|(name, value)| {
+        !name.starts_with('-') && flag_names_a_key(name) && is_a_value(value)
+    });
+    prefixed || aws || header || variable
 }
 
 /// Whether a credential header's template holds text that may be a value (re-review N4). Split at
 /// spaces and `;`, each piece is a `{KEY}`, a `name={KEY}`, or, first, a scheme of letters alone,
-/// such as `Bearer`.
+/// such as `Bearer` or `OAuth2`.
 fn holds_a_value(template: &str) -> bool {
     template
         .split([' ', ';'])
         .filter(|piece| !piece.is_empty())
         .enumerate()
         .any(|(index, piece)| match piece.split_once('{') {
-            None => index > 0 || !piece.chars().all(|c| c.is_ascii_alphabetic()),
+            None => {
+                index > 0
+                    || !piece.starts_with(|c: char| c.is_ascii_alphabetic())
+                    || !piece.chars().all(|c| c.is_ascii_alphanumeric())
+            }
             Some((before, after)) => {
                 let name = before.strip_suffix('=').unwrap_or(before);
                 let names = before.is_empty()
@@ -449,43 +538,28 @@ fn holds_a_value(template: &str) -> bool {
         })
 }
 
-/// The index of each argument that holds a key's value (re-review N4): one given to a flag whose
-/// name ends in `key`, `token`, `password` or `secret`, as `--api-key abc` or `--token=abc`, or one
-/// shaped like a well-known service's key, such as `sk-…` or `ghp_…`.
+/// The index of each argument that holds a key's value (re-review N4, re-review 2 m3): one given
+/// to a flag that names a key ([`flag_names_a_key`]), as `--api-key abc` or `--token=abc`, or one
+/// that is a key by itself ([`arg_is_a_key`]).
 fn args_holding_secrets(args: &[&str]) -> Vec<usize> {
-    let names_a_key = |flag: &str| {
-        let flag = flag.to_ascii_lowercase();
-        ["key", "token", "password", "secret"]
-            .iter()
-            .any(|word| flag.ends_with(word))
-    };
     let mut held = Vec::new();
     for (index, arg) in args.iter().enumerate() {
         let flag = arg.strip_prefix("--").or_else(|| arg.strip_prefix('-'));
         let holds = match flag.map(|flag| flag.split_once('=')) {
-            Some(Some((name, value))) => names_a_key(name) && !value.is_empty(),
+            Some(Some((name, value))) => {
+                (flag_names_a_key(name) && is_a_value(value)) || arg_is_a_key(value)
+            }
             Some(None) => {
-                if names_a_key(flag.unwrap_or_default())
+                if flag_names_a_key(flag.unwrap_or_default())
                     && args
                         .get(index + 1)
-                        .is_some_and(|next| !next.starts_with('-'))
+                        .is_some_and(|next| !next.starts_with("--") && is_a_value(next))
                 {
                     held.push(index + 1);
                 }
                 false
             }
-            None => [
-                "sk-",
-                "ghp_",
-                "gho_",
-                "ghs_",
-                "github_pat_",
-                "glpat-",
-                "xoxb-",
-                "xoxp-",
-            ]
-            .iter()
-            .any(|prefix| arg.starts_with(prefix)),
+            None => arg_is_a_key(arg),
         };
         if holds {
             held.push(index);
@@ -2255,6 +2329,95 @@ mod tests {
                 validate_team(&with_servers(json!([server]))).is_ok(),
                 "{args}"
             );
+        }
+    }
+
+    #[test]
+    fn tells_a_key_from_a_setting_that_only_looks_like_one() {
+        // Re-review 2 m3: each is (args, headers, the field refused, or None when it passes).
+        let header = |name: &str, template: &str| json!({ name: template });
+        for (args, headers, refused_at) in [
+            (
+                json!(["srv", "--key", "/etc/tls/server.key"]),
+                json!({}),
+                None,
+            ),
+            (json!(["srv", "--sort-key", "name"]), json!({}), None),
+            (json!(["srv", "--primary-key", "id"]), json!({}), None),
+            (json!(["srv", "--max-token", "4096"]), json!({}), None),
+            (json!(["srv", "--monkey", "x"]), json!({}), None),
+            (json!([]), header("Authorization", "OAuth2 {API_KEY}"), None),
+            (
+                json!(["srv", "--header", "Authorization: Bearer abc"]),
+                json!({}),
+                Some("args/2"),
+            ),
+            (
+                json!(["srv", "--header=Authorization: Bearer abc"]),
+                json!({}),
+                Some("args/1"),
+            ),
+            (json!(["srv", "sk_live_abc123"]), json!({}), Some("args/1")),
+            (
+                json!(["srv", "AKIAIOSFODNN7EXAMPLE"]),
+                json!({}),
+                Some("args/1"),
+            ),
+            (json!(["srv", "--auth", "abc"]), json!({}), Some("args/2")),
+            (
+                json!(["srv", "--credentials", "abc"]),
+                json!({}),
+                Some("args/2"),
+            ),
+            (
+                json!(["srv", "--github-pat", "abc"]),
+                json!({}),
+                Some("args/2"),
+            ),
+            (json!(["srv", "API_KEY=abc"]), json!({}), Some("args/1")),
+            (
+                json!(["srv", "--api-key", "-abc"]),
+                json!({}),
+                Some("args/2"),
+            ),
+            (
+                json!([]),
+                header("X-Password", "hunter2"),
+                Some("headers/X-Password"),
+            ),
+            (
+                json!([]),
+                header("X-Pass", "hunter2"),
+                Some("headers/X-Pass"),
+            ),
+            // Re-review 2 m4 (N4b): a value after the scheme is a value, letters or not.
+            (
+                json!([]),
+                header("Authorization", "Bearer abcdef {API_KEY}"),
+                Some("headers/Authorization"),
+            ),
+        ] {
+            let mut server = if headers == json!({}) {
+                a_stdio_server()
+            } else {
+                an_http_server()
+            };
+            if headers == json!({}) {
+                server["args"] = args.clone();
+            } else {
+                server["headers"] = headers.clone();
+            }
+            let at: Vec<String> = refused_at
+                .map(|field| format!("/agents/0/mcp_servers/0/{field}"))
+                .into_iter()
+                .collect();
+            let refused: Vec<String> = validate_team(&with_servers(json!([server])))
+                .err()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|error| error.path)
+                .collect();
+            assert_eq!(refused, at, "{args} {headers}");
         }
     }
 
