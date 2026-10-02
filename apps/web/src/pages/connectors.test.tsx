@@ -39,7 +39,10 @@ const LINEAR = {
 	source: "custom",
 	transport: "http",
 	url: "https://connect.linear.example/v1",
-	headers: { Authorization: "Bearer {LINEAR_KEY}" },
+	headers: {
+		Authorization: "Bearer {LINEAR_KEY}",
+		"X-Workspace": "corner-bakery",
+	},
 	credential_keys: ["LINEAR_KEY"],
 	tools: { list_issues: "network" },
 };
@@ -448,6 +451,30 @@ describe("connectors on the agent page", () => {
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
+	});
+
+	it("connect_again_keeps_every_header", async () => {
+		const { container, s } = await opened();
+		fireEvent.click(
+			within(row("linear")).getByRole("button", {
+				name: en.connectorAgainButton,
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Add linear to Theo",
+		});
+		await expectNoAxeViolations(container);
+		fireEvent.change(within(dialog).getByLabelText(en.addKeyValue), {
+			target: { value: "lin-key" },
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: en.addNext }));
+		const asked = await sent(s, "connector.tools");
+		expect(
+			(asked.params as { server: { headers: object } }).server.headers,
+		).toEqual({
+			Authorization: "Bearer {LINEAR_KEY}",
+			"X-Workspace": "corner-bakery",
+		});
 	});
 
 	it("connector_add_offers_three_labels_and_defaults_to_asks", async () => {

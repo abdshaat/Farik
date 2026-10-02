@@ -129,10 +129,10 @@ export function ConnectorAdd({
 		[again?.command ?? "", ...(again?.args ?? [])].join(" ").trim(),
 	);
 	const [url, setUrl] = useState(again?.url ?? "");
+	// The field holds the first header; Connect again keeps the others as the team file has them.
+	const [first, ...others] = Object.entries(again?.headers ?? {});
 	const [header, setHeader] = useState(
-		Object.entries(again?.headers ?? {})
-			.map(([k, v]) => `${k}: ${v}`)
-			.at(0) ?? "Authorization: Bearer {API_KEY}",
+		first ? `${first[0]}: ${first[1]}` : "Authorization: Bearer {API_KEY}",
 	);
 	const [keys, setKeys] = useState<Key[]>(
 		again
@@ -162,8 +162,13 @@ export function ConnectorAdd({
 		...(http
 			? {
 					url: url.trim(),
-					...(header.trim() && {
-						headers: { [headerName?.trim() ?? ""]: rest.join(":").trim() },
+					...((header.trim() || others.length > 0) && {
+						headers: {
+							...Object.fromEntries(others),
+							...(header.trim() && {
+								[headerName?.trim() ?? ""]: rest.join(":").trim(),
+							}),
+						},
 					}),
 				}
 			: { command: words[0], args: words.slice(1) }),
