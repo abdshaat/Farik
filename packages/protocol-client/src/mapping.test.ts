@@ -131,4 +131,10 @@ describe("mapping", () => {
 			],
 		});
 	});
+
+	it("mapping_keeps_skill_file_paths", () => {
+		const files = { "SKILL.md": "a", "references/api_notes.md": "b" };
+		expect(toSnake({ body: { files } })).toEqual({ body: { files } });
+		expect(toCamel({ files })).toEqual({ files });
+	});
 });

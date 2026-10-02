@@ -69,7 +69,7 @@ An Opus session (ADR 0032) draws these on the canvas (https://claude.ai/artifact
 
 Gate (O1): the founder approves the boards, or says to approve them automatically, and the approval is written into this plan's header with its date.
 
-- [ ] `docs(design): mock up skills per agent`
+- [x] `docs(design): mock up skills per agent`
 
 ### Task 2: The screens
 
@@ -86,7 +86,7 @@ Files: as the file map's Task 2 lines. Built from Task 1's approved boards.
 - `skill_review_shows_a_refused_folder_with_remove_alone`: `skill.get` answering `skill_runs_commands` shows the reason and "Remove" without "Use this skill".
 - `skill_review_renders_markup_as_text`.
 
-- [ ] `feat(web): skills on the agent page`
+- [x] `feat(web): skills on the agent page`
 
 ### Task 3: Spec and plan
 

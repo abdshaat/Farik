@@ -6,6 +6,8 @@ import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import { ConnectorAdd, hostOf, labelsSaid } from "./ConnectorAdd.tsx";
+import { type Editing, SkillEdit } from "./dialogs/SkillEdit.tsx";
+import { SkillReview } from "./dialogs/SkillReview.tsx";
 import styles from "./pages.module.css";
 import { useAdvanced } from "./Settings.tsx";
 import {
@@ -16,6 +18,13 @@ import {
 	type Team as TeamFile,
 } from "./setup/TeamSetup.tsx";
 import {
+	refusedWith,
+	type SkillAt,
+	type SkillFolder,
+	sendSkill,
+	skillParams,
+} from "./skills.ts";
+import {
 	type ConnectorState,
 	type Effective,
 	type Model,
@@ -23,6 +32,14 @@ import {
 	useStatus,
 	useTeam,
 } from "./Team.tsx";
+
+/** One row of `skills.list`. */
+type SkillRow = {
+	level: "role" | "team" | "agent";
+	name: string;
+	description: string;
+	state: "in_use" | "replaced" | "review" | "missing";
+};
 
 type Effort = "low" | "medium" | "high";
 type Edited = Omit<Agent, "model"> & {
@@ -436,6 +453,12 @@ function Editor({
 					</>
 				)}
 			</section>
+			<SkillsSection
+				agent={saved.id}
+				name={name}
+				role={roleName(agent.role)}
+				onChanged={again}
+			/>
 			{removing && (
 				<Dialog
 					open
@@ -627,5 +650,221 @@ function CustomRow({
 				</>
 			)}
 		</li>
+	);
+}
+
+/** "Skills": what comes with the role, what the team has and what the agent has of its own. */
+function SkillsSection({
+	agent,
+	name,
+	role,
+	onChanged,
+}: {
+	agent: string;
+	name: string;
+	role: string;
+	/** Reads the team again, which holds each skill's pin. */
+	onChanged: () => void;
+}) {
+	const { client } = useConnection();
+	const { data, again } = useQuery<{ skills: SkillRow[] }>("skills.list", {
+		agent,
+	});
+	const [dialog, setDialog] = useState<
+		| { kind: "edit"; editing?: Editing }
+		| { kind: "review"; skill: SkillAt }
+		| { kind: "remove"; skill: SkillAt }
+	>();
+	const [refused, setRefused] = useState<string>();
+	const [busy, setBusy] = useState(false);
+	const rows = data?.skills ?? [];
+	const shipped = rows.filter((r) => r.level === "role").map((r) => r.name);
+	const done = (changed: boolean) => {
+		setDialog(undefined);
+		if (changed) {
+			again();
+			onChanged();
+		}
+	};
+	const edit = async (skill: SkillAt) => {
+		if (!client) return;
+		setRefused(undefined);
+		try {
+			const folder = (await client.query(
+				"skill.get",
+				skillParams(agent, skill),
+			)) as SkillFolder;
+			setDialog({ kind: "edit", editing: { ...skill, folder } });
+		} catch (e) {
+			setRefused(
+				said(refusedWith(e), { skill: skill.name }, "skillCannotOpen"),
+			);
+		}
+	};
+	const remove = async (skill: SkillAt) => {
+		if (!client) return;
+		setBusy(true);
+		const code = await sendSkill(client, {
+			command: "skill_remove",
+			body: {
+				level: skill.level,
+				...(skill.level === "agent" && { agent }),
+				name: skill.name,
+			},
+		});
+		setBusy(false);
+		if (code === undefined) done(true);
+		else setRefused(said(code, {}, "skillOtherRefusal"));
+	};
+	const groups = [
+		["role", t("skillsRole", { role })],
+		["team", t("skillsTeam")],
+		["agent", t("skillsOwn", { name })],
+	] as const;
+	return (
+		<section className={styles.section} aria-labelledby="skills-heading">
+			<h2 id="skills-heading">
+				{t("skills")}{" "}
+				<span className={styles.muted}>{t("skillsLead", { name })}</span>
+			</h2>
+			{groups.map(([level, heading]) => {
+				const here = rows.filter((r) => r.level === level);
+				if (!here.length) return null;
+				return (
+					<div key={level}>
+						<h3 className={styles.subheading}>{heading}</h3>
+						<ul className={styles.ruled} aria-label={heading}>
+							{here.map((r) => {
+								const skill: SkillAt | undefined =
+									r.level === "role"
+										? undefined
+										: { level: r.level, name: r.name };
+								return (
+									<li key={r.name}>
+										<div className={styles.rowHead}>
+											<span>
+												<strong>{r.name}</strong>
+											</span>
+											{skill && (
+												<span className={styles.actions}>
+													{r.state === "review" && (
+														<Button
+															onClick={() =>
+																setDialog({ kind: "review", skill })
+															}
+														>
+															{t("skillReviewButton")}{" "}
+															<span className={styles.hidden}>{r.name}</span>
+														</Button>
+													)}
+													{(r.state === "in_use" || r.state === "replaced") && (
+														<Button kind="quiet" onClick={() => edit(skill)}>
+															{t("skillEditButton")}{" "}
+															<span className={styles.hidden}>{r.name}</span>
+														</Button>
+													)}
+													{r.state !== "review" && (
+														<Button
+															kind="quiet"
+															onClick={() =>
+																setDialog({ kind: "remove", skill })
+															}
+														>
+															{t("skillRemoveButton")}{" "}
+															<span className={styles.hidden}>{r.name}</span>
+														</Button>
+													)}
+												</span>
+											)}
+										</div>
+										{r.state === "missing" ? (
+											<p>
+												<strong>
+													<code>{r.name}</code> {t("skillMissing")}
+												</strong>
+											</p>
+										) : (
+											<p>{r.description}</p>
+										)}
+										{r.state === "review" && (
+											<p>
+												<strong>{t("skillToReview", { name })}</strong>
+											</p>
+										)}
+										{r.state === "replaced" && (
+											<p className={styles.muted}>
+												{t(
+													r.level === "role"
+														? "skillReplacedByTeam"
+														: "skillReplacedByOwn",
+													{ name, skill: r.name },
+												)}
+											</p>
+										)}
+									</li>
+								);
+							})}
+						</ul>
+					</div>
+				);
+			})}
+			{refused && (
+				<p role="alert" className={styles.alert}>
+					{refused}
+				</p>
+			)}
+			<span>
+				<Button onClick={() => setDialog({ kind: "edit" })}>
+					{t("skillsAdd")}
+				</Button>
+			</span>
+			{dialog?.kind === "edit" && (
+				<SkillEdit
+					agent={agent}
+					name={name}
+					role={role}
+					shipped={shipped}
+					editing={dialog.editing}
+					onClose={done}
+				/>
+			)}
+			{dialog?.kind === "review" && (
+				<SkillReview
+					agent={agent}
+					name={name}
+					role={role}
+					skill={dialog.skill}
+					shipped={shipped}
+					onClose={done}
+				/>
+			)}
+			{dialog?.kind === "remove" && (
+				<Dialog
+					open
+					title={t("skillRemoveTitle", { skill: dialog.skill.name })}
+					onClose={() => setDialog(undefined)}
+					actions={
+						<>
+							<Button onClick={() => setDialog(undefined)}>
+								{t("connectorKeep")}
+							</Button>
+							<Button
+								kind="primary"
+								busy={busy}
+								onClick={() => remove(dialog.skill)}
+							>
+								{t("skillRemoveYes", { skill: dialog.skill.name })}
+							</Button>
+						</>
+					}
+				>
+					<p>
+						{dialog.skill.level === "agent"
+							? t("skillRemoveOwn", { name })
+							: t("skillRemoveTeam")}
+					</p>
+				</Dialog>
+			)}
+		</section>
 	);
 }

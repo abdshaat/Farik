@@ -32,7 +32,7 @@ function shown(input: string): string {
  * `text` with each control character (a line break and a tab aside) and each character that hides
  * or reorders text written `\u{202e}`, so that what the human reads is what would be sent.
  */
-function visibly(text: string): string {
+export function visibly(text: string): string {
 	return Array.from(text, (character) => {
 		const code = character.codePointAt(0) ?? 0;
 		const hidden =

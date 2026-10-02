@@ -543,3 +543,8 @@
 	outline: 2px solid var(--farik-color-focus);
 	outline-offset: 2px;
 }
+
+/* A skill's instructions: the text is code-like, so it is set in the code face. */
+.code textarea {
+	font-family: var(--farik-type-code-family);
+}
