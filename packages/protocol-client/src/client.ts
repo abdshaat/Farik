@@ -47,7 +47,9 @@ export type MethodName =
 	| "template.delete"
 	| "connector.tools"
 	| "connector.connect"
-	| "connector.disconnect";
+	| "connector.disconnect"
+	| "connector.sign_in"
+	| "connector.sign_in_status";
 export type Status = "connecting" | "open" | "closed";
 
 /** The part of the browser `WebSocket` the client uses. */

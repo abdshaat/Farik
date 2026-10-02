@@ -1,12 +1,13 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
+	act,
 	cleanup,
 	fireEvent,
 	screen,
 	waitFor,
 	within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
@@ -990,6 +991,463 @@ describe("connectors on the agent page", () => {
 			expect(teamAskedTimes(s)).toBeGreaterThan(before);
 			cleanup();
 			localStorage.clear();
+		}
+	});
+});
+
+/** The tests of signing in to a service (ADR 0033). */
+const ATTEMPT = "0123456789abcdef0123456789abcdef";
+const SIGNED_NOTION = {
+	name: "notion",
+	source: "custom",
+	transport: "http",
+	url: "https://mcp.notion.com/mcp",
+	oauth: {},
+	tools: { search: "network", create_page: "external_effect" },
+};
+const SIGNED_LINEAR = {
+	name: "linear",
+	source: "custom",
+	transport: "http",
+	url: "https://mcp.linear.app/mcp",
+	oauth: {},
+	tools: { list_issues: "network" },
+};
+/** Theo with `notion` signed in to and `linear`'s sign-in ended by the service. */
+const SIGNED_IN_TEAM = theoWith([SIGNED_NOTION, SIGNED_LINEAR]);
+const SIGNED_IN_ROWS = [
+	{
+		agent: "theo",
+		server: "notion",
+		state: "connected",
+		auth: "oauth",
+		revokes: true,
+		stored_in: "keychain",
+	},
+	{
+		agent: "theo",
+		server: "linear",
+		state: "sign_in_again",
+		auth: "oauth",
+		revokes: false,
+		stored_in: "keychain",
+	},
+];
+
+/** Theo's page with the signed-in team, answered. */
+async function openedSignedIn(rows: object[] = SIGNED_IN_ROWS) {
+	const { container, socket } = await renderApp("/team/theo");
+	const s = socket as FakeSocket;
+	await answerStatus(s, false);
+	await answerQuery(s, "team.get", teamGot(SIGNED_IN_TEAM, rows));
+	await answerQuery(s, "models.list", { models: [] });
+	await screen.findByRole("heading", { name: "Theo, your Developer" });
+	return { container, s };
+}
+
+/** ConnectorAdd at step 1 for a web address, `url` typed and Next pressed, no key typed. */
+async function askedToSignIn(url = "https://mcp.notion.com/mcp") {
+	const page = await opened([], true);
+	fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+	fireEvent.click(screen.getByRole("button", { name: en.connectorCustomAdd }));
+	const dialog = await screen.findByRole("dialog", {
+		name: "Add a custom connector to Theo",
+	});
+	fireEvent.change(within(dialog).getByLabelText(en.addName), {
+		target: { value: "notion" },
+	});
+	fireEvent.click(
+		within(dialog).getByRole("radio", { name: new RegExp(en.addUrlChoice) }),
+	);
+	fireEvent.change(within(dialog).getByLabelText(en.addUrl), {
+		target: { value: url },
+	});
+	fireEvent.click(within(dialog).getByRole("button", { name: en.addNext }));
+	const asked = await sent(page.s, "connector.sign_in");
+	return { ...page, dialog, asked };
+}
+
+/** The service offers signing in at `issuer`. */
+const offered = (
+	s: FakeSocket,
+	asked: Parameters<FakeSocket["reply"]>[0],
+	issuer: string,
+) =>
+	s.reply(asked, {
+		attempt: ATTEMPT,
+		authorize_url: `${issuer}/authorize?state=abc`,
+		issuer,
+	});
+
+describe("signing in to a service", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+		localStorage.clear();
+	});
+
+	it("connector_add_offers_sign_in_when_the_service_has_one", async () => {
+		const { container, s, dialog, asked } = await askedToSignIn();
+		// The probe names the server and its sign-in settings, with no key and no Authorization header.
+		expect(asked.params).toEqual({
+			agent: "theo",
+			server: {
+				name: "notion",
+				transport: "http",
+				url: "https://mcp.notion.com/mcp",
+				oauth: {},
+			},
+		});
+		await offered(s, asked, "https://mcp.notion.com");
+		expect(
+			await within(dialog).findByRole("button", {
+				name: "Sign in with mcp.notion.com",
+			}),
+		).toBeTruthy();
+		expect(
+			within(dialog).getByText("mcp.notion.com lets you sign in."),
+		).toBeTruthy();
+		expect(within(dialog).getByText(en.addSignInNote)).toBeTruthy();
+		expect(
+			within(dialog).getByRole("button", { name: en.addUseAKey }),
+		).toBeTruthy();
+		// No key field shows, and nothing was asked of the server's tools yet.
+		expect(within(dialog).queryByLabelText(en.addKeyName)).toBeNull();
+		expect(within(dialog).queryByLabelText(en.addHeader)).toBeNull();
+		expect(s.calls("connector.tools")).toHaveLength(0);
+		await expectNoAxeViolations(container);
+	});
+
+	it("connector_add_names_who_signs_you_in", async () => {
+		const { container, s, dialog, asked } = await askedToSignIn(
+			"https://mcp.stripe.com",
+		);
+		await offered(s, asked, "https://access.stripe.com");
+		expect(
+			await within(dialog).findByRole("button", {
+				name: "Sign in with access.stripe.com",
+			}),
+		).toBeTruthy();
+		expect(within(dialog).getByText("for mcp.stripe.com")).toBeTruthy();
+		expect(
+			within(dialog).getByText("mcp.stripe.com lets you sign in."),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+		cleanup();
+		localStorage.clear();
+		// Where the two hosts are the same, no "for" line says it twice.
+		const same = await askedToSignIn();
+		await offered(same.s, same.asked, "https://mcp.notion.com");
+		await within(same.dialog).findByRole("button", {
+			name: "Sign in with mcp.notion.com",
+		});
+		expect(within(same.dialog).queryByText(/^for /)).toBeNull();
+	});
+
+	it("connector_add_lets_a_key_be_used_where_sign_in_is_offered", async () => {
+		const { s, dialog, asked } = await askedToSignIn();
+		await offered(s, asked, "https://mcp.notion.com");
+		fireEvent.click(
+			await within(dialog).findByRole("button", { name: en.addUseAKey }),
+		);
+		fireEvent.change(await within(dialog).findByLabelText(en.addKeyName), {
+			target: { value: "NOTION_KEY" },
+		});
+		fireEvent.change(within(dialog).getByLabelText(en.addKeyValue), {
+			target: { value: "secret-1" },
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: en.addNext }));
+		const listing = await sent(s, "connector.tools");
+		const params = listing.params as {
+			keys: Record<string, string>;
+			attempt?: string;
+			server: { oauth?: unknown };
+		};
+		expect(params.keys).toEqual({ NOTION_KEY: "secret-1" });
+		expect(params.attempt).toBeUndefined();
+		expect(params.server.oauth).toBeUndefined();
+		expect(s.calls("connector.sign_in")).toHaveLength(1);
+	});
+
+	it("connector_add_waits_for_the_sign_in_then_labels", async () => {
+		const open = vi.spyOn(window, "open").mockReturnValue(null);
+		const { container, s, dialog, asked } = await askedToSignIn();
+		await offered(s, asked, "https://mcp.notion.com");
+		const button = await within(dialog).findByRole("button", {
+			name: "Sign in with mcp.notion.com",
+		});
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		fireEvent.click(button);
+		// Opened in the click itself, with no call in between, so a pop-up blocker lets it through.
+		expect(open).toHaveBeenCalledWith(
+			"https://mcp.notion.com/authorize?state=abc",
+			"_blank",
+			"noopener",
+		);
+		expect(s.calls("connector.sign_in_status")).toHaveLength(0);
+		expect(
+			within(dialog).getByText("Waiting for you to sign in to mcp.notion.com…"),
+		).toBeTruthy();
+		expect(
+			within(dialog).getByRole("button", { name: en.addOpenAgain }),
+		).toBeTruthy();
+
+		// Asked every 2 seconds, until the service has said yes.
+		await act(() => vi.advanceTimersByTimeAsync(1900));
+		expect(s.calls("connector.sign_in_status")).toHaveLength(0);
+		await act(() => vi.advanceTimersByTimeAsync(200));
+		// (Read directly: the library's waiting needs the timers this test has faked.)
+		const first = s.calls("connector.sign_in_status")[0] as NonNullable<
+			ReturnType<FakeSocket["calls"]>[number]
+		>;
+		expect(first.params).toEqual({ attempt: ATTEMPT });
+		await s.reply(first, { state: "waiting" });
+		await act(() => vi.advanceTimersByTimeAsync(2000));
+		const second = s.calls("connector.sign_in_status")[1] as NonNullable<
+			ReturnType<FakeSocket["calls"]>[number]
+		>;
+		expect(second).toBeDefined();
+		await s.reply(second, { state: "signed_in" });
+		vi.useRealTimers();
+		expect(
+			await within(dialog).findByText("Signed in to mcp.notion.com."),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(within(dialog).getByRole("button", { name: en.addNext }));
+		const listing = await sent(s, "connector.tools");
+		expect(listing.params).toEqual({
+			agent: "theo",
+			server: {
+				name: "notion",
+				transport: "http",
+				url: "https://mcp.notion.com/mcp",
+				oauth: {},
+			},
+			attempt: ATTEMPT,
+		});
+		await s.reply(listing, {
+			tools: [
+				{ name: "search", description: "Search.", usable: true },
+				{ name: "create_page", description: "Make a page.", usable: true },
+			],
+		});
+		await within(dialog).findByRole("group", { name: "search" });
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Add notion to Theo" }),
+		);
+		const connect = await sent(s, "connector.connect");
+		const params = connect.params as Record<string, unknown>;
+		expect(params.attempt).toBe(ATTEMPT);
+		expect(params.keys).toBeUndefined();
+		await s.reply(connect, {
+			stored_in: "keychain",
+			tools: { search: "external_effect", create_page: "external_effect" },
+		});
+		expect(
+			await within(dialog).findByText("notion is added to Theo"),
+		).toBeTruthy();
+		expect(within(dialog).getByText(en.addSignedIn)).toBeTruthy();
+		expect(
+			within(dialog).getByText(
+				"Theo uses Notion as you. Farik keeps the sign-in in your keychain.",
+			),
+		).toBeTruthy();
+		expect(
+			within(dialog).getByText(
+				"Only Theo has notion. To give it to someone else, add it from their page, and sign in again there.",
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("connector_add_waiting_is_accessible", async () => {
+		vi.spyOn(window, "open").mockReturnValue(null);
+		const { container, s, dialog, asked } = await askedToSignIn();
+		await offered(s, asked, "https://mcp.notion.com");
+		fireEvent.click(
+			await within(dialog).findByRole("button", {
+				name: "Sign in with mcp.notion.com",
+			}),
+		);
+		expect(
+			within(dialog).getByText("Waiting for you to sign in to mcp.notion.com…"),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it.each([
+		[
+			"access_denied",
+			"You said no on mcp.notion.com’s page, so Farik isn’t connected.",
+		],
+		["sign_in_timed_out", "The sign-in took longer than 10 minutes."],
+		[
+			"sign_in_mismatch",
+			"Something didn’t match on the way back from mcp.notion.com, so Farik stopped to keep you safe.",
+		],
+		[
+			"sign_in_failed",
+			"mcp.notion.com didn’t finish the sign-in. Try again, or use a key if it gives you one.",
+		],
+	])("connector_add_says_why_a_sign_in_failed_%s", async (code, sentence) => {
+		vi.spyOn(window, "open").mockReturnValue(null);
+		const { container, s, dialog, asked } = await askedToSignIn();
+		await offered(s, asked, "https://mcp.notion.com");
+		const button = await within(dialog).findByRole("button", {
+			name: "Sign in with mcp.notion.com",
+		});
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		fireEvent.click(button);
+		await act(() => vi.advanceTimersByTimeAsync(2100));
+		const poll = s.calls("connector.sign_in_status")[0] as NonNullable<
+			ReturnType<FakeSocket["calls"]>[number]
+		>;
+		expect(poll).toBeDefined();
+		await s.reply(poll, {
+			state: "failed",
+			reason: { code, message: "whatever the daemon says" },
+		});
+		vi.useRealTimers();
+		const line = await within(dialog).findByText(sentence);
+		expect(line.getAttribute("role")).toBe("alert");
+		// The daemon's own words are never shown, and "Try again" asks the service again.
+		expect(within(dialog).queryByText(/whatever the daemon says/)).toBeNull();
+		await expectNoAxeViolations(container);
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.addTryAgain }),
+		);
+		await sent(s, "connector.sign_in", 2);
+	});
+
+	it("connector_add_falls_back_to_a_key", async () => {
+		// The service offers no sign-in: the key fields, unchanged, and nothing said.
+		const one = await askedToSignIn();
+		await one.s.fail(
+			one.asked,
+			-32005,
+			"sign_in_not_offered: this server does not offer signing in",
+		);
+		expect(
+			await within(one.dialog).findByLabelText(en.addKeyName),
+		).toBeTruthy();
+		expect(within(one.dialog).queryByText(/sign in/i)).toBeNull();
+		expect(within(one.dialog).queryByRole("alert")).toBeNull();
+		await expectNoAxeViolations(one.container);
+		cleanup();
+		localStorage.clear();
+
+		for (const [code, sentence] of [
+			[
+				"sign_in_not_supported",
+				"api.githubcopilot.com doesn’t let Farik sign in by itself yet. If it gives you a key, paste it below.",
+			],
+			[
+				"sign_in_failed",
+				"Farik couldn’t sign in to api.githubcopilot.com. If it gives you a key, paste it below.",
+			],
+		] as const) {
+			const page = await askedToSignIn("https://api.githubcopilot.com/mcp");
+			await page.s.fail(page.asked, -32005, `${code}: the daemon's words`);
+			expect(await within(page.dialog).findByText(sentence)).toBeTruthy();
+			expect(within(page.dialog).getByLabelText(en.addKeyName)).toBeTruthy();
+			expect(within(page.dialog).queryByText(/the daemon's words/)).toBeNull();
+			await expectNoAxeViolations(page.container);
+			// And Next now lists with the keys, never asking the service to sign in again.
+			fireEvent.click(
+				within(page.dialog).getByRole("button", { name: en.addNext }),
+			);
+			await sent(page.s, "connector.tools");
+			expect(page.s.calls("connector.sign_in")).toHaveLength(1);
+			cleanup();
+			localStorage.clear();
+		}
+	});
+
+	it("agent_edit_shows_signed_in_and_sign_in_again", async () => {
+		const { container, s } = await openedSignedIn();
+		const notion = row("notion");
+		expect(within(notion).getByText(en.connectorHttp)).toBeTruthy();
+		expect(
+			within(notion).getByText("Signed in to mcp.notion.com"),
+		).toBeTruthy();
+		expect(
+			within(notion).getByText(
+				"2 tools: 1 Only reads, 1 Changes things, asks you",
+			),
+		).toBeTruthy();
+		expect(within(notion).queryByText(/keys are in/)).toBeNull();
+		expect(
+			within(notion).queryByRole("button", { name: en.connectorSignInAgain }),
+		).toBeNull();
+		const linear = row("linear");
+		expect(
+			within(linear).getByText(
+				"mcp.linear.app ended Farik’s sign-in. Sign in again to use it.",
+			),
+		).toBeTruthy();
+		expect(within(linear).queryByText(en.connectorAgain)).toBeNull();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(
+			within(linear).getByRole("button", { name: en.connectorSignInAgain }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Add linear to Theo",
+		});
+		// Opened at the sign-in, filled in from the team file: the service is asked at once.
+		const asked = await sent(s, "connector.sign_in");
+		expect(asked.params).toEqual({
+			agent: "theo",
+			server: {
+				name: "linear",
+				transport: "http",
+				url: "https://mcp.linear.app/mcp",
+				oauth: {},
+			},
+		});
+		await offered(s, asked, "https://mcp.linear.app");
+		expect(
+			await within(dialog).findByRole("button", {
+				name: "Sign in with mcp.linear.app",
+			}),
+		).toBeTruthy();
+		expect(
+			within(dialog).getByText(
+				"mcp.linear.app ended Farik’s sign-in. Sign in again to use linear.",
+			),
+		).toBeTruthy();
+		expect(
+			(within(dialog).getByLabelText(en.addName) as HTMLInputElement).value,
+		).toBe("linear");
+		await expectNoAxeViolations(container);
+	});
+
+	it("agent_edit_remove_says_the_service_is_asked_to_forget", async () => {
+		const { container } = await openedSignedIn();
+		for (const [server, words] of [
+			[
+				"notion",
+				"Farik deletes the sign-in from your keychain and asks mcp.notion.com to forget it.",
+			],
+			[
+				"linear",
+				"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in mcp.linear.app’s settings.",
+			],
+		] as const) {
+			fireEvent.click(
+				within(row(server)).getByRole("button", { name: `Remove ${server}` }),
+			);
+			const dialog = await screen.findByRole("dialog", {
+				name: `Remove ${server} from Theo?`,
+			});
+			expect(within(dialog).getByText(words)).toBeTruthy();
+			expect(within(dialog).queryByText(/type the keys/)).toBeNull();
+			await expectNoAxeViolations(container);
+			fireEvent.click(
+				within(dialog).getByRole("button", { name: en.connectorKeep }),
+			);
+			await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 		}
 	});
 });

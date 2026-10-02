@@ -35,6 +35,8 @@ export type McpServer = {
 	url?: string;
 	headers?: Record<string, string>;
 	credentialKeys?: string[];
+	/** Present when the user signs in to the service instead of giving a key (ADR 0033). */
+	oauth?: { clientId?: string; callbackPort?: number; scopes?: string[] };
 	tools?: Record<string, "network" | "external_effect" | "denied">;
 };
 export type Judgment = {

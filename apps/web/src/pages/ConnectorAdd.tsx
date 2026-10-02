@@ -1,5 +1,5 @@
 import { Button, Choice, Dialog, Stepper, TextField } from "@farik/ui";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, refusalsOf } from "../app/refusals.ts";
 import type { en } from "../strings/en.ts";
@@ -10,6 +10,29 @@ import type { McpServer } from "./setup/TeamSetup.tsx";
 export type Tag = "network" | "external_effect" | "denied";
 type Listed = { name: string; description: string; usable: boolean };
 type Key = { name: string; value: string };
+/** How signing in to the service stands (ADR 0033). `keys` is the key fields, with a sentence when the service said why. */
+type SignIn =
+	| { kind: "idle" }
+	| { kind: "offered"; attempt: string; address: string; issuer: string }
+	| { kind: "waiting"; attempt: string; address: string; issuer: string }
+	| { kind: "signedIn"; attempt: string; issuer: string }
+	| { kind: "failed"; code: string; issuer: string }
+	| { kind: "keys"; probed: boolean; sentence?: string };
+/** How often the page asks whether the user has said yes. */
+const POLL_MS = 2000;
+
+/** The host of a web address, for a sentence: `mcp.notion.com` of `https://mcp.notion.com/mcp`. */
+export function hostOf(url: string | undefined): string {
+	try {
+		return new URL(url ?? "").hostname;
+	} catch {
+		return url ?? "";
+	}
+}
+
+/** "notion" as "Notion": the name the user gave, said as a service's. */
+const serviceOf = (server: string) =>
+	server ? server.charAt(0).toUpperCase() + server.slice(1) : server;
 /** A field of step 1 a refusal can be said at; `arg-<n>` is the command's part n, from 0. */
 type Field =
 	| "name"
@@ -124,6 +147,7 @@ export function ConnectorAdd({
 	agent,
 	name,
 	again,
+	ended,
 	sandboxed,
 	onClose,
 }: {
@@ -132,6 +156,8 @@ export function ConnectorAdd({
 	name: string;
 	/** The team file's entry, when connecting it again. */
 	again?: McpServer | undefined;
+	/** The service ended the sign-in `again` holds, so the page says so and signs in at once. */
+	ended?: boolean | undefined;
 	/** Whether sessions run in Docker's sandbox, the one mode where no command of the agent reaches its keys. */
 	sandboxed: boolean;
 	onClose: (changed: boolean) => void;
@@ -162,7 +188,12 @@ export function ConnectorAdd({
 	const [done, setDone] = useState<{
 		storedIn: "keychain" | "file";
 		tools: Record<string, Tag>;
+		signedIn?: boolean;
 	}>();
+	// A server connected with keys goes straight to its keys; one that signs in asks to again.
+	const [sign, setSign] = useState<SignIn>(
+		again && !again.oauth ? { kind: "keys", probed: false } : { kind: "idle" },
+	);
 	const [refused, setRefused] = useState<Partial<Record<Field, string>>>({});
 	const [busy, setBusy] = useState(false);
 
@@ -222,48 +253,180 @@ export function ConnectorAdd({
 	const keysWire = Object.fromEntries(
 		named.map((k) => [k.name.trim(), k.value]),
 	);
+	// What signing in asks about: the server, its sign-in settings, no key, and no Authorization
+	// header, which the sign-in sends itself.
+	const signInHeaders = sentHeaders.filter(
+		(l) => l.name.toLowerCase() !== "authorization",
+	);
+	const signInWire = {
+		name: server.trim(),
+		transport: "http",
+		url: url.trim(),
+		...(signInHeaders.length > 0 && {
+			headers: Object.fromEntries(signInHeaders.map((l) => [l.name, l.value])),
+		}),
+		oauth: again?.oauth ?? {},
+	};
+	const urlHost = hostOf(url.trim());
+	const signedIn = http && sign.kind === "signedIn";
 	const ready =
 		server.trim() &&
 		(http ? url.trim() : command.trim()) &&
 		!secretInUrl &&
 		!commandWhole;
 
+	const listed = (answer: { tools: Listed[] }) => {
+		setTools(answer.tools);
+		setTags({});
+		setStep(1);
+	};
 	const list = async () => {
 		if (!client) return;
 		setBusy(true);
 		setRefused({});
 		try {
-			const answer = (await client.call("connector.tools", {
-				agent,
-				server: wire,
-				keys: keysWire,
-			})) as { tools: Listed[] };
-			setTools(answer.tools);
-			setTags({});
-			setStep(1);
+			if (signedIn && sign.kind === "signedIn") {
+				listed(
+					(await client.call("connector.tools", {
+						agent,
+						server: signInWire,
+						attempt: sign.attempt,
+					})) as { tools: Listed[] },
+				);
+			} else {
+				listed(
+					(await client.call("connector.tools", {
+						agent,
+						server: wire,
+						keys: keysWire,
+					})) as { tools: Listed[] },
+				);
+			}
 		} catch (e) {
-			setRefused(atParts(refusalsAt(e, fill)));
+			// A sign-in that is gone (it lasts ten minutes) is said as that, and asked for again.
+			if (
+				signedIn &&
+				codeOf(refusalsOf(e)[0]?.message ?? "") === "sign_in_unknown"
+			)
+				setSign({ kind: "failed", code: "sign_in_timed_out", issuer: "" });
+			else setRefused(atParts(refusalsAt(e, fill)));
 		}
 		setBusy(false);
+	};
+	/** Asks the service whether it signs the user in: what Next does for a web address with no key typed. */
+	const ask = async () => {
+		if (!client) return;
+		setBusy(true);
+		setRefused({});
+		try {
+			const answer = (await client.call("connector.sign_in", {
+				agent,
+				server: signInWire,
+			})) as { attempt: string; authorizeUrl: string; issuer: string };
+			setSign({
+				kind: "offered",
+				attempt: answer.attempt,
+				address: answer.authorizeUrl,
+				issuer: answer.issuer,
+			});
+		} catch (e) {
+			const code = codeOf(refusalsOf(e)[0]?.message ?? "");
+			if (code === "sign_in_not_offered")
+				setSign({ kind: "keys", probed: true });
+			else if (code === "sign_in_not_supported")
+				setSign({
+					kind: "keys",
+					probed: true,
+					sentence: t("addNotSupported", { host: urlHost }),
+				});
+			else if (code === "pkce_not_supported" || code === "sign_in_failed")
+				setSign({
+					kind: "keys",
+					probed: true,
+					sentence: t("addSignInCouldNot", { host: urlHost }),
+				});
+			else setRefused(atParts(refusalsAt(e, fill)));
+		}
+		setBusy(false);
+	};
+	// "Sign in again" opens at the sign-in: the service is asked as soon as the page is up.
+	const asked = useRef(false);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: once, when the page opens
+	useEffect(() => {
+		if (asked.current || !again?.oauth) return;
+		asked.current = true;
+		void ask();
+	}, []);
+	// Whether the user has said yes, asked every 2 seconds.
+	const waitingFor = sign.kind === "waiting" ? sign.attempt : "";
+	const waitingIssuer = sign.kind === "waiting" ? sign.issuer : "";
+	// biome-ignore lint/correctness/useExhaustiveDependencies: the attempt is the dependency
+	useEffect(() => {
+		if (!waitingFor || !client) return;
+		let live = true;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const poll = async () => {
+			try {
+				const answer = (await client.call("connector.sign_in_status", {
+					attempt: waitingFor,
+				})) as { state: string; reason?: { code: string } };
+				if (!live) return;
+				if (answer.state === "signed_in")
+					return setSign({
+						kind: "signedIn",
+						attempt: waitingFor,
+						issuer: waitingIssuer,
+					});
+				if (answer.state === "failed")
+					return setSign({
+						kind: "failed",
+						code: answer.reason?.code ?? "sign_in_failed",
+						issuer: waitingIssuer,
+					});
+			} catch {
+				// The attempt is gone: it lasts ten minutes.
+				if (live)
+					return setSign({
+						kind: "failed",
+						code: "sign_in_timed_out",
+						issuer: waitingIssuer,
+					});
+			}
+			if (live) timer = setTimeout(poll, POLL_MS);
+		};
+		timer = setTimeout(poll, POLL_MS);
+		return () => {
+			live = false;
+			if (timer) clearTimeout(timer);
+		};
+	}, [waitingFor]);
+	/** The service's page, in a new tab: run in the click itself, so a pop-up blocker lets it through. */
+	const openPage = (address: string) =>
+		window.open(address, "_blank", "noopener");
+	/** Next: ask the service first when a web address has no key typed; else list the tools. */
+	const next = () => {
+		if (http && sign.kind === "idle" && named.length === 0) return ask();
+		return list();
 	};
 	const connect = async () => {
 		if (!client) return;
 		setBusy(true);
 		const sending = keysWire;
+		const labels = Object.fromEntries(
+			tools
+				.filter((x) => x.usable)
+				.map((x) => [x.name, tags[x.name] ?? "external_effect"]),
+		);
 		// The keys leave the page with this call; none is kept for a second try.
 		setKeys(keys.map((k) => ({ ...k, value: "" })));
 		try {
-			const answer = (await client.call("connector.connect", {
-				agent,
-				server: wire,
-				keys: sending,
-				tags: Object.fromEntries(
-					tools
-						.filter((x) => x.usable)
-						.map((x) => [x.name, tags[x.name] ?? "external_effect"]),
-				),
-			})) as NonNullable<typeof done>;
-			setDone(answer);
+			const answer = (await client.call(
+				"connector.connect",
+				signedIn && sign.kind === "signedIn"
+					? { agent, server: signInWire, attempt: sign.attempt, tags: labels }
+					: { agent, server: wire, keys: sending, tags: labels },
+			)) as NonNullable<typeof done>;
+			setDone({ ...answer, signedIn });
 			setStep(2);
 		} catch (e) {
 			setRefused(atParts(refusalsAt(e, fill)));
@@ -271,7 +434,28 @@ export function ConnectorAdd({
 		}
 		setBusy(false);
 	};
+	/** Why a sign-in failed, in the words of the code and not the daemon's. */
+	const failedWords = (code: string, issuer: string) =>
+		t(
+			(
+				{
+					access_denied: "addSignInDenied",
+					sign_in_timed_out: "addSignInTimedOut",
+					sign_in_mismatch: "addSignInMismatch",
+				} as const
+			)[code as "access_denied"] ?? "addSignInFailed",
+			{ host: hostOf(issuer) || urlHost },
+		);
+	// Anything the sign-in was made for changing makes it another: the user signs in again.
+	const startOver = () => {
+		if (["offered", "waiting", "signedIn", "failed"].includes(sign.kind))
+			setSign({ kind: "idle" });
+		else if (sign.kind === "keys" && sign.probed) setSign({ kind: "idle" });
+	};
 
+	// The key fields show unless the service offers a sign-in, which stands in for them.
+	const showsKeys = !http || sign.kind === "idle" || sign.kind === "keys";
+	const issuerHost = "issuer" in sign ? hostOf(sign.issuer) : "";
 	const title =
 		again || step > 0 ? t("addTitleNamed", fill) : t("addTitle", { name });
 	const usable = tools.filter((x) => x.usable);
@@ -293,21 +477,34 @@ export function ConnectorAdd({
 			/>
 			{step === 0 && (
 				<>
-					{again && <p className={styles.alert}>{t("addChanged", fill)}</p>}
+					{again && ended && (
+						<p className={styles.alert}>
+							{t("addSignInEnded", { host: urlHost, server: fill.server })}
+						</p>
+					)}
+					{again && !ended && (
+						<p className={styles.alert}>{t("addChanged", fill)}</p>
+					)}
 					<TextField
 						id="connector-name"
 						label={t("addName")}
 						hint={t("addNameHint", { name })}
 						value={server}
 						error={refused.name ?? ""}
-						onChange={setServer}
+						onChange={(value) => {
+							setServer(value);
+							startOver();
+						}}
 					/>
 					{!again && (
 						<Choice
 							name="connector-transport"
 							legend={t("addHow")}
 							value={transport}
-							onChange={setTransport}
+							onChange={(value) => {
+								setTransport(value);
+								startOver();
+							}}
 							options={[
 								{
 									value: "stdio",
@@ -331,9 +528,74 @@ export function ConnectorAdd({
 								type="url"
 								value={url}
 								error={secretInUrl ? t("addUrlSecret") : (refused.url ?? "")}
-								onChange={setUrl}
+								onChange={(value) => {
+									setUrl(value);
+									startOver();
+								}}
 							/>
-							{!secretInUrl && (
+							{!secretInUrl && sign.kind === "offered" && (
+								<>
+									<p>{t("addSignInLead", { host: urlHost })}</p>
+									<span>
+										<Button
+											kind="primary"
+											onClick={() => {
+												openPage(sign.address);
+												setSign({ ...sign, kind: "waiting" });
+											}}
+										>
+											{t("addSignInButton", { host: issuerHost })}
+										</Button>
+									</span>
+									{issuerHost !== urlHost && (
+										<p className={styles.muted}>
+											{t("addSignInFor", { host: urlHost })}
+										</p>
+									)}
+									<p className={styles.muted}>{t("addSignInNote")}</p>
+									<span>
+										<Button
+											kind="quiet"
+											onClick={() => setSign({ kind: "keys", probed: true })}
+										>
+											{t("addUseAKey")}
+										</Button>
+									</span>
+								</>
+							)}
+							{!secretInUrl && sign.kind === "waiting" && (
+								<>
+									<p role="status">{t("addWaiting", { host: issuerHost })}</p>
+									<span>
+										<Button onClick={() => openPage(sign.address)}>
+											{t("addOpenAgain")}
+										</Button>
+									</span>
+								</>
+							)}
+							{!secretInUrl && sign.kind === "signedIn" && (
+								<p role="status">
+									<strong>{t("addSignedInTo", { host: issuerHost })}</strong>
+								</p>
+							)}
+							{!secretInUrl && sign.kind === "failed" && (
+								<>
+									<p role="alert" className={styles.alert}>
+										{failedWords(sign.code, sign.issuer)}
+									</p>
+									<span>
+										<Button kind="primary" busy={busy} onClick={ask}>
+											{t("addTryAgain")}
+										</Button>
+									</span>
+								</>
+							)}
+							{!secretInUrl && sign.kind === "keys" && sign.sentence && (
+								<p role="alert" className={styles.alert}>
+									{sign.sentence}
+								</p>
+							)}
+							{!secretInUrl && showsKeys && (
 								<>
 									{headers.map((line, i) => (
 										// biome-ignore lint/suspicious/noArrayIndexKey: a line is its place in the list
@@ -421,7 +683,7 @@ export function ConnectorAdd({
 							</fieldset>
 						</>
 					)}
-					{!secretInUrl && (
+					{!secretInUrl && showsKeys && (
 						<fieldset className={styles.group}>
 							<legend className={styles.subheading}>{t("addKeys")}</legend>
 							<p className={styles.muted}>
@@ -476,17 +738,21 @@ export function ConnectorAdd({
 						</p>
 					)}
 					<div className={styles.actions}>
-						<Button
-							kind="primary"
-							busy={busy}
-							disabled={!ready || !headerOk}
-							onClick={list}
-						>
-							{t("addNext")}
-						</Button>
+						{(showsKeys || sign.kind === "signedIn") && (
+							<Button
+								kind="primary"
+								busy={busy}
+								disabled={!ready || !headerOk}
+								onClick={next}
+							>
+								{t("addNext")}
+							</Button>
+						)}
 						<Button onClick={() => onClose(false)}>{t("agentCancel")}</Button>
 					</div>
-					<p className={styles.muted}>{t("addNextNote", { name })}</p>
+					{showsKeys && (
+						<p className={styles.muted}>{t("addNextNote", { name })}</p>
+					)}
 				</>
 			)}
 			{step === 1 && (
@@ -560,7 +826,21 @@ export function ConnectorAdd({
 					<p role="status">
 						<strong>{t("addDone", fill)}</strong>
 					</p>
-					{named.length > 0 && (
+					{done?.signedIn && (
+						<>
+							<p>
+								<strong>{t("addSignedIn")}</strong>
+							</p>
+							<p>
+								{t(file ? "addSignedInFile" : "addSignedInKeychain", {
+									name,
+									service: serviceOf(fill.server),
+								})}
+								{sandboxed ? "" : ` ${t("addSignedInNoSandbox", { name })}`}
+							</p>
+						</>
+					)}
+					{!done?.signedIn && named.length > 0 && (
 						<p>
 							<strong>{t(file ? "addFile" : "addKeychain", fill)}</strong>{" "}
 							{t(
@@ -578,7 +858,7 @@ export function ConnectorAdd({
 					<ul>
 						<li>{counted}</li>
 						<li>{t("addNextWork", { name })}</li>
-						<li>{t("addOnly", fill)}</li>
+						<li>{t(done?.signedIn ? "addOnlySigned" : "addOnly", fill)}</li>
 					</ul>
 					<span>
 						<Button kind="primary" onClick={() => onClose(true)}>

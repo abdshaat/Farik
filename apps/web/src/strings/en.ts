@@ -1143,6 +1143,20 @@ export const en = {
 	connectorRemoveOthers:
 		"Nobody else on the team is affected. To use it again, add it again and type the keys.",
 	connectorKeep: "Keep it",
+	connectorSignedIn: "Signed in to {host}",
+	connectorSignInEnded:
+		"{host} ended Farik’s sign-in. Sign in again to use it.",
+	connectorSignInAgain: "Sign in again",
+	connectorRemoveSignedKeychain:
+		"Farik deletes the sign-in from your keychain and asks {host} to forget it.",
+	connectorRemoveSignedFile:
+		"Farik deletes the sign-in from the private file on this computer and asks {host} to forget it.",
+	connectorRemoveSignedKeychainStays:
+		"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in {host}’s settings.",
+	connectorRemoveSignedFileStays:
+		"Farik deletes the sign-in from the private file on this computer. To remove Farik completely, also remove it in {host}’s settings.",
+	connectorRemoveOthersSigned:
+		"Nobody else on the team is affected. To use it again, add it again and sign in.",
 	connectorCustom: "A custom connector",
 	connectorCustomNote:
 		"Any connector, by the command that starts it or its web address. Farik has not checked it, so you label each of its tools yourself. A connector started by a command runs on this computer with your rights, so add only one you trust. It runs in a folder Farik keeps for it, so give a file of yours by its full path, starting with /.",
@@ -1256,6 +1270,37 @@ export const en = {
 		"Farik could not start {server} or reach it to list its tools. Check the command or the address, and the keys, against its instructions.",
 	addTimeout:
 		"{server} did not answer within thirty seconds. Check the command or the address, and try again.",
+	addSignInLead: "{host} lets you sign in.",
+	addSignInButton: "Sign in with {host}",
+	addSignInFor: "for {host}",
+	addSignInNote:
+		"Farik opens its sign-in page in a new tab. Come back here when you’re done.",
+	addUseAKey: "Use a key instead",
+	addWaiting: "Waiting for you to sign in to {host}…",
+	addOpenAgain: "Open the sign-in page again",
+	addSignedInTo: "Signed in to {host}.",
+	addTryAgain: "Try again",
+	addSignInDenied: "You said no on {host}’s page, so Farik isn’t connected.",
+	addSignInTimedOut: "The sign-in took longer than 10 minutes.",
+	addSignInMismatch:
+		"Something didn’t match on the way back from {host}, so Farik stopped to keep you safe.",
+	addSignInFailed:
+		"{host} didn’t finish the sign-in. Try again, or use a key if it gives you one.",
+	addNotSupported:
+		"{host} doesn’t let Farik sign in by itself yet. If it gives you a key, paste it below.",
+	addSignInCouldNot:
+		"Farik couldn’t sign in to {host}. If it gives you a key, paste it below.",
+	addSignInEnded:
+		"{host} ended Farik’s sign-in. Sign in again to use {server}.",
+	addSignedIn: "Signed in.",
+	addSignedInKeychain:
+		"{name} uses {service} as you. Farik keeps the sign-in in your keychain.",
+	addSignedInFile:
+		"{name} uses {service} as you. Farik keeps the sign-in in a private file only you can read.",
+	addSignedInNoSandbox:
+		"Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
+	addOnlySigned:
+		"Only {name} has {server}. To give it to someone else, add it from their page, and sign in again there.",
 	uiPathsTitle: "Which files are screens",
 	uiPathsLead:
 		"When a Developer’s change touches a file like these, the UI/UX Designer checks its screens before the Architect reviews the code.",

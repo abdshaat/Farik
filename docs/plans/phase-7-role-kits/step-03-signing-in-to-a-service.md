@@ -287,7 +287,7 @@ Files: `ConnectorAdd.tsx`, `AgentEdit.tsx`, `connectors.test.tsx`, `strings/en.t
 - `agent_edit_shows_signed_in_and_sign_in_again`: the two rows; "Sign in again" opens `ConnectorAdd` at the sign-in, filled in.
 - `agent_edit_remove_says_the_service_is_asked_to_forget`: the confirmation's sentence for a signed-in row, and the settings sentence when `revokes` is false.
 
-- [ ] `feat(web): sign in to a service from the agent page`
+- [x] `feat(web): sign in to a service from the agent page`
 
 ### Task 9: Spec and plan
 

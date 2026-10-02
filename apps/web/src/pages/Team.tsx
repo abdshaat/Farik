@@ -46,8 +46,12 @@ export type Effective = {
 export type ConnectorState = {
 	agent: string;
 	server: string;
-	state: "connected" | "connect_again" | "store_unavailable";
-	/** Where its keys are kept, whenever some are. */
+	state: "connected" | "connect_again" | "sign_in_again" | "store_unavailable";
+	/** Whether the user gave keys or signed in to the service (ADR 0033). */
+	auth?: "keys" | "oauth";
+	/** For a sign-in: whether the service can be asked to forget it when it is removed. */
+	revokes?: boolean;
+	/** Where its keys or sign-in are kept, whenever some are. */
 	storedIn?: "keychain" | "file";
 };
 type Holder = { agentId: string; displayName: string; role: Agent["role"] };

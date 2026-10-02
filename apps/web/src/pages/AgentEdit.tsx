@@ -5,7 +5,7 @@ import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
-import { ConnectorAdd, labelsSaid } from "./ConnectorAdd.tsx";
+import { ConnectorAdd, hostOf, labelsSaid } from "./ConnectorAdd.tsx";
 import styles from "./pages.module.css";
 import { useAdvanced } from "./Settings.tsx";
 import {
@@ -224,7 +224,29 @@ function Editor({
 		file: "connectorRemoveBodyFile",
 		none: "connectorRemoveBody",
 	} as const;
-	const [adding, setAdding] = useState<{ again?: McpServer }>();
+	/** What Remove says it deletes, and, for a sign-in, whether the service is asked to forget it. */
+	const removeWords = (server: string) => {
+		const kept = stateOf(server);
+		if (kept?.auth !== "oauth")
+			return t(removeBody[kept?.storedIn ?? "none"], { server, name });
+		const host = hostOf(custom.find((c) => c.name === server)?.url);
+		const forgets = kept.revokes !== false;
+		const file = kept.storedIn === "file";
+		return t(
+			forgets
+				? file
+					? "connectorRemoveSignedFile"
+					: "connectorRemoveSignedKeychain"
+				: file
+					? "connectorRemoveSignedFileStays"
+					: "connectorRemoveSignedKeychainStays",
+			{ host },
+		);
+	};
+	const [adding, setAdding] = useState<{
+		again?: McpServer;
+		ended?: boolean;
+	}>();
 	const [removing, setRemoving] = useState<string>();
 	const [removeRefused, setRemoveRefused] = useState<string>();
 	const remove = async (server: string) => {
@@ -400,8 +422,10 @@ function Editor({
 									server={c}
 									state={stateOf(c.name)?.state}
 									storedIn={stateOf(c.name)?.storedIn}
+									auth={stateOf(c.name)?.auth}
 									name={name}
 									onAgain={() => setAdding({ again: c })}
+									onSignInAgain={() => setAdding({ again: c, ended: true })}
 									onRemove={() => {
 										setRemoveRefused(undefined);
 										setRemoving(c.name);
@@ -432,13 +456,14 @@ function Editor({
 						</>
 					}
 				>
-					<p>
-						{t(removeBody[stateOf(removing)?.storedIn ?? "none"], {
-							server: removing,
-							name,
-						})}
+					<p>{removeWords(removing)}</p>
+					<p className={styles.muted}>
+						{t(
+							stateOf(removing)?.auth === "oauth"
+								? "connectorRemoveOthersSigned"
+								: "connectorRemoveOthers",
+						)}
 					</p>
-					<p className={styles.muted}>{t("connectorRemoveOthers")}</p>
 					{removeRefused && (
 						<p role="alert" className={styles.alert}>
 							{removeRefused}
@@ -451,6 +476,7 @@ function Editor({
 					agent={saved.id}
 					name={name}
 					again={adding.again}
+					ended={adding.ended}
 					sandboxed={sandboxed}
 					onClose={(changed) => {
 						setAdding(undefined);
@@ -517,17 +543,23 @@ function CustomRow({
 	server,
 	state,
 	storedIn,
+	auth,
 	name,
 	onAgain,
+	onSignInAgain,
 	onRemove,
 }: {
 	server: McpServer;
 	state: ConnectorState["state"] | undefined;
 	storedIn: ConnectorState["storedIn"];
+	auth: ConnectorState["auth"];
 	name: string;
 	onAgain: () => void;
+	onSignInAgain: () => void;
 	onRemove: () => void;
 }) {
+	const signedIn = auth === "oauth" || server.oauth !== undefined;
+	const host = hostOf(server.url);
 	const tags = Object.values(server.tools ?? {});
 	const labels = labelsSaid(tags);
 	return (
@@ -545,13 +577,24 @@ function CustomRow({
 					{state === "connect_again" && (
 						<Button onClick={onAgain}>{t("connectorAgainButton")}</Button>
 					)}
+					{state === "sign_in_again" && (
+						<Button onClick={onSignInAgain}>{t("connectorSignInAgain")}</Button>
+					)}
 					<Button kind="quiet" onClick={onRemove}>
 						{t("connectorRemove")}{" "}
 						<span className={styles.hidden}>{server.name}</span>
 					</Button>
 				</span>
 			</div>
-			{storedIn && (
+			{signedIn && state === "connected" && (
+				<p>{t("connectorSignedIn", { host })}</p>
+			)}
+			{signedIn && state === "sign_in_again" && (
+				<p>
+					<strong>{t("connectorSignInEnded", { host })}</strong>
+				</p>
+			)}
+			{!signedIn && storedIn && (
 				<p>
 					{t(storedIn === "file" ? "connectorFile" : "connectorKeychain", {
 						name,

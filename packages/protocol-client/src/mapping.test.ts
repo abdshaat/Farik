@@ -79,4 +79,56 @@ describe("mapping", () => {
 			tools: [{ name: "a_b", isX: true }],
 		});
 	});
+
+	it("maps_the_sign_in_calls_and_keeps_the_scopes_as_given", () => {
+		// What `connector.sign_in` takes, and what it and `team.get` answer (ADR 0033).
+		const camel = {
+			agent: "theo",
+			server: {
+				name: "notion",
+				oauth: {
+					clientId: "abc",
+					callbackPort: 33418,
+					scopes: ["read", "offline_access"],
+				},
+			},
+			attempt: "0123",
+		};
+		const wire = {
+			agent: "theo",
+			server: {
+				name: "notion",
+				oauth: {
+					client_id: "abc",
+					callback_port: 33418,
+					scopes: ["read", "offline_access"],
+				},
+			},
+			attempt: "0123",
+		};
+		expect(toSnake(camel)).toEqual(wire);
+		expect(toCamel(wire)).toEqual(camel);
+		expect(
+			toCamel({
+				attempt: "0123",
+				authorize_url: "https://auth.example/authorize",
+				issuer: "https://auth.example",
+			}),
+		).toEqual({
+			attempt: "0123",
+			authorizeUrl: "https://auth.example/authorize",
+			issuer: "https://auth.example",
+		});
+		expect(
+			toCamel({
+				connectors: [
+					{ server: "notion", auth: "oauth", revokes: true, stored_in: "file" },
+				],
+			}),
+		).toEqual({
+			connectors: [
+				{ server: "notion", auth: "oauth", revokes: true, storedIn: "file" },
+			],
+		});
+	});
 });
