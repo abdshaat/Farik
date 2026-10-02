@@ -82,6 +82,13 @@ pub(crate) fn waiting(
                     "may need your acceptance".to_string(),
                     format!("farik accept {id} --message <your review>"),
                 ),
+                WaitingKind::ToolApproval => {
+                    let seq = item.approval.as_ref().map_or(0, |ask| ask.approval);
+                    (
+                        format!("waits: {}", item.line),
+                        format!("farik tool approve {seq}, or farik tool refuse {seq}"),
+                    )
+                }
                 WaitingKind::Integration => (
                     "waits for you to integrate it".to_string(),
                     format!("farik integrate {id}"),

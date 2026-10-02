@@ -18,7 +18,7 @@ use crate::generated::command::{
     EscalationResolveBody, FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject,
     HumanSendBackBody, HumanSendBackBodySubject, MessagePostBody, QuestionAnswerBody,
     RequestTriageBody, RequestTriageBodySize, SessionStopBody, SprintStartBody, TaskCreateBody,
-    TaskIdBody, TaskTransitionBody,
+    TaskIdBody, TaskTransitionBody, ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -213,6 +213,20 @@ pub enum Command {
         /// The server's name.
         server: String,
     },
+    /// Allow once the connector call an agent asked about (ADR 0031).
+    ToolApprove {
+        /// The seq of its `tool_approval.requested`.
+        approval: u64,
+        /// What the human says to the agent.
+        note: Option<String>,
+    },
+    /// Refuse the connector call an agent asked about.
+    ToolRefuse {
+        /// The seq of its `tool_approval.requested`.
+        approval: u64,
+        /// What the human says to the agent.
+        note: Option<String>,
+    },
 }
 
 /// Checks a value against `docs/schemas/command.schema.json` and, when it conforms, returns the
@@ -362,6 +376,7 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
         CommandName::ConnectorConnect | CommandName::ConnectorDisconnect => {
             connector_command(name, body)
         }
+        CommandName::ToolApprove | CommandName::ToolRefuse => decision_command(name, body),
     }
 }
 
@@ -373,6 +388,17 @@ fn empty_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
         CommandName::SprintEnd => Command::SprintEnd,
         CommandName::TeamPause => Command::TeamPause,
         _ => Command::TeamResume,
+    })
+}
+
+/// `tool_approve` or `tool_refuse`, which share one body shape.
+fn decision_command(name: CommandName, body: &Value) -> Result<Command, Vec<ValidationError>> {
+    let body: ToolDecisionBody = read_body(body, name)?;
+    let (approval, note) = (body.approval.get(), body.note);
+    Ok(if name == CommandName::ToolApprove {
+        Command::ToolApprove { approval, note }
+    } else {
+        Command::ToolRefuse { approval, note }
     })
 }
 
@@ -506,6 +532,12 @@ pub fn command_to_value(command: &Command) -> Value {
         Command::ConnectorConnect { .. } | Command::ConnectorDisconnect { .. } => {
             connector_wire(command)
         }
+        Command::ToolApprove { approval, note } => {
+            decision_wire(CommandName::ToolApprove, *approval, note.as_ref())
+        }
+        Command::ToolRefuse { approval, note } => {
+            decision_wire(CommandName::ToolRefuse, *approval, note.as_ref())
+        }
     };
     json!({ "command": name.to_string(), "body": body })
 }
@@ -513,6 +545,15 @@ pub fn command_to_value(command: &Command) -> Value {
 /// A command whose body is its task's id alone.
 fn task_wire(name: CommandName, task_id: &TaskId) -> (CommandName, Value) {
     (name, json!({ "task_id": task_id.as_str() }))
+}
+
+/// `tool_approve` or `tool_refuse` as its name and body, `note` absent when there is none.
+fn decision_wire(name: CommandName, approval: u64, note: Option<&String>) -> (CommandName, Value) {
+    let mut body = json!({ "approval": approval });
+    if let Some(note) = note {
+        body["note"] = json!(note);
+    }
+    (name, body)
 }
 
 /// `connector_connect` or `connector_disconnect` as its name and body.

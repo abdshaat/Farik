@@ -6,14 +6,16 @@ use std::path::{Component, Path, PathBuf};
 
 use farik_core::contract::Role;
 use farik_core::governor::permissions::{
-    AgentGrants, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext, ToolCallRequest,
-    ToolDescriptor, evaluate_connector_call, evaluate_tool_call,
+    AgentGrants, ApprovalKey, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext,
+    ToolCallRequest, ToolDescriptor, evaluate_connector_call, evaluate_tool_call, input_sha256,
 };
 use farik_core::team::{AgentStatus, Team};
 use farik_protocol::event::{
-    ConnectorTagWire, EventBody, EventIds, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
-    new_event,
+    ConnectorTagWire, EventBody, EventIds, EventKind, ToolApprovalRequestedBody, ToolCalledBody,
+    ToolDeniedBody, ToolReturnedBody, new_event,
 };
+use farik_store::EventQuery;
+use farik_store::waiting::open_grants;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 
@@ -87,6 +89,9 @@ const JSON_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const ALLOWED: &str = "allowed by the governor";
 /// The kind of the denial of every call of a session told to stop.
 const SESSION_STOPPED: &str = "session_stopped";
+/// The kind of the denial of a connector's call that waits for the human, and the start of the
+/// stop and the end's detail it gives its session (ADR 0031).
+pub(crate) const APPROVAL_NEEDED: &str = "approval_needed";
 
 /// The tier a Claude Code built-in tool needs, or `None` for one no session may call: `Bash`
 /// above all, because a session's shell is `farik_exec` (ADR 0004).
@@ -133,7 +138,7 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
     };
     let verdict = verdict.map_err(|denial| {
         if let Some(stop) = denial.stop {
-            session.stop_reason.get_or_insert_with(|| stop.to_string());
+            session.stop_reason.get_or_insert(stop);
             state.stops().notify_waiters();
         }
         denial.reason
@@ -153,10 +158,11 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
 }
 
 /// Why a call is denied, and the stop the denial asks of the session when it asks one: an agent
-/// the human paused or retired stops at its next tool call (F1).
+/// the human paused or retired stops at its next tool call (F1), and a call that waits for the
+/// human ends its session (ADR 0031).
 struct Denial {
     reason: String,
-    stop: Option<&'static str>,
+    stop: Option<String>,
 }
 
 impl From<String> for Denial {
@@ -200,6 +206,7 @@ pub fn record_post_tool_use(request: &HookRequest, state: &DaemonState) -> Resul
                 .and_then(|ms| i64::try_from(ms.min(JSON_SAFE_INTEGER)).ok()),
         }),
     )
+    .map(|_| ())
     .map_err(|detail| DaemonError::Io { detail })
 }
 
@@ -209,11 +216,11 @@ fn judge(
     registration: &SessionRegistration,
     tool_calls: u32,
     deps: &ToolDeps,
-) -> Result<(), Denial> {
+) -> Result<Option<u64>, Denial> {
     let team = deps
         .files
         .read_team()
-        .map_err(|error| format!("team_unreadable: {error}"))?;
+        .map_err(|error| Denial::from(format!("team_unreadable: {error}")))?;
     match team
         .agents
         .iter()
@@ -228,32 +235,41 @@ fn judge(
                     status,
                 }
                 .reason(),
-                stop: Some(if status == Some(AgentStatus::Paused) {
-                    "agent paused by the user"
-                } else {
-                    "agent retired by the user"
-                }),
+                stop: Some(
+                    if status == Some(AgentStatus::Paused) {
+                        "agent paused by the user"
+                    } else {
+                        "agent retired by the user"
+                    }
+                    .to_string(),
+                ),
             });
         }
     }
-    judge_call(request, registration, tool_calls, deps, &team).map_err(Denial::from)
+    if tool_calls >= registration.limits.max_tool_calls {
+        return Err(Denial::from(format!(
+            "tool_call_limit: the session has made the {} tool calls it may make",
+            registration.limits.max_tool_calls
+        )));
+    }
+    // A connector's call is judged by its tag alone, whatever the session's tiers (5.6).
+    if !request.tool_name.starts_with(FARIK_PREFIX) && connector_tool(&request.tool_name).is_some()
+    {
+        return judge_connector(request, registration, deps, &team);
+    }
+    judge_call(request, registration, deps, &team)
+        .map(|()| None)
+        .map_err(Denial::from)
 }
 
-/// Whether an active agent's call may go ahead, or the reason it may not: by the tiers the
-/// session started with (spec 4.4).
+/// Whether an active agent's call of a Farik tool or a built-in may go ahead, or the reason it may
+/// not: by the tiers the session started with (spec 4.4).
 fn judge_call(
     request: &HookRequest,
     registration: &SessionRegistration,
-    tool_calls: u32,
     deps: &ToolDeps,
     team: &Team,
 ) -> Result<(), String> {
-    if tool_calls >= registration.limits.max_tool_calls {
-        return Err(format!(
-            "tool_call_limit: the session has made the {} tool calls it may make",
-            registration.limits.max_tool_calls
-        ));
-    }
     let (tier, paths) = match request.tool_name.strip_prefix(FARIK_PREFIX) {
         // A Farik tool is asked with no paths here: `call_tool` asks again with its real ones.
         Some(name) => match tool_descriptors().iter().find(|tool| tool.name == name) {
@@ -266,10 +282,6 @@ fn judge_call(
             Some(tool) => (tool.tier, Vec::new()),
             None => return Err(not_allowed(&request.tool_name)),
         },
-        // A connector's call is judged by its tag alone, whatever the session's tiers (5.6).
-        None if connector_tool(&request.tool_name).is_some() => {
-            return judge_connector(request, registration);
-        }
         None => match builtin_tool_tier(&request.tool_name) {
             Some(tier) => (
                 tier,
@@ -309,6 +321,17 @@ fn judge_call(
         },
     )
     .map_err(|refusal| Refusal::Tool(refusal).reason())?;
+    plan_gate(deps, team, registration, tier)
+}
+
+/// The Designer's plan gate (ADR 0026): before the Product Manager approves its plan, a Designer's
+/// call at a writing tier, `external_effect` among them, is refused.
+fn plan_gate(
+    deps: &ToolDeps,
+    team: &Team,
+    registration: &SessionRegistration,
+    tier: PermissionTier,
+) -> Result<(), String> {
     let role = team
         .agents
         .iter()
@@ -344,23 +367,36 @@ fn connector_of(
     Some((server.to_string(), tag))
 }
 
-/// Whether a connector's call may go ahead, by `evaluate_connector_call` alone (5.6): no tier is
-/// asked, and `preauthorized_external_tools` is never consulted.
+/// Whether a connector's call may go ahead, and the approval it uses when a grant allows it, by
+/// `evaluate_connector_call` (5.6): no tier is asked, and `preauthorized_external_tools` is never
+/// consulted. An `external_effect` call meets the Designer's plan gate first, then the human's open
+/// grant for it is looked up; with none, it asks (ADR 0031).
 fn judge_connector(
     request: &HookRequest,
     registration: &SessionRegistration,
-) -> Result<(), String> {
+    deps: &ToolDeps,
+    team: &Team,
+) -> Result<Option<u64>, Denial> {
     let Some((server, tool)) = connector_tool(&request.tool_name) else {
-        return Err(not_allowed(&request.tool_name));
+        return Err(Denial::from(not_allowed(&request.tool_name)));
     };
     let connector = registration
         .connectors
         .iter()
         .find(|connector| connector.server == server);
-    // No grant is looked up yet, so every external_effect call is refused until step 02 asks.
-    evaluate_connector_call(tool, &request.tool_input, connector, None)
-        .map(|_| ())
-        .map_err(|refusal| match refusal {
+    let mut granted = None;
+    if connector.and_then(|connector| connector.tools.get(tool))
+        == Some(&ConnectorTag::ExternalEffect)
+    {
+        plan_gate(deps, team, registration, PermissionTier::ExternalEffect)?;
+        granted = grant_for(deps, registration, server, tool, &request.tool_input)?;
+    }
+    match evaluate_connector_call(tool, &request.tool_input, connector, granted) {
+        Ok((_, approval)) => Ok(approval),
+        Err(ConnectorRefusal::ApprovalNeeded) => {
+            Err(ask(deps, registration, server, tool, &request.tool_input))
+        }
+        Err(refusal) => Err(Denial::from(match refusal {
             ConnectorRefusal::ConnectorNotInSession => format!(
                 "connector_not_in_session: {server} is not a connector this session was given"
             ),
@@ -371,10 +407,7 @@ fn judge_connector(
             ConnectorRefusal::ToolDenied => format!(
                 "tool_denied: {tool} of {server} is tagged denied, and no session may call it"
             ),
-            ConnectorRefusal::ApprovalNeeded => format!(
-                "external_effect_refused: {tool} of {server} changes something outside the \
-                 sandbox, and Farik cannot ask you about one call yet, so it is refused"
-            ),
+            ConnectorRefusal::ApprovalNeeded => unreachable!("asked above"),
             ConnectorRefusal::InputTooLarge => format!(
                 "tool_input_too_large: {tool}'s input is over 64 KiB, too long to show you, so it \
                  is refused"
@@ -385,7 +418,102 @@ fn judge_connector(
                     .and_then(|connector| connector.origin.as_deref())
                     .unwrap_or_default()
             ),
+        })),
+    }
+}
+
+/// The open grant this session may use for this exact call: the human's, for the session's agent
+/// and task, server, tool and input, granted before this session started. Only the task's events
+/// are read, so the sessions lock the caller holds stays short.
+fn grant_for(
+    deps: &ToolDeps,
+    registration: &SessionRegistration,
+    server: &str,
+    tool: &str,
+    input: &Value,
+) -> Result<Option<u64>, Denial> {
+    let Some(task_id) = &registration.task_id else {
+        return Ok(None);
+    };
+    let events = deps
+        .log
+        .read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            kinds: vec![
+                EventKind::ToolApprovalRequested,
+                EventKind::ToolApprovalGranted,
+                EventKind::ToolApprovalRefused,
+                EventKind::ToolCalled,
+                EventKind::SessionStarted,
+                EventKind::SessionEnded,
+            ],
+            ..EventQuery::default()
         })
+        .map_err(|error| Denial::from(format!("grants_unreadable: {error}")))?;
+    // The latest start of this session's id: an id is never given twice, and if it were, the
+    // session running now is the last one started under it.
+    let Some(started) = events
+        .iter()
+        .rev()
+        .find(|event| {
+            matches!(event.body, EventBody::SessionStarted(_))
+                && event.envelope.ids.session_id.as_deref() == Some(&registration.session_id)
+        })
+        .map(|event| event.envelope.seq)
+    else {
+        return Ok(None);
+    };
+    let key = ApprovalKey {
+        agent_id: registration.agent_id.clone(),
+        task_id: task_id.clone(),
+        server: server.to_string(),
+        tool: tool.to_string(),
+        input_sha256: input_sha256(input),
+    };
+    Ok(open_grants(&events)
+        .into_iter()
+        .find(|grant| grant.key == key && grant.granted_at < started)
+        .map(|grant| grant.approval))
+}
+
+/// Records that the call waits for the human, `tool_approval.requested` with its whole input, and
+/// the denial that names its seq and stops the session. A session about no task has nothing to
+/// wait on, so its call is refused without asking.
+fn ask(
+    deps: &ToolDeps,
+    registration: &SessionRegistration,
+    server: &str,
+    tool: &str,
+    input: &Value,
+) -> Denial {
+    if registration.task_id.is_none() {
+        return Denial::from(format!(
+            "external_effect_refused: {tool} of {server} changes something outside the sandbox, \
+             and only a session about a task can ask you to allow it"
+        ));
+    }
+    // The connector's own checks passed, so neither name is empty; a panic here would poison the
+    // sessions lock, so a body that cannot be made is a failed record instead.
+    let requested = (|| {
+        Some(EventBody::ToolApprovalRequested(
+            ToolApprovalRequestedBody {
+                server: server.to_string().try_into().ok()?,
+                tool: tool.to_string().try_into().ok()?,
+                input: input.to_string(),
+                input_sha256: input_sha256(input).try_into().ok()?,
+            },
+        ))
+    })()
+    .ok_or_else(|| format!("{server} {tool} cannot be named in a request"));
+    match requested.and_then(|body| append(deps, ids_of(deps, registration), body)) {
+        Ok(seq) => Denial {
+            reason: format!(
+                "{APPROVAL_NEEDED}: {server} {tool} waits for the human (approval {seq})"
+            ),
+            stop: Some(format!("{APPROVAL_NEEDED}: approval {seq}")),
+        },
+        Err(detail) => Denial::from(format!("record_failed: {detail}")),
+    }
 }
 
 fn not_allowed(tool: &str) -> String {
@@ -487,7 +615,7 @@ fn record_decision(
     ids: EventIds,
     request: &HookRequest,
     connector: Option<(String, Option<ConnectorTag>)>,
-    verdict: Result<(), String>,
+    verdict: Result<Option<u64>, String>,
 ) -> HookDecision {
     let (server, tag) = match connector {
         Some((server, tag)) => (Some(server), tag.map(tag_wire)),
@@ -496,13 +624,14 @@ fn record_decision(
     let tool = request.tool_name.clone();
     let tool_use_id = request.tool_use_id.clone();
     let (body, decision) = match verdict {
-        Ok(()) => (
+        Ok(approval) => (
             EventBody::ToolCalled(ToolCalledBody {
                 tool,
                 tool_use_id,
                 input: cut(request.tool_input.to_string()),
                 server: server.and_then(|name| name.try_into().ok()),
                 tag,
+                approval: approval.and_then(std::num::NonZeroU64::new),
             }),
             HookDecision {
                 allow: true,
@@ -521,7 +650,7 @@ fn record_decision(
         ),
     };
     match append(deps, ids, body) {
-        Ok(()) => decision,
+        Ok(_) => decision,
         Err(detail) => HookDecision::deny(format!("record_failed: {detail}")),
     }
 }
@@ -534,13 +663,15 @@ fn tag_wire(tag: ConnectorTag) -> ConnectorTagWire {
     }
 }
 
-fn append(deps: &ToolDeps, ids: EventIds, body: EventBody) -> Result<(), String> {
+/// Appends one event and projects it: the seq it was written at.
+fn append(deps: &ToolDeps, ids: EventIds, body: EventBody) -> Result<u64, String> {
     let event = new_event(body, deps.clock.now(), ids)
         .map_err(|error| format!("the event cannot be stamped: {error:?}"))?;
     let appended = deps.log.append(&event).map_err(|error| error.to_string())?;
     deps.projections
         .apply(&appended)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    Ok(appended.envelope.seq)
 }
 
 /// `text` whole when it fits in 4 KiB, or cut at the last character boundary that leaves room
@@ -1170,15 +1301,27 @@ mod tests {
     /// Registers `session-github`, a session of `dev-a` holding the `read` tier alone and given
     /// the custom server `github`, which has one tool of each tag and no origin.
     fn with_github(daemon: &TestDaemon) {
+        github_session(daemon, "session-github", "dev-a");
+    }
+
+    /// Registers `session`, of `agent` on FRK-1, as `with_github` describes, and records its
+    /// `session.started`.
+    fn github_session(daemon: &TestDaemon, session: &str, agent: &str) {
+        task_session(daemon, session, agent, "FRK-1");
+    }
+
+    /// `github_session` on `task`. `github` also has `close_issue`, and the session is given
+    /// `gitlab` too, both tagged `external_effect`.
+    fn task_session(daemon: &TestDaemon, session: &str, agent: &str, task: &str) {
         use farik_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
 
         use crate::daemon::SessionRegistration;
         use crate::session::SessionPurpose;
 
         daemon.state.register_session(SessionRegistration {
-            session_id: "session-github".to_string(),
-            agent_id: "dev-a".to_string(),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            session_id: session.to_string(),
+            agent_id: agent.to_string(),
+            task_id: Some(task.parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -1187,20 +1330,109 @@ mod tests {
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: Vec::new(),
             tiers: vec![PermissionTier::Read],
-            connectors: vec![SessionConnector {
-                server: "github".to_string(),
-                origin: None,
-                tools: [
-                    ("search_issues", ConnectorTag::Network),
-                    ("create_issue", ConnectorTag::ExternalEffect),
-                    ("delete_repo", ConnectorTag::Denied),
-                ]
-                .into_iter()
-                .map(|(tool, tag)| (tool.to_string(), tag))
-                .collect(),
-            }],
+            connectors: vec![
+                SessionConnector {
+                    server: "github".to_string(),
+                    origin: None,
+                    tools: [
+                        ("search_issues", ConnectorTag::Network),
+                        ("create_issue", ConnectorTag::ExternalEffect),
+                        ("close_issue", ConnectorTag::ExternalEffect),
+                        ("delete_repo", ConnectorTag::Denied),
+                    ]
+                    .into_iter()
+                    .map(|(tool, tag)| (tool.to_string(), tag))
+                    .collect(),
+                },
+                SessionConnector {
+                    server: "gitlab".to_string(),
+                    origin: None,
+                    tools: [("create_issue".to_string(), ConnectorTag::ExternalEffect)].into(),
+                },
+            ],
             preview: None,
         });
+        task_event(
+            daemon,
+            task,
+            session,
+            agent,
+            "session.started",
+            &json!({ "purpose": "implement", "model": "claude-opus-5", "effort": "high" }),
+        );
+    }
+
+    /// Appends an event of `session`, of `agent` on FRK-1.
+    fn session_event(daemon: &TestDaemon, session: &str, agent: &str, kind: &str, body: &Value) {
+        task_event(daemon, "FRK-1", session, agent, kind, body);
+    }
+
+    /// Appends an event of `session`, of `agent` on `task`.
+    fn task_event(
+        daemon: &TestDaemon,
+        task: &str,
+        session: &str,
+        agent: &str,
+        kind: &str,
+        body: &Value,
+    ) {
+        use farik_protocol::event::{NewEvent, event_from_value};
+
+        let event = event_from_value(&json!({
+            "seq": 1, "recorded_at": "2026-09-17T10:00:00Z", "team_id": "farik",
+            "project_id": "farik", "task_id": task, "agent_id": agent, "session_id": session,
+            "kind": kind, "body": body,
+        }))
+        .expect("schema-valid");
+        let deps = &daemon.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
+    }
+
+    /// `session` calls `create_issue` with `input`.
+    fn create_issue(daemon: &TestDaemon, session: &str, input: &Value) -> HookDecision {
+        decide_pre_tool_use(
+            &daemon.call(session, "mcp__github__create_issue", input),
+            &daemon.state,
+        )
+    }
+
+    /// `session` calls `create_issue` with `input`, is asked, and the approval's seq.
+    fn asked(daemon: &TestDaemon, session: &str, input: &Value) -> u64 {
+        let decision = create_issue(daemon, session, input);
+        denied_for(&decision, "approval_needed");
+        let requested = daemon.events(EventKind::ToolApprovalRequested);
+        let seq = requested.last().expect("recorded").envelope.seq;
+        assert_eq!(
+            decision.reason,
+            format!("approval_needed: github create_issue waits for the human (approval {seq})")
+        );
+        seq
+    }
+
+    /// The human allows `approval`, as the command records it.
+    fn grant(daemon: &TestDaemon, approval: u64) {
+        daemon.project.record(
+            "FRK-1",
+            "tool_approval.granted",
+            &json!({ "approval": approval }),
+        );
+    }
+
+    /// The approval the last `tool.called` used.
+    fn used(daemon: &TestDaemon) -> Option<u64> {
+        let called = daemon.events(EventKind::ToolCalled);
+        let EventBody::ToolCalled(body) = &called.last().expect("recorded").body else {
+            panic!("a tool.called body");
+        };
+        body.approval.map(std::num::NonZeroU64::get)
     }
 
     fn github_call(daemon: &TestDaemon, tool: &str, input: &Value) -> HookDecision {
@@ -1262,47 +1494,64 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn external_effect_is_refused_with_a_sentence() {
-        use farik_core::governor::permissions::{
-            ConnectorRefusal, SessionConnector, evaluate_connector_call,
-        };
-
+    fn an_external_effect_call_asks_with_its_whole_input() {
         let daemon = TestDaemon::new("hook-custom-external", |_| {});
         with_github(&daemon);
-        let connector = SessionConnector {
-            server: "github".to_string(),
-            origin: None,
-            tools: [(
-                "create_issue".to_string(),
-                farik_core::governor::permissions::ConnectorTag::ExternalEffect,
-            )]
-            .into(),
-        };
-        assert_eq!(
-            evaluate_connector_call("create_issue", &json!({}), Some(&connector), None),
-            Err(ConnectorRefusal::ApprovalNeeded)
-        );
-        let decision = github_call(
-            &daemon,
-            "mcp__github__create_issue",
-            &json!({ "title": "x" }),
-        );
-        assert!(!decision.allow, "{decision:?}");
-        assert_eq!(
-            decision.reason,
-            "external_effect_refused: create_issue of github changes something outside the \
-             sandbox, and Farik cannot ask you about one call yet, so it is refused"
-        );
+        // Longer than the 4 KiB a tool call's input is cut at, keys out of order.
+        let input = json!({ "title": "x", "body": "b".repeat(5_000) });
+        let approval = asked(&daemon, "session-github", &input);
         assert_eq!(
             last_denied_server(&daemon).as_deref(),
             Some("github"),
             "recorded against its server"
         );
+        let requested = daemon.events(EventKind::ToolApprovalRequested);
+        assert_eq!(requested.len(), 1);
+        let ids = &requested[0].envelope.ids;
+        assert_eq!(ids.agent_id.as_deref(), Some("dev-a"));
+        assert_eq!(ids.session_id.as_deref(), Some("session-github"));
+        assert_eq!(
+            ids.task_id.as_ref().map(|id| id.to_string()).as_deref(),
+            Some("FRK-1")
+        );
+        let EventBody::ToolApprovalRequested(body) = &requested[0].body else {
+            panic!("a tool_approval.requested body");
+        };
+        assert_eq!(body.server.as_str(), "github");
+        assert_eq!(body.tool.as_str(), "create_issue");
+        assert_eq!(body.input, input.to_string(), "whole, never cut");
+        assert_eq!(
+            body.input_sha256.as_str(),
+            farik_core::governor::permissions::input_sha256(&input)
+        );
+        assert_eq!(
+            daemon.state.stop_reason("session-github"),
+            Some(format!("approval_needed: approval {approval}")),
+            "the session is stopped"
+        );
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn a_preauthorized_external_tool_is_still_refused() {
+    fn a_large_input_is_refused_not_asked() {
+        let daemon = TestDaemon::new("hook-custom-large", |_| {});
+        with_github(&daemon);
+        let large = json!({ "body": "b".repeat(64 * 1024) });
+        let decision = create_issue(&daemon, "session-github", &large);
+        assert_eq!(
+            decision.reason,
+            "tool_input_too_large: create_issue's input is over 64 KiB, too long to show you, so \
+             it is refused"
+        );
+        assert!(!decision.allow);
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+        assert_eq!(daemon.events(EventKind::ToolDenied).len(), 1);
+        assert_eq!(daemon.state.stop_reason("session-github"), None);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_preauthorized_external_tool_still_asks() {
         let daemon = TestDaemon::new("hook-custom-preauthorized", |_| {});
         daemon
             .project
@@ -1314,10 +1563,241 @@ mod tests {
             }))
             .expect("the team is written");
         with_github(&daemon);
-        denied_for(
-            &github_call(&daemon, "mcp__github__create_issue", &json!({})),
-            "external_effect_refused",
+        asked(&daemon, "session-github", &json!({}));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_designers_call_before_the_plan_is_refused_not_asked() {
+        let daemon = TestDaemon::new("hook-custom-designer", |_| {});
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&a_team_of_three(with_the_designer))
+            .expect("the team is written");
+        github_session(&daemon, "session-iris", "iris");
+        let decision = create_issue(&daemon, "session-iris", &json!({ "title": "x" }));
+        denied_for(&decision, "design_plan_not_approved");
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+        assert_eq!(daemon.state.stop_reason("session-iris"), None);
+        // Once the plan is approved, it asks.
+        daemon.project.record(
+            "FRK-1",
+            "design_plan.proposed",
+            &json!({ "plan": "A plan." }),
         );
+        daemon.project.record(
+            "FRK-1",
+            "design_plan.approved",
+            &json!({ "reason": "Go ahead." }),
+        );
+        asked(&daemon, "session-iris", &json!({ "title": "x" }));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn approve_then_the_same_call_runs_once() {
+        let daemon = TestDaemon::new("hook-grant-once", |_| {});
+        with_github(&daemon);
+        let input = json!({ "title": "x", "labels": ["bug"] });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        github_session(&daemon, "session-next", "dev-a");
+        // The same input, its keys in another order.
+        let reordered: Value =
+            serde_json::from_str(r#"{"labels":["bug"],"title":"x"}"#).expect("JSON");
+        let allowed = create_issue(&daemon, "session-next", &reordered);
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(used(&daemon), Some(approval));
+        let again = asked(&daemon, "session-next", &input);
+        assert!(again > approval);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_is_used_once_under_concurrency() {
+        let daemon = TestDaemon::new("hook-grant-concurrent", |_| {});
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        github_session(&daemon, "session-next", "dev-a");
+        let request = daemon.call("session-next", "mcp__github__create_issue", &input);
+        let barrier = std::sync::Barrier::new(2);
+        let decisions: Vec<HookDecision> = std::thread::scope(|scope| {
+            let calls: Vec<_> = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        decide_pre_tool_use(&request, &daemon.state)
+                    })
+                })
+                .collect();
+            calls
+                .into_iter()
+                .map(|call| call.join().expect("the call ends"))
+                .collect()
+        });
+        assert_eq!(
+            decisions.iter().filter(|decision| decision.allow).count(),
+            1,
+            "{decisions:?}"
+        );
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 1);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_different_input_is_not_approved() {
+        let daemon = TestDaemon::new("hook-grant-input", |_| {});
+        with_github(&daemon);
+        let approval = asked(&daemon, "session-github", &json!({ "title": "x", "n": 1 }));
+        grant(&daemon, approval);
+        github_session(&daemon, "session-next", "dev-a");
+        asked(&daemon, "session-next", &json!({ "title": "x", "n": 2 }));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_is_for_the_asking_agent_only() {
+        let daemon = TestDaemon::new("hook-grant-agent", |_| {});
+        with_github(&daemon);
+        // A session of dev-a's started before the grant is not its next session.
+        github_session(&daemon, "session-earlier", "dev-a");
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        asked(&daemon, "session-earlier", &input);
+        github_session(&daemon, "session-dev-b", "dev-b");
+        asked(&daemon, "session-dev-b", &input);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_is_for_its_task_server_and_tool_only() {
+        let daemon = TestDaemon::new("hook-grant-key", |_| {});
+        daemon
+            .project
+            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+                wire["assignee"] = json!("dev-a");
+            });
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        task_session(&daemon, "session-frk-2", "dev-a", "FRK-2");
+        denied_for(
+            &create_issue(&daemon, "session-frk-2", &input),
+            "approval_needed",
+        );
+        for (session, tool) in [
+            ("session-close", "mcp__github__close_issue"),
+            ("session-gitlab", "mcp__gitlab__create_issue"),
+        ] {
+            github_session(&daemon, session, "dev-a");
+            let decision = decide_pre_tool_use(&daemon.call(session, tool, &input), &daemon.state);
+            denied_for(&decision, "approval_needed");
+        }
+        // The grant is still there for the call it was given for.
+        github_session(&daemon, "session-next", "dev-a");
+        let allowed = create_issue(&daemon, "session-next", &input);
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(used(&daemon), Some(approval));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_lapses_with_the_next_session() {
+        let daemon = TestDaemon::new("hook-grant-lapse", |_| {});
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        github_session(&daemon, "session-next", "dev-a");
+        // A session of another agent's ending takes nothing from dev-a's grant.
+        github_session(&daemon, "session-dev-b", "dev-b");
+        session_event(
+            &daemon,
+            "session-dev-b",
+            "dev-b",
+            "session.ended",
+            &json!({ "reason": "completed", "detail": "done" }),
+        );
+        session_event(
+            &daemon,
+            "session-next",
+            "dev-a",
+            "session.ended",
+            &json!({ "reason": "completed", "detail": "done" }),
+        );
+        github_session(&daemon, "session-later", "dev-a");
+        asked(&daemon, "session-later", &input);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_outlives_another_agents_session() {
+        let daemon = TestDaemon::new("hook-grant-other-ends", |_| {});
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        github_session(&daemon, "session-dev-b", "dev-b");
+        session_event(
+            &daemon,
+            "session-dev-b",
+            "dev-b",
+            "session.ended",
+            &json!({ "reason": "completed", "detail": "done" }),
+        );
+        // The asking session's own end, recorded after the grant, lapses nothing either.
+        session_event(
+            &daemon,
+            "session-github",
+            "dev-a",
+            "session.ended",
+            &json!({ "reason": "aborted", "detail": "approval_needed" }),
+        );
+        github_session(&daemon, "session-next", "dev-a");
+        let allowed = create_issue(&daemon, "session-next", &input);
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(used(&daemon), Some(approval));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_an_agent_recorded_is_no_grant() {
+        let daemon = TestDaemon::new("hook-grant-forged", |_| {});
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        // Only a command records a decision, with no agent or session on it.
+        session_event(
+            &daemon,
+            "session-github",
+            "dev-a",
+            "tool_approval.granted",
+            &json!({ "approval": approval }),
+        );
+        github_session(&daemon, "session-next", "dev-a");
+        asked(&daemon, "session-next", &input);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_refused_call_asks_again() {
+        let daemon = TestDaemon::new("hook-refused", |_| {});
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        daemon.project.record(
+            "FRK-1",
+            "tool_approval.refused",
+            &json!({ "approval": approval }),
+        );
+        github_session(&daemon, "session-next", "dev-a");
+        asked(&daemon, "session-next", &input);
     }
 
     #[test]

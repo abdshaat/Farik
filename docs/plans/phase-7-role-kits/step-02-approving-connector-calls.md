@@ -57,7 +57,7 @@ crates/runtime/src/daemon/team.rs                               modifies: tool_a
 docs/schemas/{event,command}.schema.json                        modifies: three events, approval on tool.called, two commands (Task 3)
 crates/protocol/src/event.rs, command.rs                        modifies: hand-written EventKind, EventBody, Command (Task 3)
 crates/store/src/waiting.rs, projections.rs                     modifies: open approvals wait on the human; open grants (Task 3)
-crates/store/src/migrations/0011_tool_approvals.sql             creates: open_approvals (Task 3)
+crates/store/src/migrations/0012_tool_approvals.sql             creates: open_approvals (Task 3)
 docs/schemas/rpc.schema.json                                    modifies: waiting row kind tool_approval (Task 3)
 crates/cli/src/human.rs, lib.rs                                 modifies: farik tool approve|refuse (Task 4)
 packages/protocol-client/src/mapping.ts                         modifies: the waiting row's camelCase mapping (Task 5)
@@ -115,7 +115,7 @@ Files: `permissions.rs`, ADR 0031, and, as call sites only, `daemon/hooks.rs` (`
 
 ### Task 3: The hook, and approvals that wait
 
-Files: `daemon/hooks.rs`, `orchestrator/session.rs`, `orchestrator/messages.rs`, `daemon/team.rs`, the event, command and RPC schemas, `protocol/src/event.rs`, `command.rs`, `store/src/waiting.rs`, `projections.rs`, migration `0011_tool_approvals.sql`.
+Files: `daemon/hooks.rs`, `orchestrator/session.rs`, `orchestrator/messages.rs`, `daemon/team.rs`, the event, command and RPC schemas, `protocol/src/event.rs`, `command.rs`, `store/src/waiting.rs`, `projections.rs`, migration `0012_tool_approvals.sql`.
 
 The hook reads only the task's events for `open_grants`, through the log's query by task, so the sessions lock stays short. `append` returns the seq it wrote, so the hook appends `tool_approval.requested` first and names its seq in the denial; a `tool.denied` that then fails to record leaves a request with no denial, which is harmless, since the call was denied either way.
 
@@ -133,7 +133,7 @@ The hook reads only the task's events for `open_grants`, through the log's query
 - `approve_refuses_an_unknown_or_decided_approval`: an unknown seq and a seq that is not `tool_approval.requested` are `unknown_approval`; a second approve, and an approve after a refuse, are `approval_decided`.
 - `refuse_tells_the_next_session`: the asking agent's next session's human message carries the refusal and the note.
 
-- [ ] `feat(runtime): ask the human before a connector changes anything`
+- [x] `feat(runtime): ask the human before a connector changes anything`
 
 ### Task 4: The command line
 

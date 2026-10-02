@@ -729,10 +729,13 @@ fn session_spec(
     // A session about no task has no human message, and the whole log is not read for one; a
     // chat's is its chat, which no other session of the agent is shown.
     let human = match ask.contract {
-        Some(contract) => human_message(&deps.tools.log.read(&EventQuery {
-            task_id: Some(contract.id.clone()),
-            ..EventQuery::default()
-        })?),
+        Some(contract) => human_message(
+            &deps.tools.log.read(&EventQuery {
+                task_id: Some(contract.id.clone()),
+                ..EventQuery::default()
+            })?,
+            ask.agent.id.as_str(),
+        ),
         None if ask.purpose == SessionPurpose::Chat => {
             crate::chat::chat_history(&deps.tools.log, ask.agent.id.as_str())?
         }
@@ -892,6 +895,24 @@ struct Running<'a> {
     ids: &'a EventIds,
 }
 
+/// What a session's end says: a session stopped to wait for the human's approval says which
+/// (ADR 0031), and any other end what the program said.
+fn ended_detail(
+    deps: &OrchestratorDeps,
+    session_id: &str,
+    reason: EndReason,
+    detail: String,
+) -> String {
+    match deps.daemon.stop_reason(session_id) {
+        Some(stop)
+            if reason == EndReason::Aborted && stop.starts_with(crate::daemon::APPROVAL_NEEDED) =>
+        {
+            stop
+        }
+        _ => detail,
+    }
+}
+
 /// Reads the started session's events until it ends, costing each usage report, recording the
 /// budgets it exhausts, and aborting the session when one of them is not the task's sessions.
 /// The session is also aborted, once, as soon as the daemon has been asked to stop it: by the
@@ -992,6 +1013,7 @@ async fn read_to_end(
                     let now = record(&held, &after)?;
                     crossed.extend(now.iter().map(|exhausted| exhausted.scope));
                 }
+                let detail = ended_detail(deps, &spec.session_id, reason, detail);
                 return Ok((reason, detail, resets_at));
             }
             Some(_) => {}
@@ -2516,5 +2538,167 @@ mod tests {
                 "{tool}: {disallowed:?}"
             );
         }
+    }
+    /// dev-a's implement session of FRK-1, given `github`, whose start calls each of `probes`.
+    async fn probed_session(
+        harness: &Harness,
+        probes: &[&str],
+    ) -> (Arc<ExecutorWitness>, SessionEnd) {
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let witness = Arc::new(ExecutorWitness::probing(
+            adapter,
+            Arc::clone(&harness.daemon),
+            probes,
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let end = run_session(
+            deps,
+            &team,
+            dev_asks(harness, &team, &contract, SessionPurpose::Implement, None),
+        )
+        .await
+        .expect("the session runs");
+        (witness, end)
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_external_effect_call_asks_and_stops() {
+        let harness = Harness::new("session-approval-asks", with_custom_servers);
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        connect(&harness, &["github"], |_| {});
+        let (witness, end) = probed_session(&harness, &["mcp__github__create_issue"]).await;
+
+        let requested = harness.events(&[EventKind::ToolApprovalRequested]);
+        assert_eq!(requested.len(), 1);
+        let approval = requested[0].envelope.seq;
+        let EventBody::ToolApprovalRequested(body) = &requested[0].body else {
+            panic!("a request");
+        };
+        let input = json!({ "url": "https://example.com/" });
+        assert_eq!(body.input, input.to_string());
+        assert_eq!(
+            body.input_sha256.as_str(),
+            farik_core::governor::permissions::input_sha256(&input)
+        );
+        let decided = &witness.decided()[0];
+        assert_eq!(
+            decided[0].reason,
+            format!(
+                "approval_needed: github create_issue waits for the human (approval {approval})"
+            )
+        );
+        assert_eq!(end.reason, crate::session::EndReason::Aborted);
+        let expected = format!("approval_needed: approval {approval}");
+        assert_eq!(end.detail, expected);
+        let ended = harness.events(&[EventKind::SessionEnded]);
+        let EventBody::SessionEnded(body) = &ended.last().expect("recorded").body else {
+            panic!("an end");
+        };
+        assert_eq!(
+            (body.reason.to_string(), body.detail.as_str()),
+            ("aborted".to_string(), expected.as_str())
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_approval_stop_is_not_a_failed_try() {
+        let harness = Harness::new("session-approval-try", with_custom_servers);
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        connect(&harness, &["github"], |_| {});
+        let before = harness.row("FRK-1");
+        let adapter = harness.recorded(vec![
+            crate::recorded::fixtures::reads_a_file(),
+            crate::recorded::fixtures::reads_a_file(),
+        ]);
+        let witness = Arc::new(ExecutorWitness::probing(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+            &["mcp__github__create_issue"],
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1);
+        assert_eq!(harness.events(&[EventKind::ToolApprovalRequested]).len(), 1);
+
+        let after = harness.row("FRK-1");
+        assert_eq!(
+            (after.status, after.iteration),
+            (before.status, before.iteration)
+        );
+        assert!(after.waiting_on_human);
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        let sessions = harness
+            .project
+            .deps
+            .projections
+            .costs(farik_store::CostScope::Task)
+            .expect("the costs read")
+            .into_iter()
+            .find(|row| row.key == "FRK-1")
+            .map(|row| row.sessions);
+        assert_eq!(sessions, Some(1), "max_sessions counts it");
+        // While it waits, no session starts for it.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_next_session_is_told_and_runs_the_call_once() {
+        let harness = Harness::new("session-approval-granted", with_custom_servers);
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        connect(&harness, &["github"], |_| {});
+        let create = "mcp__github__create_issue";
+        probed_session(&harness, &[create]).await;
+        let approval = harness.events(&[EventKind::ToolApprovalRequested])[0]
+            .envelope
+            .seq;
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator
+            .handle(farik_protocol::command::Command::ToolApprove {
+                approval,
+                note: None,
+            })
+            .await
+            .expect("allowed");
+
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let witness = Arc::new(ExecutorWitness::probing(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+            &[create, create],
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+        orchestrator.tick().await.expect("the tick runs");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "the task no longer waits");
+        assert!(
+            started[0].system_prompt.contains(&format!(
+                "You may call `{create}` once with the input you asked for (approval \
+                 {approval})."
+            )),
+            "{}",
+            started[0].system_prompt
+        );
+        let decided = &witness.decided()[0];
+        assert!(decided[0].allow, "{decided:?}");
+        assert!(
+            decided[1].reason.starts_with("approval_needed: "),
+            "used once: {decided:?}"
+        );
+        let called = harness.events(&[EventKind::ToolCalled]);
+        let EventBody::ToolCalled(body) = &called.last().expect("recorded").body else {
+            panic!("a call");
+        };
+        assert_eq!(body.approval.map(std::num::NonZeroU64::get), Some(approval));
     }
 }

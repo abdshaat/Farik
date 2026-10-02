@@ -34,7 +34,9 @@
         "team_pause",
         "team_resume",
         "connector_connect",
-        "connector_disconnect"
+        "connector_disconnect",
+        "tool_approve",
+        "tool_refuse"
       ]
     },
     "commandBodyWire": {
@@ -56,6 +58,7 @@
         { "$ref": "#/$defs/chatMessagePostBody" },
         { "$ref": "#/$defs/connectorConnectBody" },
         { "$ref": "#/$defs/connectorDisconnectBody" },
+        { "$ref": "#/$defs/toolDecisionBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -226,6 +229,17 @@
       "properties": {
         "agent": { "type": "string", "minLength": 1 },
         "server": { "type": "string", "minLength": 1 }
+      }
+    },
+    "toolDecisionBody": {
+      "title": "Tool Decision Body",
+      "description": "The human allows (tool_approve) or refuses (tool_refuse) one connector call an agent asked about (docs/SPEC.md 5.7; ADR 0031): approval is the sequence number of its tool_approval.requested, and note is what the human says to the agent, absent when they say nothing. Refused unknown_approval when approval names no tool_approval.requested, and approval_decided when it was already allowed or refused. tool_approval.granted or tool_approval.refused is appended with the request's task on its envelope. tool_approve and tool_refuse share this body.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval"],
+      "properties": {
+        "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "note": { "type": "string" }
       }
     },
     "emptyBody": {

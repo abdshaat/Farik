@@ -110,7 +110,10 @@
         "page.checked",
         "chat_message.posted",
         "connector.connected",
-        "connector.disconnected"
+        "connector.disconnected",
+        "tool_approval.requested",
+        "tool_approval.granted",
+        "tool_approval.refused"
       ]
     },
     "eventBodyWire": {
@@ -167,7 +170,9 @@
         { "$ref": "#/$defs/pageCheckedBody" },
         { "$ref": "#/$defs/chatMessagePostedBody" },
         { "$ref": "#/$defs/connectorConnectedBody" },
-        { "$ref": "#/$defs/connectorDisconnectedBody" }
+        { "$ref": "#/$defs/connectorDisconnectedBody" },
+        { "$ref": "#/$defs/toolApprovalRequestedBody" },
+        { "$ref": "#/$defs/toolApprovalDecidedBody" }
       ]
     },
     "contractSummary": {
@@ -867,6 +872,30 @@
         "server": { "type": "string", "minLength": 1 }
       }
     },
+    "toolApprovalRequestedBody": {
+      "title": "Tool Approval Requested Body",
+      "description": "An agent's session called a connector's tool tagged external_effect with no grant of the human's for it, so the call was denied and waits for the human like a question (docs/SPEC.md 5.6, 5.7; ADR 0031). The event's sequence number is the approval's id. input is the call's whole input as compact JSON, never cut, so the human sees all of what they allow; input_sha256 is the sha256 of its canonical JSON, object keys sorted at every depth, which a grant binds. The envelope names the session, the agent, and the task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server", "tool", "input", "input_sha256"],
+      "properties": {
+        "server": { "type": "string", "minLength": 1 },
+        "tool": { "type": "string", "minLength": 1 },
+        "input": { "type": "string" },
+        "input_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "toolApprovalDecidedBody": {
+      "title": "Tool Approval Decided Body",
+      "description": "The human allowed (tool_approval.granted) or refused (tool_approval.refused) the call an agent asked about (docs/SPEC.md 5.7; ADR 0031): approval is the sequence number of its tool_approval.requested, whose task is on this event's envelope too, and note is what the human said, absent when they said nothing. A grant allows one later call, by the asking agent's next session about the task, with the same server, tool, and input_sha256. Only the human decides: the envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval"],
+      "properties": {
+        "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "note": { "type": "string" }
+      }
+    },
     "connectorTag": {
       "type": "string",
       "enum": ["network", "external_effect", "denied"],
@@ -912,7 +941,7 @@
     },
     "toolCalledBody": {
       "title": "Tool Called Body",
-      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one. A connector's call also names its server and the tool's tag.",
+      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one. A connector's call also names its server and the tool's tag, and a call the human allowed names approval, the sequence number of its tool_approval.requested, which this call uses up.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tool", "input"],
@@ -921,7 +950,8 @@
         "tool_use_id": { "type": "string" },
         "input": { "type": "string" },
         "server": { "type": "string", "minLength": 1 },
-        "tag": { "$ref": "#/$defs/connectorTag" }
+        "tag": { "$ref": "#/$defs/connectorTag" },
+        "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
       }
     },
     "toolDeniedBody": {

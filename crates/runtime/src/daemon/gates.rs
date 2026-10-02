@@ -110,6 +110,24 @@ fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Fa
     Ok(rows)
 }
 
+/// One row of `waiting.list`; a connector call's also names its approval, server, tool and input.
+fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
+    let mut row = json!({
+        "task_id": item.task_id,
+        "kind": item.kind.as_str(),
+        "agent_id": item.agent_id,
+        "title": item.title,
+        "line": item.line,
+    });
+    if let Some(ask) = &item.approval {
+        row["approval"] = json!(ask.approval);
+        row["server"] = json!(ask.server);
+        row["tool"] = json!(ask.tool);
+        row["input"] = json!(ask.input);
+    }
+    row
+}
+
 /// The gates' queries, whose params the schema already passed.
 pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value, Failure> {
     deps.projections.catch_up().map_err(|e| internal(&e))?;
@@ -119,18 +137,7 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
             let team = team()?;
             let listed = waiting(&deps.projections, &deps.log, &deps.files, &team)
                 .map_err(|e| internal(&e))?;
-            let mut rows: Vec<Value> = listed
-                .iter()
-                .map(|item| {
-                    json!({
-                        "task_id": item.task_id,
-                        "kind": item.kind.as_str(),
-                        "agent_id": item.agent_id,
-                        "title": item.title,
-                        "line": item.line,
-                    })
-                })
-                .collect();
+            let mut rows: Vec<Value> = listed.iter().map(waiting_row).collect();
             rows.extend(design_reviews_waiting(deps, &team)?);
             Ok(json!({ "waiting": rows }))
         }
@@ -870,6 +877,63 @@ pub(super) mod tests {
                          on for Iris on the Team page"
             }])
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_open_approval_waits_on_the_human() {
+        use farik_protocol::event::{NewEvent, event_from_value};
+
+        let harness = Harness::new("gates-tool-approval", |wire| {
+            wire["agents"][1]["display_name"] = json!("Theo");
+        });
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let event = event_from_value(&json!({
+            "seq": 1, "recorded_at": "2026-09-17T10:00:00Z", "team_id": "farik",
+            "project_id": "farik", "task_id": "FRK-1", "agent_id": "dev-a", "session_id": "s-1",
+            "kind": "tool_approval.requested",
+            "body": {
+                "server": "github", "tool": "create_issue", "input": "{\"title\":\"x\"}",
+                "input_sha256": "0".repeat(64)
+            },
+        }))
+        .expect("schema-valid");
+        let deps = &harness.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
+        let approval = appended.envelope.seq;
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(
+            waiting["waiting"],
+            json!([{
+                "task_id": "FRK-1", "kind": "tool_approval", "agent_id": "dev-a",
+                "title": "Add a login page", "line": "Theo wants to use github",
+                "approval": approval, "server": "github", "tool": "create_issue",
+                "input": "{\"title\":\"x\"}"
+            }])
+        );
+        assert!(harness.row("FRK-1").waiting_on_human);
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime is made")
+            .block_on(orchestrator.tick())
+            .expect("the tick runs");
+        assert!(adapter.started().is_empty(), "no session starts for it");
     }
 
     #[test]

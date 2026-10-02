@@ -57,6 +57,7 @@ pub mod web;
 #[cfg(test)]
 pub(crate) use mcp::listed_names;
 
+pub(crate) use hooks::APPROVAL_NEEDED;
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
 };

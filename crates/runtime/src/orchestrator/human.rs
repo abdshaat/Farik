@@ -133,6 +133,8 @@ pub(super) async fn handle(
         Command::ConnectorDisconnect { agent, server } => {
             disconnect_server(tools, &orchestrator.deps.daemon, &agent, &server)
         }
+        Command::ToolApprove { approval, note } => decide_tool_call(tools, approval, note, true),
+        Command::ToolRefuse { approval, note } => decide_tool_call(tools, approval, note, false),
         Command::RunStop => {
             orchestrator.stop();
             Ok(CommandReport {
@@ -411,6 +413,76 @@ fn answer_question(
     )?;
     Ok(CommandReport {
         said: format!("question {question_id} is answered"),
+        events: vec![seq],
+    })
+}
+
+/// Allows (`tool_approve`) or refuses (`tool_refuse`) the connector call asked at `approval`,
+/// once (ADR 0031): `tool_approval.granted` or `.refused`, with the note and the request's task
+/// on its envelope and no agent or session, since only the human decides. Refused
+/// `unknown_approval` for a seq that is no `tool_approval.requested`, and `approval_decided` for
+/// one already decided either way.
+fn decide_tool_call(
+    tools: &ToolDeps,
+    approval: u64,
+    note: Option<String>,
+    granted: bool,
+) -> Result<CommandReport, CommandError> {
+    let unknown = || CommandError::Refused {
+        reason: format!(
+            "unknown_approval: event {approval} is no connector call waiting for you to allow it"
+        ),
+    };
+    let asked = tools
+        .log
+        .read(&EventQuery {
+            after_seq: Some(approval.saturating_sub(1)),
+            limit: Some(1),
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .into_iter()
+        .find(|event| event.envelope.seq == approval)
+        .ok_or_else(unknown)?;
+    let EventBody::ToolApprovalRequested(request) = &asked.body else {
+        return Err(unknown());
+    };
+    let decisions = tools
+        .log
+        .read(&EventQuery {
+            task_id: asked.envelope.ids.task_id.clone(),
+            kinds: vec![
+                EventKind::ToolApprovalGranted,
+                EventKind::ToolApprovalRefused,
+            ],
+            ..EventQuery::default()
+        })
+        .map_err(failed)?;
+    if farik_store::waiting::decision_on(&decisions, approval).is_some() {
+        return Err(CommandError::Refused {
+            reason: format!("approval_decided: approval {approval} was already decided"),
+        });
+    }
+    let body = farik_protocol::event::ToolApprovalDecidedBody {
+        approval: NonZeroU64::new(approval).ok_or_else(unknown)?,
+        note,
+    };
+    let tool = request.tool.as_str();
+    let agent = asked.envelope.ids.agent_id.as_deref().unwrap_or("an agent");
+    let (event, said) = if granted {
+        (
+            EventBody::ToolApprovalGranted(body),
+            format!("Allowed {tool} once for {agent}"),
+        )
+    } else {
+        (
+            EventBody::ToolApprovalRefused(body),
+            format!("Not allowed: {tool} for {agent}"),
+        )
+    };
+    let seq = append(tools, asked.envelope.ids.task_id.clone(), event)?;
+    Ok(CommandReport {
+        said: format!("{said} (approval {approval})."),
         events: vec![seq],
     })
 }
@@ -1469,6 +1541,127 @@ mod tests {
             "escalation.raised",
             &json!({ "reason": reason, "detail": "contract_requires_human" }),
         );
+    }
+
+    /// dev-a's session `s-1` on FRK-1 asked to call `create_issue`: the approval's seq.
+    fn an_approval_asked(harness: &Harness) -> u64 {
+        use farik_protocol::event::{NewEvent, event_from_value};
+
+        let event = event_from_value(&json!({
+            "seq": 1, "recorded_at": "2026-09-17T10:00:00Z", "team_id": "farik",
+            "project_id": "farik", "task_id": "FRK-1", "agent_id": "dev-a", "session_id": "s-1",
+            "kind": "tool_approval.requested",
+            "body": {
+                "server": "github", "tool": "create_issue", "input": "{}",
+                "input_sha256": "0".repeat(64)
+            },
+        }))
+        .expect("schema-valid");
+        let deps = &harness.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
+        appended.envelope.seq
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn approve_records_the_grant_on_the_task() {
+        let harness = Harness::new("human-tool-approve", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let orchestrator = an_orchestrator(&harness);
+        let approval = an_approval_asked(&harness);
+        assert!(harness.row("FRK-1").waiting_on_human);
+        let report = handled(
+            &orchestrator,
+            Command::ToolApprove {
+                approval,
+                note: Some("Only this one.".to_string()),
+            },
+        )
+        .await;
+        assert_eq!(
+            report.said,
+            format!("Allowed create_issue once for dev-a (approval {approval}).")
+        );
+        let granted = last(&harness, EventKind::ToolApprovalGranted).expect("recorded");
+        assert_eq!(report.events, vec![granted.envelope.seq]);
+        assert_eq!(granted.envelope.ids.task_id, Some(task("FRK-1")));
+        assert_eq!(granted.envelope.ids.agent_id, None);
+        assert_eq!(granted.envelope.ids.session_id, None);
+        let EventBody::ToolApprovalGranted(body) = &granted.body else {
+            panic!("a grant");
+        };
+        assert_eq!(body.approval.get(), approval);
+        assert_eq!(body.note.as_deref(), Some("Only this one."));
+        assert!(!harness.row("FRK-1").waiting_on_human);
+
+        let other = an_approval_asked(&harness);
+        let report = handled(
+            &orchestrator,
+            Command::ToolRefuse {
+                approval: other,
+                note: None,
+            },
+        )
+        .await;
+        assert_eq!(
+            report.said,
+            format!("Not allowed: create_issue for dev-a (approval {other}).")
+        );
+        let refused = last(&harness, EventKind::ToolApprovalRefused).expect("recorded");
+        let EventBody::ToolApprovalRefused(body) = &refused.body else {
+            panic!("a refusal");
+        };
+        assert_eq!((body.approval.get(), body.note.as_deref()), (other, None));
+        assert!(!harness.row("FRK-1").waiting_on_human);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn approve_refuses_an_unknown_or_decided_approval() {
+        let harness = Harness::new("human-tool-refusals", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let orchestrator = an_orchestrator(&harness);
+        let approve = |approval| Command::ToolApprove {
+            approval,
+            note: None,
+        };
+        let refuse = |approval| Command::ToolRefuse {
+            approval,
+            note: None,
+        };
+        let created = harness.events(&[EventKind::TaskCreated])[0].envelope.seq;
+        for command in [
+            approve(9_999),
+            refuse(9_999),
+            approve(created),
+            refuse(created),
+        ] {
+            let reason = refused(&orchestrator, command).await;
+            assert!(reason.starts_with("unknown_approval: "), "{reason}");
+        }
+        let first = an_approval_asked(&harness);
+        handled(&orchestrator, approve(first)).await;
+        let second = an_approval_asked(&harness);
+        handled(&orchestrator, refuse(second)).await;
+        for command in [
+            approve(first),
+            refuse(first),
+            approve(second),
+            refuse(second),
+        ] {
+            let reason = refused(&orchestrator, command).await;
+            assert!(reason.starts_with("approval_decided: "), "{reason}");
+        }
+        assert_eq!(harness.events(&[EventKind::ToolApprovalGranted]).len(), 1);
+        assert_eq!(harness.events(&[EventKind::ToolApprovalRefused]).len(), 1);
     }
 
     #[tokio::test]

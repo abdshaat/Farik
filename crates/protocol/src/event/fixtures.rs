@@ -50,6 +50,7 @@ pub fn a_full_event_wire(kind: EventKind) -> Value {
 
 /// The body one kind carries, schema-valid and with no optional field.
 #[must_use]
+#[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
 pub fn a_body_wire(kind: EventKind) -> Value {
     match kind {
         EventKind::TaskCreated | EventKind::ContractWritten => a_summary_body_wire(kind),
@@ -143,9 +144,11 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::PreviewStarted
         | EventKind::PreviewStopped
         | EventKind::PageChecked => a_design_body_wire(kind),
-        EventKind::ConnectorConnected | EventKind::ConnectorDisconnected => {
-            a_connector_body_wire(kind)
-        }
+        EventKind::ConnectorConnected
+        | EventKind::ConnectorDisconnected
+        | EventKind::ToolApprovalRequested
+        | EventKind::ToolApprovalGranted
+        | EventKind::ToolApprovalRefused => a_connector_body_wire(kind),
         EventKind::SprintStarted
         | EventKind::SprintPlanned
         | EventKind::SprintEnded
@@ -353,8 +356,15 @@ pub fn a_contract_summary_wire() -> Value {
     json!({ "kind": "task", "title": "Add a login page", "status": "draft", "risk": "low" })
 }
 
-/// `dev-a`'s custom server `github`, connected or taken away.
+/// `dev-a`'s custom server `github`, connected or taken away, or a call of it asked about or
+/// decided.
 fn a_connector_body_wire(kind: EventKind) -> Value {
+    if !matches!(
+        kind,
+        EventKind::ConnectorConnected | EventKind::ConnectorDisconnected
+    ) {
+        return a_tool_approval_body_wire(kind);
+    }
     if kind == EventKind::ConnectorConnected {
         json!({
             "agent": "dev-a",
@@ -366,5 +376,19 @@ fn a_connector_body_wire(kind: EventKind) -> Value {
         })
     } else {
         json!({ "agent": "dev-a", "server": "github" })
+    }
+}
+
+/// A `tool_approval.` body: `create_issue` of `github` asked about, or approval 1 decided.
+fn a_tool_approval_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::ToolApprovalRequested {
+        json!({
+            "server": "github",
+            "tool": "create_issue",
+            "input": "{\"title\":\"x\"}",
+            "input_sha256": "0".repeat(64)
+        })
+    } else {
+        json!({ "approval": 1 })
     }
 }

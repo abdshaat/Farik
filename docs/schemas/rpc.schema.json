@@ -2089,7 +2089,7 @@
       }
     },
     "waitingListResult": {
-      "description": "What waits on the human, questions first, then approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
+      "description": "What waits on the human, questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2111,6 +2111,7 @@
                   "question",
                   "help",
                   "integration",
+                  "tool_approval",
                   "preview_missing",
                   "designer_needs_sandbox",
                   "designer_needs_browser"
@@ -2126,6 +2127,19 @@
                 "type": "string"
               },
               "line": {
+                "type": "string"
+              },
+              "approval": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "server": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "input": {
                 "type": "string"
               }
             },

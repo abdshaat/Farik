@@ -32,8 +32,9 @@ pub use crate::generated::event::{
     SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
     TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
     TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
-    TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
-    TransitionRefusedBody, TransitionRefusedBodyRefusal, Violation,
+    TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody, ToolApprovalRequestedBody,
+    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
+    TransitionRefusedBodyRefusal, Violation,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
@@ -152,6 +153,10 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::ChatMessagePosted => "chatMessagePostedBody",
         EventKind::ConnectorConnected => "connectorConnectedBody",
         EventKind::ConnectorDisconnected => "connectorDisconnectedBody",
+        EventKind::ToolApprovalRequested => "toolApprovalRequestedBody",
+        EventKind::ToolApprovalGranted | EventKind::ToolApprovalRefused => {
+            "toolApprovalDecidedBody"
+        }
     }
 }
 
@@ -189,6 +194,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::PreviewStarted
             | EventKind::PreviewStopped
             | EventKind::PageChecked
+            | EventKind::ToolApprovalRequested
+            | EventKind::ToolApprovalGranted
+            | EventKind::ToolApprovalRefused
     )
 }
 
@@ -262,13 +270,16 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::PreviewStopped(_)
         | EventBody::PageChecked(_)
         | EventBody::ConnectorConnected(_)
-        | EventBody::ConnectorDisconnected(_) => None,
+        | EventBody::ConnectorDisconnected(_)
+        | EventBody::ToolApprovalRequested(_)
+        | EventBody::ToolApprovalGranted(_)
+        | EventBody::ToolApprovalRefused(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 54] = [
+pub const EVERY_KIND: [EventKind; 57] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -323,6 +334,9 @@ pub const EVERY_KIND: [EventKind; 54] = [
     EventKind::ChatMessagePosted,
     EventKind::ConnectorConnected,
     EventKind::ConnectorDisconnected,
+    EventKind::ToolApprovalRequested,
+    EventKind::ToolApprovalGranted,
+    EventKind::ToolApprovalRefused,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -524,6 +538,15 @@ pub enum EventBody {
     /// The human took a custom MCP server away from an agent.
     #[serde(rename = "connector.disconnected")]
     ConnectorDisconnected(ConnectorDisconnectedBody),
+    /// A connector's `external_effect` call waits for the human; its seq is the approval's id.
+    #[serde(rename = "tool_approval.requested")]
+    ToolApprovalRequested(ToolApprovalRequestedBody),
+    /// The human allowed one call an agent asked about.
+    #[serde(rename = "tool_approval.granted")]
+    ToolApprovalGranted(ToolApprovalDecidedBody),
+    /// The human refused one call an agent asked about.
+    #[serde(rename = "tool_approval.refused")]
+    ToolApprovalRefused(ToolApprovalDecidedBody),
 }
 
 impl EventBody {
@@ -585,6 +608,9 @@ impl EventBody {
             Self::ChatMessagePosted(_) => EventKind::ChatMessagePosted,
             Self::ConnectorConnected(_) => EventKind::ConnectorConnected,
             Self::ConnectorDisconnected(_) => EventKind::ConnectorDisconnected,
+            Self::ToolApprovalRequested(_) => EventKind::ToolApprovalRequested,
+            Self::ToolApprovalGranted(_) => EventKind::ToolApprovalGranted,
+            Self::ToolApprovalRefused(_) => EventKind::ToolApprovalRefused,
         }
     }
 }
@@ -909,10 +935,15 @@ mod tests {
         for kind in EVERY_KIND {
             for other in EVERY_KIND {
                 // team.paused and team.resumed share one body, so each carries the other's, and so
-                // do design_plan.approved, design_plan.returned and preview.stopped; no others do,
-                // and a fixture that made one equal must not hide it.
-                let shared: [&[EventKind]; 2] = [
+                // do design_plan.approved, design_plan.returned and preview.stopped, and
+                // tool_approval.granted and tool_approval.refused; no others do, and a
+                // fixture that made one equal must not hide it.
+                let shared: [&[EventKind]; 3] = [
                     &[EventKind::TeamPaused, EventKind::TeamResumed],
+                    &[
+                        EventKind::ToolApprovalGranted,
+                        EventKind::ToolApprovalRefused,
+                    ],
                     &[
                         EventKind::DesignPlanApproved,
                         EventKind::DesignPlanReturned,
@@ -1462,7 +1493,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 54);
+        assert_eq!(EVERY_KIND.len(), 57);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);
