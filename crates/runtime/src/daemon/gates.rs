@@ -934,6 +934,22 @@ pub(super) mod tests {
             .block_on(orchestrator.tick())
             .expect("the tick runs");
         assert!(adapter.started().is_empty(), "no session starts for it");
+
+        // Once the human has decided, the row is gone, so that a second click cannot meet
+        // `approval_decided`.
+        harness.project.record(
+            "FRK-1",
+            "tool_approval.refused",
+            &json!({ "approval": approval }),
+        );
+        let after = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(after["waiting"], json!([]));
+        assert!(!harness.row("FRK-1").waiting_on_human);
     }
 
     #[test]

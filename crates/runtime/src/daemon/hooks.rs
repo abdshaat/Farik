@@ -1494,6 +1494,28 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_session_about_no_task_is_refused_without_asking() {
+        let daemon = TestDaemon::new("hook-external-no-task", |_| {});
+        with_github(&daemon);
+        daemon
+            .state
+            .sessions()
+            .get_mut("session-github")
+            .expect("registered")
+            .registration
+            .task_id = None;
+
+        let decision = create_issue(&daemon, "session-github", &json!({ "title": "x" }));
+
+        denied_for(&decision, "external_effect_refused");
+        assert!(
+            daemon.events(EventKind::ToolApprovalRequested).is_empty(),
+            "nothing is recorded that no row lists and nothing can decide"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn an_external_effect_call_asks_with_its_whole_input() {
         let daemon = TestDaemon::new("hook-custom-external", |_| {});
         with_github(&daemon);
