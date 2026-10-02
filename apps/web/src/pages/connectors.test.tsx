@@ -79,8 +79,8 @@ const CONNECTORS = [
 	{ agent: "theo", server: "notion", state: "store_unavailable" },
 ];
 
-/** Theo's page, with the team and its connectors answered. */
-async function opened(connectors: object[] = CONNECTORS) {
+/** Theo's page, with the team and its connectors answered, sessions in the sandbox or not. */
+async function opened(connectors: object[] = CONNECTORS, sandboxed = true) {
 	const { container, socket } = await renderApp("/team/theo");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
@@ -90,6 +90,7 @@ async function opened(connectors: object[] = CONNECTORS) {
 		judges: { auto: null, architect: null, scrum_master: null },
 		max_agents: 7,
 		connectors,
+		sandboxed,
 	});
 	await answerQuery(s, "models.list", { models: [] });
 	await screen.findByRole("heading", { name: "Theo, your Developer" });
@@ -118,8 +119,8 @@ const row = (name: string) => {
 };
 
 /** ConnectorAdd, opened from Advanced, step 1 filled in for airtable with `key`. */
-async function startedAdding(key = "pat-secret-1") {
-	const page = await opened([]);
+async function startedAdding(key = "pat-secret-1", sandboxed = true) {
+	const page = await opened([], sandboxed);
 	fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
 	fireEvent.click(screen.getByRole("button", { name: en.connectorCustomAdd }));
 	const dialog = await screen.findByRole("dialog", {
@@ -138,8 +139,8 @@ async function startedAdding(key = "pat-secret-1") {
 }
 
 /** Steps 1 and 2 done: the tools listed, the user's labels left as they come. */
-async function listed(key = "pat-secret-1") {
-	const page = await startedAdding(key);
+async function listed(key = "pat-secret-1", sandboxed = true) {
+	const page = await startedAdding(key, sandboxed);
 	fireEvent.click(
 		within(page.dialog).getByRole("button", { name: en.addNext }),
 	);
@@ -162,6 +163,7 @@ const teamGot = (team: object, connectors: object[] = CONNECTORS) => ({
 	judges: { auto: null, architect: null, scrum_master: null },
 	max_agents: 7,
 	connectors,
+	sandboxed: true,
 });
 
 /** Theo's team with `servers` in place of Theo's custom connectors. */
@@ -706,6 +708,38 @@ describe("connectors on the agent page", () => {
 		).toBeTruthy();
 		expect(within(dialog).queryByText(/tag_unknown_tool/)).toBeNull();
 		await expectNoAxeViolations(container);
+	});
+
+	it("connector_add_promises_theo_never_sees_the_keys_only_in_the_sandbox", async () => {
+		// Without the sandbox a command Theo runs can read them (spec 8.6, re-review N5).
+		for (const [sandboxed, storedIn] of [
+			[true, "keychain"],
+			[true, "file"],
+			[false, "keychain"],
+			[false, "file"],
+		] as const) {
+			const { container, s, dialog } = await listed("pat-secret-1", sandboxed);
+			fireEvent.click(
+				within(dialog).getByRole("button", { name: "Add airtable to Theo" }),
+			);
+			await s.reply(await sent(s, "connector.connect"), {
+				stored_in: storedIn,
+				tools: { list_bases: "network" },
+			});
+			await within(dialog).findByText("airtable is added to Theo");
+			const said = dialog.textContent ?? "";
+			expect(
+				said.includes("Theo never sees them"),
+				`${sandboxed} ${storedIn}`,
+			).toBe(sandboxed);
+			if (!sandboxed)
+				expect(said).toContain(
+					"Without Docker’s sandbox, a command Theo runs on this computer could reach them.",
+				);
+			await expectNoAxeViolations(container);
+			cleanup();
+			localStorage.clear();
+		}
 	});
 
 	it("connector_add_says_which_store_kept_the_keys", async () => {

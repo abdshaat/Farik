@@ -65,6 +65,7 @@ export function useTeam() {
 		agents: Effective[];
 		maxAgents: number;
 		connectors?: ConnectorState[];
+		sandboxed?: boolean;
 	}>("team.get", {});
 	const { data: models } = useQuery<{ models: Model[] }>("models.list", {});
 	return {
@@ -74,6 +75,8 @@ export function useTeam() {
 		connectors: data?.connectors ?? [],
 		/** The most agents a team has that are not retired (SPEC F1), as the daemon says. */
 		most: data?.maxAgents,
+		/** Whether sessions run in Docker's sandbox, where no command of an agent reaches a connector's keys. */
+		sandboxed: data?.sandboxed ?? false,
 		models: models?.models ?? [],
 		/** Reads the team again now, rather than on the next event. */
 		again,

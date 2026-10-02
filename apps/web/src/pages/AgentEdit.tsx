@@ -101,7 +101,7 @@ function rebased(draft: Edited, saved: Edited): Edited {
 /** One agent's page, once the team has loaded. */
 export function AgentEdit() {
 	const { id } = useParams();
-	const { team, effective, models, connectors, again } = useTeam();
+	const { team, effective, models, connectors, sandboxed, again } = useTeam();
 	if (!team) return null;
 	const saved = team.agents.find((a) => a.id === id);
 	const known = effective.find((e) => e.id === id);
@@ -120,6 +120,7 @@ export function AgentEdit() {
 			known={known}
 			models={models}
 			connectors={connectors}
+			sandboxed={sandboxed}
 			again={again}
 		/>
 	);
@@ -132,6 +133,7 @@ function Editor({
 	known,
 	models,
 	connectors,
+	sandboxed,
 	again,
 }: {
 	team: TeamFile;
@@ -140,6 +142,8 @@ function Editor({
 	known: Effective;
 	models: Model[];
 	connectors: ConnectorState[];
+	/** Whether sessions run in Docker's sandbox (team.get). */
+	sandboxed: boolean;
 	/** Reads the team again, after a connector is added or removed outside Save. */
 	again: () => void;
 }) {
@@ -447,6 +451,7 @@ function Editor({
 					agent={saved.id}
 					name={name}
 					again={adding.again}
+					sandboxed={sandboxed}
 					onClose={(changed) => {
 						setAdding(undefined);
 						if (changed) again();

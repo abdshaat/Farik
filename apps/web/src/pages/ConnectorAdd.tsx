@@ -110,6 +110,7 @@ export function ConnectorAdd({
 	agent,
 	name,
 	again,
+	sandboxed,
 	onClose,
 }: {
 	agent: string;
@@ -117,6 +118,8 @@ export function ConnectorAdd({
 	name: string;
 	/** The team file's entry, when connecting it again. */
 	again?: McpServer | undefined;
+	/** Whether sessions run in Docker's sandbox, the one mode where no command of the agent reaches its keys. */
+	sandboxed: boolean;
 	onClose: (changed: boolean) => void;
 }) {
 	const { client } = useConnection();
@@ -448,7 +451,16 @@ export function ConnectorAdd({
 					{named.length > 0 && (
 						<p>
 							<strong>{t(file ? "addFile" : "addKeychain", fill)}</strong>{" "}
-							{t(file ? "addFileNote" : "addKeychainNote", fill)}
+							{t(
+								sandboxed
+									? file
+										? "addFileNote"
+										: "addKeychainNote"
+									: file
+										? "addFileNoteNoSandbox"
+										: "addKeychainNoteNoSandbox",
+								fill,
+							)}
 						</p>
 					)}
 					<ul>

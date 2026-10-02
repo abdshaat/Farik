@@ -1191,6 +1191,10 @@ export const en = {
 		"{name}’s keys for {server} are kept in a private file only you can read.",
 	addFileNote:
 		"This computer has no keychain, so Farik keeps them in a file in your Farik folder that only your user account can open. {name} never sees them.",
+	addKeychainNoteNoSandbox:
+		"Farik hands them to {server} when {server} starts, and never puts them in {name}’s instructions. Without Docker’s sandbox, a command {name} runs on this computer could reach them.",
+	addFileNoteNoSandbox:
+		"This computer has no keychain, so Farik keeps them in a file in your Farik folder that only your user account can open. Without Docker’s sandbox, a command {name} runs on this computer could reach them.",
 	addNextWork: "{name} can use it from the next piece of work.",
 	addOnly:
 		"Only {name} has {server}. To give it to someone else, add it from their page, with their own key.",

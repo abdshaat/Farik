@@ -836,6 +836,10 @@
           "minimum": 1,
           "description": "The most agents a team may have that are not retired (spec 4.1)."
         },
+        "sandboxed": {
+          "type": "boolean",
+          "description": "Whether sessions run in Docker's sandbox. False in no-sandbox mode, where a command an agent runs can reach a connector's keys (spec 8.6), so no page promises that the agent never sees them."
+        },
         "connectors": {
           "type": "array",
           "description": "Each agent's custom MCP servers and whether each runs (ADR 0030): connected when the definition kept on this machine beside its keys is the team file's and every key it names is kept; connect_again when none is kept or the team file changed since, so it runs nothing until the user connects it again; store_unavailable when the keychain or the private file could not be read, the last time Farik read it, so it is left out of sessions until it can be. The kept definition is read once per connect and disconnect, when a session is set up, and the first time it is asked for.",
@@ -879,7 +883,8 @@
         "agents",
         "judges",
         "max_agents",
-        "connectors"
+        "connectors",
+        "sandboxed"
       ]
     },
     "serveStatusResult": {

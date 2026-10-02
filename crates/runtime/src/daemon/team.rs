@@ -90,6 +90,7 @@ pub(super) fn query(
             answer["connectors"] = json!(connector_states(state, deps, &team));
             answer["team"] = serde_json::to_value(team).map_err(|e| internal(&e))?;
             answer["max_agents"] = json!(farik_core::team::MAX_AGENTS);
+            answer["sandboxed"] = json!(deps.transitions.sandboxed());
             Ok(answer)
         }
         "team.propose" => propose(deps),
@@ -1267,6 +1268,30 @@ pub(super) mod tests {
             unticked["unavailable"],
             json!([{ "agent_id": "iris", "reason": "designer_needs_sandbox" }])
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_says_whether_sessions_run_in_the_sandbox() {
+        // Without the sandbox an agent's command can reach a connector's keys, and the add page
+        // must not promise otherwise (re-review N5).
+        use crate::preview::NoPreviews;
+        use crate::preview::fixtures::FakePreviews;
+
+        for (name, previews, sandboxed) in [
+            (
+                "team-get-sandboxed",
+                Arc::new(FakePreviews::ready()) as Arc<dyn crate::preview::PreviewFactory>,
+                true,
+            ),
+            ("team-get-no-sandbox", Arc::new(NoPreviews), false),
+        ] {
+            let mut harness = Harness::new(name, |_| {});
+            harness.previews = previews;
+            let _ = harness.orchestrator(harness.recorded(Vec::new()));
+            let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+            assert_eq!(got["sandboxed"], json!(sandboxed), "{name}");
+        }
     }
 
     #[test]
