@@ -32,8 +32,8 @@ pub use kit::{
 };
 pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
 pub use skill_check::{
-    CheckedSkill, SkillRefusal, check_skill, core_skill_names, declared_name_and_description,
-    skill_name_ok,
+    CheckedSkill, SHIPPED_ROLES, SkillRefusal, check_skill, core_skill_names,
+    declared_name_and_description, skill_name_ok,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/role.schema.json");

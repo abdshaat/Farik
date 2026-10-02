@@ -67,6 +67,66 @@ pub(crate) fn browsing(wire: &mut Value) {
     });
 }
 
+/// The Software Developer's kit for a test: its skills `(name, body)`, each in a folder of one
+/// `SKILL.md`, and, when `search` is given, the service `github` (a program started on the host,
+/// one key) with `search` tagged so and `create_issue` and `delete_repo` as they are in
+/// `a_kit_server`.
+pub(crate) fn a_developer_kit(skills: &[(&str, &str)], search: Option<&str>) -> farik_roles::Kit {
+    let connectors: Vec<Value> = search
+        .map(|tag| {
+            json!({
+                "name": "github", "transport": "stdio", "command": "github-mcp",
+                "args": ["stdio"], "credential_keys": ["API_KEY"],
+                "title": "GitHub", "about": "Where the code lives.",
+                "why": "Lets the Developer read issues.",
+                "setup": "Make a key on GitHub's page and paste it.",
+                "key_page": "https://github.example/keys",
+                "tools": { "search": tag, "create_issue": "external_effect", "delete_repo": "denied" }
+            })
+        })
+        .into_iter()
+        .collect();
+    let texts: Vec<(String, String)> = skills
+        .iter()
+        .map(|(name, body)| {
+            (
+                (*name).to_string(),
+                format!("---\nname: {name}\ndescription: Use when {name}.\n---\n{body}"),
+            )
+        })
+        .collect();
+    let folders: Vec<(&str, Vec<(&str, &str)>)> = texts
+        .iter()
+        .map(|(name, text)| (name.as_str(), vec![("SKILL.md", text.as_str())]))
+        .collect();
+    let folders: Vec<(&str, &[(&str, &str)])> = folders
+        .iter()
+        .map(|(name, files)| (*name, files.as_slice()))
+        .collect();
+    let file = json!({
+        "role": "software_developer",
+        "skills": skills.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+        "connectors": connectors,
+    });
+    farik_roles::parse_kit(
+        farik_core::contract::Role::SoftwareDeveloper,
+        &file.to_string(),
+        &[],
+        &folders,
+    )
+    .expect("the fixture kit loads")
+}
+
+/// `dev-a`'s entry for the service `github` of `a_developer_kit(_, Some("network"))`, as the team
+/// file holds it once connected.
+pub(crate) fn a_kit_server() -> Value {
+    json!({
+        "name": "github", "source": "kit", "transport": "stdio",
+        "command": "github-mcp", "args": ["stdio"], "credential_keys": ["API_KEY"],
+        "tools": { "search": "network", "create_issue": "external_effect", "delete_repo": "denied" }
+    })
+}
+
 /// A project the tools run on.
 pub(crate) struct TestProject {
     pub(crate) repo: TempRepo,

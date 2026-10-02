@@ -142,12 +142,13 @@ pub(super) fn query(
 fn skills_list(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     let agent = params["agent"].as_str().unwrap_or_default();
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
-    if !team.agents.iter().any(|held| held.id.as_str() == agent) {
+    let Some(held) = team.agents.iter().find(|held| held.id.as_str() == agent) else {
         return Err(Failure::new(
             super::web::NOT_FOUND,
             format!("there is no agent {agent}"),
         ));
-    }
+    };
+    let kit = (deps.kits)(Role::from(held.role)).map_err(|e| internal(&e))?;
     let events = deps
         .log
         .read(&farik_store::EventQuery {
@@ -165,6 +166,7 @@ fn skills_list(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
         &team,
         Some(agent),
         &crate::skills::confirmed_skills(&events),
+        &kit.skills,
     );
     Ok(json!({ "skills": rows }))
 }
@@ -175,7 +177,7 @@ fn skills_list(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
 fn skill_get(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     let name = params["name"].as_str().unwrap_or_default();
     if params["level"] == "role" {
-        return role_skill_get(params, name);
+        return role_skill_get(deps, params, name);
     }
     let level = match (params["level"].as_str(), params["agent"].as_str()) {
         (Some("team"), None) => crate::skills::SkillLevel::Team,
@@ -230,29 +232,39 @@ fn skill_get(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
 /// `skill.get { level: "role", role, name }`: the `SKILL.md` Farik ships for `role`, with no hash,
 /// since it is trusted and pinned in the binary. `role` and `name` are checked before any lookup,
 /// and nothing here builds a path.
-fn role_skill_get(params: &Value, name: &str) -> Result<Value, Failure> {
+fn role_skill_get(deps: &ToolDeps, params: &Value, name: &str) -> Result<Value, Failure> {
     if !farik_roles::skill_name_ok(name) {
         return Err(Failure::new(
             REFUSED,
             "skill_name_invalid: a skill's name is lower-case words joined by hyphens, up to 64 characters",
         ));
     }
-    let role = serde_json::from_value::<farik_core::contract::Role>(params["role"].clone())
-        .ok()
-        .and_then(|role| farik_roles::load_role(role).ok());
-    let Some(role) = role else {
+    let asked = serde_json::from_value::<farik_core::contract::Role>(params["role"].clone()).ok();
+    let role = asked.and_then(|role| farik_roles::load_role(role).ok());
+    let (Some(role), Some(asked)) = (role, asked) else {
         return Err(Failure::new(
             REFUSED,
             "a role's skill names a role Farik ships",
         ));
     };
-    let Some(skill) = role.skills.iter().find(|skill| skill.name == name) else {
-        return Err(Failure::new(
-            super::web::NOT_FOUND,
-            format!("the role ships no skill {name}"),
-        ));
-    };
-    Ok(json!({ "files": { "SKILL.md": skill.text }, "ignored_fields": [] }))
+    if let Some(skill) = role.skills.iter().find(|skill| skill.name == name) {
+        return Ok(json!({ "files": { "SKILL.md": skill.text }, "ignored_fields": [] }));
+    }
+    // Then the role's kit's, as the session's copy holds it: its frontmatter is name and
+    // description alone.
+    let kit = (deps.kits)(asked).map_err(|error| internal(&error))?;
+    if let Some(text) = kit
+        .skills
+        .iter()
+        .find(|skill| skill.name == name)
+        .and_then(|skill| skill.session_files.get("SKILL.md"))
+    {
+        return Ok(json!({ "files": { "SKILL.md": text }, "ignored_fields": [] }));
+    }
+    Err(Failure::new(
+        super::web::NOT_FOUND,
+        format!("the role ships no skill {name}"),
+    ))
 }
 
 /// `account.status` on a daemon with a project: the credential read afresh from the environment
@@ -354,7 +366,32 @@ fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team) -> Vec<Va
             );
             let ended = matches!(&kept, Kept::Entry { spec_sha256, signed_in: Some(grant), .. }
                 if grant.lapsed && *spec_sha256 == farik_core::team::spec_sha256(&server));
+            // A kit's service the kit no longer says is as it is stays unconnected until the user
+            // connects it again, and one the kit no longer has cannot be (ADR 0036).
+            let kit_says = if server.kit {
+                let role = team
+                    .agents
+                    .iter()
+                    .find(|held| held.id.as_str() == agent)
+                    .map(|held| Role::from(held.role));
+                role.and_then(|role| (deps.kits)(role).ok()).map(|kit| {
+                    if matches_kit(&kit, &server) {
+                        "same"
+                    } else if kit.connectors.iter().any(|connector| {
+                        matches!(connector, KitConnector::Server { .. })
+                            && connector.name() == server.name
+                    }) {
+                        "changed"
+                    } else {
+                        "gone"
+                    }
+                })
+            } else {
+                None
+            };
             let shown = match kept {
+                _ if kit_says == Some("gone") => "not_in_kit",
+                _ if kit_says == Some("changed") => "connect_again",
                 ref kept if kept.runs(&server) => "connected",
                 Kept::Unavailable => "store_unavailable",
                 _ if ended => "sign_in_again",
@@ -1907,6 +1944,89 @@ pub(super) mod tests {
             shown.contains("-32005") && shown.contains("skill_name_invalid: "),
             "{shown}"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_a_kit_skill_as_the_roles() {
+        let harness = Harness::new("rpc-kit-skill-rows", |_| {});
+        harness
+            .project
+            .set_kit(crate::tools::fixtures::a_developer_kit(
+                &[("launch-plans", "KIT-BODY")],
+                None,
+            ));
+        let rows = || {
+            let got = query(
+                &harness.daemon,
+                "skills.list",
+                &json!({ "agent": "dev-a" }),
+                "skillsListResult",
+            );
+            got["skills"]
+                .as_array()
+                .expect("rows")
+                .iter()
+                .map(|row| {
+                    (
+                        row["level"].as_str().unwrap_or_default().to_string(),
+                        row["name"].as_str().unwrap_or_default().to_string(),
+                        row["state"].as_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let row = |level: &str, name: &str, state: &str| {
+            (level.to_string(), name.to_string(), state.to_string())
+        };
+        assert_eq!(
+            rows(),
+            [
+                row("role", "implementing-a-contract", "in_use"),
+                row("role", "launch-plans", "in_use"),
+            ]
+        );
+        // A team skill of that name in use replaces it.
+        save_a_skill_replacing(&harness, "launch-plans");
+        assert_eq!(
+            rows(),
+            [
+                row("role", "implementing-a-contract", "in_use"),
+                row("role", "launch-plans", "replaced"),
+                row("team", "launch-plans", "in_use"),
+            ]
+        );
+        let got = query(
+            &harness.daemon,
+            "skill.get",
+            &json!({ "level": "role", "role": "software_developer", "name": "launch-plans" }),
+            "skillGetResult",
+        );
+        let text = got["files"]["SKILL.md"].as_str().expect("the text");
+        assert!(text.starts_with("---\nname: launch-plans\n"), "{text:?}");
+        assert!(text.ends_with("KIT-BODY"), "{text}");
+        assert!(got.get("sha256").is_none(), "{got}");
+        // Another role's kit skill is not this role's.
+        let reply = rpc(
+            &harness.daemon,
+            "query",
+            &json!({ "name": "skill.get", "params":
+                { "level": "role", "role": "architect", "name": "launch-plans" } }),
+        );
+        assert_eq!(reply["error"]["code"], -32002, "{reply}");
+    }
+
+    /// The team's skill `name` saved over a shipped name, as the person said to.
+    fn save_a_skill_replacing(harness: &Harness, name: &str) {
+        let text = format!("---\nname: {name}\ndescription: Use when {name}.\n---\nTEAM-BODY");
+        let files = BTreeMap::from([("SKILL.md".to_string(), text.into_bytes())]);
+        crate::skills::save_skill(
+            &harness.project.deps,
+            &crate::skills::SkillLevel::Team,
+            &files,
+            true,
+        )
+        .expect("saved");
     }
 
     #[test]

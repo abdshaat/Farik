@@ -12,7 +12,8 @@ use farik_core::skill::skill_sha256;
 use farik_core::team::{SkillPin, Team};
 use farik_protocol::event::{EventBody, FarikEvent};
 use farik_roles::{
-    CheckedSkill, SkillRefusal, check_skill, core_skill_names, declared_name_and_description,
+    CheckedSkill, SHIPPED_ROLES, SkillRefusal, check_skill, core_skill_names,
+    declared_name_and_description, shipped_skill_names,
 };
 
 /// Whose skill: the team's, or one agent's.
@@ -276,15 +277,32 @@ pub(crate) fn evaluate(
     }
 }
 
-/// The skills `agent_id`'s sessions load: its own pinned skills, and the team's that it has no
-/// skill of the same name for, each only when its folder, its pin and this computer's
-/// confirmations agree.
+/// The name of every skill Farik ships: each shipped role's, and each of its kit's from `kits`.
+/// What a user's skill may not take without `replace_shipped` (ADR 0034).
+#[must_use]
+pub fn shipped_names(kits: &crate::tools::KitSource) -> BTreeSet<String> {
+    let roles: Vec<_> = SHIPPED_ROLES
+        .into_iter()
+        .filter_map(|role| farik_roles::load_role(role).ok())
+        .collect();
+    let kits: Vec<_> = SHIPPED_ROLES
+        .into_iter()
+        .filter_map(|role| kits(role).ok())
+        .collect();
+    shipped_skill_names(&roles, &kits)
+}
+
+/// The skills `agent_id`'s sessions load: its own pinned skills, the team's that it has no skill
+/// of the same name for, then its role's kit's (`kit_skills`) that neither pins a skill of the
+/// name of, each only when its folder, its pin and this computer's confirmations agree; a kit's
+/// skill is Farik's own, neither pinned nor confirmed (ADR 0034).
 #[must_use]
 pub fn session_skills(
     root: &Path,
     team: &Team,
     agent_id: &str,
     confirmed: &BTreeMap<(SkillLevel, String), String>,
+    kit_skills: &[CheckedSkill],
 ) -> SessionSkills {
     let own: &[SkillPin] = team
         .agents
@@ -301,6 +319,13 @@ pub fn session_skills(
             .filter(|pin| !own.iter().any(|mine| mine.name == pin.name))
             .map(|pin| (SkillLevel::Team, pin)),
     );
+    // A pin of the name stands for the kit's skill, whatever its state: one in review never falls
+    // back silently to the kit's.
+    let pinned: Vec<&str> = chosen.iter().map(|(_, pin)| pin.name.as_str()).collect();
+    let kit_chosen: Vec<&CheckedSkill> = kit_skills
+        .iter()
+        .filter(|skill| !pinned.contains(&skill.name.as_str()))
+        .collect();
     let shipped = core_skill_names();
     let mut loaded = SessionSkills::default();
     for (level, pin) in chosen {
@@ -316,6 +341,12 @@ pub fn session_skills(
             files: checked.session_files,
         });
     }
+    loaded
+        .skills
+        .extend(kit_chosen.into_iter().map(|skill| SessionSkill {
+            name: skill.name.clone(),
+            files: skill.session_files.clone(),
+        }));
     loaded
 }
 
@@ -551,7 +582,7 @@ pub fn save_skill(
     let (name, _) = declared_name_and_description(files)
         .ok_or(SkillCommandError::Refused(SkillRefusal::FrontmatterInvalid))?;
     check_skill(&name, files).map_err(SkillCommandError::Refused)?;
-    if !replace_shipped && core_skill_names().contains(name.as_str()) {
+    if !replace_shipped && shipped_names(&tools.kits).contains(name.as_str()) {
         return Err(SkillCommandError::NameTaken);
     }
     let team = tools.files.read_team().map_err(io_other)?;
@@ -648,7 +679,7 @@ pub fn confirm_skill(
         return Err(SkillCommandError::HashMismatch);
     }
     check_skill(name, &files).map_err(SkillCommandError::Refused)?;
-    if !replace_shipped && core_skill_names().contains(name) {
+    if !replace_shipped && shipped_names(&tools.kits).contains(name) {
         return Err(SkillCommandError::NameTaken);
     }
     if pin.sha256.as_str() != hash {
@@ -698,6 +729,7 @@ pub fn skill_rows(
     team: &Team,
     agent_id: Option<&str>,
     confirmed: &BTreeMap<(SkillLevel, String), String>,
+    kit_skills: &[CheckedSkill],
 ) -> Vec<SkillRow> {
     let agent = agent_id.and_then(|id| team.agents.iter().find(|agent| agent.id.as_str() == id));
     let own: &[SkillPin] = agent.map_or(&[], |agent| &agent.skills);
@@ -746,6 +778,23 @@ pub fn skill_rows(
                 SkillState::InUse
             },
             bytes: skill.bytes as u64,
+        }));
+        // Its role's kit's skills follow the role's own, and count as the role's.
+        rows.extend(kit_skills.iter().map(|skill| {
+            SkillRow {
+                level: SkillRowLevel::Role,
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                state: if in_use(&skill.name) {
+                    SkillState::Replaced
+                } else {
+                    SkillState::InUse
+                },
+                bytes: skill
+                    .session_files
+                    .get("SKILL.md")
+                    .map_or(0, |text| text.len() as u64),
+            }
         }));
     }
     for (pin, evaluated) in &team_skills {
@@ -807,7 +856,9 @@ mod tests {
     use farik_core::team::{Team, validate_team};
     use farik_protocol::event::fixtures::an_event_wire;
     use farik_protocol::event::{EventBody, EventKind, FarikEvent, event_from_value};
-    use farik_roles::SkillRefusal;
+    use std::sync::Arc;
+
+    use farik_roles::{SkillRefusal, check_skill};
     use serde_json::{Value, json};
 
     use super::{
@@ -992,10 +1043,10 @@ mod tests {
         let team = team_with(&[], &[("api-style", &sha)]);
         let ok = confirmed(&[(agent(), "api-style", &sha)]);
         assert_eq!(
-            names(&session_skills(&root, &team, "linus", &ok)),
+            names(&session_skills(&root, &team, "linus", &ok, &[])),
             ["api-style"]
         );
-        let loaded = session_skills(&root, &team, "linus", &ok);
+        let loaded = session_skills(&root, &team, "linus", &ok, &[]);
         assert!(
             loaded.skills[0].files["SKILL.md"].starts_with("---\nname: api-style\ndescription: ")
         );
@@ -1003,14 +1054,18 @@ mod tests {
         // A folder edited after confirming.
         let folder = skill_folder(&root, &agent(), "api-style");
         std::fs::write(folder.join("references/a.md"), "edited").expect("an edit");
-        assert!(session_skills(&root, &team, "linus", &ok).skills.is_empty());
+        assert!(
+            session_skills(&root, &team, "linus", &ok, &[])
+                .skills
+                .is_empty()
+        );
 
         // A pin changed alone, the folder still what this computer confirmed.
         let (_, current) = put(&root, &agent(), "api-style", "body");
         let repinned = team_with(&[], &[("api-style", &"c".repeat(64))]);
         let current_ok = confirmed(&[(agent(), "api-style", &current)]);
         assert!(
-            session_skills(&root, &repinned, "linus", &current_ok)
+            session_skills(&root, &repinned, "linus", &current_ok, &[])
                 .skills
                 .is_empty()
         );
@@ -1018,26 +1073,32 @@ mod tests {
         let (_, new_sha) = put(&root, &agent(), "api-style", "a pulled body");
         let pulled = team_with(&[], &[("api-style", &new_sha)]);
         assert!(
-            session_skills(&root, &pulled, "linus", &ok)
+            session_skills(&root, &pulled, "linus", &ok, &[])
                 .skills
                 .is_empty()
         );
         assert!(
-            session_skills(&root, &pulled, "linus", &BTreeMap::new())
+            session_skills(&root, &pulled, "linus", &BTreeMap::new(), &[])
                 .skills
                 .is_empty(),
             "no event at all"
         );
         let confirmed_new = confirmed(&[(agent(), "api-style", &new_sha)]);
         assert_eq!(
-            names(&session_skills(&root, &pulled, "linus", &confirmed_new)),
+            names(&session_skills(
+                &root,
+                &pulled,
+                "linus",
+                &confirmed_new,
+                &[]
+            )),
             ["api-style"]
         );
 
         // A pin whose folder is gone.
         std::fs::remove_dir_all(&folder).expect("removed");
         assert!(
-            session_skills(&root, &pulled, "linus", &confirmed_new)
+            session_skills(&root, &pulled, "linus", &confirmed_new, &[])
                 .skills
                 .is_empty()
         );
@@ -1049,9 +1110,17 @@ mod tests {
         let sha = skill_sha256(&read_skill_folder(&folder).expect("readable"));
         let team = team_with(&[], &[("api-style", &sha)]);
         let ok = confirmed(&[(agent(), "api-style", &sha)]);
-        assert!(session_skills(&root, &team, "linus", &ok).skills.is_empty());
+        assert!(
+            session_skills(&root, &team, "linus", &ok, &[])
+                .skills
+                .is_empty()
+        );
         // Another agent's skill is not this agent's.
-        assert!(session_skills(&root, &team, "ada", &ok).skills.is_empty());
+        assert!(
+            session_skills(&root, &team, "ada", &ok, &[])
+                .skills
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1067,7 +1136,11 @@ mod tests {
         .expect("a link");
         let team = team_with(&[("api-style", &sha)], &[]);
         let ok = confirmed(&[(SkillLevel::Team, "api-style", &sha)]);
-        assert!(session_skills(&root, &team, "linus", &ok).skills.is_empty());
+        assert!(
+            session_skills(&root, &team, "linus", &ok, &[])
+                .skills
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1080,18 +1153,74 @@ mod tests {
             (SkillLevel::Team, "api-style", &team_sha),
             (agent(), "api-style", &agent_sha),
         ]);
-        let loaded = session_skills(&root, &team, "linus", &ok);
+        let loaded = session_skills(&root, &team, "linus", &ok, &[]);
         assert_eq!(names(&loaded), ["api-style"]);
         assert!(loaded.skills[0].files["SKILL.md"].ends_with("the agent's"));
         // Ada has no skill of her own: she gets the team's.
-        let ada = session_skills(&root, &team, "ada", &ok);
+        let ada = session_skills(&root, &team, "ada", &ok, &[]);
         assert!(ada.skills[0].files["SKILL.md"].ends_with("the team's"));
         // The agent's is in review: none, never the team's.
         let only_team = confirmed(&[(SkillLevel::Team, "api-style", &team_sha)]);
         assert!(
-            session_skills(&root, &team, "linus", &only_team)
+            session_skills(&root, &team, "linus", &only_team, &[])
                 .skills
                 .is_empty()
+        );
+    }
+
+    /// The kit skill `name` with `body`, as `check_skill` hands it over.
+    fn a_kit_skill(name: &str, body: &str) -> farik_roles::CheckedSkill {
+        let files = BTreeMap::from([("SKILL.md".to_string(), skill_md(name, body).into_bytes())]);
+        check_skill(name, &files).expect("a skill")
+    }
+
+    #[test]
+    fn kit_skills_load_after_the_agents_and_the_teams_without_a_pin_naming_them() {
+        let root = scratch("kit-order");
+        let kit = [a_kit_skill("launch-plans", "the kit's")];
+        let none = BTreeMap::new();
+        let team = team_with(&[], &[]);
+        let loaded = session_skills(&root, &team, "linus", &none, &kit);
+        assert_eq!(names(&loaded), ["launch-plans"]);
+        assert!(loaded.skills[0].files["SKILL.md"].ends_with("the kit's"));
+        // The team's, in use: the team's, not the kit's.
+        let (_, team_sha) = put(&root, &SkillLevel::Team, "launch-plans", "the team's");
+        let team = team_with(&[("launch-plans", &team_sha)], &[]);
+        let ok = confirmed(&[(SkillLevel::Team, "launch-plans", &team_sha)]);
+        let loaded = session_skills(&root, &team, "linus", &ok, &kit);
+        assert_eq!(names(&loaded), ["launch-plans"]);
+        assert!(loaded.skills[0].files["SKILL.md"].ends_with("the team's"));
+        // The team's, in review: none, and never the kit's.
+        assert!(
+            session_skills(&root, &team, "linus", &none, &kit)
+                .skills
+                .is_empty()
+        );
+        // The agent's pin shadows both.
+        let (_, agent_sha) = put(&root, &agent(), "launch-plans", "the agent's");
+        let team = team_with(
+            &[("launch-plans", &team_sha)],
+            &[("launch-plans", &agent_sha)],
+        );
+        let ok = confirmed(&[(agent(), "launch-plans", &agent_sha)]);
+        let loaded = session_skills(&root, &team, "linus", &ok, &kit);
+        assert!(loaded.skills[0].files["SKILL.md"].ends_with("the agent's"));
+    }
+
+    #[test]
+    fn counts_a_kit_skill_among_the_names_a_command_checks() {
+        let kits: crate::tools::KitSource = Arc::new(|role| match role {
+            farik_core::contract::Role::SoftwareDeveloper => Ok(
+                crate::tools::fixtures::a_developer_kit(&[("launch-plans", "x")], None),
+            ),
+            other => farik_roles::load_kit(other),
+        });
+        let names = super::shipped_names(&kits);
+        assert!(names.contains("launch-plans"));
+        assert!(names.contains("writing-task-contracts"));
+        assert!(
+            !super::shipped_names(&(Arc::new(farik_roles::load_kit) as crate::tools::KitSource))
+                .contains("launch-plans")
         );
     }
 
@@ -1101,7 +1230,7 @@ mod tests {
         let (_, sha) = put(&root, &SkillLevel::Team, "implementing-a-contract", "mine");
         let team = team_with(&[("implementing-a-contract", &sha)], &[]);
         let ok = confirmed(&[(SkillLevel::Team, "implementing-a-contract", &sha)]);
-        let loaded = session_skills(&root, &team, "linus", &ok);
+        let loaded = session_skills(&root, &team, "linus", &ok, &[]);
         assert_eq!(names(&loaded), ["implementing-a-contract"]);
         assert_eq!(
             loaded
@@ -1111,13 +1240,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["implementing-a-contract"]
         );
-        let review = session_skills(&root, &team, "linus", &BTreeMap::new());
+        let review = session_skills(&root, &team, "linus", &BTreeMap::new(), &[]);
         assert!(review.skills.is_empty() && review.replaced_role_skills.is_empty());
         let (_, other) = put(&root, &SkillLevel::Team, "api-style", "x");
         let team = team_with(&[("api-style", &other)], &[]);
         let ok = confirmed(&[(SkillLevel::Team, "api-style", &other)]);
         assert!(
-            session_skills(&root, &team, "linus", &ok)
+            session_skills(&root, &team, "linus", &ok, &[])
                 .replaced_role_skills
                 .is_empty()
         );
@@ -1223,6 +1352,68 @@ mod tests {
 
     fn code(result: Result<impl std::fmt::Debug, SkillCommandError>) -> &'static str {
         result.expect_err("refused").code()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_team_skill_named_for_a_kit_skill_without_replace_shipped() {
+        let project = a_project("skills-kit-name-taken");
+        project.set_kit(crate::tools::fixtures::a_developer_kit(
+            &[("launch-plans", "kit")],
+            None,
+        ));
+        let files = skill_files("launch-plans", "mine");
+        assert_eq!(
+            code(save_skill(&project.deps, &SkillLevel::Team, &files, false)),
+            "skill_name_taken"
+        );
+        assert!(pins(&project, &SkillLevel::Team).is_empty());
+        save_skill(&project.deps, &SkillLevel::Team, &files, true).expect("replaced on purpose");
+        let sha = skill_sha256(&files);
+        assert_eq!(
+            code(confirm_skill(
+                &project.deps,
+                &SkillLevel::Team,
+                "launch-plans",
+                &sha,
+                false
+            )),
+            "skill_name_taken"
+        );
+        // The rows: the kit's skill is the role's, after the role's own, and replaced now.
+        let team = project.deps.files.read_team().expect("the team");
+        let root = project.repo.path.clone();
+        let kit = (project.deps.kits)(farik_core::contract::Role::SoftwareDeveloper).expect("kit");
+        let rows = skill_rows(
+            &root,
+            &team,
+            Some("dev-a"),
+            &confirmed_in(&project),
+            &kit.skills,
+        );
+        let shown: Vec<(SkillRowLevel, &str, SkillState)> = rows
+            .iter()
+            .map(|row| (row.level, row.name.as_str(), row.state))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (
+                    SkillRowLevel::Role,
+                    "implementing-a-contract",
+                    SkillState::InUse
+                ),
+                (SkillRowLevel::Role, "launch-plans", SkillState::Replaced),
+                (SkillRowLevel::Team, "launch-plans", SkillState::InUse),
+            ]
+        );
+        let bare = skill_rows(&root, &team, Some("dev-a"), &BTreeMap::new(), &kit.skills);
+        assert_eq!(
+            bare[1].state,
+            SkillState::InUse,
+            "no confirmation: the kit's still stands"
+        );
+        assert!(bare[1].bytes > 0 && !bare[1].description.is_empty());
     }
 
     #[test]
@@ -1558,6 +1749,7 @@ mod tests {
                 &p.deps.files.read_team().expect("team"),
                 Some("dev-a"),
                 &confirmed_in(p),
+                &[],
             )
         };
         let state = |p: &TestProject| {
@@ -1693,7 +1885,7 @@ mod tests {
         .expect("an edit");
         let team = project.deps.files.read_team().expect("the team");
         let confirmed = confirmed_in(&project);
-        let rows = skill_rows(&root, &team, Some("dev-a"), &confirmed);
+        let rows = skill_rows(&root, &team, Some("dev-a"), &confirmed, &[]);
         let shown: Vec<(SkillRowLevel, &str, SkillState)> = rows
             .iter()
             .map(|row| (row.level, row.name.as_str(), row.state))
@@ -1749,7 +1941,7 @@ mod tests {
 
         // The Product Manager has its own role skill in use, and the team's skills, in use.
         let pm: Vec<(SkillRowLevel, &str, SkillState)> =
-            skill_rows(&root, &team, Some("pm"), &confirmed)
+            skill_rows(&root, &team, Some("pm"), &confirmed, &[])
                 .iter()
                 .map(|row| (row.level, row.name.as_str(), row.state))
                 .collect::<Vec<_>>()
@@ -1779,7 +1971,7 @@ mod tests {
             ]
         );
         // Without an agent, the team's alone, and nothing is replaced.
-        let team_rows: Vec<(String, SkillState)> = skill_rows(&root, &team, None, &confirmed)
+        let team_rows: Vec<(String, SkillState)> = skill_rows(&root, &team, None, &confirmed, &[])
             .into_iter()
             .map(|row| {
                 assert_eq!(row.level, SkillRowLevel::Team);
@@ -1799,7 +1991,7 @@ mod tests {
             "edited",
         )
         .expect("an edit");
-        let rows = skill_rows(&root, &team, Some("dev-a"), &confirmed);
+        let rows = skill_rows(&root, &team, Some("dev-a"), &confirmed, &[]);
         assert_eq!(rows[0].state, SkillState::InUse);
         assert_eq!(rows[1].state, SkillState::Review);
     }

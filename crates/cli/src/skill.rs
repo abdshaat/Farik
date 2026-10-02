@@ -9,12 +9,11 @@ use std::path::Path;
 use farik_core::skill::skill_sha256;
 use farik_protocol::command::{Command, SkillScope};
 use farik_protocol::event::EventKind;
-use farik_roles::{
-    CheckedSkill, SkillRefusal, check_skill, core_skill_names, declared_name_and_description,
-};
+use farik_roles::{CheckedSkill, SkillRefusal, check_skill, declared_name_and_description};
 use farik_runtime::skills::{
     SkillLevel, SkillState, confirm_skill, confirmed_sentence, confirmed_skills, read_skill_folder,
-    remove_skill, removed_sentence, save_skill, saved_sentence, skill_folder_unlinked, skill_rows,
+    remove_skill, removed_sentence, save_skill, saved_sentence, shipped_names,
+    skill_folder_unlinked, skill_rows,
 };
 use farik_store::EventQuery;
 use serde_json::json;
@@ -79,7 +78,11 @@ fn state_words(state: SkillState) -> &'static str {
 /// # Errors
 ///
 /// A sentence saying the agent is not on the team, or the log could not be read.
-pub(crate) fn list(project: &Project, agent: Option<&str>) -> Result<Report, String> {
+pub(crate) fn list(
+    project: &Project,
+    agent: Option<&str>,
+    io: &CliIo<'_>,
+) -> Result<Report, String> {
     if let Some(agent) = agent {
         Whom::Agent(agent).exists(project)?;
     }
@@ -95,11 +98,27 @@ pub(crate) fn list(project: &Project, agent: Option<&str>) -> Result<Report, Str
             ..EventQuery::default()
         })
         .map_err(|error| error.to_string())?;
+    // The agent's role's kit skills follow its role's own.
+    let kit_skills = match agent.and_then(|id| {
+        project
+            .team
+            .agents
+            .iter()
+            .find(|held| held.id.as_str() == id)
+    }) {
+        Some(held) => {
+            (io.kits)(farik_core::contract::Role::from(held.role))
+                .map_err(|error| error.to_string())?
+                .skills
+        }
+        None => Vec::new(),
+    };
     let rows = skill_rows(
         &project.root,
         &project.team,
         agent,
         &confirmed_skills(&events),
+        &kit_skills,
     );
     let level = |row: &farik_runtime::skills::SkillRow| {
         serde_json::to_value(row.level)
@@ -225,7 +244,7 @@ pub(crate) fn add(
     let source = io.cwd.join(folder);
     let (files, checked) = read_checked(&source)?;
     let name = checked.name.clone();
-    if !replace && core_skill_names().contains(name.as_str()) {
+    if !replace && shipped_names(&io.kits).contains(name.as_str()) {
         return Err(shipped_sentence(&name));
     }
     if !yes && !io.stdin_is_terminal {
@@ -359,7 +378,7 @@ pub(crate) fn confirm(
              show prints, or its first 12 digits"
         ));
     }
-    if !replace && core_skill_names().contains(name) {
+    if !replace && shipped_names(&io.kits).contains(name) {
         return Err(shipped_sentence(name));
     }
     here_or_sent(

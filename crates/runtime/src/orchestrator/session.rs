@@ -384,8 +384,18 @@ fn custom_connectors(
     if !gives_connectors(ask) {
         return Vec::new();
     }
+    // A kit entry is given only while it is exactly what the kit says: a release that tags a tool
+    // `denied` takes effect at the next session, and the user connects the service again
+    // (ADR 0036).
+    let kit = (deps.tools.kits)(Role::from(ask.agent.role)).ok();
     custom_servers(ask.agent)
         .filter(|server| !left_out.contains(&server.name))
+        .filter(|server| {
+            !server.kit
+                || kit
+                    .as_ref()
+                    .is_some_and(|kit| crate::daemon::matches_kit(kit, server))
+        })
         .filter(|server| {
             deps.daemon
                 .secret_at(deps.tools.files.root(), ask.agent.id.as_str(), &server.name)
@@ -761,11 +771,14 @@ fn session_skills_of(
         ],
         ..EventQuery::default()
     })?;
+    // The kit's skills are Farik's own: loaded on demand beside the agent's and the team's.
+    let kit = (deps.tools.kits)(Role::from(ask.agent.role))?;
     Ok(session_skills(
         deps.tools.files.root(),
         team,
         ask.agent.id.as_str(),
         &confirmed_skills(&events),
+        &kit.skills,
     ))
 }
 
@@ -2748,6 +2761,217 @@ mod tests {
             .position(|arg| arg == "--disallowedTools")
             .expect("the flag");
         assert_eq!(args[at + 1], "Bash,mcp__github__delete_repo");
+    }
+
+    /// `dev-a`'s one service, `github`, written whole as a kit's.
+    fn with_a_kit_server(wire: &mut serde_json::Value) {
+        wire["agents"][1]["mcp_servers"] = json!([crate::tools::fixtures::a_kit_server()]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn leaves_out_a_kit_entry_the_kit_has_changed() {
+        use crate::tools::fixtures::a_developer_kit;
+
+        let harness = Harness::new("session-kit-stale", with_a_kit_server);
+        harness.file("FRK-1", "draft", |_| {});
+        harness
+            .project
+            .set_kit(a_developer_kit(&[], Some("network")));
+        connect(&harness, &["github"], |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let given = || {
+            let spec = session_spec(
+                deps,
+                &team,
+                &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+            )
+            .expect("the spec");
+            server_names(&spec)
+                .into_iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        let state =
+            || crate::daemon::fixtures::connector_states(&harness.daemon)[0]["state"].clone();
+        assert_eq!(given(), ["github"]);
+        assert_eq!(state(), "connected");
+        // A release tags `search` `denied`: the entry is no longer the kit's.
+        harness
+            .project
+            .set_kit(a_developer_kit(&[], Some("denied")));
+        assert!(given().is_empty(), "left out of the session's mcp.json");
+        assert_eq!(state(), "connect_again");
+        // A release drops the service.
+        harness.project.set_kit(a_developer_kit(&[], None));
+        assert!(given().is_empty());
+        assert_eq!(state(), "not_in_kit");
+        // The kit as it was: the entry runs again, with nothing connected twice.
+        harness
+            .project
+            .set_kit(a_developer_kit(&[], Some("network")));
+        assert_eq!(given(), ["github"]);
+        assert_eq!(state(), "connected");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn gives_a_confirmed_kit_entry_like_a_custom_one() {
+        use crate::tools::fixtures::a_developer_kit;
+
+        let harness = Harness::new("session-kit-given", with_a_kit_server);
+        harness.file("FRK-1", "draft", |_| {});
+        harness
+            .project
+            .set_kit(a_developer_kit(&[], Some("network")));
+        connect(&harness, &["github"], |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let spec = session_spec(
+            deps,
+            &team,
+            &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+        )
+        .expect("the spec");
+        assert_eq!(server_names(&spec), ["github"]);
+        assert_eq!(spec.disallowed_tools, ["mcp__github__delete_repo"]);
+        let root = deps.tools.files.root();
+        let config = crate::claude::ClaudeConfig {
+            claude_path: "/usr/local/bin/claude".into(),
+            hook_command: "/usr/local/bin/farik".into(),
+            daemon_file: root.join(".farik/local/daemon.json"),
+            daemon: crate::daemon::DaemonInfo {
+                port: 47_123,
+                token: "the-daemon-token".to_string(),
+                pid: 1,
+            },
+            sessions_dir: root.join(".farik/local/sessions"),
+            skills_dir: root.join("skills-state"),
+            team_file: root.join(".farik/team.yaml"),
+            env: std::collections::BTreeMap::new(),
+        };
+        let dir = config.sessions_dir.join(&spec.session_id);
+        crate::claude::write_session_files(&spec, &config, &dir).expect("written");
+        let text = std::fs::read_to_string(dir.join("mcp.json")).expect("readable");
+        let file: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+        assert_eq!(
+            file["mcpServers"]["github"]["command"],
+            "/usr/local/bin/farik"
+        );
+        assert_eq!(file["mcpServers"]["github"]["args"][1], "run");
+        assert!(
+            !text.contains(KEY_VALUE) && !text.contains("github-mcp"),
+            "{text}"
+        );
+        // The tags the session is registered with are the entry's, which are the kit's.
+        let server = team
+            .agents
+            .iter()
+            .flat_map(|held| held.mcp_servers.iter().flatten())
+            .find_map(farik_core::team::custom_server)
+            .expect("a kit entry");
+        assert!(server.kit);
+        assert_eq!(
+            server.tools["search"],
+            farik_core::governor::permissions::ConnectorTag::Network
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn loads_kit_skills_after_the_agents_and_the_teams() {
+        use crate::tools::fixtures::a_developer_kit;
+
+        let (pin, text) = a_skill_pin("launch-plans", "THE-TEAMS-LAUNCH-PLANS");
+        let harness = Harness::new("session-kit-skills", |wire| wire["skills"] = json!([pin]));
+        harness.file("FRK-1", "draft", |_| {});
+        harness.project.set_kit(a_developer_kit(
+            &[("launch-plans", "THE-KITS-LAUNCH-PLANS")],
+            None,
+        ));
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let loaded = || {
+            let spec = session_spec(
+                deps,
+                &team,
+                &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+            )
+            .expect("the spec");
+            spec.skills
+                .iter()
+                .map(|skill| (skill.name.clone(), skill.files["SKILL.md"].clone()))
+                .collect::<Vec<_>>()
+        };
+        // Only the team's pin names it, not yet confirmed: the kit's is not loaded in its place.
+        put_skill(
+            &harness,
+            "launch-plans",
+            &text,
+            pin["sha256"].as_str().expect("a hash"),
+            false,
+        );
+        assert!(
+            loaded().is_empty(),
+            "a team skill in review shadows the kit's"
+        );
+        put_skill(
+            &harness,
+            "launch-plans",
+            &text,
+            pin["sha256"].as_str().expect("a hash"),
+            true,
+        );
+        let skills = loaded();
+        assert_eq!(skills.len(), 1);
+        assert!(
+            skills[0].1.ends_with("THE-TEAMS-LAUNCH-PLANS"),
+            "{skills:?}"
+        );
+        // With no skill of the name on the team, the kit's loads.
+        let bare = Harness::new("session-kit-skills-bare", |_| {});
+        bare.file("FRK-1", "draft", |_| {});
+        bare.project.set_kit(a_developer_kit(
+            &[("launch-plans", "THE-KITS-LAUNCH-PLANS")],
+            None,
+        ));
+        let orchestrator = bare.orchestrator(bare.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let spec = session_spec(
+            deps,
+            &team,
+            &dev_asks(&bare, &team, &contract, SessionPurpose::Implement, None),
+        )
+        .expect("the spec");
+        assert_eq!(skill_names(&spec), ["launch-plans"]);
+        assert!(spec.skills[0].files["SKILL.md"].ends_with("THE-KITS-LAUNCH-PLANS"));
+        // The prompt does not carry it: a kit's skills load on demand alone (ADR 0034).
+        assert!(!spec.system_prompt.contains("THE-KITS-LAUNCH-PLANS"));
     }
 
     /// A store in memory that fails every read while `failing` is set, as a locked keychain does.

@@ -461,3 +461,52 @@ fn farik_skill_show_prints_every_file_escaped_and_remove_removes() {
         1
     );
 }
+
+/// The Software Developer's kit with one skill, `launch-plans`.
+fn a_kit_with_launch_plans() -> farik_roles::Kit {
+    let text = "---\nname: launch-plans\ndescription: Use when planning a launch.\n---\nSteps.\n";
+    let file = serde_json::json!({ "role": "software_developer", "skills": ["launch-plans"], "connectors": [] });
+    farik_roles::parse_kit(
+        farik_core::contract::Role::SoftwareDeveloper,
+        &file.to_string(),
+        &[],
+        &[("launch-plans", &[("SKILL.md", text)])],
+    )
+    .expect("the fixture kit loads")
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_skill_add_and_confirm_refuse_a_kit_skills_name_without_replace() {
+    let repository = a_team("skill-kit-name");
+    let mine = a_skill("skill-kit-name", "launch-plans", "mine");
+    let mine = mine.to_str().expect("a path");
+    let with_the_kit = |args: &[&str]| {
+        let kit = a_kit_with_launch_plans();
+        let mut all = vec!["skill"];
+        all.extend_from_slice(args);
+        run_with(&repository.path, &all, move |io| {
+            io.kits = std::sync::Arc::new(move |role| {
+                if role == farik_core::contract::Role::SoftwareDeveloper {
+                    Ok(kit.clone())
+                } else {
+                    farik_roles::load_kit(role)
+                }
+            });
+        })
+    };
+    let ran = with_the_kit(&["add", mine, "--team", "--yes"]);
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.err.contains("--replace") && ran.err.contains("launch-plans"),
+        "{}",
+        ran.err
+    );
+    // Without the kit, the name is free: it is the kit's presence that takes it.
+    let free = skill(&repository, &["add", mine, "--team", "--yes"], "", false);
+    assert_eq!(free.code, 0, "{}{}", free.out, free.err);
+    let hash = hash_of(&repository.path.join(".farik/skills/launch-plans"));
+    let ran = with_the_kit(&["confirm", "launch-plans", "--team", &hash]);
+    assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
+    assert!(ran.err.contains("--replace"), "{}", ran.err);
+}

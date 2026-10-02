@@ -321,7 +321,7 @@ pub fn declared_name_and_description(
 }
 
 /// Every agent role Farik ships.
-const SHIPPED_ROLES: [Role; 6] = [
+pub const SHIPPED_ROLES: [Role; 6] = [
     Role::ProductManager,
     Role::ScrumMaster,
     Role::Architect,

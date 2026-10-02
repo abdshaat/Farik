@@ -856,7 +856,7 @@
         },
         "connectors": {
           "type": "array",
-          "description": "Each agent's custom MCP servers and whether each runs (ADR 0030): connected when the definition kept on this machine beside its keys is the team file's and every key it names is kept; connect_again when none is kept or the team file changed since, so it runs nothing until the user connects it again; sign_in_again when the service ended the agent's sign-in, so it runs nothing until the user signs in again; store_unavailable when the keychain or the private file could not be read, the last time Farik read it, so it is left out of sessions until it can be. The kept definition is read once per connect and disconnect, when a session is set up, and the first time it is asked for.",
+          "description": "Each agent's custom MCP servers and whether each runs (ADR 0030): connected when the definition kept on this machine beside its keys is the team file's and every key it names is kept; connect_again when none is kept or the team file changed since, or, for a kit's service, when the kit's tags or fields changed with a release (ADR 0036), so it runs nothing until the user connects it again; sign_in_again when the service ended the agent's sign-in, so it runs nothing until the user signs in again; not_in_kit when a kit's service is no longer in its agent's role's kit, so the page offers Remove alone (ADR 0036); store_unavailable when the keychain or the private file could not be read, the last time Farik read it, so it is left out of sessions until it can be. The kept definition is read once per connect and disconnect, when a session is set up, and the first time it is asked for.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -880,7 +880,8 @@
                   "connected",
                   "connect_again",
                   "sign_in_again",
-                  "store_unavailable"
+                  "store_unavailable",
+                  "not_in_kit"
                 ]
               },
               "auth": {

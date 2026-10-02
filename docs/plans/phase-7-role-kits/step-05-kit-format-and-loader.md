@@ -191,7 +191,7 @@ Files: `orchestrator/session.rs`, `skills.rs`, `daemon/team.rs` (`connector_stat
 - `lists_a_kit_skill_as_the_roles`: `skills.list` has a `role` row for `launch-plans` after the role's rows, `Replaced` once a team skill of that name is in use, and `skill.get` answers its text.
 - `refuses_a_team_skill_named_for_a_kit_skill_without_replace_shipped`: `skill_save` of `launch-plans` gives `skill_name_taken`, and so does `farik skill add` with that kit in `io.kits`.
 
-- [ ] `feat(runtime): load a role's kit into its sessions`
+- [x] `feat(runtime): load a role's kit into its sessions`
 
 ### Task 6: `farik connect` by name
 

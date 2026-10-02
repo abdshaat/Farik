@@ -957,7 +957,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         #[cfg(unix)]
         Commands::Skill { command } => {
             open_project(&io.cwd, now).and_then(|project| match command {
-                SkillCommands::List { agent } => skill::list(&project, agent.as_deref()),
+                SkillCommands::List { agent } => skill::list(&project, agent.as_deref(), io),
                 SkillCommands::Show { name, whose } => skill::show(&project, name, &whose.whom()),
                 SkillCommands::Add {
                     folder,
