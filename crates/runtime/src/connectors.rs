@@ -1301,6 +1301,7 @@ mod tests {
             },
             credential_keys: credential_keys.iter().map(ToString::to_string).collect(),
             tools: BTreeMap::new(),
+            kit: false,
         }
     }
 
@@ -1432,6 +1433,7 @@ mod tests {
             },
             credential_keys: Vec::new(),
             tools: BTreeMap::new(),
+            kit: false,
         };
         let headers = launch_headers(&server, &signed_in_entry()).expect("headers");
         assert_eq!(

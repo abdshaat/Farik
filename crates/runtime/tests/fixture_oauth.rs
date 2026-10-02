@@ -532,6 +532,7 @@ async fn lists_tools_with_the_signed_in_token() {
         },
         credential_keys: Vec::new(),
         tools: BTreeMap::new(),
+        kit: false,
     };
     let folder = std::env::temp_dir();
     let tools = list_tools(

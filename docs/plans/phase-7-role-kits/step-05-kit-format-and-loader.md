@@ -162,7 +162,7 @@ Files: `team.schema.json` (`source` gains `kit`; `mcpServer`'s and `tools`' desc
 - Extend `a_server_without_oauth_keeps_its_hash` (team.rs, near line 2804) with an http custom entry and its literal, computed before this change, and with one `source: kit` http entry (no `allowances`) and its literal, computed after it; step 05b's Task 1 refers to that kit literal. A guard, not a RED test: the custom literals pass before the change.
 - `refuses_a_kit_entry_named_for_a_builtin`: `playwright` as `source: kit` gives `connector_name_reserved`.
 
-- [ ] `feat(core): take a kit's connector in the team file`
+- [x] `feat(core): take a kit's connector in the team file`
 
 ### Task 4: Connecting a kit's connector in the daemon
 

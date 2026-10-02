@@ -670,6 +670,8 @@ pub struct CustomServer {
     pub credential_keys: Vec<String>,
     /// Each tool the server listed at connect, with the user's label.
     pub tools: BTreeMap<String, ConnectorTag>,
+    /// Whether the entry is a kit's (`source: kit`), whose tags are the kit's.
+    pub kit: bool,
 }
 
 /// How a custom connector is started or reached.
@@ -714,11 +716,11 @@ pub fn oauth_json(settings: &OAuthSettings) -> Value {
     })
 }
 
-/// The custom connector a validated `mcp_servers` entry describes; `None` for a built-in one.
+/// The custom or kit connector a validated `mcp_servers` entry describes; `None` for a built-in one.
 /// This is the crate's one mapping from the generated entry.
 #[must_use]
 pub fn custom_server(server: &McpServerWire) -> Option<CustomServer> {
-    if server.source != McpServerSource::Custom {
+    if server.source == McpServerSource::Builtin {
         return None;
     }
     let transport = match server.transport? {
@@ -764,6 +766,7 @@ pub fn custom_server(server: &McpServerWire) -> Option<CustomServer> {
             .iter()
             .map(|(tool, tag)| (tool.as_str().to_string(), connector_tag(*tag)))
             .collect(),
+        kit: server.source == McpServerSource::Kit,
     })
 }
 
@@ -792,8 +795,9 @@ pub fn canonical_json(value: &Value) -> String {
 }
 
 /// The sha256, in lower-case hex, of the canonical JSON of what a custom connector runs as: its
-/// transport, command and args or url and headers, key names and tool labels (ADR 0030). Its name
-/// is not in it: the name is where the keys are kept.
+/// transport, command and args or url and headers, key names and tool labels (ADR 0030), and
+/// `"source": "kit"` for a kit's entry alone (ADR 0036). Its name is not in it: the name is where
+/// the keys are kept.
 #[must_use]
 pub fn spec_sha256(server: &CustomServer) -> String {
     let mut definition = match &server.transport {
@@ -813,6 +817,10 @@ pub fn spec_sha256(server: &CustomServer) -> String {
             definition
         }
     };
+    if server.kit {
+        // Only a kit entry says so, so every hash kept for a custom one stands.
+        definition["source"] = serde_json::json!("kit");
+    }
     definition["credential_keys"] = serde_json::json!(server.credential_keys);
     definition["tools"] = serde_json::json!(server.tools);
     sha256_hex(&canonical_json(&definition))
@@ -2136,6 +2144,7 @@ mod tests {
                         ("delete_repo".to_string(), ConnectorTag::Denied),
                         ("search".to_string(), ConnectorTag::Network),
                     ]),
+                    kit: false,
                 }),
                 Some(CustomServer {
                     name: "linear".to_string(),
@@ -2149,6 +2158,7 @@ mod tests {
                     },
                     credential_keys: vec!["API_KEY".to_string()],
                     tools: BTreeMap::from([("list_issues".to_string(), ConnectorTag::Network)]),
+                    kit: false,
                 }),
                 None,
             ]
@@ -2167,6 +2177,7 @@ mod tests {
                 },
                 credential_keys: Vec::new(),
                 tools: BTreeMap::new(),
+                kit: false,
             })],
             "a server with no arguments, keys or tools is one"
         );
@@ -2802,6 +2813,67 @@ mod tests {
         }
     }
 
+    fn a_kit_server() -> Value {
+        let mut server = an_http_server();
+        server["source"] = json!("kit");
+        server
+    }
+
+    #[test]
+    fn accepts_a_kit_entry_held_to_the_custom_rules() {
+        let wire = with_servers(json!([a_kit_server()]));
+        team(&wire);
+        let mut server = a_kit_server();
+        server["url"] = json!("https://mcp.example.com/mcp?key=abc");
+        assert_eq!(
+            paths(&with_servers(json!([server]))),
+            ["/agents/0/mcp_servers/0/url"]
+        );
+    }
+
+    #[test]
+    fn reads_a_kit_entry_as_a_server_marked_kit() {
+        let mut kit = a_kit_server();
+        kit["name"] = json!("notion");
+        let wire = with_servers(json!([
+            kit,
+            an_http_server(),
+            { "name": "playwright", "source": "builtin" }
+        ]));
+        let servers = the_custom_servers(&wire);
+        assert_eq!(servers[0].as_ref().map(|server| server.kit), Some(true));
+        assert_eq!(servers[1].as_ref().map(|server| server.kit), Some(false));
+        assert_eq!(servers[2], None);
+    }
+
+    #[test]
+    fn spec_hash_tells_a_kit_entry_from_a_custom_one() {
+        let hash = |server: Value| {
+            let wire: super::McpServerWire = serde_json::from_value(server).expect("a server");
+            spec_sha256(&custom_server(&wire).expect("a server"))
+        };
+        assert_ne!(hash(a_kit_server()), hash(an_http_server()));
+        assert_eq!(
+            hash(a_kit_server()),
+            "41d345c1449b595f91ec344a2285152a7792b98b1ead2028d83a6aa5cc987b11",
+            "recorded after source: kit joined the hash"
+        );
+    }
+
+    #[test]
+    fn refuses_a_kit_entry_named_for_a_builtin() {
+        let mut server = a_kit_server();
+        server["name"] = json!("playwright");
+        let refused = refusals(&with_servers(json!([server])));
+        assert!(
+            refused
+                .iter()
+                .any(|(path, message)| path == "/agents/0/mcp_servers/0/name"
+                    && message.starts_with("connector_name_reserved: ")),
+            "{refused:?}"
+        );
+    }
+
     #[test]
     fn a_server_without_oauth_keeps_its_hash() {
         let wire: super::McpServerWire =
@@ -2810,6 +2882,12 @@ mod tests {
             spec_sha256(&custom_server(&wire).expect("custom")),
             "4342386d7f10fabc3354e601e592e3e414884142ade85d90d7a751a20a046310",
             "recorded before oauth existed"
+        );
+        let kit: super::McpServerWire = serde_json::from_value(a_kit_server()).expect("a server");
+        assert_eq!(
+            spec_sha256(&custom_server(&kit).expect("a kit entry")),
+            "41d345c1449b595f91ec344a2285152a7792b98b1ead2028d83a6aa5cc987b11",
+            "recorded after source: kit joined the hash; step 05b's allowances do not change it"
         );
     }
 
