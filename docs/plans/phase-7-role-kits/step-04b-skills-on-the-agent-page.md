@@ -1,6 +1,6 @@
 # Phase 7, step 04b: Skills on the agent page
 
-Status: draft
+Status: executed 2026-10-02; the landing review waits
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6.7; F9
 Depends on: step 04 of this phase (its commands `skill_save`, `skill_remove`, `skill_confirm` and its RPCs `skills.list`, `skill.get`; it lands first), phase 6 (merged in #19)
@@ -92,7 +92,7 @@ Files: as the file map's Task 2 lines. Built from Task 1's approved boards.
 
 `docs/SPEC.md` 6.7: the agent page's Skills section and its two dialogs. `docs/plans/project-plan.md`: phase 7's row 04b, corrected if execution changed it. `docs/design/role-kits.md`: its steps table.
 
-- [ ] `docs(spec): record skills on the agent page`
+- [x] `docs(spec): record skills on the agent page`
 
 ## Verification
 
