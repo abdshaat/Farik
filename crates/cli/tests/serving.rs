@@ -31,14 +31,12 @@ use project::{
     Ran, a_team, events, filed, hold_the_run_lock, joined, recorded, run, run_with, scratch,
 };
 
-/// A port the operating system gave out and nothing holds now.
+#[path = "../../runtime/tests/support/ports.rs"]
+mod ports;
+
+/// A port nothing holds now, from below the ephemeral range, as text for `--port`.
 fn free_port() -> String {
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("a port is bound");
-    listener
-        .local_addr()
-        .expect("an address")
-        .port()
-        .to_string()
+    ports::free_port().to_string()
 }
 
 fn daemon_file(repository: &TempRepo) -> std::path::PathBuf {

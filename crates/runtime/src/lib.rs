@@ -39,6 +39,9 @@ mod oauth_fixture;
 pub mod orchestrator;
 /// Whether the human has paused the team.
 pub mod pause;
+#[cfg(all(test, unix))]
+#[path = "../tests/support/ports.rs"]
+mod ports;
 /// The project's preview, and the confined browser beside it.
 pub mod preview;
 /// A session's system prompt, assembled in one fixed order.

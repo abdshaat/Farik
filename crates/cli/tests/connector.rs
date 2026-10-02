@@ -27,6 +27,8 @@ use project::{LiveDriver, a_team, events, files_of, log_of, run_with, scratch};
 /// An authorization server and a protected MCP server, as the runtime's tests run them.
 #[path = "../../runtime/tests/support/oauth_fixture.rs"]
 mod oauth_fixture;
+#[path = "../../runtime/tests/support/ports.rs"]
+mod ports;
 
 const KEY: &str = "a-key-typed-at-the-terminal";
 
@@ -608,12 +610,7 @@ fn farik_connect_again_with_the_same_client_revokes_nothing() {
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
     let repository = a_team("connect-sign-in-same-client");
     let store = Arc::new(MemoryConnectorSecrets::default());
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("a port")
-        .local_addr()
-        .expect("an address")
-        .port()
-        .to_string();
+    let port = ports::free_port().to_string();
     for _ in 0..2 {
         let ran = sign_in(
             &repository,

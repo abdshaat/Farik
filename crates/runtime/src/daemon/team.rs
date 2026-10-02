@@ -4123,11 +4123,7 @@ pub(super) mod tests {
         // Some services end every grant of a client when one is revoked, so a grant is not
         // revoked when the one replacing it is the same client's.
         let signing = Signing::new("connector-sign-in-same-client");
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("a port")
-            .local_addr()
-            .expect("an address")
-            .port();
+        let port = crate::ports::free_port();
         let server = json!({
             "name": "notion", "transport": "http", "url": signing.fixture.mcp_url,
             "oauth": { "client_id": "fixed", "callback_port": port }

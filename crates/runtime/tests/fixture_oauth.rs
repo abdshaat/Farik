@@ -4,6 +4,8 @@
 
 #[path = "support/oauth_fixture.rs"]
 mod oauth_fixture;
+#[path = "support/ports.rs"]
+mod ports;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -15,6 +17,7 @@ use farik_runtime::claude::Secret;
 use farik_runtime::connectors::list_tools;
 use farik_runtime::sign_in::{OAuthGrant, SignInError, refreshed, revoke, start_sign_in};
 use oauth_fixture::{Fixture, Iss, Methods, callback, follow};
+use ports::free_port;
 use sha2::{Digest, Sha256};
 
 fn auto() -> OAuthSettings {
@@ -22,21 +25,6 @@ fn auto() -> OAuthSettings {
         client_id: None,
         callback_port: None,
         scopes: Vec::new(),
-    }
-}
-
-/// A port nothing is listening on, for a pre-registered client's redirect. Taken from below the
-/// kernel's ephemeral range (32768 and up), so no other test's port-0 listener can be handed it;
-/// the counter keeps this process's tests off each other's ports.
-fn free_port() -> u16 {
-    static NEXT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
-    loop {
-        let step = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let base = u16::try_from(std::process::id() % 6_000).expect("under 6000");
-        let port = 20_000 + base * 2 + step % 2_000;
-        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            return port;
-        }
     }
 }
 
