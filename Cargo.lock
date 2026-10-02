@@ -877,6 +877,7 @@ dependencies = [
  "clap",
  "farik-core",
  "farik-protocol",
+ "farik-roles",
  "farik-runtime",
  "farik-store",
  "futures-util",

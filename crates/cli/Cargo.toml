@@ -28,6 +28,7 @@ chrono.workspace = true
 clap.workspace = true
 farik-core.workspace = true
 farik-protocol.workspace = true
+farik-roles.workspace = true
 farik-runtime.workspace = true
 farik-store.workspace = true
 rpassword.workspace = true

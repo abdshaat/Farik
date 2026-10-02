@@ -27,7 +27,10 @@ use crate::chat::{ChatError, NewChatMessage, post_chat};
 use crate::daemon::DaemonState;
 use crate::daemon::{secret_at, with_server};
 use crate::pause::paused;
-use crate::skills::{SkillCommandError, SkillLevel, confirm_skill, remove_skill, save_skill};
+use crate::skills::{
+    SkillCommandError, SkillLevel, confirm_skill, confirmed_sentence, remove_skill,
+    removed_sentence, save_skill, saved_sentence,
+};
 use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::transitions::{
@@ -1454,11 +1457,11 @@ fn disconnect_server(
     })
 }
 
-/// The level of a skill command, and who it is said to be for in a sentence.
-fn skill_level(scope: &SkillScope) -> (SkillLevel, String) {
+/// The level of a skill command.
+fn skill_level(scope: &SkillScope) -> SkillLevel {
     match scope {
-        SkillScope::Team => (SkillLevel::Team, "the team".to_string()),
-        SkillScope::Agent(agent) => (SkillLevel::Agent(agent.clone()), agent.clone()),
+        SkillScope::Team => SkillLevel::Team,
+        SkillScope::Agent(agent) => SkillLevel::Agent(agent.clone()),
     }
 }
 
@@ -1483,7 +1486,7 @@ fn save_skill_for(
     files: &std::collections::BTreeMap<String, String>,
     replace_shipped: bool,
 ) -> Result<CommandReport, CommandError> {
-    let (level, whom) = skill_level(scope);
+    let level = skill_level(scope);
     let bytes = files
         .iter()
         .map(|(path, text)| (path.clone(), text.clone().into_bytes()))
@@ -1492,11 +1495,7 @@ fn save_skill_for(
     let saved = save_skill(&orchestrator.deps.tools, &level, &bytes, replace_shipped)
         .map_err(skill_refused)?;
     Ok(CommandReport {
-        said: format!(
-            "{} {} for {whom}.",
-            if saved.changed { "Updated" } else { "Added" },
-            saved.name
-        ),
+        said: saved_sentence(&saved, &level),
         events: vec![saved.event],
     })
 }
@@ -1507,11 +1506,11 @@ fn remove_skill_for(
     scope: &SkillScope,
     name: &str,
 ) -> Result<CommandReport, CommandError> {
-    let (level, whom) = skill_level(scope);
+    let level = skill_level(scope);
     let _writing = orchestrator.deps.daemon.team_writes();
     let event = remove_skill(&orchestrator.deps.tools, &level, name).map_err(skill_refused)?;
     Ok(CommandReport {
-        said: format!("Removed {name} for {whom}."),
+        said: removed_sentence(name, &level),
         events: vec![event],
     })
 }
@@ -1524,7 +1523,7 @@ fn confirm_skill_for(
     sha256: &str,
     replace_shipped: bool,
 ) -> Result<CommandReport, CommandError> {
-    let (level, whom) = skill_level(scope);
+    let level = skill_level(scope);
     let _writing = orchestrator.deps.daemon.team_writes();
     let event = confirm_skill(
         &orchestrator.deps.tools,
@@ -1535,7 +1534,7 @@ fn confirm_skill_for(
     )
     .map_err(skill_refused)?;
     Ok(CommandReport {
-        said: format!("Confirmed {name} for {whom}."),
+        said: confirmed_sentence(name, &level),
         events: vec![event],
     })
 }

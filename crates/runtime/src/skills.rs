@@ -24,6 +24,40 @@ pub enum SkillLevel {
     Agent(String),
 }
 
+impl SkillLevel {
+    /// Who it is said to be for in a sentence: "the team", or the agent's id.
+    #[must_use]
+    pub fn whom(&self) -> String {
+        match self {
+            Self::Team => "the team".to_string(),
+            Self::Agent(agent) => agent.clone(),
+        }
+    }
+}
+
+/// What a save says it did, as the command and the command line both say it.
+#[must_use]
+pub fn saved_sentence(saved: &SkillSaved, level: &SkillLevel) -> String {
+    format!(
+        "{} {} for {}.",
+        if saved.changed { "Updated" } else { "Added" },
+        saved.name,
+        level.whom()
+    )
+}
+
+/// What a removal says it did.
+#[must_use]
+pub fn removed_sentence(name: &str, level: &SkillLevel) -> String {
+    format!("Removed {name} for {}.", level.whom())
+}
+
+/// What a confirmation says it did.
+#[must_use]
+pub fn confirmed_sentence(name: &str, level: &SkillLevel) -> String {
+    format!("Confirmed {name} for {}.", level.whom())
+}
+
 /// Where a skill's folder is, in the project at `root`.
 #[must_use]
 pub fn skill_folder(root: &Path, level: &SkillLevel, name: &str) -> PathBuf {

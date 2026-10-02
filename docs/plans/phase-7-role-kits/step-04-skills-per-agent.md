@@ -241,7 +241,7 @@ Files: `cli/src/skill.rs`, `cli/src/lib.rs`. Each change goes through `here_or_s
 - `farik_skill_confirm_takes_a_prefix`: the first 12 hex digits of the folder's hash confirm; 11 digits, or a prefix of another hash, are refused.
 - `farik_skill_list_shows_levels_and_states`: with `--agent theo` it prints one line per row in `skill_rows` order, `<level>  <name>  <state>`, the states as `in use`, `replaced`, `review`, `missing`; without `--agent` it prints the team's rows alone.
 
-- [ ] `feat(cli): add, show, remove and confirm a skill`
+- [x] `feat(cli): add, show, remove and confirm a skill`
 
 ### Task 7: Spec and plan
 

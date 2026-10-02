@@ -59,6 +59,9 @@ mod serve;
 mod setup;
 /// One contract, and what happened to it.
 pub mod show;
+
+#[cfg(unix)]
+mod skill;
 /// One sprint, and how it went.
 pub mod sprint;
 /// Who drives a project, and how a command reaches it.
@@ -405,6 +408,13 @@ enum Commands {
         /// The server's name.
         name: String,
     },
+    /// Give the team or one agent a skill in the Agent Skills format, read before it is added
+    /// (6.7, ADR 0034).
+    #[cfg(unix)]
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommands,
+    },
     /// Drive the team until nothing needs doing, a stop, or Ctrl-C (8.2).
     Run,
     /// Drive the team and keep driving when the board is idle, until a stop or Ctrl-C (8.1).
@@ -562,6 +572,79 @@ enum HookCommands {
         /// The daemon's `daemon.json`.
         #[arg(long)]
         daemon: PathBuf,
+    },
+}
+
+/// `--team` or `--agent <id>`: whose skill.
+#[cfg(unix)]
+#[derive(clap::Args)]
+#[command(group(clap::ArgGroup::new("whom").required(true).args(["team", "agent"])))]
+struct WhoseSkill {
+    /// The team's skill.
+    #[arg(long)]
+    team: bool,
+    /// One agent's skill, by id.
+    #[arg(long)]
+    agent: Option<String>,
+}
+
+#[cfg(unix)]
+impl WhoseSkill {
+    fn whom(&self) -> skill::Whom<'_> {
+        self.agent
+            .as_deref()
+            .map_or(skill::Whom::Team, skill::Whom::Agent)
+    }
+}
+
+/// What `farik skill` does.
+#[cfg(unix)]
+#[derive(Subcommand)]
+enum SkillCommands {
+    /// List the skills the team has, or with --agent what one agent has and how each stands.
+    List {
+        /// The agent's id.
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Print every file of a skill, and the hash that confirms it.
+    Show {
+        /// The skill's name.
+        name: String,
+        #[command(flatten)]
+        whose: WhoseSkill,
+    },
+    /// Read a skill folder, see all of it, and add it.
+    Add {
+        /// The folder: a SKILL.md and the files it refers to.
+        folder: PathBuf,
+        #[command(flatten)]
+        whose: WhoseSkill,
+        /// Add without asking, once you have read it.
+        #[arg(long)]
+        yes: bool,
+        /// Let it replace a skill Farik ships with its name.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Remove a skill and its folder.
+    Remove {
+        /// The skill's name.
+        name: String,
+        #[command(flatten)]
+        whose: WhoseSkill,
+    },
+    /// Confirm on this computer a skill as its folder is now: after a pull, a clone or an edit.
+    Confirm {
+        /// The skill's name.
+        name: String,
+        #[command(flatten)]
+        whose: WhoseSkill,
+        /// The Hash `farik skill show` printed: all of it, or its first 12 digits.
+        hash: String,
+        /// Let it replace a skill Farik ships with its name.
+        #[arg(long)]
+        replace: bool,
     },
 }
 
@@ -847,6 +930,28 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         #[cfg(unix)]
         Commands::Disconnect { agent, name } => open_project(&io.cwd, now)
             .and_then(|project| connector::disconnect(&project, agent, name, io)),
+        #[cfg(unix)]
+        Commands::Skill { command } => {
+            open_project(&io.cwd, now).and_then(|project| match command {
+                SkillCommands::List { agent } => skill::list(&project, agent.as_deref()),
+                SkillCommands::Show { name, whose } => skill::show(&project, name, &whose.whom()),
+                SkillCommands::Add {
+                    folder,
+                    whose,
+                    yes,
+                    replace,
+                } => skill::add(&project, folder, &whose.whom(), *yes, *replace, io),
+                SkillCommands::Remove { name, whose } => {
+                    skill::remove(&project, name, &whose.whom(), io)
+                }
+                SkillCommands::Confirm {
+                    name,
+                    whose,
+                    hash,
+                    replace,
+                } => skill::confirm(&project, name, &whose.whom(), hash, *replace, io),
+            })
+        }
         #[cfg(unix)]
         Commands::Connector { .. } => unreachable!("a connector command returned above"),
         Commands::Hook { .. }
