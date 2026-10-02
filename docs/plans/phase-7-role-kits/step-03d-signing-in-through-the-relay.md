@@ -1,7 +1,7 @@
 # Phase 7, step 03d: Signing in through the relay
 
-Status: deferred by the founder, 2026-10-02: Slack is a later step ("Connecting slack is a later step keep it simple for now"). Reviewed and folded; lands after the launch as phase 12 step 02c (project plan revisions 30 and 31), where it is reviewed for readiness again, moved and renumbered. Where it says phase 11 for Slack's listing, read phase 12 step 02d; the website (phase 11 step 01) is live by then.
-Branch: `phase/12-desktop` when taken up (written on `phase/7-role-kits`)
+Status: deferred by the founder, 2026-10-02: Slack is a later step ("Connecting slack is a later step keep it simple for now"; "Write the slack integeration plan in the last phase"). Reviewed and folded; lands as phase 14 step 03, in its Slack integration (project plan revisions 30 to 32), where it is reviewed for readiness again, moved and renumbered. Where it says phase 11 or phase 12 for Slack's listing, read phase 14 step 04; the website (phase 11 step 01) is live by then.
+Branch: `phase/14-premium` when taken up (written on `phase/7-role-kits`)
 Spec: `docs/SPEC.md` 6.7, 8.6; F9
 Depends on: step 03 (committed before this step starts: the sign-in, the loopback listener, `refreshed`, `OAuthGrant`, the sign-in RPCs and screens), step 03b (committed before this step starts: `RegisteredApp`, `AppFlow`, `app_for`, `REGISTERED_APPS`, `OAuthGrant.app`, `set_registered_apps`, `provider` on `connector.sign_in`), step 03c (committed and deployed before Task 6: the relay's API at `signin.<domain>`)
 Readiness: fresh-session Opus reviewer, 2026-10-02: not ready, 5 Blocking, all folded with the founder's decisions; no second round (ADR 0032)
