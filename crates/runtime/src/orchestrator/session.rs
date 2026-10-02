@@ -2298,7 +2298,13 @@ mod tests {
                 .set_connector_secrets(Arc::clone(&store) as _)
         );
         let state = || crate::daemon::fixtures::connector_states(&harness.daemon);
-        let shown = |state: &str| json!([{ "agent": "dev-a", "server": "github", "state": state }]);
+        let shown = |state: &str| {
+            let mut shown = json!({ "agent": "dev-a", "server": "github", "state": state });
+            if state == "connected" {
+                shown["stored_in"] = json!("keychain");
+            }
+            json!([shown])
+        };
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let contract = deps
             .files

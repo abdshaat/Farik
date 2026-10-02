@@ -174,6 +174,8 @@ pub(crate) enum Kept {
         spec_sha256: String,
         /// The names of the keys kept.
         keys: std::collections::BTreeSet<String>,
+        /// Where they are kept.
+        stored_in: crate::connectors::SecretStore,
     },
     /// No entry.
     Nothing,
@@ -186,7 +188,7 @@ impl Kept {
     /// every key it names. Short of a key, its launcher or headers helper would be refused, and
     /// Claude Code connects an http server without its headers then (finding I2).
     pub(crate) fn runs(&self, server: &farik_core::team::CustomServer) -> bool {
-        matches!(self, Kept::Entry { spec_sha256, keys }
+        matches!(self, Kept::Entry { spec_sha256, keys, .. }
             if *spec_sha256 == farik_core::team::spec_sha256(server)
                 && server.credential_keys.iter().all(|key| keys.contains(key)))
     }
@@ -247,10 +249,11 @@ impl DaemonState {
     /// connected, and when a session is set up, so a store that fails then shows on the agent's
     /// page rather than leaving the server out unsaid.
     pub(crate) fn read_kept(&self, at: &SecretAt) -> Kept {
-        let kept = match self.connector_secrets().load(at) {
-            Ok(Some(entry)) => Kept::Entry {
+        let kept = match self.connector_secrets().locate(at) {
+            Ok(Some((entry, stored_in))) => Kept::Entry {
                 keys: entry.keys.into_keys().collect(),
                 spec_sha256: entry.spec_sha256,
+                stored_in,
             },
             Ok(None) => Kept::Nothing,
             Err(_) => Kept::Unavailable,

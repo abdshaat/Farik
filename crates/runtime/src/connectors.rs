@@ -174,6 +174,17 @@ pub trait ConnectorSecrets: Send + Sync {
     ///
     /// The store could not be read.
     fn load(&self, at: &SecretAt) -> Result<Option<ConnectorEntry>, CredentialError>;
+    /// The entry kept for `at`, and the store it is in; a store that is one place says so.
+    ///
+    /// # Errors
+    ///
+    /// The store could not be read.
+    fn locate(
+        &self,
+        at: &SecretAt,
+    ) -> Result<Option<(ConnectorEntry, SecretStore)>, CredentialError> {
+        Ok(self.load(at)?.map(|entry| (entry, SecretStore::Keychain)))
+    }
     /// Keeps `entry` for `at`, replacing any other, and says where.
     ///
     /// # Errors
@@ -324,6 +335,13 @@ impl ConnectorSecrets for FileConnectorSecrets {
             .transpose()
     }
 
+    fn locate(
+        &self,
+        at: &SecretAt,
+    ) -> Result<Option<(ConnectorEntry, SecretStore)>, CredentialError> {
+        Ok(self.load(at)?.map(|entry| (entry, SecretStore::File)))
+    }
+
     fn save(&self, at: &SecretAt, entry: &ConnectorEntry) -> Result<SecretStore, CredentialError> {
         self.rewrite(|entries| {
             entries.insert(at.account(), entry.to_json());
@@ -360,9 +378,16 @@ impl ConnectorSecretStores {
 
 impl ConnectorSecrets for ConnectorSecretStores {
     fn load(&self, at: &SecretAt) -> Result<Option<ConnectorEntry>, CredentialError> {
-        match self.keychain.load(at) {
+        Ok(self.locate(at)?.map(|(entry, _)| entry))
+    }
+
+    fn locate(
+        &self,
+        at: &SecretAt,
+    ) -> Result<Option<(ConnectorEntry, SecretStore)>, CredentialError> {
+        match self.keychain.locate(at) {
             Ok(None) | Err(CredentialError::NoKeychain) => match &self.file {
-                Some(file) => file.load(at),
+                Some(file) => file.locate(at),
                 None => Ok(None),
             },
             kept => kept,

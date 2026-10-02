@@ -219,11 +219,15 @@ fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team) -> Vec<Va
             let kept = secret_at(deps, agent, &server.name)
                 .map_or(Kept::Unavailable, |at| state.kept(&at));
             let shown = match kept {
-                kept if kept.runs(&server) => "connected",
+                ref kept if kept.runs(&server) => "connected",
                 Kept::Unavailable => "store_unavailable",
                 _ => "connect_again",
             };
-            json!({ "agent": agent, "server": server.name, "state": shown })
+            let mut row = json!({ "agent": agent, "server": server.name, "state": shown });
+            if let Kept::Entry { stored_in, .. } = kept {
+                row["stored_in"] = json!(stored_in);
+            }
+            row
         })
         .collect()
 }
@@ -2673,7 +2677,7 @@ pub(super) mod tests {
         );
         assert_eq!(
             states(&harness),
-            json!([{ "agent": "dev-a", "server": "fixture", "state": "connected" }])
+            json!([{ "agent": "dev-a", "server": "fixture", "state": "connected", "stored_in": "keychain" }])
         );
     }
 
@@ -2719,7 +2723,7 @@ pub(super) mod tests {
             written["tools"],
             json!({ "search": "external_effect", "env": "external_effect", "delete_repo": "external_effect" })
         );
-        let shown = json!([{ "agent": "dev-a", "server": "fixture", "state": "connected" }]);
+        let shown = json!([{ "agent": "dev-a", "server": "fixture", "state": "connected", "stored_in": "keychain" }]);
         assert_eq!(states(&harness), shown);
 
         // Connected again with a label: the one entry is replaced, and the new hash is read.
@@ -2838,7 +2842,7 @@ pub(super) mod tests {
         );
         assert_eq!(
             states(&harness),
-            json!([{ "agent": "dev-b", "server": "fixture", "state": "connected" }])
+            json!([{ "agent": "dev-b", "server": "fixture", "state": "connected", "stored_in": "keychain" }])
         );
         let (code, _) = refused(
             &harness,
@@ -2885,8 +2889,50 @@ pub(super) mod tests {
             states(&harness),
             json!([
                 { "agent": "dev-a", "server": "fixture", "state": "connect_again" },
-                { "agent": "dev-b", "server": "fixture", "state": "connected" },
+                { "agent": "dev-b", "server": "fixture", "state": "connected", "stored_in": "keychain" },
             ])
+        );
+    }
+
+    /// A keychain that is not there.
+    struct NoKeychain;
+
+    impl crate::connectors::ConnectorSecrets for NoKeychain {
+        fn load(
+            &self,
+            _: &SecretAt,
+        ) -> Result<Option<ConnectorEntry>, crate::credential::CredentialError> {
+            Err(crate::credential::CredentialError::NoKeychain)
+        }
+        fn save(
+            &self,
+            _: &SecretAt,
+            _: &ConnectorEntry,
+        ) -> Result<crate::connectors::SecretStore, crate::credential::CredentialError> {
+            Err(crate::credential::CredentialError::NoKeychain)
+        }
+        fn delete(&self, _: &SecretAt) -> Result<(), crate::credential::CredentialError> {
+            Err(crate::credential::CredentialError::NoKeychain)
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_says_where_the_keys_are_kept() {
+        // The agent's page says "in your keychain" or "in a private file" (carry M5).
+        let harness = driven("connector-stored-in");
+        let file = harness
+            .project
+            .repo
+            .path
+            .join(".farik/local/state/connectors.json");
+        assert!(harness.daemon.set_connector_secrets(Arc::new(
+            crate::connectors::ConnectorSecretStores::new(Arc::new(NoKeychain), Some(file))
+        )));
+        connected(&harness, "dev-a", &fixture_server("stored-in"), &json!({}));
+        assert_eq!(
+            states(&harness),
+            json!([{ "agent": "dev-a", "server": "fixture", "state": "connected", "stored_in": "file" }])
         );
     }
 
@@ -2916,7 +2962,7 @@ pub(super) mod tests {
             .expect("kept");
         assert_eq!(
             states(&harness),
-            json!([{ "agent": "dev-a", "server": "linear", "state": "connected" }])
+            json!([{ "agent": "dev-a", "server": "linear", "state": "connected", "stored_in": "keychain" }])
         );
         // What is kept is read once, not on each query: a keychain may ask the user each time.
         store
@@ -2924,16 +2970,17 @@ pub(super) mod tests {
             .expect("deleted");
         assert_eq!(
             states(&harness),
-            json!([{ "agent": "dev-a", "server": "linear", "state": "connected" }])
+            json!([{ "agent": "dev-a", "server": "linear", "state": "connected", "stored_in": "keychain" }])
         );
 
         wire["agents"][1]["mcp_servers"][0]["url"] = json!("https://elsewhere.example/mcp");
         let team = farik_core::team::validate_team(&wire).expect("a team");
         deps.files.write_team(&team).expect("written");
         let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+        // The keys read last are still kept somewhere, which Remove says.
         assert_eq!(
             got["connectors"],
-            json!([{ "agent": "dev-a", "server": "linear", "state": "connect_again" }])
+            json!([{ "agent": "dev-a", "server": "linear", "state": "connect_again", "stored_in": "keychain" }])
         );
         farik_core::team::validate_team(&got["team"]).expect("team is still the team file");
     }
