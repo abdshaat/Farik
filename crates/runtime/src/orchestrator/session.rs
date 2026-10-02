@@ -32,7 +32,6 @@ use super::verify::{append, append_stamped};
 use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
 use crate::channel::post_system;
 use crate::claude::allowed_builtins;
-use crate::connectors::SecretAt;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
@@ -312,7 +311,8 @@ fn custom_connectors(deps: &OrchestratorDeps, ask: &SessionAsk<'_>) -> Vec<Custo
     }
     custom_servers(ask.agent)
         .filter(|server| {
-            SecretAt::of(deps.tools.files.root(), ask.agent.id.as_str(), &server.name)
+            deps.daemon
+                .secret_at(deps.tools.files.root(), ask.agent.id.as_str(), &server.name)
                 .is_ok_and(|at| deps.daemon.read_kept(&at).runs(server))
         })
         .collect()
@@ -2000,9 +2000,7 @@ mod tests {
         connected: &[&str],
         change: impl Fn(&mut farik_core::team::CustomServer),
     ) {
-        use crate::connectors::{
-            ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
-        };
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
 
         let store = Arc::new(MemoryConnectorSecrets::default());
         let deps = &harness.project.deps;
@@ -2018,7 +2016,10 @@ mod tests {
         }) {
             let mut kept = server.clone();
             change(&mut kept);
-            let at = SecretAt::of(deps.files.root(), &owner, &server.name).expect("an address");
+            let at = harness
+                .daemon
+                .secret_at(deps.files.root(), &owner, &server.name)
+                .expect("an address");
             let entry = ConnectorEntry {
                 spec_sha256: farik_core::team::spec_sha256(&kept),
                 keys: [(
@@ -2262,7 +2263,7 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_store_failing_at_session_setup_shows_on_the_agent_page() {
-        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, SecretAt};
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _};
 
         let harness = Harness::new("session-custom-store-fails", |wire| {
             with_custom_servers(wire);
@@ -2281,7 +2282,10 @@ mod tests {
         .expect("a custom server");
         store
             .save(
-                &SecretAt::of(deps.files.root(), "dev-a", "github").expect("an address"),
+                &harness
+                    .daemon
+                    .secret_at(deps.files.root(), "dev-a", "github")
+                    .expect("an address"),
                 &ConnectorEntry {
                     spec_sha256: farik_core::team::spec_sha256(&github),
                     keys: [(
@@ -2365,7 +2369,7 @@ mod tests {
             }
         });
         {
-            use crate::connectors::{ConnectorEntry, SecretAt};
+            use crate::connectors::ConnectorEntry;
             let deps = &harness.project.deps;
             let team = deps.files.read_team().expect("the team");
             let asana = agent(&team, "dev-a")
@@ -2379,7 +2383,10 @@ mod tests {
                 .daemon
                 .connector_secrets()
                 .save(
-                    &SecretAt::of(deps.files.root(), "dev-a", "asana").expect("an address"),
+                    &harness
+                        .daemon
+                        .secret_at(deps.files.root(), "dev-a", "asana")
+                        .expect("an address"),
                     &ConnectorEntry {
                         spec_sha256: farik_core::team::spec_sha256(&asana),
                         keys: std::collections::BTreeMap::new(),

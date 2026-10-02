@@ -38,15 +38,21 @@ fn fixture(test: &str) -> PathBuf {
     path
 }
 
-/// The user's state folder for `repository`'s tests: beside it and outside it, as `~/.config` is.
+/// `XDG_CONFIG_HOME` for `repository`'s tests: beside it and outside it, as `~/.config` is.
+fn config_of(repository: &TempRepo) -> PathBuf {
+    PathBuf::from(format!("{}-config", repository.path.display()))
+}
+
+/// The user's state folder for `repository`'s tests: `farik` in [`config_of`].
 fn state_of(repository: &TempRepo) -> PathBuf {
-    PathBuf::from(format!("{}-state", repository.path.display()))
+    config_of(repository).join("farik")
 }
 
 /// Where `agent`'s keys for `server` are kept in `repository`'s project: where the daemon looks
 /// for them, under the project's id on this machine, never the log's team or project id.
 fn kept_at(repository: &TempRepo, agent: &str, server: &str) -> SecretAt {
-    let at = SecretAt::of(&repository.path, agent, server).expect("an address");
+    let at =
+        SecretAt::of(&state_of(repository), &repository.path, agent, server).expect("an address");
     let first = log_of(repository)
         .read(&farik_store::EventQuery {
             limit: Some(1),
@@ -85,7 +91,7 @@ fn connect(
     ];
     args.extend_from_slice(extra);
     let stdin = stdin.to_string();
-    let state = state_of(repository);
+    let state = config_of(repository);
     run_with(&repository.path, &args, move |io| {
         io.stdin = Box::new(std::io::Cursor::new(stdin.into_bytes()));
         io.connector_secrets = store;
@@ -336,10 +342,15 @@ fn farik_disconnect_deletes_the_keys_and_the_entry() {
     }
 
     let held = Arc::clone(&store);
+    let config = config_of(&repository);
     let ran = run_with(
         &repository.path,
         &["disconnect", "dev-a", "fixture"],
-        move |io| io.connector_secrets = held,
+        move |io| {
+            io.connector_secrets = held;
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+        },
     );
 
     assert_eq!(ran.code, 0, "{}", ran.err);

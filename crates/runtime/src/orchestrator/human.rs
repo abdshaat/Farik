@@ -1018,7 +1018,7 @@ fn forget_connector_keys(tools: &ToolDeps, daemon: &DaemonState, team: &Team, ag
         .flat_map(|agent| agent.mcp_servers.iter().flatten())
         .filter_map(custom_server);
     for server in servers {
-        if let Ok(at) = secret_at(tools, agent_id, &server.name) {
+        if let Ok(at) = secret_at(daemon, tools, agent_id, &server.name) {
             let _ = daemon.connector_secrets().delete(&at);
             daemon.forget_kept(&at);
         }
@@ -1291,7 +1291,7 @@ fn connect_server(
     }))
     .map_err(failed)?;
     let event = append(tools, None, EventBody::ConnectorConnected(body))?;
-    if let Ok(at) = secret_at(tools, agent, &name) {
+    if let Ok(at) = secret_at(daemon, tools, agent, &name) {
         daemon.read_kept(&at);
     }
     Ok(CommandReport {
@@ -1331,7 +1331,7 @@ fn disconnect_server(
             server: server.parse().map_err(failed)?,
         }),
     )?;
-    if let Ok(at) = secret_at(tools, agent, server) {
+    if let Ok(at) = secret_at(daemon, tools, agent, server) {
         daemon.forget_kept(&at);
     }
     Ok(CommandReport {
@@ -2208,9 +2208,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn retiring_an_agent_deletes_its_connector_keys() {
-        use crate::connectors::{
-            ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
-        };
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
 
         let server = json!([{
             "name": "github", "source": "custom", "transport": "stdio",
@@ -2224,7 +2222,12 @@ mod tests {
         let store = Arc::new(MemoryConnectorSecrets::default());
         assert!(harness.daemon.set_connector_secrets(store.clone()));
         let root = harness.project.deps.files.root();
-        let at = |agent: &str| SecretAt::of(root, agent, "github").expect("an address");
+        let at = |agent: &str| {
+            harness
+                .daemon
+                .secret_at(root, agent, "github")
+                .expect("an address")
+        };
         let entry = ConnectorEntry {
             spec_sha256: "h".to_string(),
             keys: [(

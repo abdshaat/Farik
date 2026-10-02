@@ -189,9 +189,12 @@ impl Project {
             clock,
             ids,
         })));
+        // The user's state folder, outside the repository, where each server runs.
+        let state_dir = PathBuf::from(format!("{}-state", repo.path.display()));
         let store = Arc::new(MemoryConnectorSecrets::default());
         for server in &custom {
-            let at = SecretAt::of(&repo.path, "dev-a", &server.name).expect("an address");
+            let at =
+                SecretAt::of(&state_dir, &repo.path, "dev-a", &server.name).expect("an address");
             let entry = ConnectorEntry {
                 spec_sha256: spec_sha256(server),
                 keys: server
@@ -203,8 +206,7 @@ impl Project {
             store.save(&at, &entry).expect("kept");
         }
         state.set_connector_secrets(store);
-        // The user's state folder, outside the repository, where each server runs.
-        state.set_state_dir(PathBuf::from(format!("{}-state", repo.path.display())));
+        state.set_state_dir(state_dir);
         let session_id = a_session_id();
         state.register_session(SessionRegistration {
             session_id: session_id.clone(),

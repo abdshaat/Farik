@@ -246,6 +246,34 @@ impl DaemonState {
         self.state_dir.set(directory).is_ok()
     }
 
+    /// The user's state folder, or why there is none.
+    fn state_dir(&self) -> std::io::Result<&std::path::Path> {
+        self.state_dir
+            .get()
+            .map(std::path::PathBuf::as_path)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "there is no Farik state folder on this computer",
+                )
+            })
+    }
+
+    /// Where `agent`'s keys for `server` are kept in the project at `root` ([`SecretAt::of`]).
+    ///
+    /// # Errors
+    ///
+    /// No state folder was set, so no connector is confirmed, or the project's id could not be
+    /// read or made.
+    pub(crate) fn secret_at(
+        &self,
+        root: &std::path::Path,
+        agent: &str,
+        server: &str,
+    ) -> std::io::Result<SecretAt> {
+        SecretAt::of(self.state_dir()?, root, agent, server)
+    }
+
     /// The folder the stdio connector `at` runs in, made again empty ([`working_folder`]).
     ///
     /// # Errors
@@ -254,13 +282,7 @@ impl DaemonState {
     ///
     /// [`working_folder`]: crate::connectors::working_folder
     pub(crate) fn connector_folder(&self, at: &SecretAt) -> std::io::Result<std::path::PathBuf> {
-        let state = self.state_dir.get().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "there is no Farik state folder to run it in",
-            )
-        })?;
-        crate::connectors::working_folder(state, at)
+        crate::connectors::working_folder(self.state_dir()?, at)
     }
 
     /// Where the agents' connector keys are kept: until a store is set, an empty one, so that no
@@ -996,14 +1018,14 @@ fn launched_server(
         .filter_map(farik_core::team::custom_server)
         .find(|server| server.name == asked.server)
         .ok_or_else(not_in_session)?;
-    let at = crate::connectors::SecretAt::of(deps.files.root(), &agent_id, &server.name).map_err(
-        |error| {
+    let at = state
+        .secret_at(deps.files.root(), &agent_id, &server.name)
+        .map_err(|error| {
             (
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("secret_store_unavailable: this project's id could not be read: {error}"),
             )
-        },
-    )?;
+        })?;
     Ok((server, at))
 }
 
@@ -1647,9 +1669,7 @@ mod tests {
     /// A daemon whose team gives `dev-a` the custom servers, with `session-custom` registered
     /// with both, and their entries kept as they are now in `store` (`None`: a failing store).
     fn launching(name: &str, connected: bool, failing: bool) -> TestDaemon {
-        use crate::connectors::{
-            ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
-        };
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
         use farik_core::governor::permissions::SessionConnector;
 
         let daemon = TestDaemon::new(name, |_| {});
@@ -1671,7 +1691,9 @@ mod tests {
         let store = Arc::new(MemoryConnectorSecrets::default());
         if connected {
             for server in &servers {
-                let at = SecretAt::of(daemon.project.deps.files.root(), "dev-a", &server.name)
+                let at = daemon
+                    .state
+                    .secret_at(daemon.project.deps.files.root(), "dev-a", &server.name)
                     .expect("an address");
                 let entry = ConnectorEntry {
                     spec_sha256: farik_core::team::spec_sha256(server),
@@ -1741,7 +1763,10 @@ mod tests {
         // It runs in a folder Farik keeps for it in the user's state folder, never the session's
         // worktree, nor anywhere in the repository (finding C1).
         let root = daemon.project.deps.files.root();
-        let at = crate::connectors::SecretAt::of(root, "dev-a", "github").expect("an address");
+        let at = daemon
+            .state
+            .secret_at(root, "dev-a", "github")
+            .expect("an address");
         let folder =
             std::path::PathBuf::from(format!("{}-state", daemon.project.repo.path.display()))
                 .join("connectors")
@@ -1823,12 +1848,10 @@ mod tests {
             .flatten()
             .filter_map(farik_core::team::custom_server)
         {
-            let at = crate::connectors::SecretAt::of(
-                daemon.project.deps.files.root(),
-                "dev-a",
-                &server.name,
-            )
-            .expect("an address");
+            let at = daemon
+                .state
+                .secret_at(daemon.project.deps.files.root(), "dev-a", &server.name)
+                .expect("an address");
             let entry = crate::connectors::ConnectorEntry {
                 spec_sha256: farik_core::team::spec_sha256(&server),
                 keys: std::collections::BTreeMap::new(),

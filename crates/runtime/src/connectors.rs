@@ -30,14 +30,19 @@ pub struct SecretAt {
 
 impl SecretAt {
     /// Where `agent`'s keys for `server` are kept in the project at `root`: under the project's
-    /// id on this machine, [`local_project_id`].
+    /// id on this machine, [`local_project_id`], kept in the user's state folder `state`.
     ///
     /// # Errors
     ///
     /// The project's id could not be read or made.
-    pub fn of(root: &std::path::Path, agent: &str, server: &str) -> std::io::Result<SecretAt> {
+    pub fn of(
+        state: &std::path::Path,
+        root: &std::path::Path,
+        agent: &str,
+        server: &str,
+    ) -> std::io::Result<SecretAt> {
         Ok(SecretAt {
-            project_id: local_project_id(root)?,
+            project_id: local_project_id(state, root)?,
             agent_id: agent.to_string(),
             server: server.to_string(),
         })
@@ -55,41 +60,81 @@ impl SecretAt {
 }
 
 /// The project at `root`'s id on this machine: 32 random hex digits, made the first time it is
-/// asked for and kept in `.farik/local/project_id`, which is never committed. Not the event log's
-/// `project_id`, which is the folder's name, so `~/work/app` and `~/clients/app` would share one
-/// agent's keys, and a clone into a folder of the same name would find them (finding I1).
+/// asked for and kept in the user's state folder `state`, at `projects/<sha256 of the root's
+/// canonical path>`. Not the event log's `project_id`, which is the folder's name, so `~/work/app`
+/// and `~/clients/app` would share one agent's keys (finding I1); and not a file in the project,
+/// which `cp -r app app2` copies, so the copy found the first one's keys (re-review N3). A
+/// project moved or copied is another project here, and is connected again.
 ///
 /// # Errors
 ///
-/// The id could not be read, or made and kept.
-pub fn local_project_id(root: &std::path::Path) -> std::io::Result<String> {
+/// The id could not be read, or made and kept, or what is kept is not 32 hex digits.
+pub fn local_project_id(
+    state: &std::path::Path,
+    root: &std::path::Path,
+) -> std::io::Result<String> {
+    use sha2::Digest as _;
     use std::io::Read as _;
+    use std::os::unix::ffi::OsStrExt as _;
+    use std::os::unix::fs::DirBuilderExt as _;
 
-    let file = root.join(".farik/local/project_id");
+    let canonical = root.canonicalize()?;
+    let file = state
+        .join("projects")
+        .join(hex(&sha2::Sha256::digest(canonical.as_os_str().as_bytes())));
     match std::fs::read_to_string(&file) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        read => return read,
+        read => return read.and_then(checked_id),
     }
     let mut random = [0_u8; 16];
     std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
-    let id = random.iter().fold(String::new(), |mut id, byte| {
-        use std::fmt::Write as _;
-        let _ = write!(id, "{byte:02x}");
-        id
-    });
     if let Some(folder) = file.parent() {
-        std::fs::create_dir_all(folder)?;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(folder)?;
     }
-    // Written beside and linked into place, which fails when another process got there first:
-    // then its id is the one kept, and no reader ever sees a half-written file.
+    keep_id(&file, &hex(&random))
+}
+
+/// Keeps `id` at `file` unless an id is there already, and answers the one kept. Written beside and
+/// linked into place, which fails when another process got there first: then its id is the one
+/// kept, and no reader ever sees a half-written file.
+fn keep_id(file: &std::path::Path, id: &str) -> std::io::Result<String> {
     let beside = file.with_extension(format!("{}.tmp", std::process::id()));
     crate::write_private(&beside, id.as_bytes())?;
-    let linked = std::fs::hard_link(&beside, &file);
+    let linked = std::fs::hard_link(&beside, file);
     let _ = std::fs::remove_file(&beside);
     match linked {
         Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => Err(error),
-        _ => std::fs::read_to_string(&file),
+        _ => std::fs::read_to_string(file).and_then(checked_id),
     }
+}
+
+/// `id` when it is 32 lowercase hex digits, the only ids Farik makes: an account name, and a
+/// folder's, are made of it.
+fn checked_id(id: String) -> std::io::Result<String> {
+    if id.len() == 32
+        && id
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        Ok(id)
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the project's id on this computer is not 32 hex digits",
+        ))
+    }
+}
+
+/// `bytes` in lowercase hex.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().fold(String::new(), |mut hex, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    })
 }
 
 /// What `connect` kept: the hash of the definition it connected, and the keys.
@@ -802,38 +847,103 @@ mod tests {
         assert_eq!(keychain.load(&other_project), Ok(None));
     }
 
+    /// The one id file kept in `state`.
+    fn id_file(state: &std::path::Path) -> PathBuf {
+        let files: Vec<_> = std::fs::read_dir(state.join("projects"))
+            .expect("the ids' folder reads")
+            .map(|item| item.expect("an item").path())
+            .collect();
+        assert_eq!(files.len(), 1, "{files:?}");
+        files[0].clone()
+    }
+
     #[test]
     fn two_projects_in_folders_of_one_name_keep_their_keys_apart() {
         // `~/work/app` and `~/clients/app`: a folder's name is no project's address (finding I1).
         let dir = scratch("same-name");
+        let state = dir.join("state");
         let (work, clients) = (dir.join("work/app"), dir.join("clients/app"));
         for root in [&work, &clients] {
             std::fs::create_dir_all(root).expect("the project is made");
         }
-        let at_work = SecretAt::of(&work, "theo", "github").expect("an address");
-        let at_clients = SecretAt::of(&clients, "theo", "github").expect("an address");
+        let at_work = SecretAt::of(&state, &work, "theo", "github").expect("an address");
+        assert!(
+            !work.join(".farik").exists(),
+            "nothing is kept in the project"
+        );
+        let file = id_file(&state);
+        let at_clients = SecretAt::of(&state, &clients, "theo", "github").expect("an address");
         assert_ne!(at_work.account(), at_clients.account());
-        // The id is made once, kept in `.farik/local/`, owner-only, and read back after.
+        // The id is made once, kept in the state folder, owner-only, and read back after.
         assert_eq!(
-            SecretAt::of(&work, "iris", "github")
+            SecretAt::of(&state, &work, "iris", "github")
                 .expect("an address")
                 .project_id,
             at_work.project_id
         );
-        let file = work.join(".farik/local/project_id");
         assert_eq!(
             std::fs::read_to_string(&file).expect("the id is kept"),
             at_work.project_id
         );
-        assert_eq!(
-            std::fs::metadata(&file)
+        let mode = |path: &std::path::Path| {
+            std::fs::metadata(path)
                 .expect("it is there")
                 .permissions()
                 .mode()
-                & 0o777,
-            0o600
-        );
+                & 0o777
+        };
+        assert_eq!(mode(&file), 0o600);
+        assert_eq!(mode(&state.join("projects")), 0o700);
         assert_eq!(at_work.project_id.len(), 32, "{}", at_work.project_id);
+    }
+
+    #[test]
+    fn a_copied_project_gets_its_own_id() {
+        // `cp -r app app2` copied `.farik/local/project_id`: the copy is another project, and
+        // must not find the first one's keys (re-review N3).
+        let dir = scratch("copied");
+        let state = dir.join("state");
+        let (app, copy) = (dir.join("app"), dir.join("app2"));
+        std::fs::create_dir_all(&app).expect("the project is made");
+        let first = SecretAt::of(&state, &app, "theo", "github").expect("an address");
+        assert!(
+            std::process::Command::new("cp")
+                .args(["-r"])
+                .args([&app, &copy])
+                .status()
+                .expect("cp runs")
+                .success()
+        );
+        let copied = SecretAt::of(&state, &copy, "theo", "github").expect("an address");
+        assert_ne!(first.project_id, copied.project_id);
+    }
+
+    #[test]
+    fn an_id_not_of_32_hex_digits_is_refused() {
+        let dir = scratch("bad-id");
+        let (state, app) = (dir.join("state"), dir.join("app"));
+        std::fs::create_dir_all(&app).expect("the project is made");
+        SecretAt::of(&state, &app, "theo", "github").expect("an address");
+        std::fs::write(id_file(&state), "../../x").expect("written");
+        assert!(SecretAt::of(&state, &app, "theo", "github").is_err());
+    }
+
+    #[test]
+    fn an_id_kept_first_is_never_replaced() {
+        // Two processes making the id at once: the one linked into place first is the one both
+        // answer, never a second written over it (carry P1).
+        let dir = scratch("first-kept");
+        std::fs::create_dir_all(&dir).expect("the folder is made");
+        let file = dir.join("id");
+        let first = "0123456789abcdef0123456789abcdef";
+        assert_eq!(keep_id(&file, first).expect("kept"), first);
+        assert_eq!(
+            keep_id(&file, "fedcba9876543210fedcba9876543210").expect("the first is read"),
+            first
+        );
+        assert_eq!(std::fs::read_to_string(&file).expect("kept"), first);
+        let held: Vec<_> = std::fs::read_dir(&dir).expect("reads").collect();
+        assert_eq!(held.len(), 1, "nothing is left beside it");
     }
 
     #[test]
@@ -847,8 +957,8 @@ mod tests {
         std::fs::write(planted.join("github_mcp.py"), "print('PLANTED')").expect("planted");
         std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755))
             .expect("the mode is set");
-        let at = SecretAt::of(&root, "dev-a", "github").expect("an address");
         let state = dir.join("state");
+        let at = SecretAt::of(&state, &root, "dev-a", "github").expect("an address");
         let folder = working_folder(&state, &at).expect("the folder is made");
         assert!(!folder.starts_with(&root), "{}", folder.display());
         let empty_and_owner_only = |folder: &std::path::Path| {
@@ -892,8 +1002,9 @@ mod tests {
         ] {
             std::fs::write(root.join(name), text).expect("planted");
         }
-        let at = SecretAt::of(&root, "dev-a", "github").expect("an address");
-        let folder = working_folder(&dir.join("state"), &at).expect("the folder is made");
+        let state = dir.join("state");
+        let at = SecretAt::of(&state, &root, "dev-a", "github").expect("an address");
+        let folder = working_folder(&state, &at).expect("the folder is made");
         assert!(!folder.starts_with(&root), "{}", folder.display());
         for above in folder.ancestors() {
             for name in [".npmrc", "package.json", "pyproject.toml", "node_modules"] {

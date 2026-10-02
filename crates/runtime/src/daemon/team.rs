@@ -197,8 +197,13 @@ pub(super) async fn connect(state: &DaemonState, params: &Value) -> Result<Value
 /// # Errors
 ///
 /// The project's id on this machine could not be read or made.
-pub(crate) fn secret_at(deps: &ToolDeps, agent: &str, server: &str) -> std::io::Result<SecretAt> {
-    SecretAt::of(deps.files.root(), agent, server)
+pub(crate) fn secret_at(
+    state: &DaemonState,
+    deps: &ToolDeps,
+    agent: &str,
+    server: &str,
+) -> std::io::Result<SecretAt> {
+    state.secret_at(deps.files.root(), agent, server)
 }
 
 /// Each agent's custom servers in `team` and whether each runs: `connected` when the definition
@@ -216,7 +221,7 @@ fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team) -> Vec<Va
                 .map(move |server| (agent.id.as_str(), server))
         })
         .map(|(agent, server)| {
-            let kept = secret_at(deps, agent, &server.name)
+            let kept = secret_at(state, deps, agent, &server.name)
                 .map_or(Kept::Unavailable, |at| state.kept(&at));
             let shown = match kept {
                 ref kept if kept.runs(&server) => "connected",
@@ -418,6 +423,7 @@ async fn listed(
     })
     .await?;
     let folder = secret_at(
+        state,
         deps,
         params["agent"].as_str().unwrap_or_default(),
         &server.name,
@@ -459,7 +465,7 @@ async fn connector_connect(
     };
     let (secrets, at) = (
         state.connector_secrets(),
-        secret_at(deps, &agent, &server.name).map_err(|error| internal(&error))?,
+        secret_at(state, deps, &agent, &server.name).map_err(|error| internal(&error))?,
     );
     let stored_in = off_the_worker(move || {
         secrets
@@ -500,7 +506,7 @@ async fn connector_disconnect(
     .await?;
     let (secrets, at) = (
         state.connector_secrets(),
-        secret_at(deps, agent, server).map_err(|error| internal(&error))?,
+        secret_at(state, deps, agent, server).map_err(|error| internal(&error))?,
     );
     off_the_worker(move || {
         secrets
@@ -2540,7 +2546,10 @@ pub(super) mod tests {
     }
 
     fn kept_at(harness: &Harness, agent: &str, server: &str) -> SecretAt {
-        SecretAt::of(harness.project.deps.files.root(), agent, server).expect("an address")
+        harness
+            .daemon
+            .secret_at(harness.project.deps.files.root(), agent, server)
+            .expect("an address")
     }
 
     fn connect_params(agent: &str, server: &Value, tags: &Value) -> Value {

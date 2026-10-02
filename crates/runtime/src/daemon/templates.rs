@@ -625,9 +625,7 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn applying_deletes_a_removed_agents_connector_keys() {
-        use crate::connectors::{
-            ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
-        };
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
 
         let (harness, folder) = templated("templates-remove-keys", |wire| {
             wire["agents"][3]["mcp_servers"] = json!([{
@@ -639,8 +637,10 @@ mod tests {
         saved(&folder, &pair());
         let store = Arc::new(MemoryConnectorSecrets::default());
         assert!(harness.daemon.set_connector_secrets(store.clone()));
-        let at =
-            SecretAt::of(harness.project.deps.files.root(), "kai", "github").expect("an address");
+        let at = harness
+            .daemon
+            .secret_at(harness.project.deps.files.root(), "kai", "github")
+            .expect("an address");
         let entry = ConnectorEntry {
             spec_sha256: "h".to_string(),
             keys: [(

@@ -55,14 +55,8 @@ pub(crate) fn connect(
     let (_, server) =
         custom_entry(&project.team, asked.agent, &wire, json!({})).map_err(|e| errors(&e))?;
     let keys = read_keys(asked.keys, io)?;
-    let at = SecretAt::of(&project.root, asked.agent, &server.name)
-        .map_err(|error| format!("this project's id cannot be read: {error}"))?;
-    let state = crate::state::state_dir(&io.env).ok_or_else(|| {
-        format!(
-            "XDG_CONFIG_HOME, HOME and APPDATA are all unset, so {} has no folder to run in",
-            server.name
-        )
-    })?;
+    let state = state_of(io)?;
+    let at = secret_at(&state, project, asked.agent, &server.name)?;
     let folder = working_folder(&state, &at)
         .map_err(|error| format!("{}'s folder cannot be made: {error}", server.name))?;
     let listed = runtime()?
@@ -135,12 +129,32 @@ pub(crate) fn disconnect(
         "disconnect",
         io,
     ))?;
-    let at = SecretAt::of(&project.root, agent, name)
-        .map_err(|error| format!("this project's id cannot be read: {error}"))?;
+    let at = secret_at(&state_of(io)?, project, agent, name)?;
     io.connector_secrets
         .delete(&at)
         .map_err(|error| words(&error))?;
     Ok(said)
+}
+
+/// The user's state folder, where the project's id on this machine is kept and each stdio
+/// connector runs (ADR 0030).
+fn state_of(io: &CliIo<'_>) -> Result<std::path::PathBuf, String> {
+    crate::state::state_dir(&io.env).ok_or_else(|| {
+        "XDG_CONFIG_HOME, HOME and APPDATA are all unset, so Farik has no state folder to keep \
+         this project's connectors in"
+            .to_string()
+    })
+}
+
+/// Where `agent`'s keys for `server` are kept in `project`.
+fn secret_at(
+    state: &std::path::Path,
+    project: &Project,
+    agent: &str,
+    server: &str,
+) -> Result<SecretAt, String> {
+    SecretAt::of(state, &project.root, agent, server)
+        .map_err(|error| format!("this project's id cannot be read: {error}"))
 }
 
 /// The `mcp_servers` entry `asked` describes, without its tools.

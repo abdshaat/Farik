@@ -129,7 +129,8 @@ impl Served {
         })));
         let store = Arc::new(MemoryConnectorSecrets::default());
         for server in servers(&team) {
-            let at = SecretAt::of(&repo.path, "dev-a", &server.name).expect("an address");
+            let at = SecretAt::of(&Served::state_of(&repo), &repo.path, "dev-a", &server.name)
+                .expect("an address");
             let entry = ConnectorEntry {
                 spec_sha256: spec_sha256(&server),
                 keys: [("API_KEY".to_string(), Secret::new(KEY_VALUE.to_string()))].into(),
@@ -375,7 +376,13 @@ fn connector_run_starts_the_server_in_a_folder_farik_keeps() {
     );
     let printed = String::from_utf8(output.stdout).expect("text");
     // Outside the repository, in the user's state folder (fix wave C).
-    let at = SecretAt::of(&served.repo.path, "dev-a", "whereami").expect("an address");
+    let at = SecretAt::of(
+        &Served::state_of(&served.repo),
+        &served.repo.path,
+        "dev-a",
+        "whereami",
+    )
+    .expect("an address");
     let folder = Served::state_of(&served.repo)
         .canonicalize()
         .expect("the state folder")

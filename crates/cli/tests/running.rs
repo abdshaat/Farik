@@ -890,10 +890,13 @@ fn gives_a_session_the_connectors_kept_where_this_computer_keeps_them() {
         .flatten()
         .find_map(custom_server)
         .expect("a custom server");
+    // `XDG_CONFIG_HOME`, outside the repository: its `farik` folder keeps the project's id.
+    let config = PathBuf::from(format!("{}-config", repository.path.display()));
     let store = Arc::new(MemoryConnectorSecrets::default());
     store
         .save(
-            &SecretAt::of(&repository.path, "pm", "github").expect("an address"),
+            &SecretAt::of(&config.join("farik"), &repository.path, "pm", "github")
+                .expect("an address"),
             &ConnectorEntry {
                 spec_sha256: spec_sha256(&server),
                 keys: std::collections::BTreeMap::<String, Secret>::new(),
@@ -905,6 +908,8 @@ fn gives_a_session_the_connectors_kept_where_this_computer_keeps_them() {
 
     let ran = run_with(&repository.path, &["run"], |io| {
         io.connector_secrets = store;
+        io.env
+            .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
         io.engine = Engine::Given(Arc::new(move |daemon| {
             let adapter = Arc::new(RecordedAdapter::with_tools(
                 vec![refine_writes_task_frk_1()],
