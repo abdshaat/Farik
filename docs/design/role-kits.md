@@ -4,7 +4,7 @@ Status: approved by the founder on 2026-09-28, in conversation, as the first cut
 
 ## Why
 
-The founder wants every role to be great at its job: each with a special set of skills and connectors, the Marketing Specialist with marketing skills and creative connectors such as Higgsfield among them. Phase 7 builds the plumbing first, connectors per agent, the human's approval of their calls, signing in to a service, and skills loaded into sessions (steps 01 to 04, pulled forward from the ecosystem by ADR 0029 and split by the project plan's revision 27), then fills it, role by role, on Claude, before other engines and before the web launch. Phase 8 checks every kit again on each engine and provider it adds.
+The founder wants every role to be great at its job: each with a special set of skills and connectors, the Marketing Specialist with marketing skills and creative connectors such as Higgsfield among them. Phase 7 builds the plumbing first, connectors per agent, the human's approval of their calls, signing in to a service by three routes, and skills loaded into sessions (steps 01 to 04, pulled forward from the ecosystem by ADR 0029 and split by the project plan's revision 27), then fills it, role by role, on Claude, before other engines and before the web launch. Phase 8 checks every kit again on each engine and provider it adds.
 
 ## What a kit is
 
@@ -45,11 +45,24 @@ The founder amends these before step 06 is planned. A connector is named by the 
 | Finance Specialist | expense categorisation; month-end close; forecasting; unit economics and pricing analysis; budget recommendations | Stripe, read tools `network`, `stripe_api_write` `denied` (connected in phase 7 step 09, moved into the kit in step 10); a paid ledger, `network` (Kick, Digits), optional. The receipts mailbox is not a connector: Farik's own tools take it (phase 12 step 02) |
 | DevOps Engineer | deployment checklists; reading production logs; incident response; rollback and restore; writing postmortems; pipeline and infrastructure config. Added by ADR 0027, built in steps 11 and 12 | one of AWS (ECS, EKS), Kubernetes, Vercel or Netlify, and Render, Railway or Fly, whichever the project runs on: status, deployments, logs and metrics `network`, every other tool `denied`, since Farik's own `farik_deploy`, `farik_restart` and `farik_roll_back` make the writes. See `docs/design/devops-engineer.md` |
 
+## Signing in
+
+A connector is connected without a pasted key wherever its service allows (the founder, 2026-10-02; ADR 0035). Farik tries, in order: route 1, the service registers Farik itself (step 03); route 2, Farik's own registered public app, matched by the server's host (step 03b); route 3, the sign-in relay, which adds Farik's client secret to the code exchange and each refresh and keeps no token (step 03c). A pasted key from a page the setup copy names is the fallback for every connector, and what the user is offered when the relay is down. Route 4, incoming hooks, is premium (phase 14) and no kit uses it.
+
+| Service | Kits | Route |
+|---|---|---|
+| GitHub (issues, code search) | Product Manager, Architect | 2: Farik's GitHub App, device flow, read-only repository permissions |
+| Google (Analytics, Drive) | Product Manager | 2: Farik's Google desktop client, PKCE, the narrowest read scope per connector; Google's verification is a launch dependency, and `drive.readonly` is a restricted scope with a yearly security assessment |
+| Slack (the chat bridge) | Scrum Master | 3: the sign-in relay, Farik's Slack app |
+| Every other service (Notion, Linear, PostHog, Stripe, Higgsfield, Vercel, and the rest) | all | 1 where the service registers Farik itself, else a key. Stripe's scheduled runs keep an Agent-tagged restricted key (step 09); the DevOps Engineer's platforms take the narrow credential its kit names |
+
+Each kit's step plan records the route of each connector it ships.
+
 What is not a kit: Farik's own tools (`farik_*`), which every role has by its tiers; the sandbox; git. A kit adds what the role does beyond the harness.
 
 ## The web app
 
-Adding a role in the team builder, or opening its card on the Team page, lists the kit's connectors with a one-line reason each and a "Connect" button. Connecting is a sign-in or a pasted key from a page the copy names, then the allowances where there are any, then done. The Costs page shows each allowance's use beside the model spend. These are the connector screens (`Connector`, `ConnectorAllowance`, and the connector list on `AgentEdit`), distinct from the `Connect` screen that links the browser to the daemon, and they are mocked up on the canvas before code, as every page is (`docs/design/web-ui.md`). `farik connect <agent> <connector>` and `farik disconnect <agent> <connector>` do the same from the command line, and `connector.connected` and `connector.disconnected` record it. Step 01 built them for a server the user labels (spec 0.38, 6.7 and F9): the agent page's "Added by you" list, with "Connect again" for a server the team file changed since it was connected on this computer and "Remove", which asks first, and `ConnectorAdd`, three steps (how to start it and its keys, label its tools, done); the keys are pasted, since signing in is step 03. Step 05 connects a kit's connector by name through them.
+Adding a role in the team builder, or opening its card on the Team page, lists the kit's connectors with a one-line reason each and a "Connect" button. Connecting is a sign-in or a pasted key from a page the copy names, then the allowances where there are any, then done. The Costs page shows each allowance's use beside the model spend. These are the connector screens (`Connector`, `ConnectorAllowance`, and the connector list on `AgentEdit`), distinct from the `Connect` screen that links the browser to the daemon, and they are mocked up on the canvas before code, as every page is (`docs/design/web-ui.md`). `farik connect <agent> <connector>` and `farik disconnect <agent> <connector>` do the same from the command line, and `connector.connected` and `connector.disconnected` record it. Step 01 built them for a server the user labels (spec 0.38, 6.7 and F9): the agent page's "Added by you" list, with "Connect again" for a server the team file changed since it was connected on this computer and "Remove", which asks first, and `ConnectorAdd`, three steps (how to start it and its keys, label its tools, done); the keys are pasted, since signing in is steps 03 to 03c. Step 05 connects a kit's connector by name through them.
 
 ## Steps
 
@@ -57,7 +70,9 @@ Adding a role in the team builder, or opening its card on the Team page, lists t
 |---|---|
 | 01 Connectors per agent | Moved from the ecosystem (ADR 0029): servers per agent, stdio and remote, tool listing and the user's tags, keys in the keychain or a private file, the hash of what was connected, `farik connect` and `farik disconnect` and the connector list on `AgentEdit`; it extends phase 6 step 12's connector base. `external_effect` tools are refused until step 02 |
 | 02 Approving a connector's calls | Split from step 01: an `external_effect` call waits for the human like a question, who allows that one call or refuses it, from Today or the command line |
-| 03 Signing in to a service | OAuth sign-in for remote servers, per agent, before the first kit (the founder, 2026-10-01); planned when it is next |
+| 03 Signing in to a service | OAuth sign-in for remote servers, per agent, before the first kit (the founder, 2026-10-01): route 1 |
+| 03b Farik's registered apps | Route 2: GitHub by device flow and Google by a desktop client with PKCE, through apps the founder registers (ADR 0035) |
+| 03c The sign-in relay | Route 3: a stateless function on AWS at `signin.<domain>` that adds Farik's client secret for Slack and keeps no token; pasted keys when it is down (ADR 0035) |
 | 04 Skills per agent | Moved from the ecosystem (ADR 0029): skill folders at agent, role and team level, loaded into sessions |
 | 04b Skills on the agent page | Split from step 04: the agent page's Skills section and its add, edit and review dialogs |
 | 05 Kit format and loader | `kit.schema.json` and its generated types, and the allowances and applied tags in `team.schema.json`; `kit.yaml` per role, loaded with the role; a kit connector connected by name through step 01's commands and screens, its tags applied; the pinned tool list of shipped kits and its drift test; allowances per tool and per agent, the count projected from `tool.called`, on the board and the Costs page, `ConnectorAllowance` mocked up first; the UI/UX Designer's built-in Playwright connector moved into its `kit.yaml` |
