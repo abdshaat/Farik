@@ -1,7 +1,7 @@
 # 0010. One review per step, and step plans drafted from the template
 
 Date: 2026-09-22
-Status: accepted
+Status: accepted; per-task review amended by ADR 0032 (2026-10-02)
 
 Amends ADR 0001 and ADR 0008.
 

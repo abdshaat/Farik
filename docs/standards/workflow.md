@@ -19,6 +19,17 @@ The product has its own vocabulary (task contract, sprint, ceremony, governor, t
 
 The process is the one the [superpowers](https://github.com/obra/superpowers) plugin for Claude Code enforces (ADR 0001), with one exception: step plans are written by copying `docs/plans/step-template.md`, not with the plugin's `writing-plans` skill, which puts the implementation into the plan (ADR 0008, ADR 0010). Where the plugin and this document disagree, this document wins.
 
+## Who does what
+
+Planning and judging run on Opus 5.5; execution runs on Sonnet 5.5 (ADR 0032).
+
+| Model | Does |
+|---|---|
+| Opus 5.5 | Brainstorm, design, step plans, mockups, readiness reviews (by a session that did not write the plan), the one review of each task and its fix report |
+| Sonnet 5.5 | A plan that has passed its readiness review: the tasks under TDD, the fixes a task's review reports, verification, the recording of the spec, the runbook preparation |
+
+The reviews stay on Opus because they are the independent check on the executor (hard rule 10). Every hard rule, the pass bars and one task, one commit are unchanged. A decision found missing during execution goes back to the planning role; the executor does not decide it. Each task is reviewed once, and its fixes are not reviewed again (stage 5).
+
 ## The sequence
 
 Every non-trivial change goes through these six stages in order. (Stages of the workflow, not to be confused with phases of the project plan, which are bodies of product work; see stage 2.) "Non-trivial" means anything that adds or changes behavior. A typo fix or a one-line doc correction skips to stage 5.
@@ -31,11 +42,15 @@ Skipping a stage is allowed only when the person who owns the change says so in 
 
 ### 1. Brainstorm
 
+Opus 5.5 does this (see Who does what).
+
 Before any code or plan, refine the idea by asking questions. What is the user-facing outcome? Which section of `docs/SPEC.md` does this serve, and which functional requirement number? What is out of scope? What could be simpler? Present the design in small sections and get agreement on each before moving on.
 
 Output: a short design, two to twenty lines, that becomes the header of the plan. For a change that reverses or adds to a decision in the spec, also an ADR (see `docs/decisions/`).
 
 ### 2. Plan
+
+Opus 5.5 writes the plan, and an Opus 5.5 session that did not write it runs its readiness review (see Who does what). A plan must be complete enough for Sonnet 5.5 to execute without design judgement.
 
 Planning has two levels, and both are written before any product code.
 
@@ -61,7 +76,9 @@ No forward dependencies. A step depends only on phases already merged to `main` 
 
 ### 3. Execute
 
-Work on the phase branch, `phase/<n>-<name>`, created from `main` when the phase's first step starts and kept until the phase merges. Use a git worktree for it so that a clean test baseline can be confirmed before the first change. Run the full check once at the start of the phase, and again at the start of a step only when the branch's head is not the commit the previous step's landing review verified.
+Sonnet 5.5 executes a plan that has passed its readiness review (see Who does what).
+
+Work on the phase branch, `phase/<n>-<name>`, created from `main` when the phase's first step starts and kept until the phase merges. Use a git worktree for it so that a clean test baseline can be confirmed before the first change. Run the full check once at the start of the phase, and again at the start of a step only when the branch's head is not the commit the previous step landed on.
 
 Then one task at a time, in plan order, each under test-driven development:
 
@@ -75,7 +92,7 @@ Commit after each task with a message per `code.md`. Tick the task's checkbox in
 
 Code written before its test is deleted. Not kept as reference, not adapted, not consulted. The one exception is explicit permission from the change owner, recorded in the plan.
 
-Tasks may be dispatched to fresh subagents. They are not reviewed one by one: the step's landing review (stage 5) is the review. A subagent's report that it succeeded is not evidence; the landing reviewer runs the checks.
+Tasks may be dispatched to fresh subagents. Each task is reviewed once, after its commit, as stage 5 describes. A subagent's report that it succeeded is not evidence; the reviewer runs the checks.
 
 ### 4. Verify
 
@@ -89,13 +106,17 @@ Self-review first, against the plan, before requesting anyone else's time. Read 
 
 Then open the phase's pull request to `main` using the template. One phase is one pull request, opened as a draft when the phase's first step is pushed and marked ready for review when the last step's verification passes. This is not optional and it is not deferred: a pushed phase branch with no pull request is unfinished work that nobody can see. The request explains what changed and, above all, why it was necessary: what problem or spec requirement the phase serves and what would be wrong without it. It also carries links to every step plan in the phase, the spec references, the verification evidence from the final commit, and any ADRs.
 
-A pull request never contains work from two phases. Each step inside a phase is still reviewed as it lands: the reviewer reads the step's commits against its plan on the phase branch and records the review in the pull request thread, so that the final review of the whole phase is a confirmation rather than a first reading.
+A pull request never contains work from two phases. Each task inside a phase is reviewed as it lands: the reviewer reads the task's commits against the step plan on the phase branch and records the review in the pull request thread. The final review of the whole phase confirms that every task has its recorded review and that the check is green. It does not review a task again.
 
-This landing review is where the defects are, and it is not optional: a step whose landing review did not complete is reviewed before the pull request is marked ready. It reads running code, not a plan, and its acceptance bar is mutation: re-introduce the bug each test claims to catch and confirm the suite notices. A test that passes both with the code and with the code broken is not a test, and a green check does not distinguish them. ADR 0008 records what these reviews found that no plan review could.
+Each task is reviewed once, by Opus 5.5, after its commit (see Who does what), and the reviews of a step's tasks are that step's landing review. This review is where the defects are, and it is not optional: a task whose review did not complete is reviewed before the pull request is marked ready. It reads running code, not a plan, and its acceptance bar is mutation: re-introduce the bug each test claims to catch and confirm the suite notices. A test that passes both with the code and with the code broken is not a test, and a green check does not distinguish them. ADR 0008 records what these reviews found that no plan review could.
+
+The review ends in one fix report to the implementer, detailed enough to carry out without judgement. For each finding it gives the severity, the file and line, what is wrong, the fix, and the test that must fail without the fix. The implementer fixes every finding, watches each named test fail before its fix, and commits the fixes as new commits. That task is then not reviewed again. If a fix needs a decision the report does not make, it goes back to the reviewer as a question.
+
+A step lands when every task in it has been reviewed and its fixes committed, the full check passes locally (`cargo xtask check`), and the `check` GitHub Actions workflow passes on the step's last pushed commit. That workflow runs on pull requests, so the phase's draft pull request must exist (hard rule 11).
 
 Reviewers report findings by severity: critical (blocks merge: correctness, security, a rule in this document broken), important (must be addressed or explicitly deferred with a reason), and minor (author's call). A critical finding is never resolved by a comment; it is resolved by a commit.
 
-Receiving review: address each finding or reply with a reason; never resolve a thread silently. Push fixes as new commits, not force-pushes, so the reviewer can see what changed.
+Receiving review: address each finding in the fix report, or, for an important finding deferred, reply with a reason; never resolve a thread silently. Push fixes as new commits, not force-pushes, so the reviewer can see what changed.
 
 ### 6. Finish
 
