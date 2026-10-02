@@ -759,3 +759,109 @@ fn chats_from_the_command_line() {
     assert_eq!(channel.code, 0, "{}", channel.err);
     assert!(!channel.out.contains("Apple Pay"), "{}", channel.out);
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_tool_approve_sends_the_command() {
+    let repository = a_project("human-tool-approve-sent");
+    let driver = LiveDriver::answering(
+        &repository,
+        Ok(farik_runtime::orchestrator::CommandReport {
+            said: "Allowed create_issue once for theo (approval 12).".to_string(),
+            events: Vec::new(),
+        }),
+    );
+
+    let ran = run(&repository.path, &["tool", "approve", "12"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.trim(),
+        "Allowed create_issue once for theo (approval 12)."
+    );
+    assert_eq!(
+        driver.commands(),
+        vec![Command::ToolApprove {
+            approval: 12,
+            note: None
+        }]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_tool_refuse_carries_the_note() {
+    let repository = a_project("human-tool-refuse-sent");
+    let driver = LiveDriver::answering(
+        &repository,
+        Ok(farik_runtime::orchestrator::CommandReport {
+            said: "Not allowed: create_issue for theo (approval 12).".to_string(),
+            events: Vec::new(),
+        }),
+    );
+
+    let ran = run(
+        &repository.path,
+        &["tool", "refuse", "12", "--note", "not this repo"],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.trim(),
+        "Not allowed: create_issue for theo (approval 12)."
+    );
+    assert_eq!(
+        driver.commands(),
+        vec![Command::ToolRefuse {
+            approval: 12,
+            note: Some("not this repo".to_string())
+        }]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_tool_approve_writes_here_when_nothing_drives() {
+    let repository = a_project("human-tool-approve-here");
+    let task = filed(&repository, "Add done.txt");
+    let n = record_as(
+        &repository,
+        &task,
+        Some(("theo", "session-1")),
+        "tool_approval.requested",
+        &json!({
+            "server": "github",
+            "tool": "create_issue",
+            "input": "{\"title\":\"Broken link\"}",
+            "input_sha256": "0".repeat(64)
+        }),
+    )
+    .envelope
+    .seq;
+
+    let ran = run(&repository.path, &["tool", "approve", &n.to_string()]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.trim(),
+        format!("Allowed create_issue once for theo (approval {n}).")
+    );
+    let granted = events(&repository, &[EventKind::ToolApprovalGranted]);
+    assert_eq!(granted.len(), 1);
+    let EventBody::ToolApprovalGranted(body) = &granted[0].body else {
+        panic!("a grant");
+    };
+    assert_eq!((body.approval.get(), body.note.as_deref()), (n, None));
+    assert_eq!(
+        granted[0].envelope.ids.task_id.as_ref().map(|t| t.as_str()),
+        Some(task.as_str())
+    );
+
+    let again = run(&repository.path, &["tool", "refuse", &n.to_string()]);
+    assert_eq!(again.code, 1, "{}", again.out);
+    assert!(
+        again.err.starts_with("farik: approval_decided"),
+        "{}",
+        again.err
+    );
+}

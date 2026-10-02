@@ -143,7 +143,7 @@ Files: `cli/src/human.rs`, `cli/src/lib.rs`.
 - `farik_tool_refuse_carries_the_note`: `farik tool refuse 12 --note "not this repo"` sends `tool_refuse { approval: 12, note: "not this repo" }` and prints "Not allowed: create_issue for theo (approval 12)."
 - `farik_tool_approve_writes_here_when_nothing_drives`: with no daemon, `tool_approval.granted` is appended under the run lock.
 
-- [ ] `feat(cli): approve or refuse a connector's call`
+- [x] `feat(cli): approve or refuse a connector's call`
 
 ### Task 5: The screens
 

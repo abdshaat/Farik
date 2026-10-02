@@ -472,6 +472,11 @@ enum Commands {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         reason: Vec<String>,
     },
+    /// Allow or refuse one call an agent asked to make to a connector (5.7).
+    Tool {
+        #[command(subcommand)]
+        command: ToolCommands,
+    },
     /// Start, end, or show a sprint (5.5).
     Sprint {
         #[command(subcommand)]
@@ -596,6 +601,26 @@ enum SprintCommands {
     Show {
         /// The sprint, as S<n>.
         sprint_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ToolCommands {
+    /// Allow the call once, with exactly the input the agent asked with.
+    Approve {
+        /// The approval's number, as farik run prints it.
+        approval: u64,
+        /// A note for the agent's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Refuse the call.
+    Refuse {
+        /// The approval's number, as farik run prints it.
+        approval: u64,
+        /// Why, for the agent's next session.
+        #[arg(long)]
+        note: Option<String>,
     },
 }
 
@@ -744,6 +769,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         | Commands::Accept { .. }
         | Commands::SendBack { .. }
         | Commands::Answer { .. }
+        | Commands::Tool { .. }
         | Commands::Integrate { .. }
         | Commands::Resolve { .. }
         | Commands::Cancel { .. }
@@ -884,6 +910,7 @@ pub(crate) fn task(task_id: &str) -> Result<TaskId, String> {
 }
 
 /// The human's command a subcommand stands for, and its name as typed.
+#[allow(clippy::too_many_lines, reason = "one arm per command")]
 fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
     Ok(match command {
         Commands::Approve { task_id } => (
@@ -923,6 +950,24 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
             Command::QuestionAnswer {
                 question_id: *question_id,
                 answer: answer.join(" "),
+            },
+        ),
+        Commands::Tool {
+            command: ToolCommands::Approve { approval, note },
+        } => (
+            "tool approve",
+            Command::ToolApprove {
+                approval: *approval,
+                note: note.clone(),
+            },
+        ),
+        Commands::Tool {
+            command: ToolCommands::Refuse { approval, note },
+        } => (
+            "tool refuse",
+            Command::ToolRefuse {
+                approval: *approval,
+                note: note.clone(),
             },
         ),
         Commands::Integrate { task_id } => (
