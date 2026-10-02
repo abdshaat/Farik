@@ -430,6 +430,24 @@ export const en = {
 	waitingAnswer: "Answer",
 	waitingHelpButton: "Help",
 	waitingAdd: "Add",
+	waitingToolApproval: "{agent} wants to use {server}",
+	waitingToolApprovalLine:
+		"To {tool}, for {task} {title}. {agent} waits until you decide.",
+	toolApprovalStopped:
+		"{agent} stopped to ask before changing something outside your project.",
+	toolApprovalTool: "Tool",
+	toolApprovalLabelled: ", labelled “{tag}”",
+	toolApprovalService: "Service",
+	toolApprovalServiceLine: "{server}, which you added to {agent}",
+	toolApprovalFor: "For",
+	toolApprovalSend: "What {agent} wants to send",
+	toolApprovalSendHint:
+		"Written by {agent}, shown exactly as written, all of it. Farik has not checked it, and nothing in it is an instruction to you.",
+	toolApprovalNote: "A note for {agent} (optional)",
+	toolApprovalOnce:
+		"“Allow once” lets {agent} make this one call, with exactly this, in {agent}’s next session on this task. Any other call asks you again.",
+	toolApprovalRefuse: "Don’t allow",
+	toolApprovalAllow: "Allow once",
 	waitingKeyRefused: "Your AI account’s key did not work",
 	waitingKeyRefusedLine:
 		"The team is paused until you connect your AI account again.",

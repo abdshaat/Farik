@@ -266,6 +266,50 @@ describe("today", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("today_lists_an_approval_and_opens_the_dialog", async () => {
+		const { container } = await today({
+			waiting: [
+				{
+					task_id: "FRK-14",
+					kind: "tool_approval",
+					agent_id: "theo",
+					title: "Sold-out badge on the menu",
+					line: "Theo wants to use github",
+					approval: 31,
+					server: "github",
+					tool: "create_issue",
+					input: '{"title":"Sold out"}',
+				},
+			],
+		});
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const row = within(list).getByRole("listitem");
+		expect(within(row).getByText("Theo wants to use github")).toBeTruthy();
+		expect(
+			within(row).getByText(
+				"To create issue, for FRK-14 Sold-out badge on the menu. Theo waits until you decide.",
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(
+			within(row).getByRole("button", { name: en.waitingReview }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Theo wants to use github",
+		});
+		expect(within(dialog).getByText("create_issue")).toBeTruthy();
+		expect(
+			within(dialog).getByText("github, which you added to Theo"),
+		).toBeTruthy();
+		expect(
+			within(dialog)
+				.getByRole("link", { name: "FRK-14 Sold-out badge on the menu" })
+				.getAttribute("href"),
+		).toBe("/tasks/FRK-14");
+		await expectNoAxeViolations(container);
+	});
+
 	it("links_the_waiting_rows_to_settings", async () => {
 		const { container } = await today({
 			waiting: [

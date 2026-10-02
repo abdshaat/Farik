@@ -487,3 +487,59 @@
 	margin-bottom: var(--farik-space-1);
 	font-weight: 600;
 }
+
+/* The tool approval dialog: what the agent wants to send, framed as untrusted text. */
+.toolApproval {
+	display: grid;
+	gap: var(--farik-space-3);
+}
+
+.toolApproval p,
+.toolApproval h3 {
+	margin: 0;
+}
+
+.toolApproval h3 {
+	font-size: inherit;
+}
+
+.toolApproval dl {
+	display: grid;
+	grid-template-columns: 6rem minmax(0, 1fr);
+	gap: var(--farik-space-1) var(--farik-space-3);
+	margin: 0;
+}
+
+.toolApproval dt,
+.toolHint {
+	color: var(--farik-color-ink-muted);
+}
+
+.toolApproval dd {
+	margin: 0;
+}
+
+.untrusted {
+	margin: 0;
+	max-height: 18rem;
+	overflow: auto;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	font-family: var(--farik-type-code-family);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-left: 3px solid var(--farik-color-ink);
+	border-radius: var(--farik-radius-control);
+}
+
+.untrusted pre {
+	margin: 0;
+	font: inherit;
+	white-space: inherit;
+}
+
+.untrusted:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}

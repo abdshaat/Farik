@@ -9,6 +9,7 @@ import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { type Backlog, moreWaits } from "./Board.tsx";
 import { ChannelPreview } from "./Channel.tsx";
+import { ToolApproval, type ToolAsk } from "./dialogs/ToolApproval.tsx";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
 import styles from "./Today.module.css";
 
@@ -24,11 +25,11 @@ type Kind =
 	| "designer_needs_browser";
 type Waiting = {
 	taskId: string;
-	kind: Kind;
+	kind: Kind | "tool_approval";
 	agentId: string | null;
 	title: string;
 	line: string;
-};
+} & Partial<ToolAsk>;
 type Moved = { at: string; line: string };
 type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
@@ -166,20 +167,28 @@ export function Today() {
 					) : (
 						<ul className={styles.rows} aria-label={t("waitingList")}>
 							{keyRefused && <KeyRefusedRow />}
-							{waiting.waiting.map((item) => (
-								<WaitingRow
-									key={`${item.kind}-${item.taskId}`}
-									item={item}
-									agent={agent(item.agentId)}
-									developer={
-										agents.find(
-											(a) =>
-												a.role === "software_developer" &&
-												a.status !== "retired",
-										)?.displayName ?? ""
-									}
-								/>
-							))}
+							{waiting.waiting.map((item) =>
+								item.kind === "tool_approval" ? (
+									<ToolApprovalRow
+										key={`${item.kind}-${item.approval}`}
+										item={item}
+										agent={agent(item.agentId)}
+									/>
+								) : (
+									<WaitingRow
+										key={`${item.kind}-${item.taskId}`}
+										item={item}
+										agent={agent(item.agentId)}
+										developer={
+											agents.find(
+												(a) =>
+													a.role === "software_developer" &&
+													a.status !== "retired",
+											)?.displayName ?? ""
+										}
+									/>
+								),
+							)}
 						</ul>
 					)}
 				</section>
@@ -303,7 +312,7 @@ function WaitingRow({
 	agent: Agent | undefined;
 	developer: string;
 }) {
-	const kind = KINDS[item.kind];
+	const kind = KINDS[item.kind as Kind];
 	const name = agent?.displayName ?? item.agentId ?? "";
 	const titleId = `waiting-${item.kind}-${item.taskId}`;
 	return (
@@ -331,6 +340,62 @@ function WaitingRow({
 			>
 				{t(kind.word)}
 			</Link>
+		</li>
+	);
+}
+
+/** A connector call waiting to be allowed; "Review" opens its dialog. */
+function ToolApprovalRow({
+	item,
+	agent,
+}: {
+	item: Waiting;
+	agent: Agent | undefined;
+}) {
+	const [open, setOpen] = useState(false);
+	const name = agent?.displayName ?? item.agentId ?? "";
+	const titleId = `waiting-tool-${item.approval}`;
+	const ask: ToolAsk = {
+		approval: item.approval ?? 0,
+		server: item.server ?? "",
+		tool: item.tool ?? "",
+		input: item.input ?? "",
+	};
+	return (
+		<li className={styles.row}>
+			{agent?.avatar && (
+				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
+			)}
+			<div className={styles.rowText}>
+				<strong id={titleId}>
+					{t("waitingToolApproval", { agent: name, server: ask.server })}
+				</strong>
+				<span>
+					{t("waitingToolApprovalLine", {
+						tool: ask.tool.replaceAll("_", " "),
+						task: item.taskId,
+						title: item.title,
+						agent: name,
+					})}
+				</span>
+			</div>
+			<button
+				type="button"
+				className={styles.action}
+				aria-describedby={titleId}
+				onClick={() => setOpen(true)}
+			>
+				{t("waitingReview")}
+			</button>
+			{open && (
+				<ToolApproval
+					ask={ask}
+					agent={name}
+					taskId={item.taskId}
+					title={item.title}
+					onClose={() => setOpen(false)}
+				/>
+			)}
 		</li>
 	);
 }

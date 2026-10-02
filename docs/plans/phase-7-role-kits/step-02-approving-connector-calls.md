@@ -153,7 +153,7 @@ Files: `pages/dialogs/ToolApproval.tsx` and its test, `Today.tsx`, `Today.test.t
 - `the_dialog_sends_approve_or_refuse_with_the_note`: "Allow once" sends `tool_approve`, "Don't allow" `tool_refuse`, each with the note when one is typed.
 - `the_input_is_shown_as_untrusted_text`: markup in the input renders as text, in the `untrusted` frame, whole.
 
-- [ ] `feat(web): approve a connector's call from Today`
+- [x] `feat(web): approve a connector's call from Today`
 
 ### Task 6: Spec and plan
 
