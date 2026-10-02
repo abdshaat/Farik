@@ -1342,6 +1342,8 @@ export const en = {
 		"Only {name} has {service}. To give it to someone else, connect it from their page.",
 	kitRefused:
 		"Farik could not connect {service}. Check the key against {service}’s page, and try again.",
+	kitTimeout:
+		"{service} did not answer within thirty seconds. Try again in a minute.",
 	kitChanged:
 		"Farik changed what it offers for {service} just now. Close this and look at {name}’s page again.",
 	uiPathsTitle: "Which files are screens",

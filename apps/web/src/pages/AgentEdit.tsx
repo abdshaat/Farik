@@ -480,26 +480,24 @@ function Editor({
 								);
 							})}
 							{gone.map((c) => (
-								<li key={c.name}>
-									<div className={styles.rowHead}>
-										<strong>{c.name}</strong>
-										<span className={styles.actions}>
-											<Button
-												kind="quiet"
-												onClick={() => {
-													setRemoveRefused(undefined);
-													setRemoving(c.name);
-												}}
-											>
-												{t("connectorRemove")}{" "}
-												<span className={styles.hidden}>{c.name}</span>
-											</Button>
-										</span>
-									</div>
+								<li key={c.name} className={styles.kitRow}>
+									<strong>{c.name}</strong>
 									<p>
-										<strong>{t("kitGone")}</strong>
+										<strong className={styles.warn}>{t("kitGone")}</strong>
 									</p>
 									<p className={styles.muted}>{t("kitGoneNote", { name })}</p>
+									<span className={styles.actions}>
+										<Button
+											kind="quiet"
+											onClick={() => {
+												setRemoveRefused(undefined);
+												setRemoving(c.name);
+											}}
+										>
+											{t("connectorRemove")}{" "}
+											<span className={styles.hidden}>{c.name}</span>
+										</Button>
+									</span>
 								</li>
 							))}
 						</ul>
@@ -765,43 +763,15 @@ function KitRow({
 }) {
 	const connected = held !== undefined && state === "connected";
 	return (
-		<li>
-			<div className={styles.rowHead}>
-				<strong>{service.title}</strong>
-				<span className={styles.actions}>
-					{!held && (
-						<Button onClick={onConnect}>
-							{t("kitConnect")}{" "}
-							<span className={styles.hidden}>{service.title}</span>
-						</Button>
-					)}
-					{held && state === "connect_again" && (
-						<Button onClick={onConnect}>
-							{t("connectorAgainButton")}{" "}
-							<span className={styles.hidden}>{service.title}</span>
-						</Button>
-					)}
-					{held && state === "sign_in_again" && (
-						<Button onClick={onConnect}>
-							{t("connectorSignInAgain")}{" "}
-							<span className={styles.hidden}>{service.title}</span>
-						</Button>
-					)}
-					{held && (
-						<Button kind="quiet" onClick={onRemove}>
-							{t("connectorRemove")}{" "}
-							<span className={styles.hidden}>{held.name}</span>
-						</Button>
-					)}
-				</span>
-			</div>
+		<li className={styles.kitRow}>
+			<strong>{service.title}</strong>
 			<p className={styles.muted}>{service.why}</p>
 			{connected && (
 				<>
 					<p>
 						<strong>{t("kitConnected")}</strong>
 					</p>
-					<p>
+					<p className={styles.muted}>
 						{service.auth === "oauth"
 							? t("kitSignedIn", { service: service.title })
 							: t(storedIn === "file" ? "connectorFile" : "connectorKeychain", {
@@ -812,7 +782,7 @@ function KitRow({
 			)}
 			{held && state === "connect_again" && (
 				<p>
-					<strong>{t("kitAgain")}</strong>
+					<strong className={styles.warn}>{t("kitAgain")}</strong>
 				</p>
 			)}
 			{held && state === "sign_in_again" && (
@@ -827,6 +797,32 @@ function KitRow({
 					</strong>
 				</p>
 			)}
+			<span className={styles.actions}>
+				{!held && (
+					<Button onClick={onConnect}>
+						{t("kitConnect")}{" "}
+						<span className={styles.hidden}>{service.title}</span>
+					</Button>
+				)}
+				{held && state === "connect_again" && (
+					<Button onClick={onConnect}>
+						{t("connectorAgainButton")}{" "}
+						<span className={styles.hidden}>{service.title}</span>
+					</Button>
+				)}
+				{held && state === "sign_in_again" && (
+					<Button onClick={onConnect}>
+						{t("connectorSignInAgain")}{" "}
+						<span className={styles.hidden}>{service.title}</span>
+					</Button>
+				)}
+				{held && (
+					<Button kind="quiet" onClick={onRemove}>
+						{t("connectorRemove")}{" "}
+						<span className={styles.hidden}>{held.name}</span>
+					</Button>
+				)}
+			</span>
 		</li>
 	);
 }

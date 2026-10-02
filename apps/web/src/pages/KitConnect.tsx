@@ -66,7 +66,7 @@ export function KitConnect({
 		if (codeOf(message) === "connector_not_in_kit")
 			return t("kitChanged", fill);
 		if (message.startsWith("the server did not answer"))
-			return t("addTimeout", { server: service.title });
+			return t("kitTimeout", { service: service.title });
 		return t("kitRefused", fill);
 	};
 	const connect = async (attempt?: string) => {
@@ -88,7 +88,7 @@ export function KitConnect({
 			setDone({ ...answer, signedIn: Boolean(attempt) });
 		} catch (e) {
 			setRefused(said(e));
-			if (attempt) setSign({ kind: "failed", code: "sign_in_timed_out" });
+			if (attempt) setSign({ kind: "failed", code: "" });
 		}
 		setBusy(false);
 	};
@@ -235,7 +235,7 @@ export function KitConnect({
 									</span>
 								</>
 							)}
-							{sign.kind === "failed" && (
+							{sign.kind === "failed" && !refused && (
 								<p role="alert" className={styles.alert}>
 									{failedWords(sign.code)}
 								</p>
@@ -278,7 +278,7 @@ export function KitConnect({
 							))}
 						</>
 					)}
-					{refused && sign.kind !== "failed" && (
+					{refused && (
 						<p role="alert" className={styles.alert}>
 							{refused}
 						</p>

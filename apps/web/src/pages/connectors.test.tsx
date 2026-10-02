@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
+import { t } from "../strings/t.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 
@@ -1737,6 +1738,74 @@ describe("a role's kit on the agent page", () => {
 			await within(dialog).findByText("Linear is connected to Theo"),
 		).toBeTruthy();
 		expect(s.calls("connector.tools")).toHaveLength(0);
+	});
+
+	it("connector_add_from_a_kit_says_why_a_signed_in_connect_failed", async () => {
+		const open = vi.spyOn(window, "open").mockReturnValue(null);
+		const { s } = await openedWithKit([KIT_LINEAR], [], []);
+		fireEvent.click(
+			within(kitRow("Linear")).getByRole("button", { name: "Connect Linear" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Connect Linear to Theo",
+		});
+		const asked = await sent(s, "connector.sign_in");
+		await s.reply(asked, {
+			attempt: ATTEMPT,
+			authorize_url: "https://linear.example/authorize?state=abc",
+			issuer: "https://linear.example",
+		});
+		const button = await within(dialog).findByRole("button", {
+			name: "Sign in with Linear",
+		});
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		fireEvent.click(button);
+		expect(open).toHaveBeenCalled();
+		await act(() => vi.advanceTimersByTimeAsync(2100));
+		const status = s.calls("connector.sign_in_status")[0] as NonNullable<
+			ReturnType<FakeSocket["calls"]>[number]
+		>;
+		await s.reply(status, { state: "signed_in" });
+		vi.useRealTimers();
+		const connect = await sent(s, "connector.connect");
+		await s.fail(
+			connect,
+			-32005,
+			"connector_not_in_kit: linear is not in the kit",
+		);
+		expect(
+			await within(dialog).findByText(
+				t("kitChanged", { service: "Linear", name: "Theo" }),
+			),
+		).toBeTruthy();
+		expect(within(dialog).queryByText(en.addSignInTimedOut)).toBeNull();
+	});
+
+	it("connector_add_from_a_kit_says_the_service_did_not_answer", async () => {
+		const { s } = await openedWithKit([KIT_NOTION], [], []);
+		fireEvent.click(
+			within(kitRow("Notion")).getByRole("button", { name: "Connect Notion" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Connect Notion to Theo",
+		});
+		fireEvent.change(within(dialog).getByLabelText("Your Notion key"), {
+			target: { value: "k" },
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: "Connect" }));
+		await s.fail(
+			await sent(s, "connector.connect"),
+			-32005,
+			"the server did not answer within thirty seconds",
+		);
+		expect(
+			await within(dialog).findByText(
+				"Notion did not answer within thirty seconds. Try again in a minute.",
+			),
+		).toBeTruthy();
+		expect(
+			within(dialog).queryByText(en.addTimeout.replace("{server}", "Notion")),
+		).toBeNull();
 	});
 
 	it("done_groups_the_tools_by_what_the_agent_may_do", async () => {
