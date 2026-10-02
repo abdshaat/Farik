@@ -2405,7 +2405,16 @@ mod tests {
             session_spec(deps, &team, &ask).expect("the spec")
         };
         let conversation = spec(SessionPurpose::Conversation, None);
-        assert_eq!(skill_names(&conversation), ["writing-task-contracts"]);
+        // The agent's replacement stands in for the role's skill, and the kit's skills follow it.
+        let mut wanted = vec!["writing-task-contracts".to_string()];
+        wanted.extend(
+            farik_roles::load_kit(farik_core::contract::Role::ProductManager)
+                .expect("the kit")
+                .skills
+                .into_iter()
+                .map(|skill| skill.name),
+        );
+        assert_eq!(skill_names(&conversation), wanted);
         assert!(
             !conversation
                 .system_prompt
@@ -2441,7 +2450,8 @@ mod tests {
             &asked(deps, pm, SessionPurpose::Conversation, None),
         )
         .expect("the spec");
-        assert!(review.skills.is_empty());
+        // Only the kit's skills load: the unconfirmed replacement is not among them.
+        assert_eq!(skill_names(&review), &wanted[1..]);
         assert!(
             review
                 .system_prompt

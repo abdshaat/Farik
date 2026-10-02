@@ -149,8 +149,58 @@ pub fn load_kit(role: Role) -> Result<Kit, KitError> {
         .into_iter()
         .map(|skill| skill.name)
         .collect();
-    // No shipped kit has a skill yet; each arm above gains its `include_str!` files with its first.
-    parse_kit(role, yaml, &role_skills, &[])
+    parse_kit(role, yaml, &role_skills, &embedded_skills(role))
+}
+
+/// A kit's skills as `(name, files)`, each file embedded in the binary.
+type EmbeddedSkills = Vec<(&'static str, &'static [(&'static str, &'static str)])>;
+
+/// The skill folders a role's kit ships, in the order its `kit.yaml` names them.
+fn embedded_skills(role: Role) -> EmbeddedSkills {
+    match role {
+        Role::ProductManager => vec![
+            (
+                "asking-the-right-questions",
+                &[(
+                    "SKILL.md",
+                    include_str!(
+                        "../roles/product_manager/skills/asking-the-right-questions/SKILL.md"
+                    ),
+                )],
+            ),
+            (
+                "writing-requirements",
+                &[(
+                    "SKILL.md",
+                    include_str!("../roles/product_manager/skills/writing-requirements/SKILL.md"),
+                )],
+            ),
+            (
+                "prioritising-the-backlog",
+                &[(
+                    "SKILL.md",
+                    include_str!(
+                        "../roles/product_manager/skills/prioritising-the-backlog/SKILL.md"
+                    ),
+                )],
+            ),
+            (
+                "scoping-a-release",
+                &[(
+                    "SKILL.md",
+                    include_str!("../roles/product_manager/skills/scoping-a-release/SKILL.md"),
+                )],
+            ),
+            (
+                "using-product-sources",
+                &[(
+                    "SKILL.md",
+                    include_str!("../roles/product_manager/skills/using-product-sources/SKILL.md"),
+                )],
+            ),
+        ],
+        _ => Vec::new(),
+    }
 }
 
 static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
@@ -902,6 +952,29 @@ mod tests {
     }
 
     #[test]
+    fn product_manager_kit_carries_its_skills() {
+        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "asking-the-right-questions",
+                "writing-requirements",
+                "prioritising-the-backlog",
+                "scoping-a-release",
+                "using-product-sources",
+            ]
+        );
+        for skill in &kit.skills {
+            assert!(
+                skill.session_files.contains_key("SKILL.md"),
+                "{}",
+                skill.name
+            );
+        }
+    }
+
+    #[test]
     fn holds_every_shipped_kit_to_its_schema() {
         let roles = Path::new(env!("CARGO_MANIFEST_DIR")).join("roles");
         let mut folders = 0;
@@ -924,7 +997,7 @@ mod tests {
                     .iter()
                     .map(|s| s.name.clone())
                     .collect::<Vec<_>>(),
-                &[],
+                &super::embedded_skills(role),
             )
             .unwrap_or_else(|error| panic!("{id}: {error}"));
             load_kit(role).expect("and load_kit loads it");

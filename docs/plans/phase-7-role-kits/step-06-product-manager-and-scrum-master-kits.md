@@ -61,7 +61,7 @@ Files: `product_manager/skills/{asking-the-right-questions,writing-requirements,
 
 - `product_manager_kit_carries_its_skills`: `load_kit(ProductManager)`'s skills are those five names in that order, each `CheckedSkill` with its `SKILL.md`. RED: the kit has none.
 
-- [ ] `feat(roles): give the Product Manager's kit its skills`
+- [x] `feat(roles): give the Product Manager's kit its skills`
 
 ### Task 2: The Scrum Master's skills
 

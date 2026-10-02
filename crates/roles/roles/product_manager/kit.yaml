@@ -1,3 +1,8 @@
 role: product_manager
-skills: []
+skills:
+  - asking-the-right-questions
+  - writing-requirements
+  - prioritising-the-backlog
+  - scoping-a-release
+  - using-product-sources
 connectors: []
