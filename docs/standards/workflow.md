@@ -19,6 +19,17 @@ The product has its own vocabulary (task contract, sprint, ceremony, governor, t
 
 The process is the one the [superpowers](https://github.com/obra/superpowers) plugin for Claude Code enforces (ADR 0001), with one exception: step plans are written by copying `docs/plans/step-template.md`, not with the plugin's `writing-plans` skill, which puts the implementation into the plan (ADR 0008, ADR 0010). Where the plugin and this document disagree, this document wins.
 
+## Who does what
+
+Planning and judging run on Opus 5.5; execution runs on Sonnet 5.5 (ADR 0032).
+
+| Model | Does |
+|---|---|
+| Opus 5.5 | Brainstorm, design, step plans, mockups, readiness reviews, landing reviews and re-reviews |
+| Sonnet 5.5 | A plan that has passed its readiness review: the tasks under TDD, the fix waves, the recording of the spec, the runbook preparation |
+
+The reviews stay on Opus because they are the independent check on the executor (hard rule 10). Every hard rule, the pass bars and one task, one commit are unchanged. A decision found missing during execution goes back to the planning role; the executor does not decide it.
+
 ## The sequence
 
 Every non-trivial change goes through these six stages in order. (Stages of the workflow, not to be confused with phases of the project plan, which are bodies of product work; see stage 2.) "Non-trivial" means anything that adds or changes behavior. A typo fix or a one-line doc correction skips to stage 5.
@@ -31,11 +42,15 @@ Skipping a stage is allowed only when the person who owns the change says so in 
 
 ### 1. Brainstorm
 
+Opus 5.5 does this (see Who does what).
+
 Before any code or plan, refine the idea by asking questions. What is the user-facing outcome? Which section of `docs/SPEC.md` does this serve, and which functional requirement number? What is out of scope? What could be simpler? Present the design in small sections and get agreement on each before moving on.
 
 Output: a short design, two to twenty lines, that becomes the header of the plan. For a change that reverses or adds to a decision in the spec, also an ADR (see `docs/decisions/`).
 
 ### 2. Plan
+
+Opus 5.5 writes the plan and runs its readiness review (see Who does what). A plan must be complete enough for Sonnet 5.5 to execute without design judgement.
 
 Planning has two levels, and both are written before any product code.
 
@@ -60,6 +75,8 @@ Ambiguity inside an implementation is not this gate's job. A type that does not 
 No forward dependencies. A step depends only on phases already merged to `main` and on earlier steps already committed on the same phase branch. A task depends only on earlier tasks in the same plan. Nothing in a plan stubs, mocks, or leaves a placeholder for work that a later step will do; if a later step needs an interface, the later step adds it. Phases are ordered so that this holds across the whole project plan, and a step whose plan cannot be written without a forward reference means the phase is in the wrong order.
 
 ### 3. Execute
+
+Sonnet 5.5 executes a plan that has passed its readiness review (see Who does what).
 
 Work on the phase branch, `phase/<n>-<name>`, created from `main` when the phase's first step starts and kept until the phase merges. Use a git worktree for it so that a clean test baseline can be confirmed before the first change. Run the full check once at the start of the phase, and again at the start of a step only when the branch's head is not the commit the previous step's landing review verified.
 
@@ -91,7 +108,7 @@ Then open the phase's pull request to `main` using the template. One phase is on
 
 A pull request never contains work from two phases. Each step inside a phase is still reviewed as it lands: the reviewer reads the step's commits against its plan on the phase branch and records the review in the pull request thread, so that the final review of the whole phase is a confirmation rather than a first reading.
 
-This landing review is where the defects are, and it is not optional: a step whose landing review did not complete is reviewed before the pull request is marked ready. It reads running code, not a plan, and its acceptance bar is mutation: re-introduce the bug each test claims to catch and confirm the suite notices. A test that passes both with the code and with the code broken is not a test, and a green check does not distinguish them. ADR 0008 records what these reviews found that no plan review could.
+Landing reviews and re-reviews are done by Opus 5.5 (see Who does what). This landing review is where the defects are, and it is not optional: a step whose landing review did not complete is reviewed before the pull request is marked ready. It reads running code, not a plan, and its acceptance bar is mutation: re-introduce the bug each test claims to catch and confirm the suite notices. A test that passes both with the code and with the code broken is not a test, and a green check does not distinguish them. ADR 0008 records what these reviews found that no plan review could.
 
 Reviewers report findings by severity: critical (blocks merge: correctness, security, a rule in this document broken), important (must be addressed or explicitly deferred with a reason), and minor (author's call). A critical finding is never resolved by a comment; it is resolved by a commit.
 
