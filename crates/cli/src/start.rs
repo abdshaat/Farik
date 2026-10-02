@@ -292,7 +292,7 @@ pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.farik/lo
     read your credential files (~/.git-credentials, ~/.ssh, ~/.claude/.credentials.json, the gh \
     configuration), push with a git hidden in a script, which farik_exec's check does not see, and \
     read .farik/local/daemon.json, whose token lets them act as you through farik: approve, \
-    accept, answer, and integrate, and get the keys you gave a connector, which they can also read \
+    accept, answer, add skills, and integrate, and get the keys you gave a connector, which they can also read \
     from a running connector's /proc/<pid>/environ. The governor still checks every path and \
     permission it is asked about.";
 

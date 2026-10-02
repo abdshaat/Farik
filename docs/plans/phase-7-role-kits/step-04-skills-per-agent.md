@@ -247,7 +247,7 @@ Files: `cli/src/skill.rs`, `cli/src/lib.rs`. Each change goes through `here_or_s
 
 `docs/SPEC.md`: 6 (the three levels and their order, role skills in the prompt, a shipped skill replaced only on confirmation), 6.7 (adding, confirming, limits), 8.2 (the plugin folder outside the project, `Skill` in `--tools`, `disableSkillShellExecution`, the hook's two checks), 8.3 (add "add skills" to the no-sandbox warning's list, "approve, accept, answer, and integrate", since a command can read `daemon.json`'s token and send `skill_save`), 8.5 (the four events), 8.6 (skills as instructions, confirmed on this computer, no commands and no `@` file attachments, and the no-sandbox residual), F9 (the commands and RPCs). `docs/plans/project-plan.md`: phase 7's row 04 and its skills decision bullet, corrected if execution changed them. `docs/design/role-kits.md`: its steps table.
 
-- [ ] `docs(spec): record skills per agent`
+- [x] `docs(spec): record skills per agent`
 
 ## Verification
 

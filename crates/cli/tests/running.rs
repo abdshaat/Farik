@@ -98,6 +98,9 @@ fn warned(err: &str) -> bool {
         && err.contains("a git hidden in a script")
         && err.contains(".farik/local/daemon.json, whose token lets them act as you through farik")
         // ADR 0030: the token also gets a connector's keys, as does its process's environment.
+        // ADR 0034: a command that reads the token can also send `skill_save`, which counts as the
+        // person's confirmation of a skill.
+        && err.contains("approve, accept, answer, add skills, and integrate")
         && err.contains("and get the keys you gave a connector")
         && err.contains("/proc/<pid>/environ")
 }
