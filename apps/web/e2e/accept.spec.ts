@@ -5,7 +5,7 @@ import { screenshots } from "./fixtures/shots.ts";
 /** Opens the task's acceptance gate from Today's Waiting row, once the review is in. */
 async function openTheGate(page: Page) {
 	await page.getByRole("link", { name: "Today" }).first().click();
-	await expect(page.getByText(/^Accept /)).toBeVisible({ timeout: 15_000 });
+	await expect(page.getByText(/^Accept /)).toBeVisible({ timeout: 30_000 });
 	await page.getByRole("link", { name: "Review" }).click();
 	await expect(page).toHaveURL(/\/tasks\/FRK-1\/accept$/);
 }
@@ -13,6 +13,8 @@ async function openTheGate(page: Page) {
 test("a high-risk plan is approved, its work sent back once, then accepted", async ({
 	page,
 }) => {
+	// Three sessions play before the gate, and a slow disk stretches each one.
+	test.setTimeout(90_000);
 	const serve = await startServe({
 		team: "pm-architect-developer",
 		transcripts: [

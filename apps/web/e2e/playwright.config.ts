@@ -8,7 +8,7 @@ export default defineConfig({
 	testDir: ".",
 	workers: 1,
 	forbidOnly: true,
-	reporter: "list",
+	reporter: [["list"], ["./fixtures/cleanup-reporter.ts"]],
 	// Failure traces go outside the repository, where neither git nor biome sees them, in a folder
 	// per worktree: Playwright empties it when it starts, so two checks must not share one.
 	outputDir: join(
