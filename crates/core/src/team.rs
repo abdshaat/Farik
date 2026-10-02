@@ -344,15 +344,9 @@ fn entry_errors(server: &McpServerWire) -> Vec<(String, String)> {
         .map(|key| key.as_str())
         .collect();
     for (header, template) in &server.headers {
-        if !header_names_only(template, &keys) {
-            let header = header.as_str();
-            refuse(
-                &format!("headers/{header}"),
-                format!(
-                    "header_key_unknown: {header} may hold {{KEY}} only for a key this connector \
-                     is given in credential_keys."
-                ),
-            );
+        let header = header.as_str();
+        if let Some(message) = header_error(header, template, &keys) {
+            refuse(&format!("headers/{header}"), message);
         }
     }
     refused
@@ -379,6 +373,33 @@ fn url_holds_secret(url: &str) -> bool {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     authority.contains('@') || rest.contains('?')
+}
+
+/// Why the header `header` with `template` is refused, when it is: it holds a credential's value
+/// itself, or names a key the connector is not given.
+fn header_error(header: &str, template: &str, keys: &[&str]) -> Option<String> {
+    if names_a_secret(header) && !template.contains('{') {
+        return Some(format!(
+            "header_holds_secret: {header} holds its value itself, and the team file is shared. \
+             Write {{KEY}} where the key goes, with KEY in credential_keys, and give the key when \
+             you connect."
+        ));
+    }
+    (!header_names_only(template, keys)).then(|| {
+        format!(
+            "header_key_unknown: {header} may hold {{KEY}} only for a key this connector is given \
+             in credential_keys."
+        )
+    })
+}
+
+/// Whether a header's name says it carries a credential: `Authorization`, or a name holding
+/// `key`, `token`, `secret` or `auth`, in any case.
+fn names_a_secret(header: &str) -> bool {
+    let header = header.to_ascii_lowercase();
+    ["key", "token", "secret", "auth"]
+        .iter()
+        .any(|word| header.contains(word))
 }
 
 /// Whether every `{` in a header template opens a `{KEY}` for one of `keys`.
@@ -2029,6 +2050,38 @@ mod tests {
                 "{command}: a bare name goes through PATH, and a full path is the user's"
             );
         }
+    }
+
+    #[test]
+    fn refuses_a_header_holding_a_secret_itself() {
+        // The team file is committed: a key typed in place of `{API_KEY}` would be shared.
+        for (header, template) in [
+            ("Authorization", "Bearer ghp_abc123"),
+            ("X-Api-Key", "abc123"),
+            ("x-auth-token", "t"),
+            ("Client-Secret", "s"),
+            ("Private-Token", "t"),
+        ] {
+            let mut server = an_http_server();
+            server["headers"] = json!({ header: template });
+            let refused = refusals(&with_servers(json!([server])));
+            assert_eq!(refused.len(), 1, "{header}: {refused:?}");
+            assert_eq!(
+                refused[0].0,
+                format!("/agents/0/mcp_servers/0/headers/{header}"),
+                "{header}"
+            );
+            assert!(
+                refused[0].1.starts_with("header_holds_secret: "),
+                "{header}: {}",
+                refused[0].1
+            );
+        }
+        let mut server = an_http_server();
+        server["headers"] = json!({
+            "Authorization": "Bearer {API_KEY}", "X-Team": "farik", "Accept": "text/plain"
+        });
+        assert!(validate_team(&with_servers(json!([server]))).is_ok());
     }
 
     #[test]
