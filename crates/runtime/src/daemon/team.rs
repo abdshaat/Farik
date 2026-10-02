@@ -179,7 +179,23 @@ fn skill_get(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
             ));
         }
     };
-    let folder = crate::skills::skill_folder(deps.files.root(), &level, name);
+    if !farik_roles::skill_name_ok(name) {
+        return Err(Failure::new(
+            REFUSED,
+            "skill_name_invalid: a skill's name is lower-case words joined by hyphens, up to 64 characters",
+        ));
+    }
+    if let crate::skills::SkillLevel::Agent(id) = &level {
+        let team = deps.files.read_team().map_err(|e| internal(&e))?;
+        if !team.agents.iter().any(|agent| agent.id.as_str() == id) {
+            return Err(Failure::new(
+                super::web::NOT_FOUND,
+                format!("there is no agent {id}"),
+            ));
+        }
+    }
+    let folder = crate::skills::skill_folder_unlinked(deps.files.root(), &level, name)
+        .map_err(|refusal| Failure::new(REFUSED, refusal.to_string()))?;
     if std::fs::symlink_metadata(&folder).is_err() {
         return Err(Failure::new(
             super::web::NOT_FOUND,
@@ -1442,6 +1458,31 @@ pub(super) mod tests {
             &json!({ "name": "skill.get", "params": missing }),
         );
         assert_eq!(reply["error"]["code"], -32002, "{reply}");
+        // No such agent, and a name that is not a skill name, are refused before any path is built.
+        let reply = rpc(
+            &harness.daemon,
+            "query",
+            &json!({ "name": "skill.get", "params":
+                { "level": "agent", "agent": "../../x", "name": "api-style" } }),
+        );
+        assert_eq!(reply["error"]["code"], -32002, "{reply}");
+        assert!(
+            reply["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("no agent")),
+            "{reply}"
+        );
+        // The protocol schema refuses such a name first; the function refuses it too.
+        let refused = super::skill_get(
+            &harness.project.deps,
+            &json!({ "level": "team", "name": "../x" }),
+        )
+        .expect_err("refused");
+        let shown = format!("{refused:?}");
+        assert!(
+            shown.contains("-32005") && shown.contains("skill_name_invalid: "),
+            "{shown}"
+        );
     }
 
     #[test]

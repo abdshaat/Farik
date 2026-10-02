@@ -172,7 +172,7 @@ pub fn check_skill(
     let Some(Value::String(named)) = map.get("name") else {
         return Err(SkillRefusal::FrontmatterInvalid);
     };
-    if !name_ok(named) {
+    if !skill_name_ok(named) {
         return Err(SkillRefusal::NameInvalid);
     }
     if named != name {
@@ -247,7 +247,9 @@ fn split_frontmatter(text: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn name_ok(name: &str) -> bool {
+/// A skill's name: 1 to 64 characters, lower-case letters and digits in words joined by single hyphens.
+#[must_use]
+pub fn skill_name_ok(name: &str) -> bool {
     name.chars().count() <= 64
         && !name.is_empty()
         && name.split('-').all(|word| {
