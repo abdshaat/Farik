@@ -1465,3 +1465,388 @@ describe("signing in to a service", () => {
 		}
 	});
 });
+
+/** What a role's kit offers Theo, as `team.get` answers it (ADR 0036). */
+const KIT_NOTION = {
+	name: "notion",
+	title: "Notion",
+	about: "Notion is where your team keeps docs, notes and plans.",
+	why: "Reads your product docs, so plans start from what you already wrote.",
+	setup:
+		"On Notion’s page, choose “New integration”, name it Farik and pick your workspace. Copy the value labelled “Internal Integration Secret”.",
+	key_page: "https://www.notion.so/profile/integrations",
+	labels: {
+		search: "search pages",
+		read_page: "read a page",
+		create_page: "create a page",
+		delete_page: "delete a page",
+	},
+	auth: "keys",
+	credential_keys: ["NOTION_KEY"],
+};
+const KIT_LINEAR = {
+	name: "linear",
+	title: "Linear",
+	about: "Linear is where your team keeps its backlog.",
+	why: "Reads your backlog, so a request can start from an issue you already filed.",
+	setup: "Sign in with your Linear account.",
+	labels: {},
+	auth: "oauth",
+	credential_keys: [],
+};
+const KIT_POSTHOG = {
+	name: "posthog",
+	title: "PostHog",
+	about: "PostHog shows how people use your product.",
+	why: "Reads how people use your product, so priorities follow what they do.",
+	setup: "Make a key on PostHog’s page and paste it.",
+	key_page: "https://posthog.example/keys",
+	labels: {},
+	auth: "keys",
+	credential_keys: ["POSTHOG_KEY"],
+};
+/** A kit service as `team.yaml` holds it once connected: the kit's tags are its tools. */
+const kitEntry = (name: string, transport: "http" | "stdio" = "stdio") => ({
+	name,
+	source: "kit",
+	transport,
+	...(transport === "http"
+		? { url: `https://${name}.example/mcp`, oauth: {} }
+		: {
+				command: `${name}-server`,
+				credential_keys: [`${name.toUpperCase()}_KEY`],
+			}),
+	tools: { search: "network", create_page: "external_effect" },
+});
+const KIT_STATES = [
+	{
+		agent: "theo",
+		server: "linear",
+		state: "connected",
+		auth: "oauth",
+		source: "kit",
+		revokes: true,
+		stored_in: "keychain",
+	},
+	{
+		agent: "theo",
+		server: "posthog",
+		state: "connect_again",
+		auth: "keys",
+		source: "kit",
+	},
+	{
+		agent: "theo",
+		server: "plausible",
+		state: "not_in_kit",
+		auth: "keys",
+		source: "kit",
+	},
+];
+const kitTeam = (servers: object[]) => theoWith(servers);
+
+/** Theo's page with a kit offering `services`, Theo holding `held`, whose states are `states`. */
+async function openedWithKit(
+	services: object[],
+	held: object[],
+	states: object[],
+) {
+	const { container, socket } = await renderApp("/team/theo");
+	const s = socket as FakeSocket;
+	await answerStatus(s, false);
+	await answerQuery(s, "team.get", {
+		...teamGot(kitTeam(held), states),
+		kits: [{ role: "software_developer", connectors: services }],
+	});
+	await answerQuery(s, "models.list", { models: [] });
+	await screen.findByRole("heading", { name: "Theo, your Developer" });
+	return { container, s };
+}
+
+/** The row of the kit service `title` in "From the Developer’s kit". */
+const kitRow = (title: string) => {
+	const section = screen.getByRole("list", {
+		name: "From the Developer’s kit",
+	});
+	return within(section)
+		.getByText(title, { selector: "strong" })
+		.closest("li") as HTMLElement;
+};
+
+describe("a role's kit on the agent page", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+		localStorage.clear();
+	});
+
+	it("agent_edit_lists_the_kit_above_your_own", async () => {
+		const { container } = await openedWithKit(
+			[KIT_NOTION, KIT_LINEAR, KIT_POSTHOG],
+			[
+				AIRTABLE,
+				kitEntry("linear", "http"),
+				kitEntry("posthog"),
+				kitEntry("plausible"),
+			],
+			[...CONNECTORS.slice(0, 1), ...KIT_STATES],
+		);
+		const kit = screen.getByRole("list", { name: "From the Developer’s kit" });
+		const yours = screen.getByRole("list", { name: en.connectorsYours });
+		// The kit comes first.
+		expect(
+			kit.compareDocumentPosition(yours) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		// Not connected: the service, why, and Connect.
+		const notion = kitRow("Notion");
+		expect(within(notion).getByText(KIT_NOTION.why)).toBeTruthy();
+		expect(
+			within(notion).getByRole("button", { name: "Connect Notion" }),
+		).toBeTruthy();
+		expect(within(notion).queryByRole("button", { name: /Remove/ })).toBeNull();
+		// Connected: signed in, and Remove.
+		const linear = kitRow("Linear");
+		expect(within(linear).getByText(en.kitConnected)).toBeTruthy();
+		expect(within(linear).getByText("Signed in to Linear.")).toBeTruthy();
+		expect(
+			within(linear).getByRole("button", { name: "Remove linear" }),
+		).toBeTruthy();
+		expect(
+			within(linear).queryByRole("button", { name: /Connect/ }),
+		).toBeNull();
+		// Farik updated it: Connect again, with the reason, and Remove.
+		const posthog = kitRow("PostHog");
+		expect(within(posthog).getByText(en.kitAgain)).toBeTruthy();
+		expect(
+			within(posthog).getByRole("button", { name: "Connect again PostHog" }),
+		).toBeTruthy();
+		expect(
+			within(posthog).getByRole("button", { name: "Remove posthog" }),
+		).toBeTruthy();
+		// Farik no longer offers it: Remove alone, whatever the entry says.
+		const gone = kitRow("plausible");
+		expect(within(gone).getByText(en.kitGone)).toBeTruthy();
+		expect(
+			within(gone).getByRole("button", { name: "Remove plausible" }),
+		).toBeTruthy();
+		expect(within(gone).queryByRole("button", { name: /Connect/ })).toBeNull();
+		// A kit service is not also "Added by you".
+		expect(
+			within(yours).queryByText("linear", { selector: "strong" }),
+		).toBeNull();
+		expect(
+			within(yours).getByText("airtable", { selector: "strong" }),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("connector_add_from_a_kit_skips_labelling", async () => {
+		const { container, s } = await openedWithKit([KIT_NOTION], [], []);
+		fireEvent.click(
+			within(kitRow("Notion")).getByRole("button", { name: "Connect Notion" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Connect Notion to Theo",
+		});
+		expect(within(dialog).getByText(KIT_NOTION.about)).toBeTruthy();
+		expect(within(dialog).getByText(KIT_NOTION.why)).toBeTruthy();
+		// The service's own label, quoted in its steps, is shown as it is.
+		expect(within(dialog).getByText(KIT_NOTION.setup)).toBeTruthy();
+		const link = within(dialog).getByRole("link", { name: /Get your key/ });
+		expect(link.getAttribute("href")).toBe(KIT_NOTION.key_page);
+		expect(link.getAttribute("target")).toBe("_blank");
+		expect(link.getAttribute("rel")).toContain("noopener");
+		const key = within(dialog).getByLabelText(
+			"Your Notion key",
+		) as HTMLInputElement;
+		expect(key.type).toBe("password");
+		await expectNoAxeViolations(container);
+		fireEvent.change(key, { target: { value: "ntn-secret-1" } });
+		fireEvent.click(within(dialog).getByRole("button", { name: "Connect" }));
+		const connect = await sent(s, "connector.connect");
+		expect(connect.params).toEqual({
+			agent: "theo",
+			server: { name: "notion", source: "kit" },
+			keys: { NOTION_KEY: "ntn-secret-1" },
+			tags: {},
+		});
+		// Nothing was listed for the user to label, and no label is asked for.
+		expect(s.calls("connector.tools")).toHaveLength(0);
+		expect(within(dialog).queryByRole("radio")).toBeNull();
+		expect(container.innerHTML).not.toContain("ntn-secret-1");
+		await s.reply(connect, {
+			stored_in: "keychain",
+			tools: { search: "network" },
+		});
+		expect(
+			await within(dialog).findByText("Notion is connected to Theo"),
+		).toBeTruthy();
+	});
+
+	it("connector_add_from_a_kit_signs_in_when_the_kit_does", async () => {
+		const open = vi.spyOn(window, "open").mockReturnValue(null);
+		const { container, s } = await openedWithKit([KIT_LINEAR], [], []);
+		fireEvent.click(
+			within(kitRow("Linear")).getByRole("button", { name: "Connect Linear" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Connect Linear to Theo",
+		});
+		// No key field: the button names the service, and the page is asked for at once.
+		expect(within(dialog).queryByLabelText(/key/i)).toBeNull();
+		const asked = await sent(s, "connector.sign_in");
+		expect(asked.params).toEqual({
+			agent: "theo",
+			server: { name: "linear", source: "kit" },
+		});
+		await s.reply(asked, {
+			attempt: ATTEMPT,
+			authorize_url: "https://linear.example/authorize?state=abc",
+			issuer: "https://linear.example",
+		});
+		const button = await within(dialog).findByRole("button", {
+			name: "Sign in with Linear",
+		});
+		await expectNoAxeViolations(container);
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		fireEvent.click(button);
+		expect(open).toHaveBeenCalledWith(
+			"https://linear.example/authorize?state=abc",
+			"_blank",
+			"noopener",
+		);
+		await act(() => vi.advanceTimersByTimeAsync(2100));
+		const status = s.calls("connector.sign_in_status")[0] as NonNullable<
+			ReturnType<FakeSocket["calls"]>[number]
+		>;
+		await s.reply(status, { state: "signed_in" });
+		vi.useRealTimers();
+		// Signed in is connected: nothing to label.
+		const connect = await sent(s, "connector.connect");
+		expect(connect.params).toEqual({
+			agent: "theo",
+			server: { name: "linear", source: "kit" },
+			attempt: ATTEMPT,
+			tags: {},
+		});
+		await s.reply(connect, {
+			stored_in: "keychain",
+			tools: { search: "network" },
+		});
+		expect(
+			await within(dialog).findByText("Linear is connected to Theo"),
+		).toBeTruthy();
+		expect(s.calls("connector.tools")).toHaveLength(0);
+	});
+
+	it("done_groups_the_tools_by_what_the_agent_may_do", async () => {
+		const { container, s } = await openedWithKit([KIT_NOTION], [], []);
+		fireEvent.click(
+			within(kitRow("Notion")).getByRole("button", { name: "Connect Notion" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Connect Notion to Theo",
+		});
+		fireEvent.change(within(dialog).getByLabelText("Your Notion key"), {
+			target: { value: "k" },
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: "Connect" }));
+		await s.reply(await sent(s, "connector.connect"), {
+			stored_in: "keychain",
+			tools: {
+				search: "network",
+				"API-post-search": "network",
+				create_page: "external_effect",
+				delete_page: "denied",
+			},
+		});
+		await within(dialog).findByText("Notion is connected to Theo");
+		const list = (heading: string) => {
+			const group = within(dialog)
+				.getByText(heading)
+				.closest("div") as HTMLElement;
+			return within(group)
+				.getAllByRole("listitem")
+				.map((item) => item.textContent);
+		};
+		// Each tool by its kit label, or by its name with `_` and `-` read as spaces.
+		expect(list("Theo can now")).toEqual(["search pages", "API post search"]);
+		expect(list("Theo asks you first before")).toEqual(["create a page"]);
+		expect(list("Farik never offers")).toEqual(["delete a page"]);
+		expect(
+			within(dialog).getByText(
+				"Theo’s key is kept in your computer’s keychain. Theo never sees it: Farik hands it to Notion.",
+			),
+		).toBeTruthy();
+		expect(
+			within(dialog).getByText(
+				"Only Theo has Notion. To give it to someone else, connect it from their page.",
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("saving_the_agent_keeps_a_kit_connector_connected_meanwhile", async () => {
+		const { s } = await openedWithKit([KIT_NOTION], [AIRTABLE], []);
+		editPersona();
+		fireEvent.click(
+			within(kitRow("Notion")).getByRole("button", { name: "Connect Notion" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Connect Notion to Theo",
+		});
+		fireEvent.change(within(dialog).getByLabelText("Your Notion key"), {
+			target: { value: "k" },
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: "Connect" }));
+		await s.reply(await sent(s, "connector.connect"), {
+			stored_in: "keychain",
+			tools: { search: "network" },
+		});
+		const before = teamAskedTimes(s);
+		fireEvent.click(
+			await within(dialog).findByRole("button", { name: "Back to Theo" }),
+		);
+		await waitFor(() => expect(teamAskedTimes(s)).toBeGreaterThan(before));
+		await answerQuery(s, "team.get", {
+			...teamGot(kitTeam([AIRTABLE, kitEntry("notion")]), [
+				{
+					agent: "theo",
+					server: "notion",
+					state: "connected",
+					auth: "keys",
+					source: "kit",
+					stored_in: "keychain",
+				},
+			]),
+			kits: [{ role: "software_developer", connectors: [KIT_NOTION] }],
+		});
+		await waitFor(() =>
+			expect(within(kitRow("Notion")).getByText(en.kitConnected)).toBeTruthy(),
+		);
+		const theo = await savedTheo(s);
+		expect(theo?.persona).toBe("Short and kind.");
+		expect(theo?.mcp_servers?.map((c) => c.name)).toEqual([
+			"airtable",
+			"notion",
+		]);
+	});
+
+	it("kit_screens_never_name_the_plumbing", () => {
+		const plumbing = /\b(mcp|oauth|token)/i;
+		// Farik's own words for these screens.
+		const own = Object.entries(en)
+			.filter(([key]) => key.startsWith("kit"))
+			.map(([key, words]) => [key, words]);
+		expect(own.length).toBeGreaterThan(10);
+		for (const [key, words] of own) expect(words, key).not.toMatch(plumbing);
+		// The kit's copy, outside a service's label quoted in its steps.
+		const unquoted = (words: string) =>
+			words.replace(/[‘“][^’”\n]{0,60}[’”]/g, " ");
+		for (const service of [KIT_NOTION, KIT_LINEAR, KIT_POSTHOG]) {
+			for (const field of ["title", "about", "why"] as const)
+				expect(service[field]).not.toMatch(plumbing);
+			expect(unquoted(service.setup)).not.toMatch(plumbing);
+		}
+	});
+});

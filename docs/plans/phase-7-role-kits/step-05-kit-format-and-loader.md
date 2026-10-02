@@ -215,7 +215,7 @@ Files: as the file map's Task 7 lines. Built from Task 1's approved boards.
 - `saving_the_agent_keeps_a_kit_connector_connected_meanwhile`: connect a kit service after the draft is read, then Save; the `team.replace` body still holds the kit entry. RED: `rebased` drops it. `rebased` keeps `kit` entries as it keeps `custom` ones; built-ins are `source === "builtin"`.
 - `kit_screens_never_name_the_plumbing`: Farik's strings in `strings/en.ts` for these screens and the fixture kit's copy, outside quoted labels in `setup`, hold no "MCP", "OAuth" or "token". Service tool names are not checked.
 
-- [ ] `feat(web): connect a kit's services on the agent page`
+- [x] `feat(web): connect a kit's services on the agent page`
 
 ### Task 8: The pins
 

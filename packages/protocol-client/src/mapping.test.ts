@@ -137,4 +137,43 @@ describe("mapping", () => {
 		expect(toSnake({ body: { files } })).toEqual({ body: { files } });
 		expect(toCamel({ files })).toEqual({ files });
 	});
+	it("keeps_a_kit_services_tool_labels_as_the_kit_gave_them", () => {
+		// `labels` names tools, which the service chose (`API-post-search`), like `tools` does.
+		const wire = {
+			kits: [
+				{
+					role: "product_manager",
+					connectors: [
+						{
+							name: "notion",
+							key_page: "https://notion.example/keys",
+							credential_keys: ["NOTION_KEY"],
+							labels: {
+								"API-post-search": "search pages",
+								list_all: "list pages",
+							},
+						},
+					],
+				},
+			],
+		};
+		expect(toCamel(wire)).toEqual({
+			kits: [
+				{
+					role: "product_manager",
+					connectors: [
+						{
+							name: "notion",
+							keyPage: "https://notion.example/keys",
+							credentialKeys: ["NOTION_KEY"],
+							labels: {
+								"API-post-search": "search pages",
+								list_all: "list pages",
+							},
+						},
+					],
+				},
+			],
+		});
+	});
 });

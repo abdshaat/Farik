@@ -10,6 +10,7 @@ import { type Editing, SkillEdit } from "./dialogs/SkillEdit.tsx";
 import { SkillRead } from "./dialogs/SkillRead.tsx";
 import { SkillReview } from "./dialogs/SkillReview.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
+import { KitConnect } from "./KitConnect.tsx";
 import styles from "./pages.module.css";
 import { useAdvanced } from "./Settings.tsx";
 import {
@@ -30,7 +31,9 @@ import {
 import {
 	type ConnectorState,
 	type Effective,
+	type KitService,
 	type Model,
+	type RoleKit,
 	type Tier,
 	useStatus,
 	useTeam,
@@ -94,16 +97,17 @@ function withPlaywright(agent: Edited, on: boolean): Edited {
 
 /**
  * The draft's own edits laid over the agent as last read. What the page changes outside Save, a
- * custom connector added or removed and the agent's status, stays as the daemon last said (I3).
+ * custom or kit connector added or removed and the agent's status, stays as the daemon last said (I3).
  */
 function rebased(draft: Edited, saved: Edited): Edited {
 	const builtins = (draft.mcpServers ?? []).filter(
-		(c) => c.source !== "custom",
+		(c) => c.source === "builtin",
 	);
 	const kept = saved.mcpServers ?? [];
 	const mcpServers = [
+		// A custom or a kit connector is as the daemon last said, whatever the draft holds.
 		...kept.flatMap((c) =>
-			c.source === "custom" ? [c] : builtins.filter((b) => b.name === c.name),
+			c.source !== "builtin" ? [c] : builtins.filter((b) => b.name === c.name),
 		),
 		...builtins.filter((b) => !kept.some((c) => c.name === b.name)),
 	];
@@ -121,7 +125,8 @@ function rebased(draft: Edited, saved: Edited): Edited {
 /** One agent's page, once the team has loaded. */
 export function AgentEdit() {
 	const { id } = useParams();
-	const { team, effective, models, connectors, sandboxed, again } = useTeam();
+	const { team, effective, models, connectors, kits, sandboxed, again } =
+		useTeam();
 	if (!team) return null;
 	const saved = team.agents.find((a) => a.id === id);
 	const known = effective.find((e) => e.id === id);
@@ -140,6 +145,7 @@ export function AgentEdit() {
 			known={known}
 			models={models}
 			connectors={connectors}
+			kits={kits}
 			sandboxed={sandboxed}
 			again={again}
 		/>
@@ -153,6 +159,7 @@ function Editor({
 	known,
 	models,
 	connectors,
+	kits,
 	sandboxed,
 	again,
 }: {
@@ -162,6 +169,7 @@ function Editor({
 	known: Effective;
 	models: Model[];
 	connectors: ConnectorState[];
+	kits: RoleKit[];
 	/** Whether sessions run in Docker's sandbox (team.get). */
 	sandboxed: boolean;
 	/** Reads the team again, after a connector is added or removed outside Save. */
@@ -237,6 +245,15 @@ function Editor({
 	};
 	const paused = saved.status === "paused";
 	const custom = (saved.mcpServers ?? []).filter((c) => c.source === "custom");
+	// What Farik offers this role, and the kit services this agent holds that it no longer offers.
+	const offered: KitService[] =
+		kits.find((kit) => kit.role === saved.role)?.connectors ?? [];
+	const heldFromKit = (saved.mcpServers ?? []).filter(
+		(c) => c.source === "kit",
+	);
+	const gone = heldFromKit.filter(
+		(c) => !offered.some((service) => service.name === c.name),
+	);
 	const stateOf = (server: string) =>
 		connectors.find((c) => c.agent === saved.id && c.server === server);
 	const removeBody = {
@@ -249,7 +266,9 @@ function Editor({
 		const kept = stateOf(server);
 		if (kept?.auth !== "oauth")
 			return t(removeBody[kept?.storedIn ?? "none"], { server, name });
-		const host = hostOf(custom.find((c) => c.name === server)?.url);
+		const host = hostOf(
+			(saved.mcpServers ?? []).find((c) => c.name === server)?.url,
+		);
 		const forgets = kept.revokes !== false;
 		const file = kept.storedIn === "file";
 		return t(
@@ -266,6 +285,7 @@ function Editor({
 	const [adding, setAdding] = useState<{
 		again?: McpServer;
 		ended?: boolean;
+		kit?: KitService;
 	}>();
 	const [removing, setRemoving] = useState<string>();
 	const [removeRefused, setRemoveRefused] = useState<string>();
@@ -429,6 +449,62 @@ function Editor({
 					</p>
 				)}
 				<p className={styles.muted}>{t("connectorsNote")}</p>
+				{(offered.length > 0 || gone.length > 0) && (
+					<>
+						<h3 id="kit-heading" className={styles.subheading}>
+							{t("kitHeading", { role: roleName(agent.role) })}{" "}
+							<span className={styles.muted}>{t("kitLead")}</span>
+						</h3>
+						<ul
+							className={styles.ruled}
+							aria-label={t("kitHeading", { role: roleName(agent.role) })}
+						>
+							{offered.map((service) => {
+								const held = heldFromKit.find((c) => c.name === service.name);
+								return (
+									<KitRow
+										key={service.name}
+										service={service}
+										held={held}
+										state={stateOf(service.name)?.state}
+										storedIn={stateOf(service.name)?.storedIn}
+										name={name}
+										onConnect={() =>
+											setAdding({ ...(held && { again: held }), kit: service })
+										}
+										onRemove={() => {
+											setRemoveRefused(undefined);
+											setRemoving(service.name);
+										}}
+									/>
+								);
+							})}
+							{gone.map((c) => (
+								<li key={c.name}>
+									<div className={styles.rowHead}>
+										<strong>{c.name}</strong>
+										<span className={styles.actions}>
+											<Button
+												kind="quiet"
+												onClick={() => {
+													setRemoveRefused(undefined);
+													setRemoving(c.name);
+												}}
+											>
+												{t("connectorRemove")}{" "}
+												<span className={styles.hidden}>{c.name}</span>
+											</Button>
+										</span>
+									</div>
+									<p>
+										<strong>{t("kitGone")}</strong>
+									</p>
+									<p className={styles.muted}>{t("kitGoneNote", { name })}</p>
+								</li>
+							))}
+						</ul>
+					</>
+				)}
 				{custom.length > 0 && (
 					<>
 						<h3 id="yours-heading" className={styles.subheading}>
@@ -498,7 +574,19 @@ function Editor({
 					)}
 				</Dialog>
 			)}
-			{adding && (
+			{adding?.kit && (
+				<KitConnect
+					agent={saved.id}
+					name={name}
+					service={adding.kit}
+					sandboxed={sandboxed}
+					onClose={(changed) => {
+						setAdding(undefined);
+						if (changed) again();
+					}}
+				/>
+			)}
+			{adding && !adding.kit && (
 				<ConnectorAdd
 					agent={saved.id}
 					name={name}
@@ -652,6 +740,92 @@ function CustomRow({
 						{t("connectorUnreadableNote", { name, server: server.name })}
 					</p>
 				</>
+			)}
+		</li>
+	);
+}
+
+/** One service of the role's kit: why the role wants it, how it stands, and what can be done (ADR 0036). */
+function KitRow({
+	service,
+	held,
+	state,
+	storedIn,
+	name,
+	onConnect,
+	onRemove,
+}: {
+	service: KitService;
+	held: McpServer | undefined;
+	state: ConnectorState["state"] | undefined;
+	storedIn: ConnectorState["storedIn"];
+	name: string;
+	onConnect: () => void;
+	onRemove: () => void;
+}) {
+	const connected = held !== undefined && state === "connected";
+	return (
+		<li>
+			<div className={styles.rowHead}>
+				<strong>{service.title}</strong>
+				<span className={styles.actions}>
+					{!held && (
+						<Button onClick={onConnect}>
+							{t("kitConnect")}{" "}
+							<span className={styles.hidden}>{service.title}</span>
+						</Button>
+					)}
+					{held && state === "connect_again" && (
+						<Button onClick={onConnect}>
+							{t("connectorAgainButton")}{" "}
+							<span className={styles.hidden}>{service.title}</span>
+						</Button>
+					)}
+					{held && state === "sign_in_again" && (
+						<Button onClick={onConnect}>
+							{t("connectorSignInAgain")}{" "}
+							<span className={styles.hidden}>{service.title}</span>
+						</Button>
+					)}
+					{held && (
+						<Button kind="quiet" onClick={onRemove}>
+							{t("connectorRemove")}{" "}
+							<span className={styles.hidden}>{held.name}</span>
+						</Button>
+					)}
+				</span>
+			</div>
+			<p className={styles.muted}>{service.why}</p>
+			{connected && (
+				<>
+					<p>
+						<strong>{t("kitConnected")}</strong>
+					</p>
+					<p>
+						{service.auth === "oauth"
+							? t("kitSignedIn", { service: service.title })
+							: t(storedIn === "file" ? "connectorFile" : "connectorKeychain", {
+									name,
+								})}
+					</p>
+				</>
+			)}
+			{held && state === "connect_again" && (
+				<p>
+					<strong>{t("kitAgain")}</strong>
+				</p>
+			)}
+			{held && state === "sign_in_again" && (
+				<p>
+					<strong>{t("connectorSignInEnded", { host: service.title })}</strong>
+				</p>
+			)}
+			{held && state === "store_unavailable" && (
+				<p>
+					<strong>
+						{t("connectorUnreadable", { name, server: held.name })}
+					</strong>
+				</p>
 			)}
 		</li>
 	);

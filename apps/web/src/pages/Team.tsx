@@ -42,11 +42,34 @@ export type Effective = {
 	tiers: Tier[];
 	baseTiers: Tier[];
 };
+/** A service a role's kit offers, with the copy the page shows while connecting it (ADR 0036). */
+export type KitService = {
+	name: string;
+	title: string;
+	about: string;
+	why: string;
+	setup: string;
+	/** Where the key is made; present when the service takes keys. */
+	keyPage?: string;
+	/** A tool to what it does in the user's words. */
+	labels: Record<string, string>;
+	auth: "keys" | "oauth";
+	credentialKeys: string[];
+};
+/** The services Farik offers one role. */
+export type RoleKit = { role: Agent["role"]; connectors: KitService[] };
 /** A custom connector's state on this computer, as `team.get` answers it. */
 export type ConnectorState = {
 	agent: string;
 	server: string;
-	state: "connected" | "connect_again" | "sign_in_again" | "store_unavailable";
+	state:
+		| "connected"
+		| "connect_again"
+		| "sign_in_again"
+		| "store_unavailable"
+		| "not_in_kit";
+	/** Whether the user added it (`custom`) or it is a service of the agent's role's kit (ADR 0036). */
+	source?: "custom" | "kit";
 	/** Whether the user gave keys or signed in to the service (ADR 0033). */
 	auth?: "keys" | "oauth";
 	/** For a sign-in: whether the service can be asked to forget it when it is removed. */
@@ -69,6 +92,7 @@ export function useTeam() {
 		agents: Effective[];
 		maxAgents: number;
 		connectors?: ConnectorState[];
+		kits?: RoleKit[];
 		sandboxed?: boolean;
 	}>("team.get", {});
 	const { data: models } = useQuery<{ models: Model[] }>("models.list", {});
@@ -77,6 +101,8 @@ export function useTeam() {
 		effective: data?.agents ?? [],
 		/** Whether each custom connector runs on this computer (ADR 0030). */
 		connectors: data?.connectors ?? [],
+		/** What Farik offers each role on the team (ADR 0036). */
+		kits: data?.kits ?? [],
 		/** The most agents a team has that are not retired (SPEC F1), as the daemon says. */
 		most: data?.maxAgents,
 		/** Whether sessions run in Docker's sandbox, where no command of an agent reaches a connector's keys. */

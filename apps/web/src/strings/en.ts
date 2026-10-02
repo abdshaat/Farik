@@ -1301,6 +1301,49 @@ export const en = {
 		"Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
 	addOnlySigned:
 		"Only {name} has {server}. To give it to someone else, add it from their page, and sign in again there.",
+	kitHeading: "From the {role}’s kit",
+	kitLead: "services Farik checked; each tool is already labelled",
+	kitConnect: "Connect",
+	kitConnected: "Connected",
+	kitSignedIn: "Signed in to {service}.",
+	kitAgain: "Farik updated this service. Connect it again to keep using it.",
+	kitGone: "Farik no longer offers this service",
+	kitGoneNote:
+		"{name} does not use it. Removing it deletes what {name} had kept for it.",
+	kitTitle: "Connect {service} to {name}",
+	kitStepConnect: "Connect",
+	kitStepDone: "Done",
+	kitWhy: "Why {name} wants it",
+	kitWhat: "What to do",
+	kitGetKey: "Get your key",
+	kitGetKeyNote: "Opens {host} in a new tab.",
+	kitKeyLabel: "Your {service} key",
+	kitKeyLabelOf: "Your {service} key: {key}",
+	kitKeyHint:
+		"For {name} only, and never shown again. Farik checks it with {service} before keeping it.",
+	kitSignIn: "Sign in with {service}",
+	kitSignInNote:
+		"Farik opens {service}’s sign-in page in a new tab. Come back here when you’re done.",
+	kitWaiting: "Waiting for you to sign in to {service}…",
+	kitDone: "{service} is connected to {name}",
+	kitCan: "{name} can now",
+	kitAsks: "{name} asks you first before",
+	kitNever: "Farik never offers",
+	kitKeychain:
+		"{name}’s key is kept in your computer’s keychain. {name} never sees it: Farik hands it to {service}.",
+	kitFile:
+		"{name}’s key is kept in a private file only you can read, because this computer has no keychain. {name} never sees it: Farik hands it to {service}.",
+	kitKeychainNoSandbox:
+		"{name}’s key is kept in your computer’s keychain. Farik hands it to {service} and never puts it in {name}’s instructions. Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
+	kitFileNoSandbox:
+		"{name}’s key is kept in a private file only you can read, because this computer has no keychain. Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
+	kitUse: "{name} can use {service} from the next piece of work.",
+	kitOnly:
+		"Only {name} has {service}. To give it to someone else, connect it from their page.",
+	kitRefused:
+		"Farik could not connect {service}. Check the key against {service}’s page, and try again.",
+	kitChanged:
+		"Farik changed what it offers for {service} just now. Close this and look at {name}’s page again.",
 	uiPathsTitle: "Which files are screens",
 	uiPathsLead:
 		"When a Developer’s change touches a file like these, the UI/UX Designer checks its screens before the Architect reviews the code.",
