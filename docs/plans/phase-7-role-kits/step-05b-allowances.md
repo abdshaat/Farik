@@ -168,7 +168,7 @@ Files: as the file map's Task 6 line. Built from step 05's approved boards.
 
 ADR 0037. `docs/SPEC.md` 6.7 (allowances: where, defaults, changing, the period, what counts, a count past the allowance), 5.6 (the hook's order), 5.5 (the period beside the daily budget), 8.5 (`connector.connected`'s and `tool.called`'s new fields), F9, F17. `docs/plans/project-plan.md` row 05b, corrected if execution changed it; `docs/design/role-kits.md`.
 
-- [ ] `docs(spec): record allowances`
+- [x] `docs(spec): record allowances`
 
 ## Verification
 
