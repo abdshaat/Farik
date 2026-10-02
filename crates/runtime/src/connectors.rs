@@ -634,10 +634,15 @@ pub async fn list_tools(
     let failed = |what: &str, error: &dyn fmt::Display| {
         ConnectorError::Failed(format!("{} {what}: {error}", server.name))
     };
+    // What failed, without the server's own words: an MCP error may quote what it was sent, keys
+    // among it, and this reaches the person and the RPC reply (carry M12).
+    let plain = |what: &str| ConnectorError::Failed(format!("{} {what}", server.name));
     let listing = async {
         let client = match &server.transport {
             CustomTransport::Stdio { command, args } => {
                 let mut process = tokio::process::Command::new(command);
+                // rmcp kills the server when the transport is dropped, as on the timeout below;
+                // this is the same promise again, should rmcp stop keeping it.
                 process
                     .args(args)
                     .current_dir(folder)
@@ -664,11 +669,11 @@ pub async fn list_tools(
                 ().serve(rmcp::transport::StreamableHttpClientTransport::from_config(config)).await
             }
         }
-        .map_err(|error| failed("did not answer as an MCP server", &error))?;
+        .map_err(|_| plain("did not answer as an MCP server"))?;
         let tools = client
             .list_all_tools()
             .await
-            .map_err(|error| failed("could not list its tools", &error));
+            .map_err(|_| plain("could not list its tools"));
         let _ = client.cancel().await;
         Ok(tools?
             .into_iter()
@@ -1030,6 +1035,19 @@ mod tests {
             launch_spec(&http, &entry("abc")),
             Err(ConnectorError::Failed(_))
         ));
+    }
+
+    #[test]
+    fn fills_a_header_in_one_pass() {
+        // A value holding `{TOKEN}` is sent as it is, never read as a template itself (carry R8).
+        let keys = BTreeMap::from([
+            ("API_KEY".to_string(), Secret::new("{TOKEN}".to_string())),
+            ("TOKEN".to_string(), Secret::new("t".to_string())),
+        ]);
+        assert_eq!(
+            filled("Bearer {API_KEY} {TOKEN}", &keys),
+            Ok("Bearer {TOKEN} t".to_string())
+        );
     }
 
     #[test]

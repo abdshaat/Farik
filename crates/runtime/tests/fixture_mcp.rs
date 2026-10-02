@@ -25,8 +25,24 @@ use rmcp::{ErrorData, RoleServer, ServerHandler};
 /// name Claude Code would rewrite.
 const STDIO_SERVER: &str = include_str!("fixtures/mcp_server.sh");
 
-/// A stdio server that reads and never answers.
-const SILENT_SERVER: &str = "cat > /dev/null\n";
+/// A stdio server that never answers, nor reads, so that only being killed ends it before a
+/// minute: it writes its process id to `pid` beside itself first.
+const SILENT_SERVER: &str = "echo $$ > \"$(dirname \"$0\")/pid\"\nexec sleep 60\n";
+
+/// A stdio server that answers `initialize`, and answers `tools/list` with an error quoting its
+/// key, as a server echoing what it was sent might.
+const ERRING_SERVER: &str = r#"while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"erring","version":"1"}}}\n' "$id"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"bad key %s"}}\n' "$id" "$API_KEY"
+      ;;
+  esac
+done
+"#;
 
 /// A fresh folder for one test.
 fn scratch(test: &str) -> PathBuf {
@@ -210,14 +226,75 @@ async fn marks_a_tool_name_claude_code_would_rewrite() {
 #[tokio::test(start_paused = true)]
 async fn gives_up_after_thirty_seconds() {
     let server = stdio_server("silent", SILENT_SERVER, &[]);
+    let CustomTransport::Stdio { args, .. } = &server.transport else {
+        panic!("a stdio server");
+    };
+    let pid_file = PathBuf::from(&args[0]).with_file_name("pid");
     let started = tokio::time::Instant::now();
-    assert_eq!(
-        list_tools(&server, &BTreeMap::new(), &own_folder()).await,
-        Err(ConnectorError::Timeout)
+    // Paused time does not move while a blocking task runs: this one holds it until the server
+    // has started and said who it is.
+    let watched = pid_file.clone();
+    let (no_keys, folder) = (BTreeMap::new(), own_folder());
+    let (listed, pid) = tokio::join!(
+        list_tools(&server, &no_keys, &folder),
+        tokio::task::spawn_blocking(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                match std::fs::read_to_string(&watched) {
+                    Ok(pid) if pid.ends_with('\n') => return pid,
+                    _ if std::time::Instant::now() > deadline => return String::new(),
+                    _ => std::thread::sleep(Duration::from_millis(10)),
+                }
+            }
+        })
     );
+    assert_eq!(listed, Err(ConnectorError::Timeout));
     let waited = started.elapsed();
     assert!(
         waited >= Duration::from_secs(30) && waited < Duration::from_secs(31),
         "{waited:?}"
     );
+    // The server given up on is killed, never left running with the keys in its environment
+    // (carry R2). Dead is gone, or a zombie not yet reaped.
+    let pid = pid.expect("the watch ends");
+    assert!(!pid.is_empty(), "the server never wrote its pid");
+    let state = || {
+        std::fs::read_to_string(format!("/proc/{}/stat", pid.trim()))
+            .ok()
+            .and_then(|stat| {
+                stat.rsplit_once(") ")
+                    .and_then(|(_, rest)| rest.chars().next())
+            })
+    };
+    // Polled on the runtime, which the kill may be a task of.
+    for _ in 0..250 {
+        if matches!(state(), None | Some('Z')) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(matches!(state(), None | Some('Z')), "{:?}", state());
+}
+
+#[tokio::test]
+async fn a_servers_own_error_text_is_not_repeated() {
+    // A server's error may quote what it was sent; the reply a person reads says only what
+    // failed (carry M12).
+    let server = stdio_server("erring", ERRING_SERVER, &["API_KEY"]);
+    let failed = list_tools(
+        &server,
+        &keys(&[("API_KEY", "k-secret-value")]),
+        &own_folder(),
+    )
+    .await
+    .expect_err("the listing fails");
+    let ConnectorError::Failed(said) = &failed else {
+        panic!("{failed:?}");
+    };
+    assert!(
+        said.starts_with("fixture could not list its tools"),
+        "{said}"
+    );
+    assert!(!said.contains("k-secret-value"), "{said}");
+    assert!(!said.contains("bad key"), "{said}");
 }
