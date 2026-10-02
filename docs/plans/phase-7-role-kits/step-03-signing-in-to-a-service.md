@@ -212,7 +212,7 @@ The fixture is one axum server on loopback that plays the protected MCP server (
 - `gives_up_starting_after_fifteen_seconds`: with a paused clock and the fixture's PRM held, `start_sign_in` gives `Failed`.
 - `refuses_an_endpoint_that_is_not_https`: metadata naming `http://auth.example/authorize` gives `Failed`, naming the endpoint; so does a metadata request redirected to an `http` non-loopback URL.
 
-- [ ] `feat(runtime): sign in to an MCP server's service with OAuth`
+- [x] `feat(runtime): sign in to an MCP server's service with OAuth`
 
 ### Task 4: Keeping, refreshing and revoking a grant
 

@@ -22,12 +22,15 @@ farik-runtime = { path = "crates/runtime" }
 farik-store = { path = "crates/store" }
 futures-util = { version = "=0.3.34", default-features = false, features = ["sink"] }
 globset = { version = "=0.4.20", default-features = false }
+http = "=1.5.0"
 jsonschema = { version = "=0.56.0", default-features = false }
 keyring = "=4.2.0"
 # Only for its in-memory mock store, standing in for the OS keychain in tests.
 keyring-core = "=1.0.0"
 regress = "=0.12.0"
-rmcp = { version = "=3.3.0", default-features = false, features = ["client", "reqwest", "server", "transport-child-process", "transport-streamable-http-client-reqwest", "transport-streamable-http-server"] }
+# Already locked through rmcp; direct for the https-only OAuth client and the token form POSTs.
+reqwest = { version = "=0.13.5", default-features = false, features = ["form"] }
+rmcp = { version = "=3.3.0", default-features = false, features = ["auth", "client", "reqwest", "server", "transport-child-process", "transport-streamable-http-client-reqwest", "transport-streamable-http-server"] }
 rpassword = "=7.5.4"
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
 rust-embed = { version = "=8.12.0", features = ["mime-guess"] }

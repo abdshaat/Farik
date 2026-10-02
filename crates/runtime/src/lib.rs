@@ -47,6 +47,9 @@ pub mod sandbox;
 pub mod session;
 /// When each session started and how it ended, in the log.
 pub mod sessions;
+/// Signing in to a connector's service: the grant, and its refresh and revocation.
+#[cfg(unix)]
+pub mod sign_in;
 /// Skills an agent is given beyond its role's: reading, confirming, loading.
 #[cfg(unix)]
 pub mod skills;
