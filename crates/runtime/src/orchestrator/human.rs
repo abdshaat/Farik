@@ -10,7 +10,7 @@ use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::sprint::{Sprint, SprintStatus};
 use farik_core::team::{Agent, AgentStatus, Team, custom_server, plain_role};
-use farik_protocol::command::{AcceptSubject, Command, RequestSize};
+use farik_protocol::command::{AcceptSubject, Command, RequestSize, SkillScope};
 use farik_protocol::event::{
     AgentUpdatedBody, ConnectorDisconnectedBody, EscalationRaisedBodyReason,
     EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
@@ -27,6 +27,7 @@ use crate::chat::{ChatError, NewChatMessage, post_chat};
 use crate::daemon::DaemonState;
 use crate::daemon::{secret_at, with_server};
 use crate::pause::paused;
+use crate::skills::{SkillCommandError, SkillLevel, confirm_skill, remove_skill, save_skill};
 use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::transitions::{
@@ -46,6 +47,7 @@ const STOPPED: &str = "stopped by the human";
 
 /// Handles one command the human gave, after bringing this process's board up to the log, so that
 /// a command another process handled is seen.
+#[allow(clippy::too_many_lines, reason = "one arm per command")]
 pub(super) async fn handle(
     orchestrator: &Orchestrator,
     command: Command,
@@ -133,6 +135,18 @@ pub(super) async fn handle(
         Command::ConnectorDisconnect { agent, server } => {
             disconnect_server(tools, &orchestrator.deps.daemon, &agent, &server)
         }
+        Command::SkillSave {
+            scope,
+            files,
+            replace_shipped,
+        } => save_skill_for(orchestrator, &scope, &files, replace_shipped),
+        Command::SkillRemove { scope, name } => remove_skill_for(orchestrator, &scope, &name),
+        Command::SkillConfirm {
+            scope,
+            name,
+            sha256,
+            replace_shipped,
+        } => confirm_skill_for(orchestrator, &scope, &name, &sha256, replace_shipped),
         Command::ToolApprove { approval, note } => decide_tool_call(tools, approval, note, true),
         Command::ToolRefuse { approval, note } => decide_tool_call(tools, approval, note, false),
         Command::RunStop => {
@@ -1440,6 +1454,92 @@ fn disconnect_server(
     })
 }
 
+/// The level of a skill command, and who it is said to be for in a sentence.
+fn skill_level(scope: &SkillScope) -> (SkillLevel, String) {
+    match scope {
+        SkillScope::Team => (SkillLevel::Team, "the team".to_string()),
+        SkillScope::Agent(agent) => (SkillLevel::Agent(agent.clone()), agent.clone()),
+    }
+}
+
+/// A skill command's refusal as the command's: the skill's and the count's, the name's and the
+/// agent's are refusals; a failure to write is a failure.
+fn skill_refused(error: SkillCommandError) -> CommandError {
+    match error {
+        SkillCommandError::Io(_) => CommandError::Failed {
+            detail: error.to_string(),
+        },
+        refused => CommandError::Refused {
+            reason: refused.to_string(),
+        },
+    }
+}
+
+/// `skill_save`: the skill added for `scope`, or replaced, under the lock the team file's writers
+/// share (ADR 0034).
+fn save_skill_for(
+    orchestrator: &Orchestrator,
+    scope: &SkillScope,
+    files: &std::collections::BTreeMap<String, String>,
+    replace_shipped: bool,
+) -> Result<CommandReport, CommandError> {
+    let (level, whom) = skill_level(scope);
+    let bytes = files
+        .iter()
+        .map(|(path, text)| (path.clone(), text.clone().into_bytes()))
+        .collect();
+    let _writing = orchestrator.deps.daemon.team_writes();
+    let saved = save_skill(&orchestrator.deps.tools, &level, &bytes, replace_shipped)
+        .map_err(skill_refused)?;
+    Ok(CommandReport {
+        said: format!(
+            "{} {} for {whom}.",
+            if saved.changed { "Updated" } else { "Added" },
+            saved.name
+        ),
+        events: vec![saved.event],
+    })
+}
+
+/// `skill_remove`: the skill `name` of `scope` taken away.
+fn remove_skill_for(
+    orchestrator: &Orchestrator,
+    scope: &SkillScope,
+    name: &str,
+) -> Result<CommandReport, CommandError> {
+    let (level, whom) = skill_level(scope);
+    let _writing = orchestrator.deps.daemon.team_writes();
+    let event = remove_skill(&orchestrator.deps.tools, &level, name).map_err(skill_refused)?;
+    Ok(CommandReport {
+        said: format!("Removed {name} for {whom}."),
+        events: vec![event],
+    })
+}
+
+/// `skill_confirm`: the skill `name` of `scope` confirmed on this computer as its folder is now.
+fn confirm_skill_for(
+    orchestrator: &Orchestrator,
+    scope: &SkillScope,
+    name: &str,
+    sha256: &str,
+    replace_shipped: bool,
+) -> Result<CommandReport, CommandError> {
+    let (level, whom) = skill_level(scope);
+    let _writing = orchestrator.deps.daemon.team_writes();
+    let event = confirm_skill(
+        &orchestrator.deps.tools,
+        &level,
+        name,
+        sha256,
+        replace_shipped,
+    )
+    .map_err(skill_refused)?;
+    Ok(CommandReport {
+        said: format!("Confirmed {name} for {whom}."),
+        events: vec![event],
+    })
+}
+
 /// `team` with `agent`'s connector `name` set to `entry`, or removed, or the refusal naming each
 /// rule it breaks.
 fn connector_team(
@@ -2380,6 +2480,135 @@ mod tests {
             orchestrator.tick().await.expect("the tick runs"),
             crate::orchestrator::TickReport::Idle { .. }
         ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one scenario, read from top to bottom"
+    )]
+    async fn saves_confirms_and_removes_a_skill_for_the_human() {
+        use farik_protocol::command::SkillScope;
+
+        let harness = Harness::new("human-skills", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+        let files: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::from([
+            (
+                "SKILL.md".to_string(),
+                "---\nname: api-style\ndescription: Use when styling.\n---\nbody".to_string(),
+            ),
+            ("references/a.md".to_string(), "details".to_string()),
+        ]);
+        let scope = SkillScope::Agent("dev-a".to_string());
+        let saved = handled(
+            &orchestrator,
+            Command::SkillSave {
+                scope: scope.clone(),
+                files: files.clone(),
+                replace_shipped: false,
+            },
+        )
+        .await;
+        assert_eq!(saved.said, "Added api-style for dev-a.");
+        assert_eq!(saved.events.len(), 1);
+        let again = handled(
+            &orchestrator,
+            Command::SkillSave {
+                scope: scope.clone(),
+                files: files.clone(),
+                replace_shipped: false,
+            },
+        )
+        .await;
+        assert_eq!(again.said, "Updated api-style for dev-a.");
+        let bytes = files
+            .iter()
+            .map(|(p, t)| (p.clone(), t.clone().into_bytes()))
+            .collect();
+        let sha = farik_core::skill::skill_sha256(&bytes);
+        let folder = harness
+            .project
+            .repo
+            .path
+            .join(".farik/agents/dev-a/skills/api-style");
+        std::fs::write(folder.join("references/a.md"), "edited").expect("an edit outside Farik");
+        let reason = refused(
+            &orchestrator,
+            Command::SkillConfirm {
+                scope: scope.clone(),
+                name: "api-style".to_string(),
+                sha256: sha,
+                replace_shipped: false,
+            },
+        )
+        .await;
+        assert!(reason.starts_with("skill_hash_mismatch: "), "{reason}");
+        let edited = farik_core::skill::skill_sha256(
+            &crate::skills::read_skill_folder(&folder).expect("readable"),
+        );
+        let confirmed = handled(
+            &orchestrator,
+            Command::SkillConfirm {
+                scope: scope.clone(),
+                name: "api-style".to_string(),
+                sha256: edited,
+                replace_shipped: false,
+            },
+        )
+        .await;
+        assert_eq!(confirmed.said, "Confirmed api-style for dev-a.");
+        assert_eq!(confirmed.events.len(), 1);
+        let reason = refused(
+            &orchestrator,
+            Command::SkillSave {
+                scope: SkillScope::Team,
+                files: std::collections::BTreeMap::from([(
+                    "SKILL.md".to_string(),
+                    "---\nname: a-b\ndescription: d\n---\nrun !`ls`".to_string(),
+                )]),
+                replace_shipped: false,
+            },
+        )
+        .await;
+        assert!(reason.starts_with("skill_runs_commands: "), "{reason}");
+        let removed = handled(
+            &orchestrator,
+            Command::SkillRemove {
+                scope: scope.clone(),
+                name: "api-style".to_string(),
+            },
+        )
+        .await;
+        assert_eq!(removed.said, "Removed api-style for dev-a.");
+        assert_eq!(removed.events.len(), 1);
+        let reason = refused(
+            &orchestrator,
+            Command::SkillRemove {
+                scope,
+                name: "api-style".to_string(),
+            },
+        )
+        .await;
+        assert!(reason.starts_with("skill_unknown: "), "{reason}");
+        let kinds: Vec<EventKind> = harness
+            .project
+            .events(&[
+                EventKind::SkillAdded,
+                EventKind::SkillConfirmed,
+                EventKind::SkillRemoved,
+            ])
+            .iter()
+            .map(|event| event.body.kind())
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                EventKind::SkillAdded,
+                EventKind::SkillConfirmed,
+                EventKind::SkillRemoved
+            ]
+        );
     }
 
     #[tokio::test]

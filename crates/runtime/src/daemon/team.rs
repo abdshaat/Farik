@@ -124,11 +124,79 @@ pub(super) fn query(
             }))
         }
         "project.scan" => scanned(deps),
+        "skills.list" => skills_list(deps, params),
+        "skill.get" => skill_get(deps, params),
         _ => Err(Failure::new(
             super::web::UNKNOWN_QUERY,
             format!("there is no query {name}"),
         )),
     }
+}
+
+/// `skills.list { agent }`: the rows of `skill_rows` for one agent (ADR 0034).
+fn skills_list(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
+    let agent = params["agent"].as_str().unwrap_or_default();
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    if !team.agents.iter().any(|held| held.id.as_str() == agent) {
+        return Err(Failure::new(
+            super::web::NOT_FOUND,
+            format!("there is no agent {agent}"),
+        ));
+    }
+    let events = deps
+        .log
+        .read(&farik_store::EventQuery {
+            kinds: vec![
+                farik_protocol::event::EventKind::SkillAdded,
+                farik_protocol::event::EventKind::SkillChanged,
+                farik_protocol::event::EventKind::SkillRemoved,
+                farik_protocol::event::EventKind::SkillConfirmed,
+            ],
+            ..farik_store::EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?;
+    let rows = crate::skills::skill_rows(
+        deps.files.root(),
+        &team,
+        Some(agent),
+        &crate::skills::confirmed_skills(&events),
+    );
+    Ok(json!({ "skills": rows }))
+}
+
+/// `skill.get { level, agent?, name }`: every file of the skill as its folder holds it, its hash,
+/// and the frontmatter keys Farik ignores; the refusal's code when the folder is one the checks
+/// refuse.
+fn skill_get(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
+    let name = params["name"].as_str().unwrap_or_default();
+    let level = match (params["level"].as_str(), params["agent"].as_str()) {
+        (Some("team"), None) => crate::skills::SkillLevel::Team,
+        (Some("agent"), Some(agent)) => crate::skills::SkillLevel::Agent(agent.to_string()),
+        _ => {
+            return Err(Failure::new(
+                REFUSED,
+                "an agent's skill names its agent, and the team's names none",
+            ));
+        }
+    };
+    let folder = crate::skills::skill_folder(deps.files.root(), &level, name);
+    if std::fs::symlink_metadata(&folder).is_err() {
+        return Err(Failure::new(
+            super::web::NOT_FOUND,
+            format!("there is no skill {name} there"),
+        ));
+    }
+    let refused = |refusal: farik_roles::SkillRefusal| Failure::new(REFUSED, refusal.to_string());
+    let files = crate::skills::read_skill_folder(&folder).map_err(refused)?;
+    let checked = farik_roles::check_skill(name, &files).map_err(refused)?;
+    Ok(json!({
+        "files": files
+            .iter()
+            .map(|(path, bytes)| (path.clone(), String::from_utf8_lossy(bytes).into_owned()))
+            .collect::<BTreeMap<String, String>>(),
+        "sha256": farik_core::skill::skill_sha256(&files),
+        "ignored_fields": checked.ignored_fields,
+    }))
 }
 
 /// `account.status` on a daemon with a project: the credential read afresh from the environment
@@ -791,11 +859,12 @@ fn code_of(error: &ValidationError) -> &'static str {
 /// seen work from is retired rather than removed, except in `setup`, whose starter team is
 /// replaced.
 fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), Refused> {
-    let after = validate_team(wire).map_err(Refused::Errors)?;
+    let mut after = validate_team(wire).map_err(Refused::Errors)?;
     let before = deps
         .files
         .read_team()
         .map_err(|e| Refused::Failed(internal(&e)))?;
+    keep_pins(&before, &mut after);
     let mut errors = Vec::new();
     for (index, agent) in after.agents.iter().enumerate() {
         if before
@@ -827,6 +896,21 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
         Ok((before, after))
     } else {
         Err(Refused::Errors(errors))
+    }
+}
+
+/// `after`'s skills as `before` holds them, whatever the browser sent: only `skill_save`,
+/// `skill_remove` and `skill_confirm` change a pin (ADR 0034). An agent `before` does not have
+/// has none.
+pub(super) fn keep_pins(before: &Team, after: &mut Team) {
+    after.skills.clone_from(&before.skills);
+    for agent in &mut after.agents {
+        agent.skills = before
+            .agents
+            .iter()
+            .find(|was| was.id == agent.id)
+            .map(|was| was.skills.clone())
+            .unwrap_or_default();
     }
 }
 
@@ -881,7 +965,11 @@ fn replace(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<(), F
         agents.push(params["newcomer"].clone());
     }
     let after = validate_team(&wire).map_err(|errors| Failure::from(Refused::Errors(errors)))?;
-    let newcomer = after.agents.last().cloned();
+    // A newcomer starts with no skills: only the skill commands pin one.
+    let newcomer = after.agents.last().cloned().map(|mut agent| {
+        agent.skills.clear();
+        agent
+    });
     let report = crate::orchestrator::update_agent_held(
         deps,
         state,
@@ -1218,6 +1306,218 @@ pub(super) mod tests {
                 .unwrap_or_else(|| panic!("an error: {reply}"))
                 .to_string(),
         )
+    }
+
+    /// The team's skill, or `agent`'s, `name`, saved through the function the commands use, so
+    /// that it is pinned and confirmed (the save is the confirmation).
+    pub(crate) fn save_a_skill(
+        harness: &Harness,
+        agent: Option<&str>,
+        name: &str,
+        extra_front: &str,
+    ) {
+        let text = format!(
+            "---\nname: {name}\ndescription: Use when {name}.\n{extra_front}---\nbody of {name}"
+        );
+        let files = BTreeMap::from([
+            ("SKILL.md".to_string(), text.into_bytes()),
+            ("references/a.md".to_string(), b"details".to_vec()),
+        ]);
+        let level = agent.map_or(crate::skills::SkillLevel::Team, |agent| {
+            crate::skills::SkillLevel::Agent(agent.to_string())
+        });
+        crate::skills::save_skill(&harness.project.deps, &level, &files, false).expect("saved");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn skills_list_answers_the_rows_of_one_agent() {
+        let harness = Harness::new("rpc-skills-list", |_| {});
+        save_a_skill(&harness, None, "api-style", "");
+        save_a_skill(&harness, Some("dev-a"), "notes", "");
+        let got = query(
+            &harness.daemon,
+            "skills.list",
+            &json!({ "agent": "dev-a" }),
+            "skillsListResult",
+        );
+        let rows: Vec<(&str, &str, &str)> = got["skills"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| {
+                (
+                    row["level"].as_str().unwrap_or_default(),
+                    row["name"].as_str().unwrap_or_default(),
+                    row["state"].as_str().unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("role", "implementing-a-contract", "in_use"),
+                ("team", "api-style", "in_use"),
+                ("agent", "notes", "in_use"),
+            ]
+        );
+        assert!(
+            got["skills"][2]["bytes"].as_u64().unwrap_or_default() > 0,
+            "{got}"
+        );
+        assert_eq!(got["skills"][2]["description"], "Use when notes.");
+        let ghost = rpc(
+            &harness.daemon,
+            "query",
+            &json!({ "name": "skills.list", "params": { "agent": "ghost" } }),
+        );
+        assert_eq!(ghost["error"]["code"], -32002, "{ghost}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn skill_get_answers_the_files_and_ignored_fields() {
+        let harness = Harness::new("rpc-skill-get", |_| {});
+        save_a_skill(
+            &harness,
+            Some("dev-a"),
+            "api-style",
+            "allowed-tools: Bash\n",
+        );
+        let asked = json!({ "level": "agent", "agent": "dev-a", "name": "api-style" });
+        let got = query(&harness.daemon, "skill.get", &asked, "skillGetResult");
+        let folder = harness
+            .project
+            .repo
+            .path
+            .join(".farik/agents/dev-a/skills/api-style");
+        let held = crate::skills::read_skill_folder(&folder).expect("readable");
+        assert_eq!(got["sha256"], farik_core::skill::skill_sha256(&held));
+        assert_eq!(got["ignored_fields"], json!(["allowed-tools"]));
+        let files: BTreeMap<String, String> = held
+            .iter()
+            .map(|(path, bytes)| (path.clone(), String::from_utf8_lossy(bytes).into_owned()))
+            .collect();
+        assert_eq!(
+            got["files"],
+            json!(files),
+            "the files as the folder holds them"
+        );
+        assert_eq!(got["files"]["references/a.md"], "details");
+
+        // A folder holding a command is answered with the refusal's code, not its files.
+        std::fs::write(
+            folder.join("SKILL.md"),
+            "---\nname: api-style\ndescription: d\n---\nrun !`ls`",
+        )
+        .expect("an edit");
+        let refused = rpc(
+            &harness.daemon,
+            "query",
+            &json!({ "name": "skill.get", "params": asked }),
+        );
+        assert!(
+            refused["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.starts_with("skill_runs_commands: ")),
+            "{refused}"
+        );
+        // A level names its agent or none.
+        for params in [
+            json!({ "level": "team", "agent": "dev-a", "name": "api-style" }),
+            json!({ "level": "agent", "name": "api-style" }),
+        ] {
+            let reply = rpc(
+                &harness.daemon,
+                "query",
+                &json!({ "name": "skill.get", "params": params }),
+            );
+            assert_eq!(reply["error"]["code"], -32005, "{reply}");
+        }
+        // No folder, no skill.
+        let missing = json!({ "level": "team", "name": "nothing" });
+        let reply = rpc(
+            &harness.daemon,
+            "query",
+            &json!({ "name": "skill.get", "params": missing }),
+        );
+        assert_eq!(reply["error"]["code"], -32002, "{reply}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn whole_team_saves_keep_pins() {
+        let harness = Harness::new("rpc-skills-pins", |_| {});
+        save_a_skill(&harness, None, "api-style", "");
+        save_a_skill(&harness, Some("dev-a"), "notes", "");
+        let pins = |harness: &Harness| {
+            let team = team_file(harness);
+            (team["skills"].clone(), team["agents"][1]["skills"].clone())
+        };
+        let (team_pins, agent_pins) = pins(&harness);
+        assert_eq!(team_pins[0]["name"], "api-style");
+        assert_eq!(agent_pins[0]["name"], "notes");
+
+        // A team the browser sends with no pins, or other ones, leaves both levels as they were.
+        let mut sent = team_file(&harness);
+        sent.as_object_mut().expect("a team").remove("skills");
+        sent["agents"][1]
+            .as_object_mut()
+            .expect("an agent")
+            .remove("skills");
+        sent["name"] = json!("Renamed");
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": sent }),
+            "emptyResult",
+        );
+        assert_eq!(team_file(&harness)["name"], "Renamed");
+        assert_eq!(pins(&harness), (team_pins.clone(), agent_pins.clone()));
+        let mut other = team_file(&harness);
+        other["skills"] = json!([{ "name": "forged", "sha256": "0".repeat(64) }]);
+        other["agents"][1]["skills"] = json!([]);
+        other["agents"][2]["skills"] = json!([{ "name": "forged", "sha256": "0".repeat(64) }]);
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": other }),
+            "emptyResult",
+        );
+        assert_eq!(pins(&harness), (team_pins.clone(), agent_pins.clone()));
+        assert_eq!(
+            team_file(&harness)["agents"][2].get("skills"),
+            None,
+            "dev-b got none"
+        );
+
+        // An agent a save adds has no pins either, whatever it carries.
+        let mut added = team_file(&harness);
+        let mut zed = farik_core::team::fixtures::an_agent_wire("zed", "architect");
+        zed["skills"] = json!([{ "name": "forged", "sha256": "0".repeat(64) }]);
+        added["agents"].as_array_mut().expect("agents").push(zed);
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": added }),
+            "emptyResult",
+        );
+        assert_eq!(team_file(&harness)["agents"][3].get("skills"), None);
+        assert_eq!(pins(&harness), (team_pins.clone(), agent_pins.clone()));
+
+        // A replacement keeps every pin and gives the newcomer none.
+        let mut newcomer = farik_core::team::fixtures::an_agent_wire("noor", "software_developer");
+        newcomer["skills"] = json!([{ "name": "forged", "sha256": "0".repeat(64) }]);
+        call(
+            &harness.daemon,
+            "agent.replace",
+            &json!({ "agent_id": "dev-b", "newcomer": newcomer }),
+            "emptyResult",
+        );
+        assert_eq!(pins(&harness), (team_pins, agent_pins));
+        let team = team_file(&harness);
+        assert_eq!(team["agents"][4]["id"], "noor");
+        assert_eq!(team["agents"][4].get("skills"), None);
     }
 
     #[test]

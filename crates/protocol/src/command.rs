@@ -17,8 +17,9 @@ use crate::generated::command::{
     AgentUpdateBody, ChatMessagePostBody, ConnectorConnectBody, ConnectorDisconnectBody, EmptyBody,
     EscalationResolveBody, FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject,
     HumanSendBackBody, HumanSendBackBodySubject, MessagePostBody, QuestionAnswerBody,
-    RequestTriageBody, RequestTriageBodySize, SessionStopBody, SprintStartBody, TaskCreateBody,
-    TaskIdBody, TaskTransitionBody, ToolDecisionBody,
+    RequestTriageBody, RequestTriageBodySize, SessionStopBody, SkillConfirmBody, SkillLevel,
+    SkillRemoveBody, SkillSaveBody, SprintStartBody, TaskCreateBody, TaskIdBody,
+    TaskTransitionBody, ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -74,6 +75,15 @@ pub enum AcceptSubject {
     Contract,
     /// The result awaiting the human's acceptance.
     Result,
+}
+
+/// Whose skill a skill command is about (ADR 0034).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkillScope {
+    /// The team's.
+    Team,
+    /// One agent's, by id.
+    Agent(String),
 }
 
 /// A request for the daemon to change something.
@@ -227,6 +237,33 @@ pub enum Command {
         /// What the human says to the agent.
         note: Option<String>,
     },
+    /// Add a skill for the team or one agent, or replace the one of its name (ADR 0034).
+    SkillSave {
+        /// Whose.
+        scope: SkillScope,
+        /// Each file of the skill's folder, by path, as text.
+        files: std::collections::BTreeMap<String, String>,
+        /// Whether a skill of a shipped skill's name may replace it.
+        replace_shipped: bool,
+    },
+    /// Remove a skill.
+    SkillRemove {
+        /// Whose.
+        scope: SkillScope,
+        /// The skill's name.
+        name: String,
+    },
+    /// Confirm on this computer the skill as its folder is now.
+    SkillConfirm {
+        /// Whose.
+        scope: SkillScope,
+        /// The skill's name.
+        name: String,
+        /// The hash of the folder the person read.
+        sha256: String,
+        /// Whether a skill of a shipped skill's name may replace it.
+        replace_shipped: bool,
+    },
 }
 
 /// Checks a value against `docs/schemas/command.schema.json` and, when it conforms, returns the
@@ -377,6 +414,56 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             connector_command(name, body)
         }
         CommandName::ToolApprove | CommandName::ToolRefuse => decision_command(name, body),
+        CommandName::SkillSave | CommandName::SkillRemove | CommandName::SkillConfirm => {
+            skill_command(name, body)
+        }
+    }
+}
+
+/// `level` and `agent` as a scope: an agent's level names its agent, and a team's names none,
+/// both refused at `/body/agent`.
+fn scope_of(level: SkillLevel, agent: Option<String>) -> Result<SkillScope, Vec<ValidationError>> {
+    let wrong = |message: &str| {
+        vec![ValidationError {
+            path: "/body/agent".to_string(),
+            message: message.to_string(),
+        }]
+    };
+    match (level, agent) {
+        (SkillLevel::Team, None) => Ok(SkillScope::Team),
+        (SkillLevel::Agent, Some(agent)) => Ok(SkillScope::Agent(agent)),
+        (SkillLevel::Team, Some(_)) => Err(wrong("a team skill has no agent")),
+        (SkillLevel::Agent, None) => Err(wrong("an agent's skill names its agent")),
+    }
+}
+
+/// `skill_save`, `skill_remove` and `skill_confirm`, each read from its own body shape.
+fn skill_command(name: CommandName, body: &Value) -> Result<Command, Vec<ValidationError>> {
+    match name {
+        CommandName::SkillSave => {
+            let body: SkillSaveBody = read_body(body, name)?;
+            Ok(Command::SkillSave {
+                scope: scope_of(body.level, body.agent.map(|agent| agent.to_string()))?,
+                files: body.files.into_iter().collect(),
+                replace_shipped: body.replace_shipped.unwrap_or(false),
+            })
+        }
+        CommandName::SkillRemove => {
+            let body: SkillRemoveBody = read_body(body, name)?;
+            Ok(Command::SkillRemove {
+                scope: scope_of(body.level, body.agent.map(|agent| agent.to_string()))?,
+                name: body.name.to_string(),
+            })
+        }
+        _ => {
+            let body: SkillConfirmBody = read_body(body, name)?;
+            Ok(Command::SkillConfirm {
+                scope: scope_of(body.level, body.agent.map(|agent| agent.to_string()))?,
+                name: body.name.to_string(),
+                sha256: body.sha256.to_string(),
+                replace_shipped: body.replace_shipped.unwrap_or(false),
+            })
+        }
     }
 }
 
@@ -440,6 +527,7 @@ fn send_back(body: HumanSendBackBody) -> Result<Command, Vec<ValidationError>> {
 ///
 /// Never: a contract's `Serialize` is derived from its schema with string keys.
 #[must_use]
+#[allow(clippy::too_many_lines, reason = "one arm per command")]
 pub fn command_to_value(command: &Command) -> Value {
     let (name, body) = match command {
         Command::TaskCreate { contract } => (
@@ -538,6 +626,9 @@ pub fn command_to_value(command: &Command) -> Value {
         Command::ToolRefuse { approval, note } => {
             decision_wire(CommandName::ToolRefuse, *approval, note.as_ref())
         }
+        Command::SkillSave { .. } | Command::SkillRemove { .. } | Command::SkillConfirm { .. } => {
+            skill_wire(command)
+        }
     };
     json!({ "command": name.to_string(), "body": body })
 }
@@ -554,6 +645,61 @@ fn decision_wire(name: CommandName, approval: u64, note: Option<&String>) -> (Co
         body["note"] = json!(note);
     }
     (name, body)
+}
+
+/// A skill command's body so far: its level and, for an agent's, its agent.
+fn scope_wire(scope: &SkillScope) -> Value {
+    match scope {
+        SkillScope::Team => json!({ "level": "team" }),
+        SkillScope::Agent(agent) => json!({ "level": "agent", "agent": agent }),
+    }
+}
+
+/// `skill_save`, `skill_remove` or `skill_confirm` as its name and body, `replace_shipped` written
+/// only when it is `true`.
+fn skill_wire(command: &Command) -> (CommandName, Value) {
+    match command {
+        Command::SkillSave {
+            scope,
+            files,
+            replace_shipped,
+        } => {
+            let mut body = scope_wire(scope);
+            body["files"] = json!(files);
+            (
+                CommandName::SkillSave,
+                with_flag(body, "replace_shipped", *replace_shipped),
+            )
+        }
+        Command::SkillRemove { scope, name } => {
+            let mut body = scope_wire(scope);
+            body["name"] = json!(name);
+            (CommandName::SkillRemove, body)
+        }
+        Command::SkillConfirm {
+            scope,
+            name,
+            sha256,
+            replace_shipped,
+        } => {
+            let mut body = scope_wire(scope);
+            body["name"] = json!(name);
+            body["sha256"] = json!(sha256);
+            (
+                CommandName::SkillConfirm,
+                with_flag(body, "replace_shipped", *replace_shipped),
+            )
+        }
+        _ => unreachable!("command_to_value asks this of the three skill commands only"),
+    }
+}
+
+/// `body` with `key` set to `true` when `set`, and left out otherwise.
+fn with_flag(mut body: Value, key: &str, set: bool) -> Value {
+    if set {
+        body[key] = json!(true);
+    }
+    body
 }
 
 /// `connector_connect` or `connector_disconnect` as its name and body.
@@ -782,8 +928,10 @@ mod tests {
     use farik_core::contract::TaskStatus;
     use farik_core::team::AgentStatus;
 
+    use std::collections::BTreeMap;
+
     use super::{
-        AcceptSubject, Command, CommandReply, ReplyKind, RequestSize, ValidationError,
+        AcceptSubject, Command, CommandReply, ReplyKind, RequestSize, SkillScope, ValidationError,
         command_from_value, command_to_value, reply_from_value, reply_to_value,
     };
 
@@ -1073,6 +1221,119 @@ mod tests {
         for wire in wires {
             let command = command_from_value(&wire).expect("the wire reads");
             assert_eq!(command_to_value(&command), wire);
+        }
+    }
+
+    #[test]
+    fn reads_and_writes_the_three_skill_commands() {
+        let files = BTreeMap::from([
+            ("SKILL.md".to_string(), "---\nname: a-b\n---\n".to_string()),
+            ("references/a.md".to_string(), "details".to_string()),
+        ]);
+        let hash = "ab".repeat(32);
+        for (name, body, command) in [
+            (
+                "skill_save",
+                json!({ "level": "team", "files": files }),
+                Command::SkillSave {
+                    scope: SkillScope::Team,
+                    files: files.clone(),
+                    replace_shipped: false,
+                },
+            ),
+            (
+                "skill_save",
+                json!({ "level": "agent", "agent": "dev-a", "files": files, "replace_shipped": true }),
+                Command::SkillSave {
+                    scope: SkillScope::Agent("dev-a".to_string()),
+                    files: files.clone(),
+                    replace_shipped: true,
+                },
+            ),
+            (
+                "skill_remove",
+                json!({ "level": "agent", "agent": "dev-a", "name": "a-b" }),
+                Command::SkillRemove {
+                    scope: SkillScope::Agent("dev-a".to_string()),
+                    name: "a-b".to_string(),
+                },
+            ),
+            (
+                "skill_remove",
+                json!({ "level": "team", "name": "a-b" }),
+                Command::SkillRemove {
+                    scope: SkillScope::Team,
+                    name: "a-b".to_string(),
+                },
+            ),
+            (
+                "skill_confirm",
+                json!({ "level": "team", "name": "a-b", "sha256": hash }),
+                Command::SkillConfirm {
+                    scope: SkillScope::Team,
+                    name: "a-b".to_string(),
+                    sha256: hash.clone(),
+                    replace_shipped: false,
+                },
+            ),
+            (
+                "skill_confirm",
+                json!({ "level": "agent", "agent": "dev-a", "name": "a-b", "sha256": hash, "replace_shipped": true }),
+                Command::SkillConfirm {
+                    scope: SkillScope::Agent("dev-a".to_string()),
+                    name: "a-b".to_string(),
+                    sha256: hash.clone(),
+                    replace_shipped: true,
+                },
+            ),
+        ] {
+            let wire = json!({ "command": name, "body": body });
+            assert_eq!(command_from_value(&wire), Ok(command.clone()), "{wire}");
+            assert_eq!(
+                command_to_value(&command),
+                wire,
+                "written back as it was read"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_a_skill_command_that_names_its_level_wrongly() {
+        let files = json!({ "SKILL.md": "x" });
+        let hash = "ab".repeat(32);
+        // An agent level needs its agent, and a team level has none.
+        for (name, body) in [
+            ("skill_save", json!({ "level": "agent", "files": files })),
+            (
+                "skill_save",
+                json!({ "level": "team", "agent": "dev-a", "files": files }),
+            ),
+            ("skill_remove", json!({ "level": "agent", "name": "a-b" })),
+            (
+                "skill_remove",
+                json!({ "level": "team", "agent": "dev-a", "name": "a-b" }),
+            ),
+            (
+                "skill_confirm",
+                json!({ "level": "agent", "name": "a-b", "sha256": hash }),
+            ),
+        ] {
+            let errors = refusal(&json!({ "command": name, "body": body }));
+            assert_eq!(errors.len(), 1, "{name} {body}: {errors:?}");
+            assert_eq!(errors[0].path, "/body/agent", "{name} {body}");
+        }
+        // A hash is 64 lower-case hex digits; a name is a skill's; a body is another command's.
+        for (name, body) in [
+            (
+                "skill_confirm",
+                json!({ "level": "team", "name": "a-b", "sha256": "abc" }),
+            ),
+            ("skill_remove", json!({ "level": "team", "name": "A_B" })),
+            ("skill_remove", json!({ "level": "team", "files": files })),
+            ("skill_save", json!({ "level": "team", "name": "a-b" })),
+        ] {
+            let errors = refusal(&json!({ "command": name, "body": body }));
+            assert!(!errors.is_empty(), "{name} {body}");
         }
     }
 

@@ -36,7 +36,10 @@
         "connector_connect",
         "connector_disconnect",
         "tool_approve",
-        "tool_refuse"
+        "tool_refuse",
+        "skill_save",
+        "skill_remove",
+        "skill_confirm"
       ]
     },
     "commandBodyWire": {
@@ -59,6 +62,9 @@
         { "$ref": "#/$defs/connectorConnectBody" },
         { "$ref": "#/$defs/connectorDisconnectBody" },
         { "$ref": "#/$defs/toolDecisionBody" },
+        { "$ref": "#/$defs/skillSaveBody" },
+        { "$ref": "#/$defs/skillRemoveBody" },
+        { "$ref": "#/$defs/skillConfirmBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -240,6 +246,54 @@
       "properties": {
         "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "note": { "type": "string" }
+      }
+    },
+    "skillLevel": {
+      "type": "string",
+      "enum": ["team", "agent"],
+      "description": "Whose skill: the team's (.farik/skills/<name>/) or one agent's (.farik/agents/<agent>/skills/<name>/). With agent, the agent is named in agent; with team there is no agent. The reader refuses both mismatches at /body/agent."
+    },
+    "skillSaveBody": {
+      "title": "Skill Save Body",
+      "description": "Adds the skill whose folder is files to level, or replaces the one of its name (docs/SPEC.md 6.7; ADR 0034). files maps each path in the folder to its text, SKILL.md among them; the name is the one in SKILL.md's frontmatter. The handler holds it to check_skill and the counts, writes the folder, then the pin in the team file, then appends skill.added or skill.changed. A name Farik ships is refused skill_name_taken unless replace_shipped is true. The refusals are skill_* codes, agent_unknown and skill_limit_reached.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "files"],
+      "properties": {
+        "level": { "$ref": "#/$defs/skillLevel" },
+        "agent": { "type": "string", "minLength": 1 },
+        "files": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": { "type": "string" }
+        },
+        "replace_shipped": { "type": "boolean" }
+      }
+    },
+    "skillRemoveBody": {
+      "title": "Skill Remove Body",
+      "description": "Removes the skill name of level: its folder, its pin, and appends skill.removed (docs/SPEC.md 6.7; ADR 0034). A skill whose folder is already gone is unpinned all the same. Refused skill_unknown for a name not pinned there.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name"],
+      "properties": {
+        "level": { "$ref": "#/$defs/skillLevel" },
+        "agent": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 }
+      }
+    },
+    "skillConfirmBody": {
+      "title": "Skill Confirm Body",
+      "description": "Confirms on this computer the skill name of level as its folder is now, which the person read as the folder hashing to sha256 (docs/SPEC.md 6.7; ADR 0034). Refused skill_hash_mismatch unless the folder's skill_sha256 is sha256, and with whatever check_skill refuses; the pin is rewritten to that hash when it differs, then skill.confirmed is appended.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name", "sha256"],
+      "properties": {
+        "level": { "$ref": "#/$defs/skillLevel" },
+        "agent": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "replace_shipped": { "type": "boolean" }
       }
     },
     "emptyBody": {

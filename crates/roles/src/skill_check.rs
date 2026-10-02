@@ -296,6 +296,26 @@ fn attaches_files(text: &str) -> bool {
     false
 }
 
+/// The `name` and `description` a folder's `SKILL.md` declares, read leniently: whatever else is
+/// wrong with the skill, so that a skill waiting for review can still be named and described. A
+/// missing description is empty. `None` when there is no `SKILL.md`, no frontmatter, or no name.
+#[must_use]
+pub fn declared_name_and_description(
+    files: &BTreeMap<String, Vec<u8>>,
+) -> Option<(String, String)> {
+    let text = std::str::from_utf8(files.get("SKILL.md")?).ok()?;
+    let (front, _) = split_frontmatter(text)?;
+    let value: Value = serde_saphyr::from_str_with_options(front, crate::yaml_options()).ok()?;
+    let Value::String(name) = value.get("name")? else {
+        return None;
+    };
+    let description = match value.get("description") {
+        Some(Value::String(description)) => description.clone(),
+        _ => String::new(),
+    };
+    Some((name.clone(), description))
+}
+
 /// Every agent role Farik ships.
 const SHIPPED_ROLES: [Role; 6] = [
     Role::ProductManager,
@@ -330,7 +350,7 @@ mod tests {
     use farik_core::contract::Role;
     use serde_json::Value;
 
-    use super::{SkillRefusal, check_skill, core_skill_names};
+    use super::{SkillRefusal, check_skill, core_skill_names, declared_name_and_description};
     use crate::load_role;
 
     fn skill(entries: &[(&str, &str)]) -> BTreeMap<String, Vec<u8>> {
@@ -610,6 +630,40 @@ mod tests {
             }
         }
         files
+    }
+
+    #[test]
+    fn declares_a_name_and_description_whatever_else_is_wrong() {
+        let declared = |text: &str| declared_name_and_description(&skill(&[("SKILL.md", text)]));
+        assert_eq!(
+            declared(&md(OK_FRONT, "run !`ls` @x")),
+            Some((
+                "api-style".to_string(),
+                "Use when writing API handlers.".to_string()
+            )),
+            "a skill that would be refused is still named"
+        );
+        assert_eq!(
+            declared("---\r\nname: a-b\r\n---\r\n"),
+            Some(("a-b".to_string(), String::new())),
+            "no description reads as empty, and CRLF is read"
+        );
+        assert_eq!(
+            declared(&md("name: Has_Upper\ndescription: 7", "b")),
+            Some(("Has_Upper".to_string(), String::new()))
+        );
+        for text in [
+            "no frontmatter",
+            "---\n[1]\n---\n",
+            "---\ndescription: d\n---\n",
+            "---\nname: 3\n---\n",
+        ] {
+            assert_eq!(declared(text), None, "{text:?}");
+        }
+        assert_eq!(
+            declared_name_and_description(&skill(&[("other.md", "x")])),
+            None
+        );
     }
 
     #[test]

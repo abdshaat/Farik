@@ -58,7 +58,9 @@
         "chat.messages",
         "templates.list",
         "template.preview",
-        "backlog.summary"
+        "backlog.summary",
+        "skills.list",
+        "skill.get"
       ]
     },
     "subscribeRequest": {
@@ -291,6 +293,12 @@
             },
             {
               "$ref": "#/$defs/templatePreviewQuery"
+            },
+            {
+              "$ref": "#/$defs/skillsListQuery"
+            },
+            {
+              "$ref": "#/$defs/skillGetQuery"
             }
           ]
         }
@@ -4404,6 +4412,80 @@
         }
       },
       "description": "The saved teams on this computer, each whole, and the files in the templates folder that are not one. Every template query and method is refused with -32005 and the code no_state_folder at / when Farik has no state folder."
+    },
+    "skillsListQuery": {
+      "title": "Skills List Query",
+      "description": "The skills one agent has (docs/SPEC.md 6.7; ADR 0034): its role's, the team's and its own, each with how it stands for that agent. An agent the team does not have is -32002.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "skills.list" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["agent"],
+          "properties": {
+            "agent": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "skillGetQuery": {
+      "title": "Skill Get Query",
+      "description": "Every file of the team's or one agent's skill name, as its folder holds them now, for the person to read (docs/SPEC.md 6.7; ADR 0034). A folder that is not there is -32002; one the checks refuse is refused with -32005 and a message starting with the refusal's skill_* code, and no files. An agent level names its agent and a team level names none; the other is refused with -32005.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "skill.get" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["level", "name"],
+          "properties": {
+            "level": { "type": "string", "enum": ["team", "agent"] },
+            "agent": { "type": "string", "minLength": 1 },
+            "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 }
+          }
+        }
+      }
+    },
+    "skillRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name", "description", "state", "bytes"],
+      "properties": {
+        "level": { "type": "string", "enum": ["role", "team", "agent"] },
+        "name": { "type": "string" },
+        "description": { "type": "string", "description": "When the skill applies, as its SKILL.md says; empty when that cannot be read." },
+        "state": {
+          "type": "string",
+          "enum": ["in_use", "replaced", "review", "missing"],
+          "description": "in_use: it loads in the agent's sessions (a role's, unless replaced). replaced: another level's skill of the same name stands in its place. review: its folder, its pin and this computer's confirmation do not agree, or a check refuses it; it waits for the person to read and confirm it. missing: pinned, and its folder is not there."
+        },
+        "bytes": { "type": "integer", "minimum": 0, "description": "The folder's total size; 0 when missing; a role's, its SKILL.md's." }
+      }
+    },
+    "skillsListResult": {
+      "description": "skills.list's answer: the agent's skills, role rows first, then the team's, then its own, each in the order its list holds. Role rows are read-only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skills"],
+      "properties": {
+        "skills": { "type": "array", "items": { "$ref": "#/$defs/skillRow" } }
+      }
+    },
+    "skillGetResult": {
+      "description": "skill.get's answer: files maps each path to its text as the folder holds it, sha256 is skill_sha256 of the folder (the hash skill_confirm is given), and ignored_fields names the frontmatter keys other than name and description, which Farik drops from a session's copy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files", "sha256", "ignored_fields"],
+      "properties": {
+        "files": { "type": "object", "additionalProperties": { "type": "string" } },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "ignored_fields": { "type": "array", "items": { "type": "string" } }
+      }
     },
     "templatePreviewQuery": {
       "title": "Template Preview Query",

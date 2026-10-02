@@ -25,7 +25,9 @@ mod skill_check;
 
 pub use connectors::{ConnectorDefinition, builtin_connector};
 pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
-pub use skill_check::{CheckedSkill, SkillRefusal, check_skill, core_skill_names};
+pub use skill_check::{
+    CheckedSkill, SkillRefusal, check_skill, core_skill_names, declared_name_and_description,
+};
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/role.schema.json");
 
@@ -50,6 +52,8 @@ pub struct Skill {
     pub description: String,
     /// The procedure: everything after the frontmatter's closing line.
     pub body: String,
+    /// The size of the whole `SKILL.md`, frontmatter included, in bytes.
+    pub bytes: usize,
 }
 
 /// A role as Farik ships it (`docs/SPEC.md` section 6).
@@ -303,6 +307,7 @@ fn parse_skill(name: &str, text: &str) -> Result<Skill, String> {
         name: front.name,
         description: front.description,
         body: body.to_string(),
+        bytes: text.len(),
     })
 }
 
@@ -640,6 +645,26 @@ mod tests {
                 let front: Value = serde_saphyr::from_str_with_options(front, yaml_options())
                     .expect("YAML frontmatter");
                 assert_eq!(front["name"], Value::String(skill.to_string()));
+            }
+        }
+    }
+
+    #[test]
+    fn counts_each_shipped_skills_bytes() {
+        let roles = Path::new(env!("CARGO_MANIFEST_DIR")).join("roles");
+        for role in [Role::ProductManager, Role::UiUxDesigner] {
+            for skill in loaded(role).skills {
+                let file = roles
+                    .join(role.to_string())
+                    .join("skills")
+                    .join(&skill.name)
+                    .join("SKILL.md");
+                assert_eq!(
+                    skill.bytes as u64,
+                    std::fs::metadata(&file).expect("a SKILL.md").len(),
+                    "{}",
+                    file.display()
+                );
             }
         }
     }

@@ -230,7 +230,7 @@ Files: `skills.rs` (`save_skill`, `remove_skill`, `confirm_skill`, `skill_rows`,
 - `skill_get_answers_the_files_and_ignored_fields`: for a skill with `references/a.md` and `allowed-tools` in its frontmatter, it answers both files' text as saved, `sha256` equal to `skill_sha256`, and `ignored_fields` `["allowed-tools"]`; for a folder holding `` !` `` it answers `skill_runs_commands`.
 - `whole_team_saves_keep_pins`: a `team.save` whose team carries no `skills`, or different ones, leaves both levels' pins as they were; so does `agent.replace`; `template.apply` keeps the team's pins and a kept agent's.
 
-- [ ] `feat(runtime): save, remove and confirm a skill`
+- [x] `feat(runtime): save, remove and confirm a skill`
 
 ### Task 6: The command line
 

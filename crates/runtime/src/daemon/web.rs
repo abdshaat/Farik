@@ -798,7 +798,9 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         }
         "task.screenshot" => screenshot(deps, params),
         "team.get" | "team.propose" | "team.validate" | "models.list" | "project.scan"
-        | "settings.defaults" => team::query(state, deps, name, params),
+        | "settings.defaults" | "skills.list" | "skill.get" => {
+            team::query(state, deps, name, params)
+        }
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
         name if templates::QUERIES.contains(&name) => templates::query(state, deps, name, params),
         _ => gates::query(deps, name, params),
