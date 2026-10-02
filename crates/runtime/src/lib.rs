@@ -47,6 +47,9 @@ pub mod sandbox;
 pub mod session;
 /// When each session started and how it ended, in the log.
 pub mod sessions;
+/// Skills an agent is given beyond its role's: reading, confirming, loading.
+#[cfg(unix)]
+pub mod skills;
 /// An agent asleep until its model provider's limit resets.
 pub mod sleep;
 /// Starting and ending a sprint.

@@ -581,6 +581,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
 }
 
 /// Applies one event to the projection tables, leaving the cursor to the caller.
+#[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
 fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), StoreError> {
     let seq = i64::try_from(event.envelope.seq).map_err(|_| StoreError::Sqlite {
         detail: format!(
@@ -686,7 +687,11 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::PageChecked(_)
         | EventBody::ChatMessagePosted(_)
         | EventBody::ConnectorConnected(_)
-        | EventBody::ConnectorDisconnected(_) => Ok(()),
+        | EventBody::ConnectorDisconnected(_)
+        | EventBody::SkillAdded(_)
+        | EventBody::SkillChanged(_)
+        | EventBody::SkillRemoved(_)
+        | EventBody::SkillConfirmed(_) => Ok(()),
     }
 }
 

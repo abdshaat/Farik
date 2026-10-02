@@ -28,13 +28,13 @@ pub use crate::generated::event::{
     ProposedRequest, PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody,
     QuestionChoice, ReasonBody, RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody,
     ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
-    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody,
-    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
-    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
-    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
-    TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody, ToolApprovalRequestedBody,
-    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal, Violation,
+    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SkillPinnedBody,
+    SkillRemovedBody, SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody,
+    SprintStartedBody, TaskCreatedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
+    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy,
+    TeamPausedBodyReason, TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody,
+    ToolApprovalRequestedBody, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal, Violation,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
@@ -157,6 +157,10 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::ToolApprovalGranted | EventKind::ToolApprovalRefused => {
             "toolApprovalDecidedBody"
         }
+        EventKind::SkillAdded | EventKind::SkillChanged | EventKind::SkillConfirmed => {
+            "skillPinnedBody"
+        }
+        EventKind::SkillRemoved => "skillRemovedBody",
     }
 }
 
@@ -273,13 +277,17 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::ConnectorDisconnected(_)
         | EventBody::ToolApprovalRequested(_)
         | EventBody::ToolApprovalGranted(_)
-        | EventBody::ToolApprovalRefused(_) => None,
+        | EventBody::ToolApprovalRefused(_)
+        | EventBody::SkillAdded(_)
+        | EventBody::SkillChanged(_)
+        | EventBody::SkillRemoved(_)
+        | EventBody::SkillConfirmed(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 57] = [
+pub const EVERY_KIND: [EventKind; 61] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -337,6 +345,10 @@ pub const EVERY_KIND: [EventKind; 57] = [
     EventKind::ToolApprovalRequested,
     EventKind::ToolApprovalGranted,
     EventKind::ToolApprovalRefused,
+    EventKind::SkillAdded,
+    EventKind::SkillChanged,
+    EventKind::SkillRemoved,
+    EventKind::SkillConfirmed,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -547,6 +559,18 @@ pub enum EventBody {
     /// The human refused one call an agent asked about.
     #[serde(rename = "tool_approval.refused")]
     ToolApprovalRefused(ToolApprovalDecidedBody),
+    /// The human added a skill for the team or one agent.
+    #[serde(rename = "skill.added")]
+    SkillAdded(SkillPinnedBody),
+    /// The human saved a changed version of a skill.
+    #[serde(rename = "skill.changed")]
+    SkillChanged(SkillPinnedBody),
+    /// The human removed a skill.
+    #[serde(rename = "skill.removed")]
+    SkillRemoved(SkillRemovedBody),
+    /// The human confirmed a skill's folder on this computer.
+    #[serde(rename = "skill.confirmed")]
+    SkillConfirmed(SkillPinnedBody),
 }
 
 impl EventBody {
@@ -611,6 +635,10 @@ impl EventBody {
             Self::ToolApprovalRequested(_) => EventKind::ToolApprovalRequested,
             Self::ToolApprovalGranted(_) => EventKind::ToolApprovalGranted,
             Self::ToolApprovalRefused(_) => EventKind::ToolApprovalRefused,
+            Self::SkillAdded(_) => EventKind::SkillAdded,
+            Self::SkillChanged(_) => EventKind::SkillChanged,
+            Self::SkillRemoved(_) => EventKind::SkillRemoved,
+            Self::SkillConfirmed(_) => EventKind::SkillConfirmed,
         }
     }
 }
@@ -938,7 +966,12 @@ mod tests {
                 // do design_plan.approved, design_plan.returned and preview.stopped, and
                 // tool_approval.granted and tool_approval.refused; no others do, and a
                 // fixture that made one equal must not hide it.
-                let shared: [&[EventKind]; 3] = [
+                let shared: [&[EventKind]; 4] = [
+                    &[
+                        EventKind::SkillAdded,
+                        EventKind::SkillChanged,
+                        EventKind::SkillConfirmed,
+                    ],
                     &[EventKind::TeamPaused, EventKind::TeamResumed],
                     &[
                         EventKind::ToolApprovalGranted,
@@ -1493,7 +1526,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 57);
+        assert_eq!(EVERY_KIND.len(), 61);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

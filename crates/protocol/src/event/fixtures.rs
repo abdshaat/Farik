@@ -149,6 +149,10 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::ToolApprovalRequested
         | EventKind::ToolApprovalGranted
         | EventKind::ToolApprovalRefused => a_connector_body_wire(kind),
+        EventKind::SkillAdded
+        | EventKind::SkillChanged
+        | EventKind::SkillRemoved
+        | EventKind::SkillConfirmed => a_skill_body_wire(kind),
         EventKind::SprintStarted
         | EventKind::SprintPlanned
         | EventKind::SprintEnded
@@ -354,6 +358,15 @@ fn a_tool_body_wire(field: &str, value: &str) -> Value {
 #[must_use]
 pub fn a_contract_summary_wire() -> Value {
     json!({ "kind": "task", "title": "Add a login page", "status": "draft", "risk": "low" })
+}
+
+/// `dev-a`'s skill `api-style`, added, changed or confirmed with a hash, or removed.
+fn a_skill_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::SkillRemoved {
+        json!({ "level": "agent", "agent": "dev-a", "name": "api-style" })
+    } else {
+        json!({ "level": "agent", "agent": "dev-a", "name": "api-style", "sha256": "0".repeat(64) })
+    }
 }
 
 /// `dev-a`'s custom server `github`, connected or taken away, or a call of it asked about or

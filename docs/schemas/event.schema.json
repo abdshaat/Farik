@@ -113,7 +113,11 @@
         "connector.disconnected",
         "tool_approval.requested",
         "tool_approval.granted",
-        "tool_approval.refused"
+        "tool_approval.refused",
+        "skill.added",
+        "skill.changed",
+        "skill.removed",
+        "skill.confirmed"
       ]
     },
     "eventBodyWire": {
@@ -172,7 +176,9 @@
         { "$ref": "#/$defs/connectorConnectedBody" },
         { "$ref": "#/$defs/connectorDisconnectedBody" },
         { "$ref": "#/$defs/toolApprovalRequestedBody" },
-        { "$ref": "#/$defs/toolApprovalDecidedBody" }
+        { "$ref": "#/$defs/toolApprovalDecidedBody" },
+        { "$ref": "#/$defs/skillPinnedBody" },
+        { "$ref": "#/$defs/skillRemovedBody" }
       ]
     },
     "contractSummary": {
@@ -894,6 +900,31 @@
       "properties": {
         "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "note": { "type": "string" }
+      }
+    },
+    "skillPinnedBody": {
+      "title": "Skill Pinned Body",
+      "description": "The human added a skill (skill.added), saved a changed one (skill.changed) or confirmed one on this computer (skill.confirmed) (docs/SPEC.md 6.7; ADR 0034): level is team or agent, agent names the agent for level agent and is absent for team, name is the skill's, and sha256 is skill_sha256 of its folder, the hash the person read and that the team file now pins. The envelope names no agent: the human acted. These events stay in this machine's log and a skill loads only when the newest of them for it carries its pin.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name", "sha256"],
+      "properties": {
+        "level": { "type": "string", "enum": ["team", "agent"] },
+        "agent": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "skillRemovedBody": {
+      "title": "Skill Removed Body",
+      "description": "The human removed a skill and its pin (docs/SPEC.md 6.7; ADR 0034): level, agent (for level agent) and name as in skill.added. A skill.removed after the newest skill.added, skill.changed or skill.confirmed for a skill means it is not confirmed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name"],
+      "properties": {
+        "level": { "type": "string", "enum": ["team", "agent"] },
+        "agent": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 }
       }
     },
     "connectorTag": {

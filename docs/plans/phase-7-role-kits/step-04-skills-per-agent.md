@@ -200,7 +200,7 @@ Files: `crates/runtime/src/skills.rs`, `lib.rs`. Produces `SkillLevel`, `skill_f
 - `a_confirmed_replacement_names_the_role_skill`: an `in_use` team skill `implementing-a-contract` is in `skills` and in `replaced_role_skills`; in review, neither.
 - `writes_the_plugin_folder`: writes `<dir>/.claude-plugin/plugin.json` as `{"name":"farik"}` and `<dir>/skills/<name>/SKILL.md` as the session copy; the folder is mode 0700; writing twice replaces the first copy whole.
 
-- [ ] `feat(runtime): assemble an agent's confirmed skills for a session`
+- [x] `feat(runtime): assemble an agent's confirmed skills for a session`
 
 ### Task 4: Skills in sessions
 
