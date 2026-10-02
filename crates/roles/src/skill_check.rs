@@ -331,16 +331,22 @@ const SHIPPED_ROLES: [Role; 6] = [
 ];
 
 static CORE_SKILL_NAMES: LazyLock<BTreeSet<&'static str>> = LazyLock::new(|| {
-    SHIPPED_ROLES
+    let roles: Vec<_> = SHIPPED_ROLES
         .into_iter()
         .filter_map(|role| crate::load_role(role).ok())
-        .flat_map(|definition| definition.skills)
+        .collect();
+    let kits: Vec<_> = SHIPPED_ROLES
+        .into_iter()
+        .filter_map(|role| crate::load_kit(role).ok())
+        .collect();
+    crate::shipped_skill_names(&roles, &kits)
+        .into_iter()
         // ponytail: leaks a few short names once, so the set can be 'static; a Cow set if it grows.
-        .map(|skill| &*Box::leak(skill.name.into_boxed_str()))
+        .map(|name| &*Box::leak(name.into_boxed_str()))
         .collect()
 });
 
-/// The name of every skill a shipped role carries.
+/// The name of every skill a shipped role or its kit carries.
 #[must_use]
 pub fn core_skill_names() -> BTreeSet<&'static str> {
     CORE_SKILL_NAMES.clone()

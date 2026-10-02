@@ -233,7 +233,7 @@ fn connector_errors(team: &Team) -> Vec<ValidationError> {
         let mut names = Vec::new();
         for (at, server) in agent.mcp_servers.iter().flatten().enumerate() {
             let name = server.name.as_str();
-            let mut refused = entry_errors(server);
+            let mut refused = server_errors(server);
             if names.contains(&name) {
                 refused.insert(
                     0,
@@ -280,8 +280,10 @@ fn skill_errors(team: &Team) -> Vec<ValidationError> {
     errors
 }
 
-/// One `mcp_servers` entry's refusals, each as its field below the entry and its message.
-fn entry_errors(server: &McpServerWire) -> Vec<(String, String)> {
+/// One `mcp_servers` entry's refusals, each as its field below the entry and its message: what
+/// `validate_team` gives that entry, which a kit's connector is held to as well.
+#[must_use]
+pub fn server_errors(server: &McpServerWire) -> Vec<(String, String)> {
     let name = server.name.as_str();
     let given = present_fields(server);
     let mut refused = Vec::new();

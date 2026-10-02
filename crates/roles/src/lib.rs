@@ -18,12 +18,18 @@ use crate::generated::role::{FarikRole, FarikRoleModelEffort};
 mod connectors;
 /// Types generated from `docs/schemas/role.schema.json`.
 pub mod generated;
+/// A role's kit: skills and services.
+mod kit;
 /// Which role reviews a task (D7).
 mod reviewer;
 /// Checking a skill a user adds.
 mod skill_check;
 
 pub use connectors::{ConnectorDefinition, builtin_connector};
+pub use kit::{
+    Kit, KitAllowance, KitConnector, KitError, PinDrift, SetupCopy, load_kit, parse_kit, pin_drift,
+    quoted_labels, shipped_skill_names,
+};
 pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
 pub use skill_check::{
     CheckedSkill, SkillRefusal, check_skill, core_skill_names, declared_name_and_description,

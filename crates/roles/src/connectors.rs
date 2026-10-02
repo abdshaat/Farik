@@ -1,12 +1,12 @@
-//! The connectors Farik ships (`docs/SPEC.md` 5.6): each one's pinned image, its arguments, and
-//! every tool's tag, embedded in the binary.
+//! The connectors Farik runs itself (`docs/SPEC.md` 5.6): each one's pinned image, its arguments, and
+//! every tool's tag, read from the kit that ships it.
 
 use std::collections::BTreeMap;
 
 use farik_core::governor::permissions::ConnectorTag;
 use serde::Deserialize;
 
-/// A built-in connector, as its file under `connectors/` defines it.
+/// A built-in connector, as the UI/UX Designer's kit defines it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectorDefinition {
@@ -22,21 +22,21 @@ pub struct ConnectorDefinition {
     pub tools: BTreeMap<String, ConnectorTag>,
 }
 
-/// The connector Farik ships under `name`, or `None` for a name it does not ship.
-///
-/// # Panics
-///
-/// When a shipped file is not a connector's, which the tests over every shipped file rule out.
+/// The connector Farik ships under `name`, or `None` for a name Farik does not ship: the
+/// `container` connector of the UI/UX Designer's kit (`roles/ui_ux_designer/kit.yaml`).
 #[must_use]
 pub fn builtin_connector(name: &str) -> Option<ConnectorDefinition> {
-    let text = match name {
-        "playwright" => include_str!("../connectors/playwright.yaml"),
-        _ => return None,
-    };
-    Some(
-        serde_saphyr::from_str_with_options(text, crate::yaml_options())
-            .expect("a shipped connector file is a connector's"),
-    )
+    // The Designer's kit is the only one that ships a container, and the tests over every shipped
+    // kit rule out its failing to load.
+    let kit = crate::load_kit(farik_core::contract::Role::UiUxDesigner).ok()?;
+    kit.connectors
+        .into_iter()
+        .find_map(|connector| match connector {
+            crate::KitConnector::Container(definition) if definition.name == name => {
+                Some(definition)
+            }
+            _ => None,
+        })
 }
 
 #[cfg(test)]

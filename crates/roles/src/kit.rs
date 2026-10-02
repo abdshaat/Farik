@@ -1,0 +1,1247 @@
+//! A role's kit (`docs/SPEC.md` 6.7, ADR 0036): the skills it carries and the services it may be
+//! connected to, read from `roles/<role>/kit.yaml` and held to `docs/schemas/kit.schema.json`
+//! and the refusals the loader adds. Pure: the files are embedded in the binary.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::ops::Range;
+use std::sync::LazyLock;
+
+use farik_core::contract::Role;
+use farik_core::governor::permissions::ConnectorTag;
+use farik_core::team::{BUILTIN_CONNECTORS, McpServerWire, server_errors};
+use jsonschema::Validator;
+use serde_json::Value;
+
+use crate::connectors::ConnectorDefinition;
+use crate::generated::kit::FarikKit;
+use crate::skill_check::{CheckedSkill, check_skill};
+use crate::{RoleDefinition, load_role};
+
+const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/kit.schema.json");
+
+/// A role's kit, as Farik ships it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Kit {
+    /// The role it belongs to.
+    pub role: Role,
+    /// The kit's skills, checked as a user's are (ADR 0034).
+    pub skills: Vec<CheckedSkill>,
+    /// The services, in the file's order.
+    pub connectors: Vec<KitConnector>,
+}
+
+/// One service of a kit.
+#[derive(Debug, Clone, PartialEq)]
+// reason: a kit holds a dozen connectors at most, and the variants are the plan's interface.
+#[allow(clippy::large_enum_variant)]
+pub enum KitConnector {
+    /// A `stdio` or `http` service the user connects by name.
+    Server {
+        /// The entry as the team file takes it, `source: custom`; `kit_entry` marks it a kit's.
+        entry: McpServerWire,
+        /// What the user reads while connecting.
+        copy: SetupCopy,
+        /// The calls per sprint a user may pre-approve, by tool (step 05b).
+        allowances: BTreeMap<String, KitAllowance>,
+    },
+    /// A server Farik runs in Docker itself.
+    Container(ConnectorDefinition),
+}
+
+impl KitConnector {
+    /// The connector's name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Server { entry, .. } => entry.name.as_str(),
+            Self::Container(definition) => &definition.name,
+        }
+    }
+}
+
+/// The words a user reads while connecting a service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetupCopy {
+    /// The service.
+    pub title: String,
+    /// What it is.
+    pub about: String,
+    /// Why the role wants it.
+    pub why: String,
+    /// What the user does.
+    pub setup: String,
+    /// Where the key is made; present when the service takes keys.
+    pub key_page: Option<String>,
+    /// A tool to what it does in the user's words.
+    pub labels: BTreeMap<String, String>,
+}
+
+/// What a user may pre-approve for a spending tool.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KitAllowance {
+    /// The default calls per sprint.
+    pub calls: u32,
+    /// A plural noun, such as "images".
+    pub what: String,
+}
+
+/// Why a kit could not be loaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KitError {
+    /// Farik ships no kit for this role.
+    NotFound {
+        /// The role asked for.
+        role_id: String,
+    },
+    /// The kit's files are not a kit's.
+    Invalid {
+        /// The role, as its wire id.
+        role_id: String,
+        /// Each refusal as `<json pointer>: <code>: <message>`, joined by `; `.
+        detail: String,
+    },
+}
+
+impl fmt::Display for KitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound { role_id } => {
+                write!(formatter, "Farik ships no kit for the role {role_id}")
+            }
+            Self::Invalid { role_id, detail } => {
+                write!(formatter, "the kit of {role_id} is not valid: {detail}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for KitError {}
+
+/// The kit Farik ships for a role.
+///
+/// # Errors
+///
+/// `NotFound` for `Human`; `Invalid` when a shipped file is refused, which the tests over every
+/// shipped kit rule out.
+pub fn load_kit(role: Role) -> Result<Kit, KitError> {
+    let yaml = match role {
+        Role::ProductManager => include_str!("../roles/product_manager/kit.yaml"),
+        Role::SoftwareDeveloper => include_str!("../roles/software_developer/kit.yaml"),
+        Role::ScrumMaster => include_str!("../roles/scrum_master/kit.yaml"),
+        Role::Architect => include_str!("../roles/architect/kit.yaml"),
+        Role::MarketingSpecialist => include_str!("../roles/marketing_specialist/kit.yaml"),
+        Role::UiUxDesigner => include_str!("../roles/ui_ux_designer/kit.yaml"),
+        Role::Human => {
+            return Err(KitError::NotFound {
+                role_id: role.to_string(),
+            });
+        }
+    };
+    // The role's own skill names come from `load_role`, never from `core_skill_names`, which is
+    // built over this function.
+    let role_skills: Vec<String> = load_role(role)
+        .map_err(|error| KitError::Invalid {
+            role_id: role.to_string(),
+            detail: error.to_string(),
+        })?
+        .skills
+        .into_iter()
+        .map(|skill| skill.name)
+        .collect();
+    // No shipped kit has a skill yet; each arm above gains its `include_str!` files with its first.
+    parse_kit(role, yaml, &role_skills, &[])
+}
+
+static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
+    let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
+        "the embedded kit schema is valid JSON: it is the file in docs/schemas/ that typify \
+         generated this crate's kit types from at compile time",
+    );
+    jsonschema::validator_for(&schema).expect(
+        "the embedded kit schema compiles: it is JSON Schema 2020-12 with no external \
+         references, and the generator already parsed it",
+    )
+});
+
+/// What a kit file may not say in a service's copy: the plumbing's names (ADR 0036).
+const PLUMBING: [&str; 3] = ["mcp", "oauth", "token"];
+
+/// Programs that fetch and run a package by name, which must then name it at an exact version.
+const PACKAGE_RUNNERS: [&str; 4] = ["npx", "uvx", "pipx", "bunx"];
+
+/// What one connector may and must say, by transport.
+struct Shape {
+    allowed: &'static [&'static str],
+    required: &'static [&'static str],
+}
+
+const COPY: [&str; 6] = ["title", "about", "why", "setup", "key_page", "labels"];
+
+fn shape(transport: &str) -> Shape {
+    match transport {
+        "stdio" => Shape {
+            allowed: &[
+                "name",
+                "transport",
+                "command",
+                "args",
+                "credential_keys",
+                "tools",
+                "allowances",
+                "title",
+                "about",
+                "why",
+                "setup",
+                "key_page",
+                "labels",
+            ],
+            required: &["command", "title", "about", "why", "setup"],
+        },
+        "http" => Shape {
+            allowed: &[
+                "name",
+                "transport",
+                "url",
+                "headers",
+                "credential_keys",
+                "oauth",
+                "tools",
+                "allowances",
+                "title",
+                "about",
+                "why",
+                "setup",
+                "key_page",
+                "labels",
+            ],
+            required: &["url", "title", "about", "why", "setup"],
+        },
+        _ => Shape {
+            allowed: &["name", "transport", "image", "module_root", "args", "tools"],
+            required: &["image", "module_root", "args"],
+        },
+    }
+}
+
+/// Turns a kit's files into the kit: `kit.yaml` held to its schema and the loader's refusals.
+/// `role_skills` are the names `role.yaml` carries; `skills` are the kit's skill folders, each as
+/// its name and its files (path, text).
+///
+/// # Errors
+///
+/// `Invalid`, naming every refusal as `<json pointer>: <code>: <words>`.
+pub fn parse_kit(
+    role: Role,
+    yaml: &str,
+    role_skills: &[String],
+    skills: &[(&str, &[(&str, &str)])],
+) -> Result<Kit, KitError> {
+    let invalid = |detail: String| KitError::Invalid {
+        role_id: role.to_string(),
+        detail,
+    };
+    let value = crate::yaml_value(yaml, "kit.yaml").map_err(invalid)?;
+    let schema: Vec<String> = VALIDATOR
+        .iter_errors(&value)
+        .map(|error| format!("{}: schema: {error}", error.instance_path()))
+        .collect();
+    if !schema.is_empty() {
+        return Err(invalid(schema.join("; ")));
+    }
+    let file: FarikKit = serde_json::from_value(value.clone()).map_err(|error| {
+        invalid(format!(
+            "the schema passed but the typed kit could not be built: {error}"
+        ))
+    })?;
+    let mut refused = Refusals(Vec::new());
+    if file.role.to_string() != role.to_string() {
+        refused.add(
+            "/role".to_string(),
+            "kit_role_mismatch",
+            &format!(
+                "kit.yaml says it is {}, and it is the kit of {role}",
+                file.role
+            ),
+        );
+    }
+    let names: Vec<String> = file
+        .skills
+        .iter()
+        .map(|skill| skill.as_str().to_string())
+        .collect();
+    let kit_skills = load_skills(&names, role_skills, skills, &mut refused);
+    let mut connectors = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    for (index, connector) in value["connectors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        let name = connector["name"].as_str().unwrap_or_default().to_string();
+        if seen.contains(&name) {
+            refused.add(
+                format!("/connectors/{index}/name"),
+                "kit_connector_twice",
+                &format!("{name} is in this kit already"),
+            );
+        }
+        seen.push(name);
+        connectors.extend(load_connector(role, index, connector, &mut refused));
+    }
+    if refused.0.is_empty() {
+        Ok(Kit {
+            role,
+            skills: kit_skills,
+            connectors,
+        })
+    } else {
+        Err(invalid(refused.0.join("; ")))
+    }
+}
+
+/// The refusals of one kit file, each `<json pointer>: <code>: <words>`.
+struct Refusals(Vec<String>);
+
+impl Refusals {
+    fn add(&mut self, pointer: impl Into<String>, code: &str, words: &str) {
+        self.0.push(format!("{}: {code}: {words}", pointer.into()));
+    }
+
+    /// Refuses `checked` when it names the plumbing, whatever the field's own text is.
+    fn check_words(&mut self, pointer: &str, checked: &str) {
+        let lower = checked.to_lowercase();
+        if let Some(word) = PLUMBING.iter().find(|word| lower.contains(**word)) {
+            self.add(
+                pointer.to_string(),
+                "copy_word_refused",
+                &format!(
+                    "Farik's own words never say \"{word}\"; only a service's label quoted in \
+                     setup may"
+                ),
+            );
+        }
+    }
+}
+
+/// The kit's skills: each named, not the role's, with its folder, and passing `check_skill`.
+fn load_skills(
+    names: &[String],
+    role_skills: &[String],
+    skills: &[(&str, &[(&str, &str)])],
+    refused: &mut Refusals,
+) -> Vec<CheckedSkill> {
+    let mut checked = Vec::new();
+    for (index, name) in names.iter().enumerate() {
+        let pointer = format!("/skills/{index}");
+        if role_skills.contains(name) {
+            refused.add(
+                pointer,
+                "kit_skill_in_role",
+                &format!("role.yaml carries {name} already, in the prompt; a kit skill is another"),
+            );
+            continue;
+        }
+        let Some((_, files)) = skills.iter().find(|(found, _)| found == name) else {
+            refused.add(
+                pointer,
+                "kit_skill_missing",
+                &format!("there is no skills/{name}/SKILL.md beside kit.yaml"),
+            );
+            continue;
+        };
+        let files = files
+            .iter()
+            .map(|(path, text)| ((*path).to_string(), text.as_bytes().to_vec()))
+            .collect();
+        match check_skill(name, &files) {
+            Ok(skill) => checked.push(skill),
+            Err(refusal) => refused.add(pointer, refusal.code(), &refusal.to_string()),
+        }
+    }
+    checked
+}
+
+/// One connector of the file: its shape by transport, then the checks of its kind. `None` when
+/// it is refused.
+fn load_connector(
+    role: Role,
+    index: usize,
+    connector: &Value,
+    refused: &mut Refusals,
+) -> Option<KitConnector> {
+    let at = |field: &str| format!("/connectors/{index}/{field}");
+    let transport = connector["transport"].as_str().unwrap_or_default();
+    let shape = shape(transport);
+    let object = connector.as_object().cloned().unwrap_or_default();
+    let mut shaped = true;
+    for field in object
+        .keys()
+        .filter(|field| !shape.allowed.contains(&field.as_str()))
+    {
+        shaped = false;
+        refused.add(
+            at(field),
+            "kit_field_not_allowed",
+            &format!("a {transport} connector has no {field}"),
+        );
+    }
+    for field in shape
+        .required
+        .iter()
+        .filter(|field| !object.contains_key(**field))
+    {
+        shaped = false;
+        refused.add(
+            at(field),
+            "kit_field_missing",
+            &format!("a {transport} connector needs its {field}"),
+        );
+    }
+    if !shaped {
+        return None;
+    }
+    if transport == "container" {
+        return Some(load_container(role, index, connector, refused));
+    }
+    load_server(index, connector, transport, refused)
+}
+
+/// A `container` connector: the built-in browser of the Designer's kit, its image pinned.
+fn load_container(
+    role: Role,
+    index: usize,
+    connector: &Value,
+    refused: &mut Refusals,
+) -> KitConnector {
+    let at = |field: &str| format!("/connectors/{index}/{field}");
+    let name = connector["name"].as_str().unwrap_or_default().to_string();
+    let image = connector["image"].as_str().unwrap_or_default();
+    if !BUILTIN_CONNECTORS.contains(&name.as_str()) || role != Role::UiUxDesigner {
+        refused.add(
+            at("name"),
+            "container_not_builtin",
+            &format!(
+                "{name} is not a server Farik runs in Docker for this role; only the \
+                 UI/UX Designer's playwright is"
+            ),
+        );
+    }
+    if !image.contains("@sha256:") {
+        refused.add(
+            at("image"),
+            "image_not_pinned",
+            "name the image with its @sha256: digest",
+        );
+    }
+    KitConnector::Container(ConnectorDefinition {
+        name,
+        image: image.to_string(),
+        args: strings(&connector["args"]),
+        module_root: connector["module_root"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        tools: tool_tags(connector),
+    })
+}
+
+/// A `stdio` or `http` connector: the team file's refusals, the pin, the key page, the labels, the
+/// allowances and the copy's words.
+fn load_server(
+    index: usize,
+    connector: &Value,
+    transport: &str,
+    refused: &mut Refusals,
+) -> Option<KitConnector> {
+    let at = |field: &str| format!("/connectors/{index}/{field}");
+    let object = connector.as_object().cloned().unwrap_or_default();
+    let tools = tool_tags(connector);
+    let mut entry = serde_json::Map::new();
+    entry.insert("source".to_string(), Value::from("custom"));
+    for (field, item) in &object {
+        if !COPY.contains(&field.as_str()) && field != "allowances" {
+            entry.insert(field.clone(), item.clone());
+        }
+    }
+    let wire: McpServerWire = match serde_json::from_value(Value::Object(entry)) {
+        Ok(wire) => wire,
+        Err(error) => {
+            refused.add(at(""), "connector_invalid", &error.to_string());
+            return None;
+        }
+    };
+    for (field, message) in server_errors(&wire) {
+        refused.add(at(&field), code_of(&message), &message);
+    }
+    if transport == "stdio" {
+        check_pinned(
+            &connector["command"],
+            &strings(&connector["args"]),
+            &at("args"),
+            refused,
+        );
+    }
+    let takes_keys = connector["credential_keys"]
+        .as_array()
+        .is_some_and(|keys| !keys.is_empty());
+    if takes_keys && !object.contains_key("key_page") {
+        refused.add(
+            at("key_page"),
+            "key_page_missing",
+            "a service that takes keys says where the user makes one",
+        );
+    }
+    let labels = string_map(&connector["labels"]);
+    for tool in labels.keys().filter(|tool| !tools.contains_key(*tool)) {
+        refused.add(
+            at(&format!("labels/{tool}")),
+            "label_not_a_tool",
+            &format!("{tool} is not one of this connector's tools"),
+        );
+    }
+    let mut allowances = BTreeMap::new();
+    for (tool, allowance) in connector["allowances"].as_object().into_iter().flatten() {
+        if tools.get(tool) != Some(&ConnectorTag::ExternalEffect) {
+            refused.add(
+                at(&format!("allowances/{tool}")),
+                "allowance_not_external",
+                &format!("only a tool tagged external_effect has an allowance, and {tool} is not"),
+            );
+        }
+        let what = allowance["what"].as_str().unwrap_or_default().to_string();
+        refused.check_words(&at(&format!("allowances/{tool}/what")), &what);
+        let calls = allowance["calls"]
+            .as_u64()
+            .and_then(|calls| u32::try_from(calls).ok());
+        allowances.insert(
+            tool.clone(),
+            KitAllowance {
+                calls: calls.unwrap_or_default(),
+                what,
+            },
+        );
+    }
+    for (tool, label) in &labels {
+        refused.check_words(&at(&format!("labels/{tool}")), label);
+    }
+    let text = |field: &str| connector[field].as_str().unwrap_or_default().to_string();
+    let copy = SetupCopy {
+        title: text("title"),
+        about: text("about"),
+        why: text("why"),
+        setup: text("setup"),
+        key_page: connector["key_page"].as_str().map(str::to_string),
+        labels,
+    };
+    for (field, words) in [
+        ("title", &copy.title),
+        ("about", &copy.about),
+        ("why", &copy.why),
+    ] {
+        refused.check_words(&at(field), words);
+    }
+    refused.check_words(&at("setup"), &without_quoted(&copy.setup));
+    Some(KitConnector::Server {
+        entry: wire,
+        copy,
+        allowances,
+    })
+}
+
+/// The code a team-file refusal opens with, before its colon.
+fn code_of(message: &str) -> &str {
+    message
+        .split_once(':')
+        .map_or("connector_invalid", |(code, _)| code)
+}
+
+fn strings(value: &Value) -> Vec<String> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.as_str().map(str::to_string))
+        .collect()
+}
+
+fn string_map(value: &Value) -> BTreeMap<String, String> {
+    value
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(key, item)| Some((key.clone(), item.as_str()?.to_string())))
+        .collect()
+}
+
+/// A connector's `tools`, which the schema has already held to the three tags.
+fn tool_tags(connector: &Value) -> BTreeMap<String, ConnectorTag> {
+    connector["tools"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(tool, tag)| {
+            let tag = match tag.as_str()? {
+                "network" => ConnectorTag::Network,
+                "external_effect" => ConnectorTag::ExternalEffect,
+                _ => ConnectorTag::Denied,
+            };
+            Some((tool.clone(), tag))
+        })
+        .collect()
+}
+
+/// A stdio connector that fetches a package by name must name it at an exact version, so the code
+/// Farik runs changes only with a Farik release and its pin review.
+fn check_pinned(command: &Value, args: &[String], pointer: &str, refused: &mut Refusals) {
+    let command = command.as_str().unwrap_or_default();
+    let program = command.rsplit('/').next().unwrap_or(command);
+    if PACKAGE_RUNNERS.contains(&program) && !args.iter().any(|arg| names_exact_version(arg)) {
+        refused.add(
+            pointer.to_string(),
+            "package_not_pinned",
+            &format!(
+                "{program} fetches code by name; name the package at an exact version, \
+                 name@1.2.3 or name==1.2.3"
+            ),
+        );
+    }
+}
+
+/// Whether an argument names a package at an exact version: `name@1.2.3` (npm, three numbers and
+/// an optional pre-release) or `name==1.2.3` (Python, two or more numbers and an optional suffix).
+fn names_exact_version(arg: &str) -> bool {
+    let numbers = |version: &str, least: usize| {
+        let head: &str = version.split(['-', '+']).next().unwrap_or_default();
+        let parts: Vec<&str> = head.split('.').collect();
+        parts.len() >= least
+            && parts
+                .iter()
+                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    };
+    if let Some((name, version)) = arg.split_once("==") {
+        return !name.is_empty() && numbers(version, 2);
+    }
+    arg.rfind('@')
+        .is_some_and(|at| at > 0 && numbers(&arg[at + 1..], 3))
+}
+
+/// The text ranges of a service's own labels quoted in a kit's `setup`: after `‘` up to `’`, after
+/// `“` up to `”`, after `"` up to `"`, on one line and at most 60 characters long. The ASCII
+/// apostrophe never opens one; an opening mark with no closing one quotes nothing.
+#[must_use]
+pub fn quoted_labels(text: &str) -> Vec<Range<usize>> {
+    let mut found = Vec::new();
+    let mut at = 0;
+    while let Some(opener) = text[at..].chars().next() {
+        let after = at + opener.len_utf8();
+        let closer = match opener {
+            '\u{2018}' => Some('\u{2019}'),
+            '\u{201C}' => Some('\u{201D}'),
+            '"' => Some('"'),
+            _ => None,
+        };
+        if let Some(closer) = closer
+            && let Some(end) = closing(&text[after..], closer).map(|end| after + end)
+        {
+            found.push(after..end);
+            at = end + closer.len_utf8();
+            continue;
+        }
+        at = after;
+    }
+    found
+}
+
+/// Where `closer` ends a label that starts `rest`: within 60 characters and before a line break.
+fn closing(rest: &str, closer: char) -> Option<usize> {
+    let mut inside = 0;
+    for (offset, character) in rest.char_indices() {
+        if character == closer {
+            return Some(offset);
+        }
+        inside += 1;
+        if character == '\n' || character == '\r' || inside > 60 {
+            return None;
+        }
+    }
+    None
+}
+
+/// `text` with each quoted label's characters taken out, a space left in its place.
+fn without_quoted(text: &str) -> String {
+    let mut kept = String::new();
+    let mut from = 0;
+    for range in quoted_labels(text) {
+        kept.push_str(&text[from..range.start]);
+        kept.push(' ');
+        from = range.end;
+    }
+    kept.push_str(&text[from..]);
+    kept
+}
+
+/// The name of every skill the roles and kits carry.
+#[must_use]
+pub fn shipped_skill_names(roles: &[RoleDefinition], kits: &[Kit]) -> BTreeSet<String> {
+    let role_skills = roles
+        .iter()
+        .flat_map(|role| role.skills.iter().map(|skill| skill.name.clone()));
+    let kit_skills = kits
+        .iter()
+        .flat_map(|kit| kit.skills.iter().map(|skill| skill.name.clone()));
+    role_skills.chain(kit_skills).collect()
+}
+
+/// How a service's tools differ from the kit's pins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinDrift {
+    /// Tools the service lists and the kit does not tag.
+    pub added: Vec<String>,
+    /// Tools the kit tags and the service no longer lists.
+    pub removed: Vec<String>,
+}
+
+/// What the service added to, and dropped from, the tools the kit pinned.
+#[must_use]
+pub fn pin_drift(pinned: &BTreeMap<String, ConnectorTag>, listed: &[String]) -> PinDrift {
+    let listed: BTreeSet<&String> = listed.iter().collect();
+    PinDrift {
+        added: listed
+            .iter()
+            .filter(|tool| !pinned.contains_key(**tool))
+            .map(|tool| (*tool).clone())
+            .collect(),
+        removed: pinned
+            .keys()
+            .filter(|tool| !listed.contains(tool))
+            .cloned()
+            .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use farik_core::contract::Role;
+    use farik_core::governor::permissions::ConnectorTag;
+    use serde_json::{Value, json};
+
+    use super::{
+        Kit, KitConnector, KitError, load_kit, parse_kit, pin_drift, quoted_labels,
+        shipped_skill_names,
+    };
+    use crate::{builtin_connector, core_skill_names, load_role};
+
+    const SHIPPED: [Role; 6] = [
+        Role::ProductManager,
+        Role::ScrumMaster,
+        Role::Architect,
+        Role::SoftwareDeveloper,
+        Role::MarketingSpecialist,
+        Role::UiUxDesigner,
+    ];
+
+    /// A valid kit of the Product Manager with one http service.
+    fn base() -> Value {
+        json!({
+            "role": "product_manager",
+            "skills": [],
+            "connectors": [{
+                "name": "notion",
+                "transport": "http",
+                "url": "https://mcp.notion.example/mcp",
+                "credential_keys": ["NOTION_KEY"],
+                "headers": { "Authorization": "Bearer {NOTION_KEY}" },
+                "title": "Notion",
+                "about": "Your team's notes and docs.",
+                "why": "Reads your product docs, so plans start from what you wrote.",
+                "setup": "Make a key on Notion's page, then paste it.",
+                "key_page": "https://www.notion.so/profile/integrations",
+                "labels": { "search": "search pages" },
+                "tools": { "search": "network", "create_page": "external_effect", "delete_page": "denied" },
+                "allowances": { "create_page": { "calls": 20, "what": "pages" } }
+            }]
+        })
+    }
+
+    fn parse_in(role: Role, value: &Value) -> Result<Kit, KitError> {
+        parse_kit(role, &value.to_string(), &[], &[])
+    }
+
+    fn parse(value: &Value) -> Result<Kit, KitError> {
+        parse_in(Role::ProductManager, value)
+    }
+
+    fn detail(result: Result<Kit, KitError>) -> String {
+        match result {
+            Err(KitError::Invalid { detail, .. }) => detail,
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+    }
+
+    fn refused(value: &Value, pointer: &str, code: &str) {
+        let detail = detail(parse(value));
+        assert!(
+            detail.contains(&format!("{pointer}: {code}")),
+            "wanted {code} at {pointer}, got {detail}"
+        );
+    }
+
+    fn set(value: &mut Value, pointer: &str, to: Value) {
+        *value.pointer_mut(pointer).expect("a field of the fixture") = to;
+    }
+
+    #[test]
+    fn loads_every_shipped_kit() {
+        for role in SHIPPED {
+            let kit = load_kit(role).expect("a shipped kit loads");
+            assert_eq!(kit.role, role);
+            assert_eq!(
+                kit.connectors.len(),
+                usize::from(role == Role::UiUxDesigner),
+                "{role}"
+            );
+        }
+        assert!(matches!(
+            load_kit(Role::Human),
+            Err(KitError::NotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn holds_every_shipped_kit_to_its_schema() {
+        let roles = Path::new(env!("CARGO_MANIFEST_DIR")).join("roles");
+        let mut folders = 0;
+        for entry in std::fs::read_dir(&roles).expect("the roles folder") {
+            let folder = entry.expect("an entry").path();
+            let id = folder
+                .file_name()
+                .expect("a name")
+                .to_string_lossy()
+                .to_string();
+            let text = std::fs::read_to_string(folder.join("kit.yaml"))
+                .unwrap_or_else(|_| panic!("{id} has no kit.yaml"));
+            let role: Role = id.parse().expect("a folder named for a role");
+            parse_kit(
+                role,
+                &text,
+                &load_role(role)
+                    .expect("a role")
+                    .skills
+                    .iter()
+                    .map(|s| s.name.clone())
+                    .collect::<Vec<_>>(),
+                &[],
+            )
+            .unwrap_or_else(|error| panic!("{id}: {error}"));
+            load_kit(role).expect("and load_kit loads it");
+            folders += 1;
+        }
+        assert_eq!(folders, SHIPPED.len());
+    }
+
+    #[test]
+    fn keeps_the_designers_browser_in_its_kit() {
+        let kit = load_kit(Role::UiUxDesigner).expect("the Designer's kit");
+        let Some(KitConnector::Container(browser)) = kit.connectors.first() else {
+            panic!("the Designer's first connector is a container");
+        };
+        assert_eq!(browser.name, "playwright");
+        assert_eq!(
+            browser.image,
+            "mcr.microsoft.com/playwright/mcp:v0.0.82@sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734"
+        );
+        assert_eq!(browser.module_root, "/app/node_modules");
+        assert_eq!(browser.args, ["--isolated"]);
+        assert_eq!(browser.tools.len(), 28);
+        assert_eq!(browser.tools["browser_navigate"], ConnectorTag::Network);
+        assert_eq!(browser.tools["browser_evaluate"], ConnectorTag::Denied);
+        assert_eq!(builtin_connector("playwright").as_ref(), Some(browser));
+    }
+
+    #[test]
+    fn loads_a_service_with_its_copy_and_allowance() {
+        let kit = parse(&base()).expect("the fixture loads");
+        let KitConnector::Server {
+            entry,
+            copy,
+            allowances,
+        } = &kit.connectors[0]
+        else {
+            panic!("a server");
+        };
+        assert_eq!(entry.name.as_str(), "notion");
+        assert_eq!(copy.title, "Notion");
+        assert_eq!(copy.labels["search"], "search pages");
+        assert_eq!(allowances["create_page"].calls, 20);
+        assert_eq!(kit.connectors[0].name(), "notion");
+    }
+
+    const SKILL: &str = "---\nname: launch-plans\ndescription: Plans a launch.\n---\nSteps.\n";
+
+    #[test]
+    fn loads_a_kit_skill_with_its_folder() {
+        let mut value = base();
+        set(&mut value, "/skills", json!(["launch-plans"]));
+        let files: &[(&str, &str)] = &[("SKILL.md", SKILL)];
+        let kit = parse_kit(
+            Role::ProductManager,
+            &value.to_string(),
+            &[],
+            &[("launch-plans", files)],
+        )
+        .expect("loads");
+        assert_eq!(kit.skills[0].name, "launch-plans");
+    }
+
+    #[test]
+    fn refuses_a_kit_skill_with_no_folder() {
+        let mut value = base();
+        set(&mut value, "/skills", json!(["launch-plans"]));
+        refused(&value, "/skills/0", "kit_skill_missing");
+    }
+
+    #[test]
+    fn refuses_a_kit_skill_the_role_file_names() {
+        let mut value = base();
+        set(&mut value, "/skills", json!(["writing-task-contracts"]));
+        let result = parse_kit(
+            Role::ProductManager,
+            &value.to_string(),
+            &["writing-task-contracts".to_string()],
+            &[],
+        );
+        assert!(detail(result).contains("/skills/0: kit_skill_in_role"));
+    }
+
+    #[test]
+    fn refuses_a_kit_skill_that_runs_commands() {
+        let mut value = base();
+        set(&mut value, "/skills", json!(["launch-plans"]));
+        let text = "---\nname: launch-plans\ndescription: Plans.\n---\nRun !`ls` now.\n";
+        let files: &[(&str, &str)] = &[("SKILL.md", text)];
+        let result = parse_kit(
+            Role::ProductManager,
+            &value.to_string(),
+            &[],
+            &[("launch-plans", files)],
+        );
+        assert!(detail(result).contains("/skills/0: skill_runs_commands"));
+    }
+
+    #[test]
+    fn refuses_the_wrong_roles_kit() {
+        let result = parse_in(Role::Architect, &base());
+        assert!(detail(result).contains("/role: kit_role_mismatch"));
+    }
+
+    #[test]
+    fn refuses_a_tool_without_a_tag() {
+        let mut value = base();
+        set(&mut value, "/connectors/0/tools/search", Value::Null);
+        let detail = detail(parse(&value));
+        assert!(detail.contains("/connectors/0/tools/search"), "{detail}");
+    }
+
+    #[test]
+    fn refuses_a_tool_tagged_read() {
+        let mut value = base();
+        set(&mut value, "/connectors/0/tools/search", json!("read"));
+        let detail = detail(parse(&value));
+        assert!(detail.contains("/connectors/0/tools/search"), "{detail}");
+    }
+
+    #[test]
+    fn refuses_an_allowance_on_a_tool_that_is_not_external_effect() {
+        let mut value = base();
+        set(
+            &mut value,
+            "/connectors/0/allowances",
+            json!({ "search": { "calls": 5, "what": "searches" } }),
+        );
+        refused(
+            &value,
+            "/connectors/0/allowances/search",
+            "allowance_not_external",
+        );
+    }
+
+    #[test]
+    fn refuses_what_the_team_file_would_refuse() {
+        let mut value = base();
+        set(
+            &mut value,
+            "/connectors/0/headers",
+            json!({ "Authorization": "Bearer abc" }),
+        );
+        refused(
+            &value,
+            "/connectors/0/headers/Authorization",
+            "header_holds_secret",
+        );
+    }
+
+    #[test]
+    fn refuses_a_key_without_its_page() {
+        let mut value = base();
+        value["connectors"][0]
+            .as_object_mut()
+            .expect("an object")
+            .remove("key_page");
+        refused(&value, "/connectors/0/key_page", "key_page_missing");
+    }
+
+    #[test]
+    fn refuses_one_connector_name_twice() {
+        let mut value = base();
+        let twin = value["connectors"][0].clone();
+        value["connectors"]
+            .as_array_mut()
+            .expect("an array")
+            .push(twin);
+        refused(&value, "/connectors/1/name", "kit_connector_twice");
+    }
+
+    #[test]
+    fn refuses_a_service_with_no_copy_or_a_foreign_field() {
+        let mut value = base();
+        value["connectors"][0]
+            .as_object_mut()
+            .expect("an object")
+            .remove("why");
+        refused(&value, "/connectors/0/why", "kit_field_missing");
+        let mut value = base();
+        value["connectors"][0]["image"] = json!("x@sha256:abc");
+        refused(&value, "/connectors/0/image", "kit_field_not_allowed");
+    }
+
+    #[test]
+    fn refuses_a_label_for_a_tool_it_lacks() {
+        let mut value = base();
+        set(&mut value, "/connectors/0/labels", json!({ "nope": "x" }));
+        refused(&value, "/connectors/0/labels/nope", "label_not_a_tool");
+    }
+
+    fn stdio(command: &str, args: &[&str]) -> Value {
+        let mut value = base();
+        let entry = value["connectors"][0].as_object_mut().expect("an object");
+        for gone in [
+            "url",
+            "headers",
+            "credential_keys",
+            "key_page",
+            "allowances",
+        ] {
+            entry.remove(gone);
+        }
+        entry.insert("transport".into(), json!("stdio"));
+        entry.insert("command".into(), json!(command));
+        entry.insert("args".into(), json!(args));
+        value
+    }
+
+    #[test]
+    fn refuses_an_unpinned_package() {
+        refused(
+            &stdio("npx", &["-y", "@notionhq/notion-mcp-server"]),
+            "/connectors/0/args",
+            "package_not_pinned",
+        );
+        parse(&stdio("npx", &["-y", "@notionhq/notion-mcp-server@1.8.1"])).expect("pinned loads");
+        refused(
+            &stdio("uvx", &["mcp-server-fetch"]),
+            "/connectors/0/args",
+            "package_not_pinned",
+        );
+        refused(
+            &stdio("npx", &["-y", "left-pad@latest"]),
+            "/connectors/0/args",
+            "package_not_pinned",
+        );
+        refused(
+            &stdio("bunx", &["left-pad@^1.2.3"]),
+            "/connectors/0/args",
+            "package_not_pinned",
+        );
+        parse(&stdio("uvx", &["mcp-server-fetch==2025.4.7"])).expect("pinned loads");
+        parse(&stdio("./server", &[])).expect_err("a relative command is the team file's refusal");
+        parse(&stdio("/usr/local/bin/server", &["--flag"])).expect("not checked");
+    }
+
+    fn browser(role: Role, name: &str, image: &str) -> Result<Kit, KitError> {
+        let value = json!({
+            "role": role.to_string(),
+            "skills": [],
+            "connectors": [{
+                "name": name, "transport": "container", "image": image,
+                "module_root": "/app/node_modules", "args": ["--isolated"],
+                "tools": { "browser_navigate": "network" }
+            }]
+        });
+        parse_in(role, &value)
+    }
+
+    const PINNED: &str = "mcr.microsoft.com/playwright/mcp:v0.0.82@sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734";
+
+    #[test]
+    fn refuses_a_container_farik_does_not_run() {
+        browser(Role::UiUxDesigner, "playwright", PINNED).expect("the built-in loads");
+        let text = detail(browser(Role::UiUxDesigner, "selenium", PINNED));
+        assert!(
+            text.contains("/connectors/0/name: container_not_builtin"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn refuses_an_unpinned_image() {
+        let text = detail(browser(
+            Role::UiUxDesigner,
+            "playwright",
+            "mcr.microsoft.com/playwright/mcp:v0.0.82",
+        ));
+        assert!(
+            text.contains("/connectors/0/image: image_not_pinned"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn refuses_the_browser_in_another_roles_kit() {
+        let text = detail(browser(Role::SoftwareDeveloper, "playwright", PINNED));
+        assert!(
+            text.contains("/connectors/0/name: container_not_builtin"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn refuses_copy_that_names_the_plumbing() {
+        for word in ["MCP", "OAuth", "tokens"] {
+            let text = format!("Paste the {word} here");
+            for (pointer, field) in [
+                ("/connectors/0/setup", "setup"),
+                ("/connectors/0/why", "why"),
+                ("/connectors/0/about", "about"),
+                ("/connectors/0/title", "title"),
+                ("/connectors/0/labels/search", "label"),
+                ("/connectors/0/allowances/create_page/what", "what"),
+            ] {
+                let mut value = base();
+                set(&mut value, pointer, json!(text));
+                let detail = detail(parse(&value));
+                assert!(
+                    detail.contains(&format!("{pointer}: copy_word_refused")),
+                    "{word} in {field}: {detail}"
+                );
+            }
+        }
+    }
+
+    fn setup_text(text: &str) -> Result<Kit, KitError> {
+        let mut value = base();
+        set(&mut value, "/connectors/0/setup", json!(text));
+        parse(&value)
+    }
+
+    #[test]
+    fn accepts_a_services_quoted_label_in_setup() {
+        for text in [
+            "On Slack's page, copy the value labelled ‘Bot User OAuth Token’.",
+            "On Slack's page, copy the value labelled “Bot User OAuth Token”.",
+            "On Slack's page, copy the value labelled \"Bot User OAuth Token\".",
+        ] {
+            setup_text(text).unwrap_or_else(|error| panic!("{text}: {error}"));
+        }
+    }
+
+    #[test]
+    fn checks_the_words_outside_a_quoted_label() {
+        let long = format!("‘{}token’", "x".repeat(56));
+        assert_eq!(long.chars().count() - 2, 61);
+        for text in [
+            "Paste the OAuth token from ‘Settings’".to_string(),
+            "On Slack's page, copy 'Bot User OAuth Token'.".to_string(),
+            "Copy ‘Bot User OAuth Token from the page".to_string(),
+            format!("Copy {long} from the page"),
+            "Copy ‘Bot User\nOAuth Token’ from the page".to_string(),
+        ] {
+            let detail = detail(setup_text(&text));
+            assert!(
+                detail.contains("/connectors/0/setup: copy_word_refused"),
+                "{text}: {detail}"
+            );
+        }
+        for pointer in [
+            "/connectors/0/why",
+            "/connectors/0/about",
+            "/connectors/0/title",
+            "/connectors/0/labels/search",
+            "/connectors/0/allowances/create_page/what",
+        ] {
+            let mut value = base();
+            set(&mut value, pointer, json!("Use ‘Bot User OAuth Token’"));
+            assert!(
+                detail(parse(&value)).contains(&format!("{pointer}: copy_word_refused")),
+                "{pointer}"
+            );
+        }
+    }
+
+    #[test]
+    fn finds_quoted_labels() {
+        let text = "a ‘b’ c “d” \"e\" f's 'g'";
+        let found: Vec<&str> = quoted_labels(text)
+            .into_iter()
+            .map(|range| &text[range])
+            .collect();
+        assert_eq!(found, ["b", "d", "e"]);
+    }
+
+    #[test]
+    fn counts_kit_skills_as_shipped() {
+        let mut value = base();
+        set(&mut value, "/skills", json!(["launch-plans"]));
+        let files: &[(&str, &str)] = &[("SKILL.md", SKILL)];
+        let kit = parse_kit(
+            Role::ProductManager,
+            &value.to_string(),
+            &[],
+            &[("launch-plans", files)],
+        )
+        .expect("loads");
+        let role = load_role(Role::Architect).expect("a role");
+        let names = shipped_skill_names(std::slice::from_ref(&role), &[kit]);
+        assert!(names.contains("launch-plans"));
+        assert!(names.contains(role.skills[0].name.as_str()));
+        let every: Vec<_> = SHIPPED
+            .iter()
+            .map(|r| load_role(*r).expect("a role"))
+            .collect();
+        let kits: Vec<_> = SHIPPED
+            .iter()
+            .map(|r| load_kit(*r).expect("a kit"))
+            .collect();
+        let shipped: std::collections::BTreeSet<String> =
+            core_skill_names().into_iter().map(str::to_string).collect();
+        assert_eq!(shipped, shipped_skill_names(&every, &kits));
+    }
+
+    #[test]
+    fn pin_drift_names_what_was_added_and_dropped() {
+        let pinned = [("a", ConnectorTag::Network), ("b", ConnectorTag::Denied)]
+            .into_iter()
+            .map(|(name, tag)| (name.to_string(), tag))
+            .collect();
+        let drift = pin_drift(&pinned, &["b".to_string(), "c".to_string()]);
+        assert_eq!(
+            (drift.added, drift.removed),
+            (vec!["c".to_string()], vec!["a".to_string()])
+        );
+        let same = pin_drift(&pinned, &["b".to_string(), "a".to_string()]);
+        assert!(same.added.is_empty() && same.removed.is_empty());
+    }
+}

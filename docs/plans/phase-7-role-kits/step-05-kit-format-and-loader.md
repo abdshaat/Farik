@@ -150,7 +150,7 @@ Files: as the file map's Task 2 lines. Produces the `farik-roles` items above.
 - `counts_kit_skills_as_shipped`: `shipped_skill_names` of one role and a fixture kit with skill `launch-plans` holds both roles' and the kit's names; `core_skill_names` is it over the shipped roles and kits.
 - `pin_drift_names_what_was_added_and_dropped`: pinned `{a, b}`, listed `[b, c]` give `added: [c]`, `removed: [a]`; equal lists give neither.
 
-- [ ] `feat(roles): ship a kit beside each role`
+- [x] `feat(roles): ship a kit beside each role`
 
 ### Task 3: Kit connectors in the team file
 
