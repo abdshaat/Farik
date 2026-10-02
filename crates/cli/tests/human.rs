@@ -844,7 +844,9 @@ fn farik_tool_approve_writes_here_when_nothing_drives() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert_eq!(
         ran.out.trim(),
-        format!("Allowed create_issue once for theo (approval {n}).")
+        format!(
+            "Allowed create_issue once for theo (approval {n}).\nInput: {{\"title\":\"Broken link\"}}"
+        )
     );
     let granted = events(&repository, &[EventKind::ToolApprovalGranted]);
     assert_eq!(granted.len(), 1);
@@ -863,5 +865,41 @@ fn farik_tool_approve_writes_here_when_nothing_drives() {
         again.err.starts_with("farik: approval_decided"),
         "{}",
         again.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_tool_refuse_shows_the_input_escaped() {
+    let repository = a_project("human-tool-refuse-input");
+    let task = filed(&repository, "Add done.txt");
+    let n = record_as(
+        &repository,
+        &task,
+        Some(("theo", "session-1")),
+        "tool_approval.requested",
+        &json!({
+            "server": "github",
+            "tool": "create_issue",
+            "input": "{\"title\":\"\u{1b}[2J\u{202e}gnp\"}",
+            "input_sha256": "0".repeat(64)
+        }),
+    )
+    .envelope
+    .seq;
+
+    let ran = run(&repository.path, &["tool", "refuse", &n.to_string()]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        !ran.out.contains('\u{1b}') && !ran.out.contains('\u{202e}'),
+        "{:?}",
+        ran.out
+    );
+    assert_eq!(
+        ran.out.trim(),
+        format!(
+            "Not allowed: create_issue for theo (approval {n}).\nInput: {{\"title\":\"\\u001b[2J\\u202egnp\"}}"
+        )
     );
 }

@@ -757,6 +757,47 @@ fn lists_what_waits_on_the_human() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn lists_a_connector_calls_whole_input_escaped() {
+    let repository = a_team("run-waiting-input");
+    let task = a_small_request(&repository);
+    // A call's input holding a raw escape sequence and a right-to-left override, which a
+    // terminal would obey or reorder, ahead of text the human must still be able to read.
+    let input = "{\"body\":\"\u{1b}[2Jpay \u{202e}100\u{200b}0\",\"to\":\"a@example.com\"}";
+    let n = record_as(
+        &repository,
+        &task,
+        Some(("theo", "session-1")),
+        "tool_approval.requested",
+        &json!({
+            "server": "mail", "tool": "send", "input": input, "input_sha256": "0".repeat(64)
+        }),
+    )
+    .envelope
+    .seq;
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(
+        !ran.out.contains('\u{1b}') && !ran.out.contains('\u{202e}'),
+        "{:?}",
+        ran.out
+    );
+    let expected =
+        "  input: {\"body\":\"\\u001b[2Jpay \\u202e100\\u200b0\",\"to\":\"a@example.com\"}";
+    assert!(ran.out.lines().any(|line| line == expected), "{}", ran.out);
+    assert!(
+        ran.out
+            .contains(&format!("farik tool approve {n}, or farik tool refuse {n}")),
+        "{}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn says_the_backlog_waits() {
     let repository = a_team_with("run-backlog", |wire| {
         wire["policy"]["plan_in_sprints"] = json!(true);

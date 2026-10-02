@@ -482,7 +482,9 @@ fn decide_tool_call(
     };
     let seq = append(tools, asked.envelope.ids.task_id.clone(), event)?;
     Ok(CommandReport {
-        said: format!("{said} (approval {approval})."),
+        // The human sees the whole input at the moment of deciding, in the terminal as in the
+        // browser (ADR 0031); the printer escapes what a terminal would obey.
+        said: format!("{said} (approval {approval}).\nInput: {}", request.input),
         events: vec![seq],
     })
 }
