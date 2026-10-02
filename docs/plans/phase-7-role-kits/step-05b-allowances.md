@@ -90,7 +90,7 @@ Files: `team.schema.json`, `crates/core/src/team.rs`, and every `CustomServer { 
 - `refuses_an_allowance_over_a_thousand`: 1001 is a schema error.
 - `spec_hash_sees_an_allowance`: 20 and 21 hash differently; a kit entry without `allowances` hashes to the kit literal step 05's Task 3 pinned in `a_server_without_oauth_keeps_its_hash`.
 
-- [ ] `feat(core): keep a kit connector's allowances in the team file`
+- [x] `feat(core): keep a kit connector's allowances in the team file`
 
 ### Task 2: The call inside its allowance
 

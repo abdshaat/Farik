@@ -71,6 +71,7 @@ fn stdio_server(test: &str, script: &str, credential_keys: &[&str]) -> CustomSer
         credential_keys: credential_keys.iter().map(ToString::to_string).collect(),
         tools: BTreeMap::new(),
         kit: false,
+        allowances: BTreeMap::new(),
     }
 }
 
@@ -202,6 +203,7 @@ async fn fills_http_headers_from_keys() {
         credential_keys: vec!["API_KEY".to_string()],
         tools: BTreeMap::from([("whoami".to_string(), ConnectorTag::Network)]),
         kit: false,
+        allowances: BTreeMap::new(),
     };
     let tools = list_tools(&server, &keys(&[("API_KEY", "k")]), None, &own_folder())
         .await

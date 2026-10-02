@@ -170,6 +170,19 @@
           },
           "description": "Every tool the connector listed when it was connected, with the user's label; a kit entry's are the kit's tags. A tool it lists later is refused until it is connected again."
         },
+        "allowances": {
+          "type": "object",
+          "maxProperties": 256,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "description": "A kit entry's alone (allowance_not_kit): for a tool it tags external_effect (allowance_not_external), how many calls each sprint the agent makes without asking, 0 to 1000; 0 asks every time (ADR 0037). Left out or empty, every such call asks. A commit that raises one makes the server need connecting again."
+        },
         "oauth": {
           "type": "object",
           "additionalProperties": false,

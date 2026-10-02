@@ -356,7 +356,40 @@ pub fn server_errors(server: &McpServerWire) -> Vec<(String, String)> {
     }
     refused.extend(secret_errors(server));
     refused.extend(oauth_errors(server));
+    refused.extend(allowance_errors(server));
     refused
+}
+
+/// The refusals for an entry's allowances (ADR 0037): on a kit entry's external tools alone.
+fn allowance_errors(server: &McpServerWire) -> Vec<(String, String)> {
+    server
+        .allowances
+        .keys()
+        .filter_map(|tool| {
+            let tool = tool.as_str();
+            let message = if server.source != McpServerSource::Kit {
+                format!(
+                    "allowance_not_kit: only a service of the role's kit has an allowance; \
+                     {tool} always asks."
+                )
+            } else if !matches!(
+                server
+                    .tools
+                    .iter()
+                    .find(|(name, _)| name.as_str() == tool)
+                    .map(|(_, tag)| connector_tag(*tag)),
+                Some(ConnectorTag::ExternalEffect)
+            ) {
+                format!(
+                    "allowance_not_external: {tool} is not a tool that spends or changes \
+                     something outside Farik, so it has no allowance."
+                )
+            } else {
+                return None;
+            };
+            Some((format!("allowances/{tool}"), message))
+        })
+        .collect()
 }
 
 /// The refusals for an entry that signs in (ADR 0033): where it cannot, and a port with no client.
@@ -454,6 +487,7 @@ fn present_fields(server: &McpServerWire) -> Vec<&'static str> {
         ("headers", !server.headers.is_empty()),
         ("credential_keys", server.credential_keys.is_some()),
         ("tools", !server.tools.is_empty()),
+        ("allowances", !server.allowances.is_empty()),
         ("oauth", server.oauth.is_some()),
     ]
     .into_iter()
@@ -672,6 +706,9 @@ pub struct CustomServer {
     pub tools: BTreeMap<String, ConnectorTag>,
     /// Whether the entry is a kit's (`source: kit`), whose tags are the kit's.
     pub kit: bool,
+    /// How many calls each period the agent makes of a tool without asking (ADR 0037), a kit
+    /// entry's alone and only for tools it tags `external_effect`.
+    pub allowances: BTreeMap<String, u32>,
 }
 
 /// How a custom connector is started or reached.
@@ -767,6 +804,13 @@ pub fn custom_server(server: &McpServerWire) -> Option<CustomServer> {
             .map(|(tool, tag)| (tool.as_str().to_string(), connector_tag(*tag)))
             .collect(),
         kit: server.source == McpServerSource::Kit,
+        allowances: server
+            .allowances
+            .iter()
+            .filter_map(|(tool, calls)| {
+                Some((tool.as_str().to_string(), u32::try_from(*calls).ok()?))
+            })
+            .collect(),
     })
 }
 
@@ -823,6 +867,10 @@ pub fn spec_sha256(server: &CustomServer) -> String {
     }
     definition["credential_keys"] = serde_json::json!(server.credential_keys);
     definition["tools"] = serde_json::json!(server.tools);
+    if !server.allowances.is_empty() {
+        // Only when there is one, so every hash kept before stands (ADR 0037).
+        definition["allowances"] = serde_json::json!(server.allowances);
+    }
     sha256_hex(&canonical_json(&definition))
 }
 
@@ -2145,6 +2193,7 @@ mod tests {
                         ("search".to_string(), ConnectorTag::Network),
                     ]),
                     kit: false,
+                    allowances: BTreeMap::new(),
                 }),
                 Some(CustomServer {
                     name: "linear".to_string(),
@@ -2159,6 +2208,7 @@ mod tests {
                     credential_keys: vec!["API_KEY".to_string()],
                     tools: BTreeMap::from([("list_issues".to_string(), ConnectorTag::Network)]),
                     kit: false,
+                    allowances: BTreeMap::new(),
                 }),
                 None,
             ]
@@ -2178,6 +2228,7 @@ mod tests {
                 credential_keys: Vec::new(),
                 tools: BTreeMap::new(),
                 kit: false,
+                allowances: BTreeMap::new(),
             })],
             "a server with no arguments, keys or tools is one"
         );
@@ -2857,6 +2908,98 @@ mod tests {
             hash(a_kit_server()),
             "41d345c1449b595f91ec344a2285152a7792b98b1ead2028d83a6aa5cc987b11",
             "recorded after source: kit joined the hash"
+        );
+    }
+
+    fn a_kit_server_with_allowance(tool: &str, calls: u32) -> Value {
+        let mut server = a_kit_server();
+        server["tools"]["generate_image"] = json!("external_effect");
+        server["allowances"] = json!({ tool: calls });
+        server
+    }
+
+    fn server_with(wire: &Value) -> CustomServer {
+        the_custom_servers(wire)
+            .remove(0)
+            .expect("the first entry is a custom or kit one")
+    }
+
+    #[test]
+    fn accepts_allowances_on_a_kit_entrys_external_tools() {
+        let wire = with_servers(json!([a_kit_server_with_allowance("generate_image", 20)]));
+        team(&wire);
+        assert_eq!(
+            server_with(&wire).allowances,
+            BTreeMap::from([("generate_image".to_string(), 20)])
+        );
+    }
+
+    #[test]
+    fn refuses_an_allowance_on_a_custom_entry() {
+        let mut server = a_kit_server_with_allowance("generate_image", 20);
+        server["source"] = json!("custom");
+        let refused = refusals(&with_servers(json!([server])));
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert_eq!(
+            refused[0].0,
+            "/agents/0/mcp_servers/0/allowances/generate_image"
+        );
+        assert!(
+            refused[0].1.starts_with("allowance_not_kit: "),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn refuses_an_allowance_on_a_tool_not_external() {
+        for tool in ["list_issues", "unlisted"] {
+            let refused = refusals(&with_servers(json!([a_kit_server_with_allowance(tool, 3)])));
+            assert_eq!(refused.len(), 1, "{tool}: {refused:?}");
+            assert_eq!(
+                refused[0].0,
+                format!("/agents/0/mcp_servers/0/allowances/{tool}")
+            );
+            assert!(
+                refused[0].1.starts_with("allowance_not_external: "),
+                "{tool}: {refused:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_an_allowance_over_a_thousand() {
+        let wire = with_servers(json!([a_kit_server_with_allowance("generate_image", 1001)]));
+        assert_eq!(
+            paths(&wire),
+            ["/agents/0/mcp_servers/0/allowances/generate_image"]
+        );
+        team(&with_servers(json!([a_kit_server_with_allowance(
+            "generate_image",
+            1000
+        )])));
+        team(&with_servers(json!([a_kit_server_with_allowance(
+            "generate_image",
+            0
+        )])));
+    }
+
+    #[test]
+    fn spec_hash_sees_an_allowance() {
+        let hash = |server: Value| spec_sha256(&server_with(&with_servers(json!([server]))));
+        assert_ne!(
+            hash(a_kit_server_with_allowance("generate_image", 20)),
+            hash(a_kit_server_with_allowance("generate_image", 21))
+        );
+        let mut empty = a_kit_server_with_allowance("generate_image", 20);
+        empty["allowances"] = json!({});
+        let mut none = empty.clone();
+        none.as_object_mut()
+            .expect("an object")
+            .remove("allowances");
+        assert_eq!(
+            hash(empty),
+            hash(none),
+            "an empty allowances is not in the hash"
         );
     }
 
