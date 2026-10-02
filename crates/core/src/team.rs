@@ -353,6 +353,50 @@ fn entry_errors(server: &McpServerWire) -> Vec<(String, String)> {
         );
     }
     refused.extend(secret_errors(server));
+    refused.extend(oauth_errors(server));
+    refused
+}
+
+/// The refusals for an entry that signs in (ADR 0033): where it cannot, and a port with no client.
+fn oauth_errors(server: &McpServerWire) -> Vec<(String, String)> {
+    let Some(oauth) = &server.oauth else {
+        return Vec::new();
+    };
+    let mut refused = Vec::new();
+    if server.transport == Some(McpServerTransport::Stdio) {
+        refused.push((
+            "oauth".to_string(),
+            "oauth_on_stdio: a connector Farik starts has no sign-in; give it a key.".to_string(),
+        ));
+    }
+    if server
+        .credential_keys
+        .as_ref()
+        .is_some_and(|keys| !keys.is_empty())
+    {
+        refused.push((
+            "credential_keys".to_string(),
+            "oauth_with_keys: a connector that signs in takes no keys.".to_string(),
+        ));
+    }
+    for header in server.headers.keys() {
+        if header.as_str().eq_ignore_ascii_case("authorization") {
+            refused.push((
+                format!("headers/{}", header.as_str()),
+                "oauth_header_conflict: a connector that signs in sends its own Authorization \
+                 header."
+                    .to_string(),
+            ));
+        }
+    }
+    if oauth.callback_port.is_some() && oauth.client_id.is_none() {
+        refused.push((
+            "oauth/callback_port".to_string(),
+            "callback_port_without_client: the port belongs to a client the service registered \
+             for Farik, so give its client_id too."
+                .to_string(),
+        ));
+    }
     refused
 }
 
@@ -408,6 +452,7 @@ fn present_fields(server: &McpServerWire) -> Vec<&'static str> {
         ("headers", !server.headers.is_empty()),
         ("credential_keys", server.credential_keys.is_some()),
         ("tools", !server.tools.is_empty()),
+        ("oauth", server.oauth.is_some()),
     ]
     .into_iter()
     .filter_map(|(field, given)| given.then_some(field))
@@ -641,7 +686,30 @@ pub enum CustomTransport {
         url: String,
         /// Each header's template, which may hold `{KEY}`.
         headers: BTreeMap<String, String>,
+        /// Present when the user signed in to the service instead of pasting a key.
+        oauth: Option<OAuthSettings>,
     },
+}
+
+/// How an http connector signs in (ADR 0033).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthSettings {
+    /// A public client the service's app registration gave, else Farik registers one.
+    pub client_id: Option<String>,
+    /// The port the pre-registered client's redirect names.
+    pub callback_port: Option<u16>,
+    /// The scopes to ask for; none means the service's own selection.
+    pub scopes: Vec<String>,
+}
+
+/// The sign-in settings as the spec hash holds them.
+#[must_use]
+pub fn oauth_json(settings: &OAuthSettings) -> Value {
+    serde_json::json!({
+        "client_id": settings.client_id,
+        "callback_port": settings.callback_port,
+        "scopes": settings.scopes,
+    })
 }
 
 /// The custom connector a validated `mcp_servers` entry describes; `None` for a built-in one.
@@ -667,6 +735,17 @@ pub fn custom_server(server: &McpServerWire) -> Option<CustomServer> {
                 .iter()
                 .map(|(name, value)| (name.as_str().to_string(), value.as_str().to_string()))
                 .collect(),
+            oauth: server.oauth.as_ref().map(|oauth| OAuthSettings {
+                client_id: oauth.client_id.as_ref().map(|id| id.as_str().to_string()),
+                callback_port: oauth
+                    .callback_port
+                    .and_then(|port| u16::try_from(port).ok()),
+                scopes: oauth
+                    .scopes
+                    .iter()
+                    .map(|scope| scope.as_str().to_string())
+                    .collect(),
+            }),
         },
     };
     Some(CustomServer {
@@ -719,8 +798,17 @@ pub fn spec_sha256(server: &CustomServer) -> String {
         CustomTransport::Stdio { command, args } => {
             serde_json::json!({ "transport": "stdio", "command": command, "args": args })
         }
-        CustomTransport::Http { url, headers } => {
-            serde_json::json!({ "transport": "http", "url": url, "headers": headers })
+        CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } => {
+            let mut definition =
+                serde_json::json!({ "transport": "http", "url": url, "headers": headers });
+            if let Some(oauth) = oauth {
+                definition["oauth"] = oauth_json(oauth);
+            }
+            definition
         }
     };
     definition["credential_keys"] = serde_json::json!(server.credential_keys);
@@ -2055,6 +2143,7 @@ mod tests {
                             "Authorization".to_string(),
                             "Bearer {API_KEY}".to_string()
                         )]),
+                        oauth: None,
                     },
                     credential_keys: vec!["API_KEY".to_string()],
                     tools: BTreeMap::from([("list_issues".to_string(), ConnectorTag::Network)]),
@@ -2594,6 +2683,182 @@ mod tests {
             assert_ne!(spec_sha256(&server(wire)), before, "{field}");
         }
         assert_ne!(spec_sha256(&http), hash);
+    }
+
+    fn oauth_server(oauth: Value) -> Value {
+        let mut server = an_http_server();
+        server["headers"] = json!({});
+        server["credential_keys"] = json!([]);
+        server["oauth"] = oauth;
+        server
+    }
+
+    #[test]
+    fn accepts_an_http_server_that_signs_in() {
+        for oauth in [
+            json!({}),
+            json!({ "client_id": "abc", "callback_port": 33418, "scopes": ["read"] }),
+        ] {
+            let wire = with_servers(json!([oauth_server(oauth.clone())]));
+            let read = team(&wire);
+            let back = serde_json::to_value(&read).expect("a team serialises");
+            assert_eq!(back["agents"][0]["mcp_servers"][0]["oauth"], oauth);
+            let server = the_custom_servers(&wire)
+                .remove(0)
+                .expect("a custom server");
+            let CustomTransport::Http {
+                oauth: settings, ..
+            } = server.transport
+            else {
+                panic!("an http server");
+            };
+            let settings = settings.expect("signs in");
+            assert_eq!(settings.client_id.as_deref(), oauth["client_id"].as_str());
+            assert_eq!(
+                settings.callback_port,
+                oauth["callback_port"]
+                    .as_u64()
+                    .and_then(|port| u16::try_from(port).ok())
+            );
+            assert_eq!(
+                settings.scopes.len(),
+                oauth["scopes"].as_array().map_or(0, Vec::len)
+            );
+        }
+        let plain = the_custom_servers(&with_servers(json!([an_http_server()]))).remove(0);
+        let CustomTransport::Http { oauth, .. } = plain.expect("custom").transport else {
+            panic!("an http server");
+        };
+        assert_eq!(oauth, None);
+    }
+
+    #[test]
+    fn refuses_oauth_where_it_cannot_be() {
+        let at = |field: &str| format!("/agents/0/mcp_servers/0/{field}");
+        let mut stdio = a_stdio_server();
+        stdio["oauth"] = json!({});
+        assert!(paths(&with_servers(json!([stdio]))).contains(&at("oauth")));
+        let mut keys = oauth_server(json!({}));
+        keys["credential_keys"] = json!(["API_KEY"]);
+        assert!(paths(&with_servers(json!([keys]))).contains(&at("credential_keys")));
+        for header in ["Authorization", "authorization"] {
+            let mut conflict = oauth_server(json!({}));
+            conflict["headers"] = json!({ header: "Bearer x" });
+            let found = refusals(&with_servers(json!([conflict])));
+            assert!(
+                found
+                    .iter()
+                    .any(|(path, message)| *path == at(&format!("headers/{header}"))
+                        && message.starts_with("oauth_header_conflict: ")),
+                "{header}: {found:?}"
+            );
+        }
+        let port = oauth_server(json!({ "callback_port": 33418 }));
+        let found = refusals(&with_servers(json!([port])));
+        assert!(
+            found
+                .iter()
+                .any(|(path, message)| *path == at("oauth/callback_port")
+                    && message.starts_with("callback_port_without_client: ")),
+            "{found:?}"
+        );
+        let found = refusals(&with_servers(json!([stdio_with_oauth()])));
+        assert!(
+            found
+                .iter()
+                .any(|(path, message)| *path == at("oauth")
+                    && message.starts_with("oauth_on_stdio: ")),
+            "{found:?}"
+        );
+        let mut keys = oauth_server(json!({}));
+        keys["credential_keys"] = json!(["API_KEY"]);
+        let found = refusals(&with_servers(json!([keys])));
+        assert!(
+            found
+                .iter()
+                .any(|(path, message)| *path == at("credential_keys")
+                    && message.starts_with("oauth_with_keys: ")),
+            "{found:?}"
+        );
+    }
+
+    fn stdio_with_oauth() -> Value {
+        let mut stdio = a_stdio_server();
+        stdio["oauth"] = json!({});
+        stdio
+    }
+
+    #[test]
+    fn refuses_a_scope_with_a_space_or_quote() {
+        for scope in ["a b", "a\"b"] {
+            let wire = with_servers(json!([oauth_server(json!({ "scopes": [scope] }))]));
+            assert_eq!(
+                paths(&wire),
+                ["/agents/0/mcp_servers/0/oauth/scopes/0"],
+                "{scope}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_server_without_oauth_keeps_its_hash() {
+        let wire: super::McpServerWire =
+            serde_json::from_value(an_http_server()).expect("a server");
+        assert_eq!(
+            spec_sha256(&custom_server(&wire).expect("custom")),
+            "4342386d7f10fabc3354e601e592e3e414884142ade85d90d7a751a20a046310",
+            "recorded before oauth existed"
+        );
+    }
+
+    #[test]
+    fn oauth_settings_change_the_hash() {
+        let hash = |oauth: Option<Value>| {
+            let mut server = oauth_server(json!({}));
+            match oauth {
+                Some(oauth) => server["oauth"] = oauth,
+                None => {
+                    server.as_object_mut().expect("an object").remove("oauth");
+                }
+            }
+            let wire: super::McpServerWire = serde_json::from_value(server).expect("a server");
+            spec_sha256(&custom_server(&wire).expect("custom"))
+        };
+        let base =
+            json!({ "client_id": "abc", "callback_port": 33418, "scopes": ["read", "write"] });
+        let mut hashes = vec![hash(None), hash(Some(json!({}))), hash(Some(base.clone()))];
+        for (field, value) in [
+            ("client_id", json!("abd")),
+            ("callback_port", json!(33419)),
+            ("scopes", json!(["read", "writes"])),
+        ] {
+            let mut changed = base.clone();
+            changed[field] = value;
+            hashes.push(hash(Some(changed)));
+        }
+        let mut unique = hashes.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), hashes.len(), "each setting is in the hash");
+        let wire: super::McpServerWire =
+            serde_json::from_value(oauth_server(json!({}))).expect("a server");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = custom_server(&wire).expect("custom").transport
+        else {
+            panic!("http");
+        };
+        assert_eq!(
+            (url.as_str(), headers.len()),
+            ("https://mcp.example.com/mcp", 0)
+        );
+        let settings = oauth.expect("oauth");
+        assert_eq!(
+            canonical_json(&super::oauth_json(&settings)),
+            r#"{"callback_port":null,"client_id":null,"scopes":[]}"#
+        );
     }
 
     /// `skills` pinned at the top level and on the first agent.

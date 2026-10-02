@@ -766,7 +766,7 @@ pub async fn list_tools(
                     .0;
                 ().serve(transport).await
             }
-            CustomTransport::Http { url, headers } => {
+            CustomTransport::Http { url, headers, .. } => {
                 let config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str())
                     .custom_headers(filled_headers(headers, keys)?);
                 ().serve(rmcp::transport::StreamableHttpClientTransport::from_config(config)).await
@@ -1304,6 +1304,7 @@ mod tests {
             transport: CustomTransport::Http {
                 url: "https://x.example/mcp".to_string(),
                 headers: BTreeMap::new(),
+                oauth: None,
             },
             ..stdio(&[])
         };

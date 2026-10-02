@@ -186,7 +186,7 @@ Files: `team.schema.json`, `crates/core/src/team.rs`, ADR 0033. Produces `OAuthS
 - `a_server_without_oauth_keeps_its_hash`: step 01's `spec_hash_ignores_key_order_and_sees_every_field` fixture gives the same `spec_sha256` as a literal hex string recorded before this change.
 - `oauth_settings_change_the_hash`: `oauth: {}` against none, and changing `client_id`, `callback_port` or one scope, each changes `spec_sha256`; `oauth: {}` hashes as `"oauth":{"callback_port":null,"client_id":null,"scopes":[]}` in `canonical_json`.
 
-- [ ] `feat(core): let a web-address connector sign in`
+- [x] `feat(core): let a web-address connector sign in`
 
 ### Task 3: The sign-in
 

@@ -168,6 +168,34 @@
             "$ref": "#/$defs/connectorTag"
           },
           "description": "Every tool the connector listed when it was connected, with the user's label. A tool it lists later is refused until it is connected again."
+        },
+        "oauth": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Present when the user signed in to this http connector's service instead of pasting a key (ADR 0033). The tokens are never here; they are kept with the agent's keys. validate_team refuses it on a stdio connector (oauth_on_stdio), beside credential_keys (oauth_with_keys), beside a header named Authorization in any case (oauth_header_conflict), and callback_port without client_id (callback_port_without_client).",
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "A public client the service's app registration gave Farik. Left out, Farik registers one with the service each time the user signs in."
+            },
+            "callback_port": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 65535,
+              "description": "The port on this computer the pre-registered client's redirect address names. 33418 when left out. Only with client_id."
+            },
+            "scopes": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "string",
+                "pattern": "^[\\x21\\x23-\\x5B\\x5D-\\x7E]{1,200}$"
+              },
+              "description": "What to ask the service for, each one RFC 6749's scope characters (no space, no double quote or backslash). Left out, Farik takes the service's own selection."
+            }
+          }
         }
       }
     },

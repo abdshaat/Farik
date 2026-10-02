@@ -196,6 +196,7 @@ async fn fills_http_headers_from_keys() {
                 "Authorization".to_string(),
                 "Bearer {API_KEY}".to_string(),
             )]),
+            oauth: None,
         },
         credential_keys: vec!["API_KEY".to_string()],
         tools: BTreeMap::from([("whoami".to_string(), ConnectorTag::Network)]),
