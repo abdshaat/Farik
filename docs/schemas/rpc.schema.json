@@ -4599,7 +4599,7 @@
     },
     "skillGetQuery": {
       "title": "Skill Get Query",
-      "description": "Every file of the team's or one agent's skill name, as its folder holds them now, for the person to read (docs/SPEC.md 6.7; ADR 0034). A folder that is not there is -32002; one the checks refuse is refused with -32005 and a message starting with the refusal's skill_* code, and no files. An agent level names its agent and a team level names none; the other is refused with -32005.",
+      "description": "Every file of the team's or one agent's skill name, as its folder holds them now, for the person to read (docs/SPEC.md 6.7; ADR 0034). A folder that is not there is -32002; one the checks refuse, a file that is not UTF-8 text among them (skill_file_not_text), is refused with -32005 and a message starting with the refusal's skill_* code, and no files. An agent level names its agent, a team level names none and a role level names its role; any other is refused with -32005. A role level answers the SKILL.md Farik ships for that role, with no hash.",
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "params"],
@@ -4610,8 +4610,9 @@
           "additionalProperties": false,
           "required": ["level", "name"],
           "properties": {
-            "level": { "type": "string", "enum": ["team", "agent"] },
+            "level": { "type": "string", "enum": ["role", "team", "agent"] },
             "agent": { "type": "string", "minLength": 1 },
+            "role": { "type": "string", "minLength": 1, "description": "A role level's role id, such as software_developer." },
             "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 }
           }
         }
@@ -4643,10 +4644,10 @@
       }
     },
     "skillGetResult": {
-      "description": "skill.get's answer: files maps each path to its text as the folder holds it, sha256 is skill_sha256 of the folder (the hash skill_confirm is given), and ignored_fields names the frontmatter keys other than name and description, which Farik drops from a session's copy.",
+      "description": "skill.get's answer: files maps each path to its text as the folder holds it, sha256 is skill_sha256 of the folder (the hash skill_confirm is given; a role level answers none, since a shipped skill is trusted and pinned in the binary), and ignored_fields names the frontmatter keys other than name and description, which Farik drops from a session's copy.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["files", "sha256", "ignored_fields"],
+      "required": ["files", "ignored_fields"],
       "properties": {
         "files": { "type": "object", "additionalProperties": { "type": "string" } },
         "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
