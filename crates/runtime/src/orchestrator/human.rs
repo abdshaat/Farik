@@ -939,6 +939,9 @@ pub(crate) fn status_effects(
                     daemon.request_stop(&session_id, words);
                 }
             }
+            if status == AgentStatus::Retired {
+                forget_connector_keys(tools, daemon, team, agent_id);
+            }
             // A retired agent never starts what it was assigned, so that is blocked for the human
             // too; a paused one starts it once resumed, so it waits.
             for row in held.filter(|row| {
@@ -987,6 +990,24 @@ pub(crate) fn status_effects(
         }
     }
     Ok(events)
+}
+
+/// Deletes the keys kept for each custom server `agent_id` has in `team`, which a retired agent
+/// never uses again (ADR 0030). A store that fails to delete one leaves it, as a refused connect
+/// does: it is sent to nothing, since the agent runs no session.
+fn forget_connector_keys(tools: &ToolDeps, daemon: &DaemonState, team: &Team, agent_id: &str) {
+    let servers = team
+        .agents
+        .iter()
+        .filter(|agent| agent.id.as_str() == agent_id)
+        .flat_map(|agent| agent.mcp_servers.iter().flatten())
+        .filter_map(custom_server);
+    for server in servers {
+        if let Ok(at) = secret_at(tools, agent_id, &server.name) {
+            let _ = daemon.connector_secrets().delete(&at);
+            daemon.forget_kept(&at);
+        }
+    }
 }
 
 /// Why `name`, of `role`, may not be paused or retired, in `team` as it would be after: it was the
@@ -2167,6 +2188,44 @@ mod tests {
                 .as_deref(),
             Some(super::RETIRED)
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retiring_an_agent_deletes_its_connector_keys() {
+        use crate::connectors::{
+            ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
+        };
+
+        let server = json!([{
+            "name": "github", "source": "custom", "transport": "stdio",
+            "command": "github-mcp", "credential_keys": ["API_KEY"],
+            "tools": { "search": "network" }
+        }]);
+        let harness = Harness::new("human-retire-keys", |wire| {
+            wire["agents"][1]["mcp_servers"] = server.clone();
+            wire["agents"][2]["mcp_servers"] = server.clone();
+        });
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        assert!(harness.daemon.set_connector_secrets(store.clone()));
+        let root = harness.project.deps.files.root();
+        let at = |agent: &str| SecretAt::of(root, agent, "github").expect("an address");
+        let entry = ConnectorEntry {
+            spec_sha256: "h".to_string(),
+            keys: [(
+                "API_KEY".to_string(),
+                crate::claude::Secret::new("k".to_string()),
+            )]
+            .into(),
+        };
+        for agent in ["dev-a", "dev-b"] {
+            store.save(&at(agent), &entry).expect("kept");
+        }
+        let orchestrator = an_orchestrator(&harness);
+        handled(&orchestrator, a_pause("dev-b", AgentStatus::Retired)).await;
+        // A retired agent never runs again: nothing it was given is kept for it (carry M4).
+        assert_eq!(store.load(&at("dev-b")), Ok(None));
+        assert_eq!(store.load(&at("dev-a")), Ok(Some(entry)));
     }
 
     #[tokio::test]
