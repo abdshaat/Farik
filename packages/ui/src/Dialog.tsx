@@ -21,6 +21,15 @@ export function Dialog({
 	const ref = useRef<HTMLDialogElement>(null);
 	const titleId = useId();
 
+	// Callers unmount the dialog rather than closing it, so the browser never gives focus back:
+	// remember the opener (this effect runs before showModal's) and return to it on unmount.
+	useEffect(() => {
+		const opener = document.activeElement as HTMLElement | null;
+		return () => {
+			if (opener?.isConnected) opener.focus();
+		};
+	}, []);
+
 	useEffect(() => {
 		const dialog = ref.current;
 		if (!dialog) return;
