@@ -1255,7 +1255,9 @@ fn connect_server(
     }))
     .map_err(failed)?;
     let event = append(tools, None, EventBody::ConnectorConnected(body))?;
-    daemon.read_kept(&secret_at(tools, agent, &name));
+    if let Ok(at) = secret_at(tools, agent, &name) {
+        daemon.read_kept(&at);
+    }
     Ok(CommandReport {
         said: format!("{agent} has the connector {name}"),
         events: vec![event],
@@ -1293,7 +1295,9 @@ fn disconnect_server(
             server: server.parse().map_err(failed)?,
         }),
     )?;
-    daemon.forget_kept(&secret_at(tools, agent, server));
+    if let Ok(at) = secret_at(tools, agent, server) {
+        daemon.forget_kept(&at);
+    }
     Ok(CommandReport {
         said: format!("{agent} no longer has the connector {server}"),
         events: vec![event],

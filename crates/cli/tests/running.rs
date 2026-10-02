@@ -881,7 +881,6 @@ fn gives_a_session_the_connectors_kept_where_this_computer_keeps_them() {
         team = wire.clone();
     });
     let task = a_small_request(&repository);
-    let project_id = events(&repository, &[])[0].envelope.ids.project_id.clone();
     let server = validate_team(&team).expect("a team").agents[0]
         .mcp_servers
         .iter()
@@ -891,11 +890,7 @@ fn gives_a_session_the_connectors_kept_where_this_computer_keeps_them() {
     let store = Arc::new(MemoryConnectorSecrets::default());
     store
         .save(
-            &SecretAt {
-                project_id,
-                agent_id: "pm".to_string(),
-                server: "github".to_string(),
-            },
+            &SecretAt::of(&repository.path, "pm", "github").expect("an address"),
             &ConnectorEntry {
                 spec_sha256: spec_sha256(&server),
                 keys: std::collections::BTreeMap::<String, Secret>::new(),

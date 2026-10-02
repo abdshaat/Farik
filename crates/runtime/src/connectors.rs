@@ -19,7 +19,8 @@ pub const NO_SECRET_STORE: &str = "no_secret_store";
 /// Whose keys, for which server: one entry per project, agent and server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SecretAt {
-    /// The project's id: two projects can both have an agent `theo`.
+    /// The project's id on this machine ([`local_project_id`]): two projects can both have an
+    /// agent `theo`.
     pub project_id: String,
     /// The agent the server was given to.
     pub agent_id: String,
@@ -28,6 +29,20 @@ pub struct SecretAt {
 }
 
 impl SecretAt {
+    /// Where `agent`'s keys for `server` are kept in the project at `root`: under the project's
+    /// id on this machine, [`local_project_id`].
+    ///
+    /// # Errors
+    ///
+    /// The project's id could not be read or made.
+    pub fn of(root: &std::path::Path, agent: &str, server: &str) -> std::io::Result<SecretAt> {
+        Ok(SecretAt {
+            project_id: local_project_id(root)?,
+            agent_id: agent.to_string(),
+            server: server.to_string(),
+        })
+    }
+
     /// The keychain account, and the key in `connectors.json`:
     /// `connector:<project_id>:<agent_id>:<server>`.
     #[must_use]
@@ -36,6 +51,44 @@ impl SecretAt {
             "connector:{}:{}:{}",
             self.project_id, self.agent_id, self.server
         )
+    }
+}
+
+/// The project at `root`'s id on this machine: 32 random hex digits, made the first time it is
+/// asked for and kept in `.farik/local/project_id`, which is never committed. Not the event log's
+/// `project_id`, which is the folder's name, so `~/work/app` and `~/clients/app` would share one
+/// agent's keys, and a clone into a folder of the same name would find them (finding I1).
+///
+/// # Errors
+///
+/// The id could not be read, or made and kept.
+pub fn local_project_id(root: &std::path::Path) -> std::io::Result<String> {
+    use std::io::Read as _;
+
+    let file = root.join(".farik/local/project_id");
+    match std::fs::read_to_string(&file) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        read => return read,
+    }
+    let mut random = [0_u8; 16];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
+    let id = random.iter().fold(String::new(), |mut id, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(id, "{byte:02x}");
+        id
+    });
+    if let Some(folder) = file.parent() {
+        std::fs::create_dir_all(folder)?;
+    }
+    // Written beside and linked into place, which fails when another process got there first:
+    // then its id is the one kept, and no reader ever sees a half-written file.
+    let beside = file.with_extension(format!("{}.tmp", std::process::id()));
+    crate::write_private(&beside, id.as_bytes())?;
+    let linked = std::fs::hard_link(&beside, &file);
+    let _ = std::fs::remove_file(&beside);
+    match linked {
+        Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => Err(error),
+        _ => std::fs::read_to_string(&file),
     }
 }
 
@@ -714,6 +767,40 @@ mod tests {
         };
         assert_eq!(other_project.account(), "connector:q:theo:github");
         assert_eq!(keychain.load(&other_project), Ok(None));
+    }
+
+    #[test]
+    fn two_projects_in_folders_of_one_name_keep_their_keys_apart() {
+        // `~/work/app` and `~/clients/app`: a folder's name is no project's address (finding I1).
+        let dir = scratch("same-name");
+        let (work, clients) = (dir.join("work/app"), dir.join("clients/app"));
+        for root in [&work, &clients] {
+            std::fs::create_dir_all(root).expect("the project is made");
+        }
+        let at_work = SecretAt::of(&work, "theo", "github").expect("an address");
+        let at_clients = SecretAt::of(&clients, "theo", "github").expect("an address");
+        assert_ne!(at_work.account(), at_clients.account());
+        // The id is made once, kept in `.farik/local/`, owner-only, and read back after.
+        assert_eq!(
+            SecretAt::of(&work, "iris", "github")
+                .expect("an address")
+                .project_id,
+            at_work.project_id
+        );
+        let file = work.join(".farik/local/project_id");
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("the id is kept"),
+            at_work.project_id
+        );
+        assert_eq!(
+            std::fs::metadata(&file)
+                .expect("it is there")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(at_work.project_id.len(), 32, "{}", at_work.project_id);
     }
 
     #[test]

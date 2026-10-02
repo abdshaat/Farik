@@ -193,12 +193,12 @@ pub(super) async fn connect(state: &DaemonState, params: &Value) -> Result<Value
 }
 
 /// Where `agent`'s keys for `server` are kept in this project (ADR 0030).
-pub(crate) fn secret_at(deps: &ToolDeps, agent: &str, server: &str) -> SecretAt {
-    SecretAt {
-        project_id: deps.ids.project_id.clone(),
-        agent_id: agent.to_string(),
-        server: server.to_string(),
-    }
+///
+/// # Errors
+///
+/// The project's id on this machine could not be read or made.
+pub(crate) fn secret_at(deps: &ToolDeps, agent: &str, server: &str) -> std::io::Result<SecretAt> {
+    SecretAt::of(deps.files.root(), agent, server)
 }
 
 /// Each agent's custom servers in `team` and whether each runs: `connected` when the definition
@@ -216,7 +216,9 @@ fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team) -> Vec<Va
                 .map(move |server| (agent.id.as_str(), server))
         })
         .map(|(agent, server)| {
-            let shown = match state.kept(&secret_at(deps, agent, &server.name)) {
+            let kept = secret_at(deps, agent, &server.name)
+                .map_or(Kept::Unavailable, |at| state.kept(&at));
+            let shown = match kept {
                 Kept::Hash(kept) if kept == spec_sha256(&server) => "connected",
                 Kept::Unavailable => "store_unavailable",
                 _ => "connect_again",
@@ -423,7 +425,7 @@ async fn connector_connect(
     };
     let (secrets, at) = (
         state.connector_secrets(),
-        secret_at(deps, &agent, &server.name),
+        secret_at(deps, &agent, &server.name).map_err(|error| internal(&error))?,
     );
     let stored_in = off_the_worker(move || {
         secrets
@@ -462,7 +464,10 @@ async fn connector_disconnect(
         },
     )
     .await?;
-    let (secrets, at) = (state.connector_secrets(), secret_at(deps, agent, server));
+    let (secrets, at) = (
+        state.connector_secrets(),
+        secret_at(deps, agent, server).map_err(|error| internal(&error))?,
+    );
     off_the_worker(move || {
         secrets
             .delete(&at)
@@ -2496,11 +2501,7 @@ pub(super) mod tests {
     }
 
     fn kept_at(harness: &Harness, agent: &str, server: &str) -> SecretAt {
-        SecretAt {
-            project_id: harness.project.deps.ids.project_id.clone(),
-            agent_id: agent.to_string(),
-            server: server.to_string(),
-        }
+        SecretAt::of(harness.project.deps.files.root(), agent, server).expect("an address")
     }
 
     fn connect_params(agent: &str, server: &Value, tags: &Value) -> Value {

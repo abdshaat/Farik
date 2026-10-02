@@ -124,11 +124,7 @@ impl Served {
         })));
         let store = Arc::new(MemoryConnectorSecrets::default());
         for server in servers(&team) {
-            let at = SecretAt {
-                project_id: "farik".to_string(),
-                agent_id: "dev-a".to_string(),
-                server: server.name.clone(),
-            };
+            let at = SecretAt::of(&repo.path, "dev-a", &server.name).expect("an address");
             let entry = ConnectorEntry {
                 spec_sha256: spec_sha256(&server),
                 keys: [("API_KEY".to_string(), Secret::new(KEY_VALUE.to_string()))].into(),

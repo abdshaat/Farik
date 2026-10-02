@@ -64,11 +64,8 @@ pub(crate) fn connect(
     let (entry, server) = custom_entry(&project.team, asked.agent, &wire, Value::Object(tools))
         .map_err(|e| errors(&e))?;
     let spec = spec_sha256(&server);
-    let at = SecretAt {
-        project_id: project.ids.project_id.clone(),
-        agent_id: asked.agent.to_string(),
-        server: server.name.clone(),
-    };
+    let at = SecretAt::of(&project.root, asked.agent, &server.name)
+        .map_err(|error| format!("this project's id cannot be read: {error}"))?;
     let stored_in = io
         .connector_secrets
         .save(
@@ -132,12 +129,10 @@ pub(crate) fn disconnect(
         "disconnect",
         io,
     ))?;
+    let at = SecretAt::of(&project.root, agent, name)
+        .map_err(|error| format!("this project's id cannot be read: {error}"))?;
     io.connector_secrets
-        .delete(&SecretAt {
-            project_id: project.ids.project_id.clone(),
-            agent_id: agent.to_string(),
-            server: name.to_string(),
-        })
+        .delete(&at)
         .map_err(|error| words(&error))?;
     Ok(said)
 }

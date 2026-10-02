@@ -38,19 +38,24 @@ fn fixture(test: &str) -> PathBuf {
     path
 }
 
-/// Where `agent`'s keys for `server` are kept in `repository`'s project.
+/// Where `agent`'s keys for `server` are kept in `repository`'s project: where the daemon looks
+/// for them, under the project's id on this machine, never the log's team or project id.
 fn kept_at(repository: &TempRepo, agent: &str, server: &str) -> SecretAt {
+    let at = SecretAt::of(&repository.path, agent, server).expect("an address");
     let first = log_of(repository)
         .read(&farik_store::EventQuery {
             limit: Some(1),
             ..farik_store::EventQuery::default()
         })
         .expect("the log reads");
-    SecretAt {
-        project_id: first[0].envelope.ids.project_id.clone(),
-        agent_id: agent.to_string(),
-        server: server.to_string(),
+    // So that a command keeping keys under either of the log's ids is caught (carry M15).
+    for logged in [
+        &first[0].envelope.ids.team_id,
+        &first[0].envelope.ids.project_id,
+    ] {
+        assert_ne!(&at.project_id, logged);
     }
+    at
 }
 
 /// `farik connect <agent> fixture` against `script`, with `extra` arguments, `stdin` on standard

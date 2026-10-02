@@ -935,11 +935,14 @@ fn launched_server(
         .filter_map(farik_core::team::custom_server)
         .find(|server| server.name == asked.server)
         .ok_or_else(not_in_session)?;
-    let at = crate::connectors::SecretAt {
-        project_id: deps.ids.project_id.clone(),
-        agent_id,
-        server: server.name.clone(),
-    };
+    let at = crate::connectors::SecretAt::of(deps.files.root(), &agent_id, &server.name).map_err(
+        |error| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("secret_store_unavailable: this project's id could not be read: {error}"),
+            )
+        },
+    )?;
     Ok((server, at))
 }
 
@@ -1607,11 +1610,8 @@ mod tests {
         let store = Arc::new(MemoryConnectorSecrets::default());
         if connected {
             for server in &servers {
-                let at = SecretAt {
-                    project_id: daemon.project.deps.ids.project_id.clone(),
-                    agent_id: "dev-a".to_string(),
-                    server: server.name.clone(),
-                };
+                let at = SecretAt::of(daemon.project.deps.files.root(), "dev-a", &server.name)
+                    .expect("an address");
                 let entry = ConnectorEntry {
                     spec_sha256: farik_core::team::spec_sha256(server),
                     keys: [(
@@ -1759,11 +1759,12 @@ mod tests {
             .flatten()
             .filter_map(farik_core::team::custom_server)
         {
-            let at = crate::connectors::SecretAt {
-                project_id: daemon.project.deps.ids.project_id.clone(),
-                agent_id: "dev-a".to_string(),
-                server: server.name.clone(),
-            };
+            let at = crate::connectors::SecretAt::of(
+                daemon.project.deps.files.root(),
+                "dev-a",
+                &server.name,
+            )
+            .expect("an address");
             let entry = crate::connectors::ConnectorEntry {
                 spec_sha256: farik_core::team::spec_sha256(&server),
                 keys: std::collections::BTreeMap::new(),

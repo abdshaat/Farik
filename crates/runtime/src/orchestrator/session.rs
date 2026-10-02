@@ -314,12 +314,8 @@ fn custom_connectors(deps: &OrchestratorDeps, ask: &SessionAsk<'_>) -> Vec<Custo
     }
     custom_servers(ask.agent)
         .filter(|server| {
-            let at = SecretAt {
-                project_id: deps.tools.ids.project_id.clone(),
-                agent_id: ask.agent.id.to_string(),
-                server: server.name.clone(),
-            };
-            deps.daemon.read_kept(&at) == Kept::Hash(spec_sha256(server))
+            SecretAt::of(deps.tools.files.root(), ask.agent.id.as_str(), &server.name)
+                .is_ok_and(|at| deps.daemon.read_kept(&at) == Kept::Hash(spec_sha256(server)))
         })
         .collect()
 }
@@ -2024,11 +2020,7 @@ mod tests {
         }) {
             let mut kept = server.clone();
             change(&mut kept);
-            let at = SecretAt {
-                project_id: deps.ids.project_id.clone(),
-                agent_id: owner,
-                server: server.name.clone(),
-            };
+            let at = SecretAt::of(deps.files.root(), &owner, &server.name).expect("an address");
             let entry = ConnectorEntry {
                 spec_sha256: farik_core::team::spec_sha256(&kept),
                 keys: [(
@@ -2291,11 +2283,7 @@ mod tests {
         .expect("a custom server");
         store
             .save(
-                &SecretAt {
-                    project_id: deps.ids.project_id.clone(),
-                    agent_id: "dev-a".to_string(),
-                    server: "github".to_string(),
-                },
+                &SecretAt::of(deps.files.root(), "dev-a", "github").expect("an address"),
                 &ConnectorEntry {
                     spec_sha256: farik_core::team::spec_sha256(&github),
                     keys: [(
