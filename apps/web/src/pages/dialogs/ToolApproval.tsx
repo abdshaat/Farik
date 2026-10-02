@@ -75,6 +75,7 @@ export function ToolApproval({
 	return (
 		<Dialog
 			open
+			fillsPhone
 			title={t("waitingToolApproval", { agent, server: ask.server })}
 			onClose={onClose}
 			actions={

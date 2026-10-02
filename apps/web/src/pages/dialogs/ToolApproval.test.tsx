@@ -135,4 +135,9 @@ describe("tool approval", () => {
 		const { dialog } = await opened('{"a":2,"b":1}');
 		expect(within(dialog).getByText(/alphabetical order/)).toBeTruthy();
 	});
+
+	it("fills_a_phones_screen", async () => {
+		const { dialog } = await opened('{"a":1}');
+		expect(dialog.hasAttribute("data-fills-phone")).toBe(true);
+	});
 });

@@ -49,3 +49,29 @@
 	justify-content: flex-end;
 	gap: var(--farik-space-3);
 }
+
+/* A dialog that asks for it fills a phone's screen, its body scrolling above its pinned actions. */
+@media (max-width: 480px) {
+	.dialog[data-fills-phone][open] {
+		display: flex;
+		flex-direction: column;
+		box-sizing: border-box;
+		width: 100%;
+		max-width: none;
+		height: 100dvh;
+		max-height: none;
+		margin: 0;
+		border-radius: 0;
+	}
+
+	.dialog[data-fills-phone] .body {
+		flex: 1;
+		overflow-y: auto;
+		min-height: 0;
+	}
+
+	.dialog[data-fills-phone] .actions {
+		padding-top: var(--farik-space-3);
+		border-top: 1px solid var(--farik-color-control-border);
+	}
+}

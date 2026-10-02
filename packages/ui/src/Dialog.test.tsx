@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -55,5 +57,42 @@ describe("Dialog", () => {
 			</Dialog>,
 		);
 		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it("fills a phone's screen only when it asks to, its actions pinned", async () => {
+		const { container, rerender } = render(
+			<Dialog
+				open
+				title="Allow"
+				onClose={() => {}}
+				actions={<button type="button">Go</button>}
+			>
+				<p>Long</p>
+			</Dialog>,
+		);
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.hasAttribute("data-fills-phone")).toBe(false);
+		rerender(
+			<Dialog
+				open
+				fillsPhone
+				title="Allow"
+				onClose={() => {}}
+				actions={<button type="button">Go</button>}
+			>
+				<p>Long</p>
+			</Dialog>,
+		);
+		expect(dialog.hasAttribute("data-fills-phone")).toBe(true);
+		await expectNoAxeViolations(container);
+		// jsdom lays nothing out, so the rule that the attribute selects is read from the source.
+		const css = readFileSync(
+			join(import.meta.dirname, "Dialog.module.css"),
+			"utf8",
+		);
+		const phone = css.slice(css.indexOf("@media (max-width: 480px)"));
+		expect(phone).toContain(".dialog[data-fills-phone][open]");
+		expect(phone).toContain("height: 100dvh");
+		expect(phone).toContain(".dialog[data-fills-phone] .body");
 	});
 });
