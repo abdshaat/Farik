@@ -171,7 +171,7 @@ pub struct DaemonState {
     connector_secrets: OnceLock<Arc<dyn ConnectorSecrets>>,
     /// What that store held for each account the last time it was read, so that `team.get` does
     /// not ask a keychain each time.
-    connectors_kept: Mutex<BTreeMap<String, Kept>>,
+    connectors_kept: Arc<Mutex<BTreeMap<String, Kept>>>,
     /// The user's state folder, where each stdio connector runs (ADR 0030), once it is set.
     state_dir: OnceLock<std::path::PathBuf>,
     /// One lock per connector entry, by account: refresh, connect, disconnect and the deletes each
@@ -241,7 +241,7 @@ impl DaemonState {
             web: OnceLock::new(),
             team_writes: Mutex::new(()),
             connector_secrets: OnceLock::new(),
-            connectors_kept: Mutex::new(BTreeMap::new()),
+            connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
             sign_ins: Mutex::new(BTreeMap::new()),
@@ -262,7 +262,7 @@ impl DaemonState {
             web: OnceLock::from(web),
             team_writes: Mutex::new(()),
             connector_secrets: OnceLock::new(),
-            connectors_kept: Mutex::new(BTreeMap::new()),
+            connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
             sign_ins: Mutex::new(BTreeMap::new()),
@@ -403,13 +403,17 @@ impl DaemonState {
             }
             Err(_) => {
                 if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                    let remembered = Arc::clone(&self.connectors_kept);
                     runtime.spawn(async move {
                         let held = lock.lock_owned().await;
+                        let account = entry_at.account();
                         let _ = tokio::task::spawn_blocking(move || {
                             signed_in::delete_and_revoke(&secrets, &entry_at);
                             drop(held);
                         })
                         .await;
+                        // Whoever held the entry read it back as it saved; it is gone now.
+                        crate::locked(&remembered).remove(&account);
                     });
                 }
             }

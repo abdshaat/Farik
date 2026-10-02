@@ -926,6 +926,14 @@ pub async fn revoke(grant: &OAuthGrant) {
 }
 
 impl OAuthGrant {
+    /// Whether the service should be asked to forget `self`, which `new` replaces. Not when `new`
+    /// is the same grant, or the same client's: some services end every grant of a client when one
+    /// is revoked, and that would end `new` with it.
+    #[must_use]
+    pub fn revocable_after(&self, new: &OAuthGrant) -> bool {
+        self.client_id != new.client_id && self.access_token.expose() != new.access_token.expose()
+    }
+
     /// The stored form, which holds both tokens.
     pub(crate) fn to_json(&self) -> serde_json::Value {
         serde_json::json!({

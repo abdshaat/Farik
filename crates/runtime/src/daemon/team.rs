@@ -665,20 +665,27 @@ async fn connector_connect(
         }
         _ => authority(state, params, &described_as)?,
     };
-    let result = Box::pin(connect_with(state, deps, params, &agent, &authority)).await;
-    if let (Err(_), Some((attempt, kept))) = (&result, taken) {
+    let mut saved = false;
+    let result = Box::pin(connect_with(
+        state, deps, params, &agent, &authority, &mut saved,
+    ))
+    .await;
+    // Put back only while the grant is not kept: a retry then has nothing of its own to undo.
+    if let (Err(_), Some((attempt, kept)), false) = (&result, taken, saved) {
         state.restore_sign_in(&attempt, kept);
     }
     result
 }
 
-/// What `connector_connect` does once it knows what lists and keeps the server.
+/// What `connector_connect` does once it knows what lists and keeps the server. `saved` is set
+/// once the entry is kept.
 async fn connect_with(
     state: &Arc<DaemonState>,
     deps: &Arc<ToolDeps>,
     params: &Value,
     agent: &str,
     authority: &Authority,
+    saved: &mut bool,
 ) -> Result<Value, Failure> {
     let (held, asked) = (Arc::clone(deps), params.clone());
     let (_, server) = off_the_worker(move || {
@@ -738,8 +745,12 @@ async fn connect_with(
     })
     .await?;
     drop(held);
-    // A sign-in this one replaces is asked to be forgotten, so it does not linger at the service.
-    if let Some(old) = replaced {
+    *saved = true;
+    // A sign-in this one replaces is asked to be forgotten, so it does not linger at the service;
+    // not when it is the one just kept, or its client's (`revocable_after`).
+    if let (Some(old), Authority::SignedIn(new)) = (replaced, authority)
+        && old.revocable_after(new)
+    {
         tokio::spawn(async move { crate::sign_in::revoke(&old).await });
     }
     handled(
@@ -775,14 +786,13 @@ async fn connector_disconnect(
         },
     )
     .await?;
-    let (secrets, at) = (
-        state.connector_secrets(),
-        secret_at(state, deps, agent, server).map_err(|error| internal(&error))?,
-    );
+    let at = secret_at(state, deps, agent, server).map_err(|error| internal(&error))?;
+    let (secrets, deleted_at) = (state.connector_secrets(), at.clone());
     // Held across the delete: a refresh in flight saves before it, never after (ADR 0033).
     let lock = state.entry_lock(&at);
     let _held = lock.lock().await;
     let grant = off_the_worker(move || {
+        let at = deleted_at;
         let grant = secrets
             .load(&at)
             .ok()
@@ -794,6 +804,8 @@ async fn connector_disconnect(
         Ok(grant)
     })
     .await?;
+    // A refresh that held the entry read it back as it saved: it is gone now.
+    state.forget_kept(&at);
     if let Some(grant) = grant {
         crate::sign_in::revoke(&grant).await;
     }
@@ -3568,6 +3580,10 @@ pub(super) mod tests {
             store.load(&at).expect("the store reads").is_none(),
             "the entry removed during the refresh is not put back"
         );
+        assert!(
+            matches!(harness.daemon.kept(&at), crate::daemon::Kept::Nothing),
+            "and the agent's page is not told it is kept"
+        );
     }
 
     /// A daemon whose agent `dev-a` signs in to an OAuth fixture, on one runtime the fixture,
@@ -3604,6 +3620,15 @@ pub(super) mod tests {
             json!({
                 "name": "notion", "transport": "http", "url": self.fixture.mcp_url, "oauth": {}
             })
+        }
+
+        /// `notion` as the daemon holds it.
+        fn described(&self) -> farik_core::team::CustomServer {
+            let wire = json!({
+                "name": "notion", "source": "custom", "transport": "http",
+                "url": self.fixture.mcp_url, "oauth": {}, "tools": { "whoami": "network" }
+            });
+            custom(&wire)
         }
 
         fn reply(&self, method: &str, params: &Value) -> Value {
@@ -3876,6 +3901,197 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_attempt_signs_in_one_agent_only() {
+        let signing = Signing::new("connector-sign-in-agent");
+        for method in ["connector.connect", "connector.tools"] {
+            let attempt = signing.signed_in(&signing.server());
+            let mut params =
+                json!({ "agent": "dev-b", "server": signing.server(), "attempt": attempt });
+            if method == "connector.connect" {
+                params["tags"] = json!({});
+            }
+            let (code, message) = signing.refused(method, &params);
+            assert_eq!(code, -32005, "{method}");
+            assert!(
+                message.starts_with("sign_in_unknown:"),
+                "{method}: {message}"
+            );
+            assert!(signing.grant().is_none(), "{method}: nothing for dev-a");
+            assert!(
+                signing
+                    .store
+                    .load(&kept_at(&signing.harness, "dev-b", "notion"))
+                    .expect("the store reads")
+                    .is_none(),
+                "{method}: nothing for dev-b"
+            );
+            // The mismatch ended the attempt: even its own agent is refused now.
+            let (_, message) = signing.refused(
+                "connector.connect",
+                &json!({
+                    "agent": "dev-a", "server": signing.server(), "attempt": attempt, "tags": {}
+                }),
+            );
+            assert!(
+                message.starts_with("sign_in_unknown:"),
+                "{method}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_refused_label_keeps_the_sign_in() {
+        let signing = Signing::new("connector-sign-in-label");
+        let attempt = signing.signed_in(&signing.server());
+        let (code, message) = signing.refused(
+            "connector.connect",
+            &json!({
+                "agent": "dev-a", "server": signing.server(), "attempt": attempt,
+                "tags": { "nope": "network" }
+            }),
+        );
+        assert_eq!(code, -32005);
+        assert!(message.starts_with("tag_unknown_tool"), "{message}");
+        assert!(signing.grant().is_none());
+        // The sign-in was not spent: the same attempt connects once the label is right.
+        signing.connect(&attempt);
+        assert!(signing.grant().is_some());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_connect_over_its_own_grant_does_not_revoke_it() {
+        // A connect that failed after its grant was kept is pressed again: the grant it replaces
+        // is itself, and the service is not asked to forget it.
+        let signing = Signing::new("connector-sign-in-own");
+        let attempt = signing.signed_in(&signing.server());
+        let server = signing.described();
+        let grant = signing
+            .harness
+            .daemon
+            .peek_sign_in(
+                attempt.as_str().expect("an attempt"),
+                &crate::daemon::signed_in::Binding {
+                    agent: "dev-a",
+                    server: &server,
+                },
+            )
+            .expect("the grant");
+        signing
+            .store
+            .save(
+                &kept_at(&signing.harness, "dev-a", "notion"),
+                &ConnectorEntry {
+                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    keys: BTreeMap::new(),
+                    oauth: Some(grant.clone()),
+                },
+            )
+            .expect("kept");
+        signing.connect(&attempt);
+        signing.runtime.block_on(async {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        });
+        assert_eq!(signing.fixture.count("/revoke"), 0);
+        assert_eq!(
+            signing
+                .grant()
+                .and_then(|kept| kept.refresh_token)
+                .map(|token| token.expose().to_string()),
+            grant.refresh_token.map(|token| token.expose().to_string())
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn connect_again_with_the_same_client_keeps_both_alive() {
+        // Some services end every grant of a client when one is revoked, so a grant is not
+        // revoked when the one replacing it is the same client's.
+        let signing = Signing::new("connector-sign-in-same-client");
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("a port")
+            .local_addr()
+            .expect("an address")
+            .port();
+        let server = json!({
+            "name": "notion", "transport": "http", "url": signing.fixture.mcp_url,
+            "oauth": { "client_id": "fixed", "callback_port": port }
+        });
+        for _ in 0..2 {
+            let attempt = signing.signed_in(&server);
+            signing.call(
+                "connector.connect",
+                &json!({
+                    "agent": "dev-a", "server": server, "attempt": attempt,
+                    "tags": { "whoami": "network" }
+                }),
+                "connectorConnectResult",
+            );
+        }
+        signing.runtime.block_on(async {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        });
+        assert_eq!(signing.fixture.count("/revoke"), 0);
+        assert_eq!(
+            signing.grant().map(|grant| grant.client_id),
+            Some("fixed".to_string())
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_dropped_signed_in_server_is_asked_to_forget() {
+        // A save that takes the server away, and a retirement, each ask the service to forget the
+        // sign-in the entry held.
+        for retire in [false, true] {
+            let signing = Signing::new(&format!("connector-sign-in-dropped-{retire}"));
+            let attempt = signing.signed_in(&signing.server());
+            signing.connect(&attempt);
+            let refresh = signing
+                .grant()
+                .and_then(|grant| grant.refresh_token)
+                .expect("a refresh token");
+            if retire {
+                let reply = signing.reply(
+                    "command",
+                    &json!({ "command": { "command": "agent_update", "body": {
+                        "agent_id": "dev-a", "status": "retired"
+                    } } }),
+                );
+                assert!(reply["result"]["said"].is_string(), "{reply}");
+            } else {
+                let mut team = team_file(&signing.harness);
+                team["agents"][1]
+                    .as_object_mut()
+                    .expect("an agent")
+                    .remove("mcp_servers");
+                signing.call("team.save", &json!({ "team": team }), "emptyResult");
+            }
+            for _ in 0..500 {
+                if signing.fixture.count("/revoke") > 0 {
+                    break;
+                }
+                signing.runtime.block_on(async {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                });
+            }
+            let revoked = signing.fixture.requests("/revoke");
+            assert_eq!(revoked.len(), 1, "retire: {retire}");
+            assert_eq!(
+                revoked[0].form["token"],
+                refresh.expose(),
+                "retire: {retire}"
+            );
+            assert!(
+                signing.grant().is_none(),
+                "retire: {retire}: the entry is gone"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn connect_needs_an_attempt_to_sign_in() {
         let signing = Signing::new("connector-sign-in-needed");
         for method in ["connector.connect", "connector.tools"] {
@@ -4048,6 +4264,8 @@ pub(super) mod tests {
         // A refresh or a connect holds the entry.
         let held = runtime.block_on(harness.daemon.entry_lock(&at).lock_owned());
         runtime.block_on(async { harness.daemon.forget_entry(&at) });
+        // The holder saves, and reads what it saved, as a refresh does.
+        harness.daemon.read_kept(&at);
         std::thread::sleep(std::time::Duration::from_millis(200));
         assert!(
             store.load(&at).expect("reads").is_some(),
@@ -4059,6 +4277,11 @@ pub(super) mod tests {
             assert!(std::time::Instant::now() < deadline, "the delete ran");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            matches!(harness.daemon.kept(&at), crate::daemon::Kept::Nothing),
+            "what the holder remembered is forgotten once the entry is gone"
+        );
         // And with no one holding it, the delete is done when it returns.
         connected(
             &harness,
