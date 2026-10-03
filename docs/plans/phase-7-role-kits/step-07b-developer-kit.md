@@ -80,7 +80,7 @@ Files: `daemon/team.rs` tests; `orchestrator/session.rs` tests. `a_team_of_three
 - `connects_every_shipped_kit_connector_by_name` (extended, a guard): for a Developer, `kit_entry` of `context7` is `Ok` and `matches_kit` true; `osv` on the Developer is `connector_not_in_kit`.
 - `gives_a_developer_its_browser_while_the_designer_has_it_off` (`orchestrator/session.rs:1295`, extended, a guard): add one assertion, `offered_connector(dev, Implement, browser) == builtin_connector("playwright")` (the whole definition, not only its name). No separate kit test: a `playwright` entry in the Developer's kit is already refused by the loader.
 
-- [ ] `test(runtime): connect the Developer's Context7 by name`
+- [x] `test(runtime): connect the Developer's Context7 by name`
 
 ### Task 4: Spec and plan
 

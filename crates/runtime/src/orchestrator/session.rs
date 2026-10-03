@@ -1309,6 +1309,11 @@ mod tests {
                 "{purpose:?}"
             );
         }
+        // The whole definition, the one confined browser of the Designer's kit, not only its name.
+        assert_eq!(
+            offered_connector(dev, SessionPurpose::Implement, browser),
+            farik_roles::builtin_connector("playwright")
+        );
         assert!(offered_connector(iris, SessionPurpose::Verify, browser).is_none());
     }
 

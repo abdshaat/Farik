@@ -3924,7 +3924,7 @@ pub(super) mod tests {
         assert!(container[0].message.starts_with("connector_not_in_kit: "));
     }
 
-    /// A guard: each shipped service of the Product Manager and the Architect connects by name.
+    /// A guard: each shipped service of the Product Manager, the Architect and the Developer connects by name.
     #[test]
     fn connects_every_shipped_kit_connector_by_name() {
         use farik_core::contract::Role;
@@ -3957,6 +3957,15 @@ pub(super) mod tests {
         }
         let refused = super::kit_entry(&pm, &team, "pm", "osv", &BTreeMap::new())
             .expect_err("the Product Manager has no OSV");
+        assert!(refused[0].message.starts_with("connector_not_in_kit: "));
+        let developer =
+            farik_roles::load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
+        let (_, server) =
+            super::kit_entry(&developer, &team, "dev-a", "context7", &BTreeMap::new())
+                .unwrap_or_else(|refused| panic!("context7: {refused:?}"));
+        assert!(super::matches_kit(&developer, &server), "context7");
+        let refused = super::kit_entry(&developer, &team, "dev-a", "osv", &BTreeMap::new())
+            .expect_err("the Developer has no OSV");
         assert!(refused[0].message.starts_with("connector_not_in_kit: "));
     }
 
