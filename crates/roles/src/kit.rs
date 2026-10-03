@@ -1044,6 +1044,15 @@ mod tests {
         server.tools.values().filter(|found| **found == tag).count()
     }
 
+    fn network_names(server: &CustomServer) -> Vec<&str> {
+        server
+            .tools
+            .iter()
+            .filter(|(_, tag)| **tag == ConnectorTag::Network)
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+
     fn signed_in(server: &CustomServer) -> (&str, Option<&[String]>) {
         let CustomTransport::Http { url, oauth, .. } = &server.transport else {
             panic!("{} is http", server.name);
@@ -1070,18 +1079,38 @@ mod tests {
             "use_amp_dashboards",
             "create_flags",
             "get_deployments",
+            "get_from_url",
         ] {
             assert_eq!(server.tools[name], ConnectorTag::Denied, "{name}");
         }
-        assert_eq!(tagged(&server, ConnectorTag::Network), 15);
-        assert_eq!(tagged(&server, ConnectorTag::Denied), 30);
+        assert_eq!(
+            network_names(&server),
+            [
+                "get_amp_taxonomy",
+                "get_amplitude_charts",
+                "get_amplitude_context",
+                "get_experiments",
+                "get_flags",
+                "get_group_types",
+                "get_guide_or_survey",
+                "get_transformations",
+                "list_guides_surveys",
+                "query_amplitude_data",
+                "query_experiment",
+                "query_wave_opportunities",
+                "query_wave_product_areas",
+                "search",
+            ]
+        );
+        assert_eq!(tagged(&server, ConnectorTag::Network), 14);
+        assert_eq!(tagged(&server, ConnectorTag::Denied), 31);
     }
 
     #[test]
     fn linear_reads_from_its_read_only_address() {
         let (server, _) = pm_service("linear");
         let (url, scopes) = signed_in(&server);
-        assert!(url.ends_with("/mcp/readonly"), "{url}");
+        assert_eq!(url, "https://mcp.linear.app/mcp/readonly");
         assert_eq!(scopes, Some(&["read".to_string()][..]));
         assert_eq!(server.tools.len(), 21);
         assert_eq!(tagged(&server, ConnectorTag::Network), 21);
@@ -1090,6 +1119,22 @@ mod tests {
     #[test]
     fn notion_reads_pages_and_never_changes_them() {
         let (server, _) = pm_service("notion");
+        let (url, scopes) = signed_in(&server);
+        assert_eq!(url, "https://mcp.notion.com/mcp");
+        assert_eq!(scopes, Some(&[][..]));
+        assert_eq!(
+            network_names(&server),
+            [
+                "notion-download-attachment",
+                "notion-fetch",
+                "notion-get-comments",
+                "notion-get-teams",
+                "notion-get-tool-access",
+                "notion-get-users",
+                "notion-query-data-sources",
+                "notion-search",
+            ]
+        );
         for name in ["notion-search", "notion-fetch"] {
             assert_eq!(server.tools[name], ConnectorTag::Network, "{name}");
         }
@@ -1125,10 +1170,11 @@ mod tests {
             );
             assert!(allowances.is_empty(), "{}", server.name);
             assert!(server.credential_keys.is_empty(), "{}", server.name);
-            let CustomTransport::Http { oauth, .. } = &server.transport else {
+            let CustomTransport::Http { oauth, headers, .. } = &server.transport else {
                 panic!("{} is http", server.name);
             };
             assert!(oauth.is_some(), "{} signs in", server.name);
+            assert!(headers.is_empty(), "{}", server.name);
         }
     }
 

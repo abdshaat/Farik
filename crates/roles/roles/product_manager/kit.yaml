@@ -1,6 +1,6 @@
 # The Product Manager's kit: five skills and three services it only reads, each signed in (route 1,
 # ADR 0035). Tool lists are from each service's documentation on 2026-10-02 (step 06's plan); the
-# live pin test compares them. A tool a service lists that is not here arrives `denied`.
+# live pin test compares them. A tool a service lists that is not here is never offered (`tool_not_tagged`) until a pin update tags it.
 role: product_manager
 skills:
   - asking-the-right-questions
@@ -16,10 +16,9 @@ connectors:
     title: Amplitude
     about: "Amplitude shows how people use your product: which features they open, where they stop, and what changed after a release."
     why: "So the Product Manager can check how a feature is really used before deciding what to build, and read the numbers again after it ships. It only reads."
-    setup: "Sign in with your Amplitude account and allow Farik to read your project. Farik connects to Amplitude's United States service; a project kept in Amplitude's EU service cannot be connected yet."
+    setup: "Sign in with your Amplitude account and allow Farik to read your project. Farik connects to Amplitude's United States service; a project kept in Amplitude's European service cannot be connected yet."
     labels:
       search: "search charts and dashboards"
-      get_from_url: "open an Amplitude link"
       get_amplitude_context: "read the project's setup"
       query_amplitude_data: "ask about usage"
       get_amplitude_charts: "read charts"
@@ -35,7 +34,6 @@ connectors:
       query_wave_product_areas: "read product areas"
     tools:
       search: network
-      get_from_url: network
       get_amplitude_context: network
       query_amplitude_data: network
       get_amplitude_charts: network
@@ -79,6 +77,7 @@ connectors:
       get_data_warehouse_destinations: denied
       get_data_warehouse_jobs: denied
       get_deployments: denied
+      get_from_url: denied
   - name: linear
     transport: http
     url: https://mcp.linear.app/mcp/readonly
