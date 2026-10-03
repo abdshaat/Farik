@@ -1,6 +1,6 @@
 # Phase 7, step 06: Product Manager and Scrum Master kits
 
-Status: ready
+Status: executed, pending the founder's live pin run
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6.1, 6.2, 6.7; F9
 Depends on: steps 05 and 05b of this phase (committed on this branch, at 3b93e4d), and the steps they rest on (01 to 04b); phase 6 (merged in #19)
@@ -110,7 +110,7 @@ Files: `daemon/team.rs` test; `live_kit_pins.rs`'s header: "No `stdio` or `http`
 
 `docs/SPEC.md`: 6.1 names the Product Manager's kit skills and services; 6.2 names the Scrum Master's kit skills only. 6.7 gets a paragraph, "The Product Manager's kit": the three servers, route 1 each, read-only. Bump the version line as 0.45 did. `docs/design/role-kits.md`: the first-cut table's Product Manager row gives the chosen services (Amplitude is already there, the founder's O4), and the Signing-in table gives Amplitude, Linear and Notion route 1; the Slack rows, the Scrum Master's connector cell and step 13's row were moved to phase 14's Slack integration by the planning commit of 2026-10-02 and stay as they are. `docs/plans/project-plan.md` row 06: what was executed, with O2 as the founder decides it.
 
-- [ ] `docs(spec): record the Product Manager's and the Scrum Master's kits`
+- [x] `docs(spec): record the Product Manager's and the Scrum Master's kits`
 
 ## Verification
 
