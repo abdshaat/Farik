@@ -106,7 +106,7 @@ Tests (`kit.rs`):
 - `grep_needs_no_account_and_only_reads`: URL exactly `https://mcp.grep.app`, no `oauth`, no `headers`, no keys; tools exactly `{ searchGitHub: network }`. RED: no such connector.
 - `every_network_tool_of_the_architect_has_a_label`: the label map's keys equal the `network` names, exactly (a guard; vacuous before the connectors).
 
-- [ ] `feat(roles): give the Architect Context7 and Grep`
+- [x] `feat(roles): give the Architect Context7 and Grep`
 
 ### Task 3: Farik's own server in a kit
 

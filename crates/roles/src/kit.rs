@@ -854,6 +854,7 @@ pub fn pin_drift(pinned: &BTreeMap<String, ConnectorTag>, listed: &[String]) -> 
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::path::Path;
 
     use farik_core::contract::Role;
@@ -937,6 +938,7 @@ mod tests {
                 match role {
                     Role::UiUxDesigner => 1,
                     Role::ProductManager => 3,
+                    Role::Architect => 2,
                     _ => 0,
                 },
                 "{role}"
@@ -1015,9 +1017,9 @@ mod tests {
         }
     }
 
-    /// A Product Manager service's server, its copy and its tags, by name.
-    fn pm_service(name: &str) -> (CustomServer, SetupCopy) {
-        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+    /// A role's service's server, its copy and its tags, by name.
+    fn service(role: Role, name: &str) -> (CustomServer, SetupCopy) {
+        let kit = load_kit(role).expect("a shipped kit");
         for connector in kit.connectors {
             if let KitConnector::Server { entry, copy, .. } = connector {
                 let server = custom_server(&entry).expect("a custom server");
@@ -1026,7 +1028,11 @@ mod tests {
                 }
             }
         }
-        panic!("the Product Manager's kit has no {name}");
+        panic!("the {role} kit has no {name}");
+    }
+
+    fn pm_service(name: &str) -> (CustomServer, SetupCopy) {
+        service(Role::ProductManager, name)
     }
 
     fn tagged(server: &CustomServer, tag: ConnectorTag) -> usize {
@@ -1136,6 +1142,75 @@ mod tests {
         }
         assert_eq!(tagged(&server, ConnectorTag::Network), 8);
         assert_eq!(tagged(&server, ConnectorTag::Denied), 28);
+    }
+
+    #[test]
+    fn context7_signs_in_and_only_reads() {
+        let (server, _) = service(Role::Architect, "context7");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("context7 is http");
+        };
+        assert_eq!(url, "https://mcp.context7.com/mcp/oauth");
+        assert_eq!(
+            oauth.as_ref().map(|settings| settings.scopes.as_slice()),
+            Some(
+                &[
+                    "profile".to_string(),
+                    "email".to_string(),
+                    "offline_access".to_string()
+                ][..]
+            )
+        );
+        assert!(headers.is_empty());
+        assert!(server.credential_keys.is_empty());
+        assert_eq!(network_names(&server), ["query-docs", "resolve-library-id"]);
+        assert_eq!(server.tools.len(), 2);
+    }
+
+    #[test]
+    fn grep_needs_no_account_and_only_reads() {
+        let (server, _) = service(Role::Architect, "grep");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("grep is http");
+        };
+        assert_eq!(url, "https://mcp.grep.app");
+        assert!(oauth.is_none());
+        assert!(headers.is_empty());
+        assert!(server.credential_keys.is_empty());
+        assert_eq!(
+            server.tools,
+            BTreeMap::from([("searchGitHub".to_string(), ConnectorTag::Network)])
+        );
+    }
+
+    /// A guard: it passes with no connector at all.
+    #[test]
+    fn every_network_tool_of_the_architect_has_a_label() {
+        let kit = load_kit(Role::Architect).expect("the Architect's kit");
+        for connector in kit.connectors {
+            let KitConnector::Server { entry, copy, .. } = connector else {
+                continue;
+            };
+            let server = custom_server(&entry).expect("a custom server");
+            let network: Vec<&String> = server
+                .tools
+                .iter()
+                .filter(|(_, tag)| **tag == ConnectorTag::Network)
+                .map(|(name, _)| name)
+                .collect();
+            let labelled: Vec<&String> = copy.labels.keys().collect();
+            assert_eq!(labelled, network, "{}", server.name);
+        }
     }
 
     #[test]
