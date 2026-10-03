@@ -703,9 +703,8 @@ mod tests {
                 from_roles.insert(shipped.name);
             }
             // A kit's skills ship too, and `load_kit` has already run `check_skill` over each.
-            if let Ok(kit) = crate::load_kit(role) {
-                from_roles.extend(kit.skills.into_iter().map(|skill| skill.name));
-            }
+            let kit = crate::load_kit(role).expect("a shipped kit loads");
+            from_roles.extend(kit.skills.into_iter().map(|skill| skill.name));
         }
         assert!(checked > 0);
         let names: std::collections::BTreeSet<String> =

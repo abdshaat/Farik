@@ -7,19 +7,18 @@ description: Use when escalations are open at planning, to give the human one sh
 
 An escalation is a question only the human can answer. The digest is the list of them.
 
-## 1. Gather the open ones
+## 1. Start from the digest
 
-Read the board (`farik_read_board`) for open escalations. Leave out any already answered.
+The planning's first message holds the digest: each open escalation, oldest first, with its task,
+reason and hours waiting, and each budget spent since the last planning. Use that list; the board
+alone misses an accepted task whose integration failed.
 
-## 2. Order them
+## 2. One line each
 
-Oldest first. The oldest has waited longest and may block the most.
+For each escalation, say what the human must decide, in one line, and how long it has waited. Do not
+retell the history; name the task so they can open it. Then one line for each budget spent.
 
-## 3. One line each
+## 3. Send it
 
-For each, say what the human must decide, in one line, and since when. Do not retell the history.
-If the decision needs context, link the task.
-
-## 4. Send it
-
-Post the digest with `farik_post_message`. Nothing already answered goes in it.
+Post the digest with `farik_post_message`, beside the plan and within the planning's three posts.
+Nothing already answered goes in it.

@@ -9,19 +9,22 @@ The session's own instructions come first; where they differ from this skill, fo
 
 ## 1. Standup
 
-Build it from the board (`farik_read_board`), never from memory. Three parts, one line each: what
+Build it from the facts in the first message, never from memory; read the board
+(`farik_read_board`) only to check one. Three parts, one line each: what
 moved, what is blocked, and what waits on the human. Post it with `farik_post_message` in the one
 post the session allows.
 
 ## 2. Review
 
-Judge each finished task against its contract and its acceptance, not against how the work looks.
-Say what was accepted, what was sent back, and why.
+Say, from the first message, what the sprint delivered and what it did not: what was accepted, what
+was sent back, and the reason given. You report the Product Manager's acceptance; you do not judge
+it again.
 
 ## 3. Retro
 
 Look at what went well, what did not, and what repeats. Pick one to three changes the team will
-try next sprint, each small enough to check. Append them with `farik_append_retro`.
+try next sprint, each small enough to check. Post them first (section 4), then record what the next planning should know with
+`farik_append_retro`, and end the session.
 
 ## 4. Post it
 

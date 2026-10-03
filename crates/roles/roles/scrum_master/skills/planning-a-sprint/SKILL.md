@@ -1,33 +1,35 @@
 ---
 name: planning-a-sprint
-description: Use in a planning ceremony, to choose the sprint's work from the ready backlog and record it.
+description: Use in a planning ceremony, to choose the sprint's work from the candidates and record it.
 ---
 
 # Planning a sprint
 
 A sprint is a promise the team can keep. Plan from facts on the board, not from memory.
 
-## 1. Start from the ready backlog
+## 1. Start from the candidates
 
-Read the board (`farik_read_board`) and the rules (`farik_read_rules`). Only tasks that are
-`ready` are candidates. Do not plan a task still being refined.
+The first message lists the candidates, each with its id, kind, most it may cost, and title, and the
+sprint's budget. Choose only from that list: an epic brings its tasks with it. Read the board
+(`farik_read_board`) to check dependencies, never to add a candidate.
 
-## 2. Fit the limits
+## 2. Fit the budget
 
-Stay within the sprint's budget, which the first message gives, and within the WIP limit. Count
-each candidate's `max_cost_usd` against the budget. Leave out what does not fit.
+Count each candidate's most it may cost against the sprint's budget, when it has one. Leave out what
+does not fit.
 
 ## 3. Order the work
 
-Order by the Product Manager's priority, then by dependencies: a task waits for what it depends
-on, whatever its priority.
+Follow the order the Product Manager last gave in the team channel, when there is one, then
+dependencies: a task waits for what it depends on, whatever its place.
 
 ## 4. Leave room
 
-Leave some budget and some of the WIP limit for work sent back in review. A sprint filled to the
-edge breaks on the first rework.
+Leave some of the budget for work sent back in review. A sprint filled to the edge breaks on the
+first rework.
 
-## 5. Record it
+## 5. Post, then plan
 
-Record the plan with `farik_plan_sprint`. Then say what did not fit and why, one line each, so the
-Product Manager can reorder.
+Post the plan, with what did not fit and why in one line each, and the digest, with
+`farik_post_message`, in at most three posts. Then record the plan with one call of
+`farik_plan_sprint`, and end the session.
