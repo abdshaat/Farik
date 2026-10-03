@@ -3916,6 +3916,51 @@ pub(super) mod tests {
         assert!(container[0].message.starts_with("connector_not_in_kit: "));
     }
 
+    /// A guard: each shipped service of the Product Manager connects by name.
+    #[test]
+    fn connects_every_shipped_kit_connector_by_name() {
+        use farik_core::contract::Role;
+        let team = crate::tools::fixtures::a_team_of_three(|wire| {
+            wire["agents"].as_array_mut().expect("agents").push(
+                farik_core::team::fixtures::an_agent_wire("sam", "scrum_master"),
+            );
+        });
+        let pm = farik_roles::load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        for name in ["amplitude", "linear", "notion"] {
+            let (_, server) = super::kit_entry(&pm, &team, "pm", name, &BTreeMap::new())
+                .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
+            assert!(super::matches_kit(&pm, &server), "{name}");
+        }
+        let scrum = farik_roles::load_kit(Role::ScrumMaster).expect("the Scrum Master's kit");
+        let refused = super::kit_entry(&scrum, &team, "sam", "notion", &BTreeMap::new())
+            .expect_err("the Scrum Master has no Notion");
+        assert!(refused[0].message.starts_with("connector_not_in_kit: "));
+    }
+
+    /// A guard: every `farik_*` tool a kit skill names is one Farik lists.
+    #[test]
+    fn kit_skills_name_only_tools_farik_lists() {
+        use farik_core::contract::Role;
+        let listed: Vec<&str> = crate::tools::tool_descriptors()
+            .iter()
+            .map(|tool| tool.name)
+            .collect();
+        let mut named = 0;
+        for role in [Role::ProductManager, Role::ScrumMaster] {
+            for skill in farik_roles::load_kit(role).expect("a kit").skills {
+                for text in skill.session_files.values() {
+                    for word in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+                        if word.starts_with("farik_") {
+                            assert!(listed.contains(&word), "{}: {word}", skill.name);
+                            named += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(named > 0, "the skills name tools, and the check saw them");
+    }
+
     #[test]
     fn matches_kit_compares_the_whole_entry() {
         let team = crate::tools::fixtures::a_team_of_three(|_| {});

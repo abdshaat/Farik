@@ -6,8 +6,8 @@
 //! upper-cased, `-` as `_`), and a service the user signs in to takes a bearer from
 //! `FARIK_KIT_<NAME>_BEARER`.
 //!
-//! No `stdio` or `http` kit connector ships before step 06, so nothing is listed yet: the
-//! comparison is proven by `pin_drift`'s tests and `fixture_mcp.rs`.
+//! The Product Manager's three signed-in services are the shipped ones since step 06; the
+//! comparison is also proven by `pin_drift`'s tests and `fixture_mcp.rs`.
 
 use std::collections::BTreeMap;
 

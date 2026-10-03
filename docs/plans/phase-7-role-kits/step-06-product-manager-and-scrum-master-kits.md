@@ -104,7 +104,7 @@ Files: `daemon/team.rs` test; `live_kit_pins.rs`'s header: "No `stdio` or `http`
 
 - `connects_every_shipped_kit_connector_by_name` (`daemon/team.rs`, a guard, not RED): for a team with a Product Manager and a Scrum Master, `kit_entry(&load_kit(role)?, …)` is `Ok` and `matches_kit` true for each of `amplitude`, `linear` and `notion` on the Product Manager; `kit_entry` of `notion` on the Scrum Master is `connector_not_in_kit`.
 
-- [ ] `test(runtime): connect each of the Product Manager's services by name` (a guard, so no RED; it may instead be folded into Task 3's commit, said in the Execution notes)
+- [x] `test(runtime): connect each of the Product Manager's services by name` (a guard, so no RED; it may instead be folded into Task 3's commit, said in the Execution notes)
 
 ### Task 5: Spec and plan
 
@@ -128,3 +128,5 @@ Then, in the web app, by the founder: connect Notion, Linear and Amplitude to a 
 ## Execution notes
 
 - **Live pins not run (S1c, the controller's ruling, 2026-10-02).** The Linear key is the founder's credential and no agent holds or sets it, so Task 3 took its tool lists from the services' documentation as this plan gives them, and did not stop. Before this step lands the founder must run `FARIK_LIVE_TESTS=1 cargo test -p farik-runtime --test live_kit_pins` with `FARIK_KIT_AMPLITUDE_BEARER`, `FARIK_KIT_LINEAR_BEARER` and `FARIK_KIT_NOTION_BEARER` set. Any difference it reports is applied by the mechanical rule in "Pins against the live service": a listed tool this plan lacks goes in `denied` with no label; a named tool the service no longer lists, and whose documentation fetched that day no longer names it, is removed; the counts in Task 3's tests and lists follow in the same commit.
+- **Task 4 added a second guard,** `kit_skills_name_only_tools_farik_lists` (`daemon/team.rs`): every `farik_*` word in a kit skill is a tool `tool_descriptors` lists, the check B3 asks for. Both guards are a separate commit, not folded into Task 3.
+- **Existing tests changed as kits ship skills and services:** `every_shipped_role_skill_passes` (`skill_check.rs`) counts kit skills among the shipped names; `a_replaced_role_skill_leaves_the_prompt` (`session.rs`) expects the kit's skills after the role's; `team_get_lists_each_roles_kit_and_each_rows_source` and `team_get_says_what_a_kit_offers_to_allow` (`daemon/team.rs`) find the Developer's kit among the Product Manager's. `holds_every_shipped_kit_to_its_schema` passes each kit its embedded skills. Task 1 and Task 3 commits carry them.
