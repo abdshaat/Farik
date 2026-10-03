@@ -1,6 +1,6 @@
 # Phase 7, step 07: Architect and Developer kits (the Architect)
 
-Status: draft
+Status: executed 2026-10-02; the landing review and the founder's live pin run (Verification) wait, and the step is not done until the run passes.
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.3, 6.7; F9
 Depends on: steps 05, 05b and 06 of this phase (committed on this branch, at 834fb8e), and the steps they rest on (01 to 04b); phase 6 (merged in #19)
@@ -150,7 +150,7 @@ Files: `daemon/team.rs` tests; `live_kit_pins.rs`.
 
 `docs/SPEC.md`: 6.3 names the Architect's kit skills and services; 6.7 gets "The Architect's kit" (the three servers, their routes, read-only) and "Farik's own connectors" (the bare `farik` with exactly `args: [connector, <name>]`, `<name>` in `FARIK_CONNECTORS`, run as Farik's own executable, ADR 0038; a custom `farik` command is unchanged, found on `PATH`); a Revision 0.47 sentence on the version line. `docs/design/role-kits.md`: the Architect row says what shipped, with GitHub after 03b; the Signing-in table adds Context7 route 1, Grep and OSV none. `docs/plans/project-plan.md` row 07: split into 07 and 07b, with what was executed and O1 to O3 as decided.
 
-- [ ] `docs(spec): record the Architect's kit`
+- [x] `docs(spec): record the Architect's kit`
 
 ## Verification
 
@@ -166,3 +166,10 @@ FARIK_LIVE_TESTS=1 cargo test -p farik-runtime --test live_kit_pins
 The live run needs `FARIK_KIT_CONTEXT7_BEARER`, from the MCP Inspector's sign-in panel (`npx @modelcontextprotocol/inspector`) with a free Context7 account, and the step-06 bearers for the services already shipped. Then, in the web app, by the founder: connect Context7, Grep and OSV to an Architect, reading each setup as a user would; each "Done" lists the labels above; then one session in which the Architect looks up a library, a code pattern and a package's flaws. The Execution notes record whether Context7's sign-in gave a refresh token, and any fallback taken. The step is not done until this live run passes, or its drift is folded in under the mechanical rule, and the Execution notes record the result, the scopes the bearer carried, and whether a refresh token was given; Status stays "executed …; the live pin run waits" until then. A user behind a corporate proxy may see OSV fail (the cleared environment); name it here if the founder's run hits it.
 
 ## Execution notes
+
+- **Live pins not run.** Context7's account is the founder's credential and no agent holds or sets it, so the tool lists are from the plan's research (2026-10-02). Before this step lands the founder runs the Verification above and records here the scopes the bearer carried, whether a refresh token was given, and any fallback taken (the keyless address, in its own commit).
+- **Where a refusal lands.** `farik` with other `args` is refused at `/args`, not at `/command`: `check_pinned` takes the bare word out first and asks `is_farik_connector` for the rest. `refuses_any_other_bare_program` is a guard, as planned.
+- **Finding Farik's own program.** One helper in `connectors.rs`, `own_program_for(command, args)` (and `own_program(server)` over it), calls `current_exe()` only for the exact pair, and answers `farik could not find its own program` when it fails; every other server gets an empty path `program` never uses, so an unrelated connector never stops on that failure. The daemon, `farik connector add` and `farik connector run` all call it.
+- **OSV details the plan left open.** `get_vulnerability` says its cuts with `details_cut: true` and `affected_cut: <the original count>`; a package's ecosystem and name match an advisory's `affected` entry exactly (a PyPI name written in another case finds `fixed: []`); the server also lists each tool `readOnlyHint`. The 25 second limit is the client's whole-request timeout, 1 second under `cfg(test)`, so the real constant is not exercised; `no_proxy()` is not tested either (a test would set an environment variable). The launcher test has no PATH at all and a thread-guarded 30 second read.
+- **`farik connector osv` is unix-only,** as the whole `farik connector` command is.
+
