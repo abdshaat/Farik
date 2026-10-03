@@ -48,7 +48,7 @@ pub fn tool_names() -> Vec<&'static str> {
 }
 
 /// How long one call to OSV may take, which OSV may spend up to twenty seconds of before it pages.
-const TIMEOUT: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 25 });
+const TIMEOUT: Duration = Duration::from_secs(25);
 /// The most of an answer Farik reads.
 const MAX_BODY: usize = 4 * 1024 * 1024;
 /// The most advisories `query_package` answers with.
@@ -59,12 +59,33 @@ const MAX_PACKAGES: usize = 100;
 const MAX_DETAILS: usize = 8_000;
 /// The most `affected` entries `get_vulnerability` answers with.
 const MAX_AFFECTED: usize = 20;
+/// The most `references` `get_vulnerability` answers with.
+const MAX_REFERENCES: usize = 20;
+/// The most `get_vulnerability` answers with, in all.
+const MAX_ANSWER: usize = 64 * 1024;
+/// The fields of a record `get_vulnerability` answers with.
+const KEPT_FIELDS: [&str; 11] = [
+    "id",
+    "summary",
+    "details",
+    "aliases",
+    "related",
+    "published",
+    "modified",
+    "withdrawn",
+    "severity",
+    "affected",
+    "references",
+];
+/// The fields of each `affected` entry it keeps.
+const KEPT_AFFECTED_FIELDS: [&str; 3] = ["package", "ranges", "severity"];
 
 /// The server, speaking to one address.
 #[derive(Clone)]
 pub struct Osv {
     api: reqwest::Url,
     client: reqwest::Client,
+    timeout: Duration,
 }
 
 /// A package to ask about, every field checked.
@@ -133,15 +154,23 @@ impl Osv {
     ///
     /// The address is not a web address, or the web client could not be made.
     pub fn new(api: &str) -> Result<Self, OsvError> {
+        Self::with_timeout(api, TIMEOUT)
+    }
+
+    fn with_timeout(api: &str, timeout: Duration) -> Result<Self, OsvError> {
         let client = reqwest::Client::builder()
             // Nothing OSV answers sends Farik anywhere else, and nothing is sent through a proxy.
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
-            .timeout(TIMEOUT)
+            .timeout(timeout)
             .build()
             .map_err(|_| OsvError::Client)?;
         let api = reqwest::Url::parse(api).map_err(|_| OsvError::Client)?;
-        Ok(Self { api, client })
+        Ok(Self {
+            api,
+            client,
+            timeout,
+        })
     }
 
     /// Runs `tool` with `input`: the answer as JSON, or why it was refused, in words.
@@ -200,10 +229,10 @@ impl Osv {
             .iter()
             .zip(results)
             .map(|(package, result)| {
-                let ids: Vec<&Value> = result["vulns"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
+                let found = result["vulns"].as_array().map_or(&[][..], Vec::as_slice);
+                let ids: Vec<&Value> = found
+                    .iter()
+                    .take(MAX_ADVISORIES)
                     .map(|vuln| &vuln["id"])
                     .collect();
                 json!({
@@ -211,7 +240,7 @@ impl Osv {
                     "name": package.name,
                     "version": package.version,
                     "advisories": ids,
-                    "more": result["next_page_token"].is_string(),
+                    "more": found.len() > MAX_ADVISORIES || result["next_page_token"].is_string(),
                 })
             })
             .collect();
@@ -222,10 +251,19 @@ impl Osv {
         let id = input["id"].as_str().filter(|id| valid_id(id)).ok_or(
             "id is 1 to 64 characters: letters, digits and - . _ :, the first a letter or digit",
         )?;
-        let mut record = self.ask(&["vulns", id], None).await?;
-        let Some(object) = record.as_object_mut() else {
+        let record = self.ask(&["vulns", id], None).await?;
+        let Some(full) = record.as_object() else {
             return Err("OSV's answer is not a record".to_string());
         };
+        // Only the named fields go on: the rest of a record (a database's own notes, every
+        // version ever affected) can weigh more than the rest together.
+        let mut object: serde_json::Map<String, Value> = KEPT_FIELDS
+            .iter()
+            .filter_map(|key| {
+                full.get(*key)
+                    .map(|value| ((*key).to_string(), value.clone()))
+            })
+            .collect();
         if let Some(details) = object.get("details").and_then(Value::as_str)
             && details.chars().count() > MAX_DETAILS
         {
@@ -233,12 +271,28 @@ impl Osv {
             object.insert("details".to_string(), Value::from(cut));
             object.insert("details_cut".to_string(), Value::from(true));
         }
-        if let Some(affected) = object.get_mut("affected").and_then(Value::as_array_mut)
-            && affected.len() > MAX_AFFECTED
+        if let Some(affected) = object.get_mut("affected").and_then(Value::as_array_mut) {
+            for entry in affected.iter_mut() {
+                if let Some(fields) = entry.as_object_mut() {
+                    fields.retain(|key, _| KEPT_AFFECTED_FIELDS.contains(&key.as_str()));
+                }
+            }
+            if affected.len() > MAX_AFFECTED {
+                let total = affected.len();
+                affected.truncate(MAX_AFFECTED);
+                object.insert("affected_cut".to_string(), Value::from(total));
+            }
+        }
+        if let Some(references) = object.get_mut("references").and_then(Value::as_array_mut)
+            && references.len() > MAX_REFERENCES
         {
-            let total = affected.len();
-            affected.truncate(MAX_AFFECTED);
-            object.insert("affected_cut".to_string(), Value::from(total));
+            let total = references.len();
+            references.truncate(MAX_REFERENCES);
+            object.insert("references_cut".to_string(), Value::from(total));
+        }
+        let record = Value::Object(object);
+        if record.to_string().len() > MAX_ANSWER {
+            return Err("OSV's record is too large to read here".to_string());
         }
         Ok(record)
     }
@@ -259,19 +313,28 @@ impl Osv {
         };
         let mut response = request.send().await.map_err(|error| {
             if error.is_timeout() {
-                format!("OSV did not answer within {} seconds", TIMEOUT.as_secs())
+                format!(
+                    "OSV did not answer within {} seconds",
+                    self.timeout.as_secs()
+                )
             } else {
                 "OSV could not be reached".to_string()
             }
         })?;
         let status = response.status();
+        if status == reqwest::StatusCode::BAD_REQUEST {
+            return Err("OSV refused the question (status 400); write the ecosystem as OSV names it, such as npm, PyPI, crates.io, Go, Maven, RubyGems, NuGet or Packagist".to_string());
+        }
         if !status.is_success() {
             return Err(format!("OSV answered with status {}", status.as_u16()));
         }
         let mut bytes: Vec<u8> = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|error| {
             if error.is_timeout() {
-                format!("OSV did not answer within {} seconds", TIMEOUT.as_secs())
+                format!(
+                    "OSV did not answer within {} seconds",
+                    self.timeout.as_secs()
+                )
             } else {
                 "OSV's answer was cut off".to_string()
             }
@@ -288,12 +351,14 @@ impl Osv {
 }
 
 /// The versions that fix `vuln` for `package`: only the `affected` entries naming that ecosystem
-/// and name, each version once, in OSV's order.
+/// and name, as [`same_package`] compares them, each version once, in OSV's order.
 fn fixed_versions(vuln: &Value, package: &Package) -> Vec<String> {
     let mut fixed: Vec<String> = Vec::new();
     for entry in vuln["affected"].as_array().into_iter().flatten() {
         if entry["package"]["ecosystem"].as_str() != Some(package.ecosystem.as_str())
-            || entry["package"]["name"].as_str() != Some(package.name.as_str())
+            || !entry["package"]["name"]
+                .as_str()
+                .is_some_and(|listed| same_package(&package.ecosystem, listed, &package.name))
         {
             continue;
         }
@@ -308,6 +373,29 @@ fn fixed_versions(vuln: &Value, package: &Package) -> Vec<String> {
         }
     }
     fixed
+}
+
+/// Whether `listed`, a name in an advisory, is `asked` as `ecosystem` compares names: `PyPI`'s by
+/// PEP 503 (case alike, and each run of `-`, `_` and `.` alike), every other exactly, as OSV
+/// itself matches them.
+fn same_package(ecosystem: &str, listed: &str, asked: &str) -> bool {
+    if ecosystem != "PyPI" {
+        return listed == asked;
+    }
+    let normalised = |name: &str| {
+        let mut out = String::with_capacity(name.len());
+        for c in name.chars() {
+            if matches!(c, '-' | '_' | '.') {
+                if !out.ends_with('-') {
+                    out.push('-');
+                }
+            } else {
+                out.push(c.to_ascii_lowercase());
+            }
+        }
+        out
+    };
+    normalised(listed) == normalised(asked)
 }
 
 /// The name the server gives itself.
@@ -332,7 +420,7 @@ fn descriptors() -> Vec<Tool> {
         ),
         (
             "query_packages",
-            "List the ids of the known flaws of up to 100 package versions at once.",
+            "List the ids of the known flaws, at most 50 each, of up to 100 package versions at once.",
             json!({
                 "type": "object",
                 "properties": { "packages": { "type": "array", "items": package, "minItems": 1, "maxItems": MAX_PACKAGES } },
@@ -423,7 +511,7 @@ mod tests {
     use axum::http::{HeaderMap, Method, Response, StatusCode, Uri};
     use serde_json::{Value, json};
 
-    use super::{Osv, descriptors, tool_names};
+    use super::{OSV_API, Osv, descriptors, tool_names};
 
     /// What the fixture was asked.
     #[derive(Clone, Debug)]
@@ -440,6 +528,7 @@ mod tests {
         Json(Value),
         Bytes(Vec<u8>),
         Redirect,
+        Status(u16),
         Hang,
     }
 
@@ -480,6 +569,10 @@ mod tests {
                                 .header("location", "http://127.0.0.1:9/elsewhere")
                                 .body(Body::empty())
                                 .expect("a response"),
+                            Reply::Status(code) => Response::builder()
+                                .status(code)
+                                .body(Body::from("{\"code\":3,\"message\":\"invalid ecosystem\"}"))
+                                .expect("a response"),
                             Reply::Hang => {
                                 tokio::time::sleep(Duration::from_secs(3600)).await;
                                 Response::new(Body::empty())
@@ -516,7 +609,12 @@ mod tests {
             "details": "a long text that is never sent on",
             "affected": [
                 { "package": { "name": "lodash", "ecosystem": "npm" },
-                  "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "0" }, { "fixed": "4.17.21" }] }] },
+                  "ranges": [
+                      { "type": "SEMVER", "events": [{ "introduced": "0" }, { "fixed": "4.17.21" }] },
+                      { "type": "SEMVER", "events": [{ "introduced": "4.0.0" }, { "fixed": "4.17.21" }] }
+                  ] },
+                { "package": { "name": "lodash", "ecosystem": "Maven" },
+                  "ranges": [{ "type": "ECOSYSTEM", "events": [{ "introduced": "0" }, { "fixed": "9.9.9" }] }] },
                 { "package": { "name": "lodash-es", "ecosystem": "npm" },
                   "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "0" }, { "fixed": "4.17.22" }] }] }
             ]
@@ -525,6 +623,7 @@ mod tests {
 
     #[test]
     fn lists_the_tools_it_names() {
+        assert_eq!(OSV_API, "https://api.osv.dev/v1");
         let listed: Vec<String> = descriptors()
             .iter()
             .map(|tool| tool.name.to_string())
@@ -599,6 +698,13 @@ mod tests {
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].method, Method::POST);
         assert_eq!(seen[0].uri.path(), "/v1/query");
+        assert!(
+            seen[0]
+                .header_names
+                .iter()
+                .any(|name| name == "content-type")
+        );
+        assert_eq!(asking(&fixture).timeout, Duration::from_secs(25));
         assert_eq!(
             body_of(&seen[0]),
             json!({ "package": { "name": "lodash", "ecosystem": "npm" }, "version": "4.17.15" })
@@ -653,6 +759,27 @@ mod tests {
             .await
             .expect_err("too large");
         assert!(error.contains("too large"), "{error}");
+
+        let padded = |total: usize| {
+            let head = br#"{"vulns":[],"pad":""#;
+            let mut body = head.to_vec();
+            body.resize(total - 2, b' ');
+            body.extend_from_slice(b"\"}");
+            body
+        };
+        let edge = padded(4 * 1024 * 1024);
+        let at = Fixture::start(move |_| Reply::Bytes(edge.clone())).await;
+        asking(&at)
+            .call("query_package", &lodash())
+            .await
+            .expect("exactly 4 MiB is read");
+        let over = padded(4 * 1024 * 1024 + 1);
+        let past = Fixture::start(move |_| Reply::Bytes(over.clone())).await;
+        let error = asking(&past)
+            .call("query_package", &lodash())
+            .await
+            .expect_err("one byte more");
+        assert!(error.contains("too large"), "{error}");
     }
 
     #[tokio::test]
@@ -704,6 +831,33 @@ mod tests {
                 .is_err()
         );
         assert!(fresh.requests().is_empty());
+
+        let odd = Fixture::start(|_| Reply::Json(json!({ "results": [{}, {}] }))).await;
+        let error = asking(&odd)
+            .call("query_packages", &packages)
+            .await
+            .expect_err("two answers for three packages");
+        assert!(error.contains("different number"), "{error}");
+
+        let ids: Vec<Value> = (0..60)
+            .map(|n| json!({ "id": format!("GHSA-{n}"), "modified": "x" }))
+            .collect();
+        let long =
+            Fixture::start(move |_| Reply::Json(json!({ "results": [{ "vulns": ids }] }))).await;
+        let one = json!({ "packages": [{ "ecosystem": "npm", "name": "a", "version": "1.0.0" }] });
+        let answer = asking(&long)
+            .call("query_packages", &one)
+            .await
+            .expect("an answer");
+        assert_eq!(
+            answer["results"][0]["advisories"]
+                .as_array()
+                .expect("a list")
+                .len(),
+            50
+        );
+        assert_eq!(answer["results"][0]["advisories"][0], "GHSA-0");
+        assert_eq!(answer["results"][0]["more"], true);
     }
 
     #[tokio::test]
@@ -798,7 +952,8 @@ mod tests {
 
         let silent = Fixture::start(|_| Reply::Hang).await;
         let started = Instant::now();
-        let error = asking(&silent)
+        let error = Osv::with_timeout(&silent.address, Duration::from_secs(1))
+            .expect("a server")
             .call("query_package", &lodash())
             .await
             .expect_err("no answer");
@@ -808,5 +963,167 @@ mod tests {
             started.elapsed()
         );
         assert!(error.contains("did not answer"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn names_the_ecosystem_spelling_on_a_400() {
+        let fixture = Fixture::start(|_| Reply::Status(400)).await;
+        let error = asking(&fixture)
+            .call("query_package", &lodash())
+            .await
+            .expect_err("a 400");
+        assert!(error.contains("as OSV names it"), "{error}");
+        assert!(!error.contains("invalid ecosystem"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn matches_a_pypi_name_as_pypi_does() {
+        let record = json!({ "vulns": [{
+            "id": "GHSA-p", "summary": "s", "aliases": [], "severity": [],
+            "affected": [
+                { "package": { "name": "flask-cors", "ecosystem": "PyPI" },
+                  "ranges": [{ "type": "ECOSYSTEM", "events": [{ "introduced": "0" }, { "fixed": "4.0.1" }] }] },
+                { "package": { "name": "flask-cors-extra", "ecosystem": "PyPI" },
+                  "ranges": [{ "type": "ECOSYSTEM", "events": [{ "introduced": "0" }, { "fixed": "9.0.0" }] }] }
+            ]
+        }] });
+        let fixture = Fixture::start(move |_| Reply::Json(record.clone())).await;
+        let osv = asking(&fixture);
+        for asked in ["Flask_Cors", "flask.cors", "FLASK--CORS", "flask-cors"] {
+            let answer = osv
+                .call(
+                    "query_package",
+                    &json!({ "ecosystem": "PyPI", "name": asked, "version": "3.0.0" }),
+                )
+                .await
+                .expect("an answer");
+            assert_eq!(
+                answer["advisories"][0]["fixed"],
+                json!(["4.0.1"]),
+                "{asked}"
+            );
+        }
+        // Every other ecosystem compares exactly, as OSV does.
+        let npm = Fixture::start(|_| Reply::Json(json!({ "vulns": [advisory("GHSA-1")] }))).await;
+        let answer = asking(&npm)
+            .call(
+                "query_package",
+                &json!({ "ecosystem": "npm", "name": "Lodash", "version": "4.17.15" }),
+            )
+            .await
+            .expect("an answer");
+        assert_eq!(answer["advisories"][0]["fixed"], json!([]));
+    }
+
+    /// The environment's proxy is never used: a child copy of this test, with `HTTP_PROXY` set
+    /// to a fixture that records, asks a second fixture directly.
+    #[tokio::test]
+    async fn uses_no_proxy_from_the_environment() {
+        if let Ok(target) = std::env::var("FARIK_OSV_PROXY_CHILD") {
+            Osv::new(&target)
+                .expect("a server")
+                .call("query_package", &lodash())
+                .await
+                .expect("answered");
+            return;
+        }
+        let proxy = Fixture::start(|_| Reply::Json(json!({ "vulns": [] }))).await;
+        let target = Fixture::start(|_| Reply::Json(json!({ "vulns": [] }))).await;
+        let through = proxy.address.trim_end_matches("/v1").to_string();
+        let child = tokio::process::Command::new(std::env::current_exe().expect("this test"))
+            .args(["--exact", "osv::tests::uses_no_proxy_from_the_environment"])
+            .env("FARIK_OSV_PROXY_CHILD", &target.address)
+            .env("HTTP_PROXY", &through)
+            .env("http_proxy", &through)
+            .env("ALL_PROXY", &through)
+            .env_remove("NO_PROXY")
+            .env_remove("no_proxy")
+            .output()
+            .await
+            .expect("the child runs");
+        assert!(
+            child.status.success(),
+            "{}",
+            String::from_utf8_lossy(&child.stdout)
+        );
+        assert!(proxy.requests().is_empty(), "the proxy was used");
+        assert_eq!(target.requests().len(), 1);
+    }
+
+    /// A record like CVE-2021-44228's: most of its weight in fields the agent never needs.
+    #[tokio::test]
+    async fn get_vulnerability_keeps_only_what_it_names() {
+        let affected: Vec<Value> = (0..3)
+            .map(|n| {
+                json!({
+                    "package": { "name": format!("p{n}"), "ecosystem": "Maven" },
+                    "ranges": [{ "type": "ECOSYSTEM", "events": [{ "introduced": "0" }] }],
+                    "severity": [],
+                    "versions": (0..500).map(|v| format!("1.{v}")).collect::<Vec<_>>(),
+                    "database_specific": { "x": "y" },
+                    "ecosystem_specific": { "x": "y" }
+                })
+            })
+            .collect();
+        let references: Vec<Value> = (0..30)
+            .map(|n| json!({ "type": "WEB", "url": format!("https://example.com/{n}") }))
+            .collect();
+        let record = json!({
+            "id": "GHSA-big", "summary": "s", "details": "d", "aliases": ["CVE-1"],
+            "related": ["CVE-2"], "published": "p", "modified": "m", "withdrawn": "w",
+            "severity": [{ "type": "CVSS_V3", "score": "x" }],
+            "schema_version": "1.6.0",
+            "database_specific": { "blob": "b".repeat(100_000) },
+            "affected": affected,
+            "references": references
+        });
+        let fixture = Fixture::start(move |_| Reply::Json(record.clone())).await;
+        let answer = asking(&fixture)
+            .call("get_vulnerability", &json!({ "id": "GHSA-big" }))
+            .await
+            .expect("an answer");
+        let kept: Vec<&str> = answer
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        for key in [
+            "id",
+            "summary",
+            "details",
+            "aliases",
+            "related",
+            "published",
+            "modified",
+            "withdrawn",
+            "severity",
+            "affected",
+            "references",
+            "references_cut",
+        ] {
+            assert!(kept.contains(&key), "{key} is kept");
+        }
+        assert_eq!(kept.len(), 12, "{kept:?}");
+        assert_eq!(answer["references"].as_array().expect("a list").len(), 20);
+        assert_eq!(answer["references_cut"], 30);
+        let first = answer["affected"][0].as_object().expect("an entry");
+        let mut entry: Vec<&str> = first.keys().map(String::as_str).collect();
+        entry.sort_unstable();
+        assert_eq!(entry, ["package", "ranges", "severity"]);
+        assert!(answer.to_string().len() < 64 * 1024);
+    }
+
+    #[tokio::test]
+    async fn get_vulnerability_refuses_an_answer_over_64_kib() {
+        let record = json!({ "id": "GHSA-fat", "details": "d", "references": [],
+            "affected": [{ "package": { "name": "a", "ecosystem": "npm" },
+                           "ranges": [{ "type": "SEMVER", "events": [{ "fixed": "x".repeat(70_000) }] }] }] });
+        let fixture = Fixture::start(move |_| Reply::Json(record.clone())).await;
+        let error = asking(&fixture)
+            .call("get_vulnerability", &json!({ "id": "GHSA-fat" }))
+            .await
+            .expect_err("too large");
+        assert!(error.contains("too large to read here"), "{error}");
     }
 }
