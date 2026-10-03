@@ -1,3 +1,8 @@
 role: architect
-skills: []
+skills:
+  - designing-apis-and-data
+  - reviewing-dependencies
+  - security-review
+  - setting-performance-budgets
+  - using-architecture-sources
 connectors: []

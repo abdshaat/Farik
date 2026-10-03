@@ -3940,13 +3940,12 @@ pub(super) mod tests {
     /// A guard: every `farik_*` tool a kit skill names is one Farik lists.
     #[test]
     fn kit_skills_name_only_tools_farik_lists() {
-        use farik_core::contract::Role;
         let listed: Vec<&str> = crate::tools::tool_descriptors()
             .iter()
             .map(|tool| tool.name)
             .collect();
         let mut named = 0;
-        for role in [Role::ProductManager, Role::ScrumMaster] {
+        for role in farik_roles::SHIPPED_ROLES {
             for skill in farik_roles::load_kit(role).expect("a kit").skills {
                 for text in skill.session_files.values() {
                     for word in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {

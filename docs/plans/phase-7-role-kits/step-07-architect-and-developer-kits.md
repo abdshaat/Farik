@@ -91,7 +91,7 @@ Files: `architect/skills/{designing-apis-and-data,reviewing-dependencies,securit
 
 - `architect_kit_carries_its_skills`: `load_kit(Architect)`'s skills are those five names in that order, each `CheckedSkill` with its `SKILL.md`. RED: the kit has none.
 
-- [ ] `feat(roles): give the Architect's kit its skills`
+- [x] `feat(roles): give the Architect's kit its skills`
 
 ### Task 2: Context7 and Grep
 

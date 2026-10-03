@@ -155,75 +155,41 @@ pub fn load_kit(role: Role) -> Result<Kit, KitError> {
 /// A kit's skills as `(name, files)`, each file embedded in the binary.
 type EmbeddedSkills = Vec<(&'static str, &'static [(&'static str, &'static str)])>;
 
+/// One role's embedded skills: each folder's `SKILL.md`, in the order the kit names them.
+macro_rules! embedded {
+    ($folder:literal: $($name:literal),+ $(,)?) => {
+        vec![$((
+            $name,
+            &[(
+                "SKILL.md",
+                include_str!(concat!("../roles/", $folder, "/skills/", $name, "/SKILL.md")),
+            )] as &'static [(&'static str, &'static str)],
+        )),+]
+    };
+}
+
 /// The skill folders a role's kit ships, in the order its `kit.yaml` names them.
 fn embedded_skills(role: Role) -> EmbeddedSkills {
     match role {
-        Role::ProductManager => vec![
-            (
-                "asking-the-right-questions",
-                &[(
-                    "SKILL.md",
-                    include_str!(
-                        "../roles/product_manager/skills/asking-the-right-questions/SKILL.md"
-                    ),
-                )],
-            ),
-            (
-                "writing-requirements",
-                &[(
-                    "SKILL.md",
-                    include_str!("../roles/product_manager/skills/writing-requirements/SKILL.md"),
-                )],
-            ),
-            (
-                "prioritising-the-backlog",
-                &[(
-                    "SKILL.md",
-                    include_str!(
-                        "../roles/product_manager/skills/prioritising-the-backlog/SKILL.md"
-                    ),
-                )],
-            ),
-            (
-                "scoping-a-release",
-                &[(
-                    "SKILL.md",
-                    include_str!("../roles/product_manager/skills/scoping-a-release/SKILL.md"),
-                )],
-            ),
-            (
-                "using-product-sources",
-                &[(
-                    "SKILL.md",
-                    include_str!("../roles/product_manager/skills/using-product-sources/SKILL.md"),
-                )],
-            ),
-        ],
-        Role::ScrumMaster => vec![
-            (
-                "planning-a-sprint",
-                &[(
-                    "SKILL.md",
-                    include_str!("../roles/scrum_master/skills/planning-a-sprint/SKILL.md"),
-                )],
-            ),
-            (
-                "running-ceremonies",
-                &[(
-                    "SKILL.md",
-                    include_str!("../roles/scrum_master/skills/running-ceremonies/SKILL.md"),
-                )],
-            ),
-            (
-                "writing-escalation-digests",
-                &[(
-                    "SKILL.md",
-                    include_str!(
-                        "../roles/scrum_master/skills/writing-escalation-digests/SKILL.md"
-                    ),
-                )],
-            ),
-        ],
+        Role::ProductManager => embedded!("product_manager":
+            "asking-the-right-questions",
+            "writing-requirements",
+            "prioritising-the-backlog",
+            "scoping-a-release",
+            "using-product-sources",
+        ),
+        Role::ScrumMaster => embedded!("scrum_master":
+            "planning-a-sprint",
+            "running-ceremonies",
+            "writing-escalation-digests",
+        ),
+        Role::Architect => embedded!("architect":
+            "designing-apis-and-data",
+            "reviewing-dependencies",
+            "security-review",
+            "setting-performance-budgets",
+            "using-architecture-sources",
+        ),
         _ => Vec::new(),
     }
 }
@@ -1015,6 +981,29 @@ mod tests {
                 "planning-a-sprint",
                 "running-ceremonies",
                 "writing-escalation-digests",
+            ]
+        );
+        for skill in &kit.skills {
+            assert!(
+                skill.session_files.contains_key("SKILL.md"),
+                "{}",
+                skill.name
+            );
+        }
+    }
+
+    #[test]
+    fn architect_kit_carries_its_skills() {
+        let kit = load_kit(Role::Architect).expect("the Architect's kit");
+        let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "designing-apis-and-data",
+                "reviewing-dependencies",
+                "security-review",
+                "setting-performance-budgets",
+                "using-architecture-sources",
             ]
         );
         for skill in &kit.skills {
