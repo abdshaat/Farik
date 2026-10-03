@@ -28,8 +28,9 @@ Use these headings, in this order:
 ## 3. Trace every requirement
 
 Each requirement must trace to an exit criterion of the epic's contract or of one of its tasks. A
-requirement nothing checks is a wish; add the criterion or cut the requirement. A criterion that
-no requirement explains is out of scope; say so or remove it.
+requirement nothing checks is a wish: cut it from this document, or list it under Open questions
+for the user. A criterion no requirement explains goes under Open questions too. Do not change the
+approved contract from here; a change to it needs the user's approval again.
 
 ## 4. Keep it short
 

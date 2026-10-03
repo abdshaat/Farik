@@ -30,5 +30,6 @@ Ask the user (`farik_ask_human`) when a guess decides the order and they would k
 
 ## 5. Record it
 
-Keep the order on the board's priority, and tell the Scrum Master only what changed since last
-time.
+Farik keeps no priority field. When the session lets you post, put the order and each reason in the
+team channel with `farik_post_message`, without naming anyone; the sprint's planning reads the
+channel. Say only what changed since your last order.

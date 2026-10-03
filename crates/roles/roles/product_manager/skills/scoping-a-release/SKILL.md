@@ -18,7 +18,7 @@ Only work with a clear contract goes in the list.
 ## 2. Draw the cut line
 
 Write down where the line is: everything above ships, everything below does not. Put the line
-where the team's budget and the sprint's time let you keep the promise.
+where the team's budget and the sprint's budget let you keep the promise.
 
 ## 3. Say what is left out
 
@@ -28,4 +28,5 @@ written down comes back as an argument.
 ## 4. The notes
 
 Write the release notes from accepted tasks only, in the user's words: what changed for them. Do
-not list work that is still open or was sent back. Save them with `farik_write_product_doc`.
+not list work that is still open or was sent back. Save them with `farik_write_product_doc` while working on the release's approved epic; Farik
+refuses it anywhere else, so otherwise give the notes to the user in your answer.
