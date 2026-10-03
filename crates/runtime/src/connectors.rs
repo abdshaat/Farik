@@ -757,18 +757,22 @@ pub fn program(command: &str, args: &[String], farik: &std::path::Path) -> PathB
 /// What a caller of [`list_tools`] says when Farik cannot find its own program.
 pub const NO_OWN_PROGRAM: &str = "farik could not find its own program";
 
-/// The program Farik's own connector runs: this executable, for the exact pair
+/// The program Farik's own connector runs: `own`, Farik's own executable as the process found it
+/// at its start (`None` when it could not), for the exact pair
 /// [`farik_roles::is_farik_connector`] holds for. Any other command gets an empty path it never
 /// uses, so a failure to find this program stops only a Farik connector and no `PATH` lookup ever
 /// stands in for it (ADR 0038).
 ///
 /// # Errors
 ///
-/// [`NO_OWN_PROGRAM`], when the command is Farik's own connector and this executable cannot be
-/// found.
-pub fn own_program_for(command: &str, args: &[String]) -> Result<PathBuf, &'static str> {
+/// [`NO_OWN_PROGRAM`], when the command is Farik's own connector and `own` is `None`.
+pub fn own_program_for(
+    command: &str,
+    args: &[String],
+    own: Option<&std::path::Path>,
+) -> Result<PathBuf, &'static str> {
     if farik_roles::is_farik_connector(command, args) {
-        std::env::current_exe().map_err(|_| NO_OWN_PROGRAM)
+        own.map(std::path::Path::to_path_buf).ok_or(NO_OWN_PROGRAM)
     } else {
         Ok(PathBuf::new())
     }
@@ -779,9 +783,12 @@ pub fn own_program_for(command: &str, args: &[String]) -> Result<PathBuf, &'stat
 /// # Errors
 ///
 /// As [`own_program_for`].
-pub fn own_program(server: &CustomServer) -> Result<PathBuf, &'static str> {
+pub fn own_program(
+    server: &CustomServer,
+    own: Option<&std::path::Path>,
+) -> Result<PathBuf, &'static str> {
     match &server.transport {
-        CustomTransport::Stdio { command, args } => own_program_for(command, args),
+        CustomTransport::Stdio { command, args } => own_program_for(command, args, own),
         CustomTransport::Http { .. } => Ok(PathBuf::new()),
     }
 }
@@ -911,10 +918,11 @@ mod tests {
             ..stdio(&[])
         };
         assert_eq!(
-            own_program(&farik),
-            Ok(std::env::current_exe().expect("the test binary"))
+            own_program(&farik, Some(std::path::Path::new("/opt/farik"))),
+            Ok(PathBuf::from("/opt/farik"))
         );
-        assert_eq!(own_program(&stdio(&[])), Ok(PathBuf::new()));
+        assert_eq!(own_program(&farik, None), Err(NO_OWN_PROGRAM));
+        assert_eq!(own_program(&stdio(&[]), None), Ok(PathBuf::new()));
     }
 
     fn at(agent: &str, server: &str) -> SecretAt {

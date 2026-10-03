@@ -289,7 +289,7 @@ fn keep_keys(
     let at = secret_at(&state, project, agent, &server.name)?;
     let folder = working_folder(&state, &project.root, &at)
         .map_err(|error| format!("{}: {}", server.name, folder_refusal(&error)))?;
-    let farik = own_program(server).map_err(str::to_string)?;
+    let farik = own_program(server, io.own_program.as_deref()).map_err(str::to_string)?;
     let listed = runtime()?
         .block_on(list_tools(server, &keys, None, &folder, &farik))
         .map_err(|error| not_listed(&error))?;
@@ -430,7 +430,7 @@ fn keep_sign_in(
         .block_on(signing.finish())
         .map_err(|error| refused(&error, &host))?;
     crate::say(&mut io.stderr, &format!("Signed in to {issuer}."));
-    let farik = own_program(server).map_err(str::to_string)?;
+    let farik = own_program(server, io.own_program.as_deref()).map_err(str::to_string)?;
     let listed = runtime
         .block_on(list_tools(
             server,

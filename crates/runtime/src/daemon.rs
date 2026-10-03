@@ -174,6 +174,8 @@ pub struct DaemonState {
     connectors_kept: Arc<Mutex<BTreeMap<String, Kept>>>,
     /// The user's state folder, where each stdio connector runs (ADR 0030), once it is set.
     state_dir: OnceLock<std::path::PathBuf>,
+    /// Farik's own executable, which runs Farik's own connectors (ADR 0038), once it is set.
+    own_program: OnceLock<std::path::PathBuf>,
     /// One lock per connector entry, by account: refresh, connect, disconnect and the deletes each
     /// take it, so a token refreshed while the entry is removed is not kept (ADR 0033).
     entry_locks: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -246,6 +248,7 @@ impl DaemonState {
             connector_secrets: OnceLock::new(),
             connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
+            own_program: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
             sign_ins: Mutex::new(BTreeMap::new()),
             allowance_counts: Mutex::default(),
@@ -268,6 +271,7 @@ impl DaemonState {
             connector_secrets: OnceLock::new(),
             connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
+            own_program: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
             sign_ins: Mutex::new(BTreeMap::new()),
             allowance_counts: Mutex::default(),
@@ -284,6 +288,15 @@ impl DaemonState {
     /// Answers `true`, or `false` when one was already set, which is kept.
     pub fn set_state_dir(&self, directory: std::path::PathBuf) -> bool {
         self.state_dir.set(directory).is_ok()
+    }
+
+    /// Sets Farik's own executable; answers whether it was not set before.
+    pub fn set_own_program(&self, program: std::path::PathBuf) -> bool {
+        self.own_program.set(program).is_ok()
+    }
+
+    pub(crate) fn own_program(&self) -> Option<&std::path::Path> {
+        self.own_program.get().map(std::path::PathBuf::as_path)
     }
 
     /// The user's state folder, or why there is none.

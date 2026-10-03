@@ -56,7 +56,8 @@ pub fn run(daemon_file: &Path, session: &str, server: &str, io: &mut CliIo<'_>) 
             return Err("the daemon's answer names no command or folder".to_string());
         };
         let owned: Vec<String> = args.iter().map(ToString::to_string).collect();
-        let own = own_program_for(command, &owned).map_err(str::to_string)?;
+        let own =
+            own_program_for(command, &owned, io.own_program.as_deref()).map_err(str::to_string)?;
         // Farik's own connector is this executable, never a `farik` the PATH finds (ADR 0038).
         let mut process = std::process::Command::new(program(command, &owned, &own));
         // The folder Farik keeps for the server, never the worktree Claude Code started this in.

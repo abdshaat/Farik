@@ -221,6 +221,9 @@ fn connected_daemon(
     if let Some(directory) = state_dir(&io.env) {
         daemon.set_state_dir(directory);
     }
+    if let Some(program) = &io.own_program {
+        daemon.set_own_program(program.clone());
+    }
     daemon
 }
 

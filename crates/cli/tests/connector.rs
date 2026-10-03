@@ -1079,3 +1079,48 @@ fn signs_in_to_a_kit_connector_with_oauth() {
     let kept = loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).expect("kept");
     assert_eq!(kept.oauth.expect("a grant").issuer, fixture.origin);
 }
+
+/// `farik connect` starts Farik's own connector as the program the process was found at (ADR
+/// 0038), with `PATH` empty so no `farik` there can stand in; without that program it says so.
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_starts_farik_s_own_connector_as_its_own_program() {
+    let repository = a_team("connect-own");
+    let connect_osv = |agent: &str, own: Option<PathBuf>| {
+        let state = config_of(&repository);
+        run_with(
+            &repository.path,
+            &[
+                "connect",
+                agent,
+                "osv",
+                "--command",
+                "farik",
+                "--arg",
+                "connector",
+                "--arg",
+                "osv",
+            ],
+            move |io| {
+                io.own_program = own;
+                io.env
+                    .insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
+                io.env.insert("PATH".to_string(), String::new());
+            },
+        )
+    };
+
+    let ran = connect_osv("dev-a", Some(PathBuf::from(env!("CARGO_BIN_EXE_farik"))));
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    for tool in ["query_package", "query_packages", "get_vulnerability"] {
+        assert!(ran.out.contains(tool), "{tool} in {}", ran.out);
+    }
+
+    let ran = connect_osv("dev-b", None);
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.err.contains("farik could not find its own program"),
+        "{}",
+        ran.err
+    );
+}

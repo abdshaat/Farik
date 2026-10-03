@@ -1380,3 +1380,84 @@ impl Prober {
         self.thread.join().expect("the prober ends")
     }
 }
+
+/// The web app's Connect lists Farik's own connector by starting the program the process was
+/// found at (ADR 0038).
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn connector_tools_runs_farik_s_own_connector() {
+    use futures_util::{SinkExt as _, StreamExt as _};
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+
+    let repository = a_team("serve-own-connector");
+    let state = scratch("serve-own-connector-state");
+    let out = SharedOut::default();
+    let root = repository.path.clone();
+    let (port_to_use, shared) = (free_port(), out.clone());
+    let serving = std::thread::spawn(move || {
+        run_with(&root, &["serve", "--port", &port_to_use], |io| {
+            io.engine = recorded(Vec::new());
+            io.stdout = Box::new(shared);
+            io.own_program = Some(std::path::PathBuf::from(env!("CARGO_BIN_EXE_farik")));
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
+        })
+    });
+    until("the link is printed", || !links(&out.text()).is_empty());
+    let (port, code) = links(&out.text()).remove(0);
+    let cookie = connected(port, &code);
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let answer = runtime.block_on(async {
+        let mut request = format!("ws://127.0.0.1:{port}/rpc")
+            .into_client_request()
+            .expect("a request");
+        let headers = request.headers_mut();
+        headers.insert(
+            "Origin",
+            format!("http://127.0.0.1:{port}")
+                .parse()
+                .expect("a header"),
+        );
+        headers.insert("Cookie", cookie.parse().expect("a header"));
+        let (mut socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .expect("the socket opens");
+        let asked = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "connector.tools",
+            "params": { "agent": "dev-a", "server": {
+                "name": "osv", "transport": "stdio", "command": "farik",
+                "args": ["connector", "osv"], "credential_keys": []
+            } }
+        });
+        socket
+            .send(Message::Text(asked.to_string().into()))
+            .await
+            .expect("sent");
+        let frame = tokio::time::timeout(Duration::from_secs(60), socket.next())
+            .await
+            .expect("an answer in time")
+            .expect("the socket is open")
+            .expect("a frame");
+        serde_json::from_str::<Value>(frame.to_text().expect("text")).expect("JSON")
+    });
+
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let names: Vec<&str> = answer["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{answer}"))
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["query_package", "query_packages", "get_vulnerability"]
+    );
+}

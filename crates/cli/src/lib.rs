@@ -174,6 +174,9 @@ pub struct CliIo<'a> {
     /// touches a real keychain, and the keychain then `connectors.json` in `main`.
     #[cfg(unix)]
     pub connector_secrets: Arc<dyn ConnectorSecrets>,
+    /// Farik's own executable, which runs Farik's own connectors (ADR 0038): none here, so a
+    /// test names the binary it built, and `std::env::current_exe()` in `main`.
+    pub own_program: Option<PathBuf>,
     /// Whether `farik serve` lets a browser at `http://localhost:<port>` in without a code: the
     /// end-to-end server's `--preview` (step 12, D1). The release build has no such field.
     #[cfg(feature = "e2e")]
@@ -255,6 +258,7 @@ impl<'a> CliIo<'a> {
                 Arc::new(move || vec![Arc::clone(&memory)])
             },
             kits: Arc::new(farik_roles::load_kit),
+            own_program: None,
             #[cfg(unix)]
             connector_secrets: Arc::new(MemoryConnectorSecrets::default()),
             #[cfg(feature = "e2e")]
