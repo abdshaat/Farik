@@ -959,8 +959,7 @@ mod tests {
                 kit.connectors.len(),
                 match role {
                     Role::UiUxDesigner => 1,
-                    Role::ProductManager => 3,
-                    Role::Architect => 2,
+                    Role::ProductManager | Role::Architect => 3,
                     _ => 0,
                 },
                 "{role}"
@@ -1213,6 +1212,41 @@ mod tests {
             server.tools,
             BTreeMap::from([("searchGitHub".to_string(), ConnectorTag::Network)])
         );
+    }
+
+    #[test]
+    fn osv_is_farik_s_own_server_and_only_reads() {
+        let (server, _) = service(Role::Architect, "osv");
+        let CustomTransport::Stdio { command, args } = &server.transport else {
+            panic!("osv is stdio");
+        };
+        assert_eq!(command, "farik");
+        assert_eq!(args, &["connector".to_string(), "osv".to_string()]);
+        assert!(server.credential_keys.is_empty());
+        assert_eq!(
+            network_names(&server),
+            ["get_vulnerability", "query_package", "query_packages"]
+        );
+        assert_eq!(server.tools.len(), 3);
+        let kit = load_kit(Role::Architect).expect("the Architect's kit");
+        let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
+        assert_eq!(names, ["context7", "grep", "osv"]);
+        for connector in &kit.connectors {
+            let KitConnector::Server {
+                entry, allowances, ..
+            } = connector
+            else {
+                panic!("{} is a server", connector.name());
+            };
+            let server = custom_server(entry).expect("a custom server");
+            assert_eq!(
+                tagged(&server, ConnectorTag::ExternalEffect),
+                0,
+                "{}",
+                server.name
+            );
+            assert!(allowances.is_empty(), "{}", server.name);
+        }
     }
 
     /// A guard: it passes with no connector at all.

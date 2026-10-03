@@ -688,6 +688,8 @@ enum ConnectorCommands {
     Run(ConnectorAsk),
     /// Print the server's headers, filled with its keys, as one JSON object.
     Headers(ConnectorAsk),
+    /// Look packages up in the open vulnerability database (used by the Architect's kit).
+    Osv,
 }
 
 #[derive(Subcommand)]
@@ -834,6 +836,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             ConnectorCommands::Headers(ask) => {
                 connector_run::headers(&io.cwd.join(&ask.daemon), &ask.session, &ask.server, io)
             }
+            ConnectorCommands::Osv => connector_run::osv(io),
         };
     }
     if parsed.json && matches!(parsed.command, Commands::Serve { .. }) {

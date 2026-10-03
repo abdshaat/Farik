@@ -39,6 +39,8 @@ mod oauth_fixture;
 /// Farik running its team: the board read, the next thing on it done, one session at a time.
 #[cfg(unix)]
 pub mod orchestrator;
+/// Farik's own server over the open vulnerability database (ADR 0038).
+pub mod osv;
 /// Whether the human has paused the team.
 pub mod pause;
 #[cfg(all(test, unix))]

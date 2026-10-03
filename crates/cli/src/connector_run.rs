@@ -98,3 +98,24 @@ pub fn headers(daemon_file: &Path, session: &str, server: &str, io: &mut CliIo<'
         }
     }
 }
+
+/// Serves the OSV lookup server (ADR 0038) on standard input and output, at OSV's one address,
+/// until its client leaves. Answers 1, saying why on standard error, when it cannot.
+pub fn osv(io: &mut CliIo<'_>) -> i32 {
+    let served = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())
+        .and_then(|runtime| {
+            runtime
+                .block_on(farik_runtime::osv::serve_stdio(farik_runtime::osv::OSV_API))
+                .map_err(|error| error.to_string())
+        });
+    match served {
+        Ok(()) => 0,
+        Err(why) => {
+            let _ = writeln!(io.stderr, "farik connector osv: {why}");
+            1
+        }
+    }
+}

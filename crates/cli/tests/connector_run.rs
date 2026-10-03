@@ -67,6 +67,11 @@ fn a_team(change: impl FnOnce(&mut Value)) -> Team {
             "name": "whereami", "source": "custom", "transport": "stdio",
             "command": "pwd", "credential_keys": [],
             "tools": { "search": "network" }
+        },
+        {
+            "name": "osv", "source": "custom", "transport": "stdio",
+            "command": "farik", "args": ["connector", "osv"], "credential_keys": [],
+            "tools": { "query_package": "network" }
         }
     ]);
     change(&mut wire);
@@ -395,4 +400,62 @@ fn connector_run_starts_the_server_in_a_folder_farik_keeps() {
         .join(&at.project_id)
         .join("dev-a/whereami");
     assert_eq!(printed.trim_end(), folder.display().to_string());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn the_launcher_starts_its_own_executable_for_farik() {
+    use std::io::{BufRead as _, Write as _};
+
+    // `command: farik` is Farik's own program, run as this very binary, with no PATH at all to
+    // find another `farik` in (ADR 0038).
+    let served = Served::new("connector-run-farik");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_farik"))
+        .args(["connector", "run", "--daemon"])
+        .arg(&served.daemon_file)
+        .args(["--session", SESSION, "--server", "osv"])
+        .current_dir(&served.repo.path)
+        .env_clear()
+        .env("PATH", "")
+        .env("HOME", "/home/someone")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("farik runs");
+    let mut stdin = child.stdin.take().expect("stdin");
+    writeln!(
+        stdin,
+        "{}",
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": { "name": "launcher-test", "version": "1" } } })
+    )
+    .expect("initialize is sent");
+    let stdout = child.stdout.take().expect("stdout");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = std::io::BufReader::new(stdout).read_line(&mut line);
+        let _ = sender.send(line);
+    });
+    let answered = receiver.recv_timeout(std::time::Duration::from_secs(30));
+    let _ = child.kill();
+    let output = child.wait_with_output().expect("farik ends");
+    let line = answered.unwrap_or_else(|_| {
+        panic!(
+            "no answer to initialize: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    let reply: Value = serde_json::from_str(&line).unwrap_or_else(|_| {
+        panic!(
+            "not JSON: {line:?} {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    assert_eq!(
+        reply["result"]["serverInfo"]["name"], "farik-osv",
+        "{reply}"
+    );
 }

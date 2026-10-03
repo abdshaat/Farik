@@ -1,7 +1,8 @@
 # The Architect's kit: five skills and the services it only reads. Context7 signs in (route 1,
-# ADR 0035); Grep needs no account. Tool lists are from each service's documentation and a probe on
-# 2026-10-02 (step 07's plan); the live pin test compares them. A tool a service lists that is not
-# here is never offered (`tool_not_tagged`) until a pin update tags it.
+# ADR 0035); Grep needs no account; OSV is Farik's own server, started by `farik connector osv`
+# (ADR 0038). Tool lists are from each service's documentation and a probe on 2026-10-02 (step 07's
+# plan); the live pin test compares them, except OSV's, whose pin is an offline test. A tool a
+# service lists that is not here is never offered (`tool_not_tagged`) until a pin update tags it.
 role: architect
 skills:
   - designing-apis-and-data
@@ -35,3 +36,19 @@ connectors:
       searchGitHub: "search public code"
     tools:
       searchGitHub: network
+  - name: osv
+    transport: stdio
+    command: farik
+    args: [connector, osv]
+    title: OSV
+    about: "OSV is a free, open database of known security flaws in open-source packages, run by Google."
+    why: "So the Architect can check whether a library your project uses, or one it is about to add, has a known flaw, and which version fixes it. It only reads."
+    setup: "Nothing to set up: Farik looks packages up in OSV itself, with no account. Farik sends OSV only the names and versions of the packages it checks."
+    labels:
+      query_package: "check a package for known flaws"
+      query_packages: "check many packages at once"
+      get_vulnerability: "read a known flaw"
+    tools:
+      query_package: network
+      query_packages: network
+      get_vulnerability: network

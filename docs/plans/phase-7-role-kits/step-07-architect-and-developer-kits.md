@@ -135,7 +135,7 @@ Tests (`osv.rs`, against a local axum fixture standing in for `api.osv.dev`; `os
 - `the_launcher_starts_its_own_executable_for_farik` (`crates/cli/tests/connector_run.rs`, `#[ignore]`d with its siblings, run by `cargo xtask check --integration`): a confirmed entry with `command: farik` and `args: [connector, osv]`, launched by `farik connector run` with `PATH` emptied, answers `initialize` with `serverInfo.name` `"farik-osv"`. RED: before Task 3's launcher change, `farik could not be started`; with it, before this task, an unknown subcommand.
 - `osv_is_farik_s_own_server_and_only_reads` (`kit.rs`): stdio, command exactly `farik`, args exactly `["connector", "osv"]`, no keys; `network_names` exactly `["get_vulnerability", "query_package", "query_packages"]`; the kit's connectors are exactly `context7`, `grep`, `osv`, no `external_effect`, no `allowances`. RED: no such connector.
 
-- [ ] `feat(runtime): look packages up in OSV through Farik's own server`
+- [x] `feat(runtime): look packages up in OSV through Farik's own server`
 
 ### Task 5: Each Architect service connects by name
 
