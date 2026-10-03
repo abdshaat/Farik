@@ -3918,14 +3918,20 @@ pub(super) mod tests {
         assert!(container[0].message.starts_with("connector_not_in_kit: "));
     }
 
-    /// A guard: each shipped service of the Product Manager connects by name.
+    /// A guard: each shipped service of the Product Manager and the Architect connects by name.
     #[test]
     fn connects_every_shipped_kit_connector_by_name() {
         use farik_core::contract::Role;
         let team = crate::tools::fixtures::a_team_of_three(|wire| {
-            wire["agents"].as_array_mut().expect("agents").push(
-                farik_core::team::fixtures::an_agent_wire("sam", "scrum_master"),
-            );
+            let agents = wire["agents"].as_array_mut().expect("agents");
+            agents.push(farik_core::team::fixtures::an_agent_wire(
+                "sam",
+                "scrum_master",
+            ));
+            agents.push(farik_core::team::fixtures::an_agent_wire(
+                "archie",
+                "architect",
+            ));
         });
         let pm = farik_roles::load_kit(Role::ProductManager).expect("the Product Manager's kit");
         for name in ["amplitude", "linear", "notion"] {
@@ -3936,6 +3942,15 @@ pub(super) mod tests {
         let scrum = farik_roles::load_kit(Role::ScrumMaster).expect("the Scrum Master's kit");
         let refused = super::kit_entry(&scrum, &team, "sam", "notion", &BTreeMap::new())
             .expect_err("the Scrum Master has no Notion");
+        assert!(refused[0].message.starts_with("connector_not_in_kit: "));
+        let architect = farik_roles::load_kit(Role::Architect).expect("the Architect's kit");
+        for name in ["context7", "grep", "osv"] {
+            let (_, server) = super::kit_entry(&architect, &team, "archie", name, &BTreeMap::new())
+                .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
+            assert!(super::matches_kit(&architect, &server), "{name}");
+        }
+        let refused = super::kit_entry(&pm, &team, "pm", "osv", &BTreeMap::new())
+            .expect_err("the Product Manager has no OSV");
         assert!(refused[0].message.starts_with("connector_not_in_kit: "));
     }
 

@@ -144,7 +144,7 @@ Files: `daemon/team.rs` tests; `live_kit_pins.rs`.
 - `connects_every_shipped_kit_connector_by_name` (extended, a guard; `a_team_of_three` has no Architect, so push `an_agent_wire("archie", "architect")`, as the test does for `sam`): for an Architect, `kit_entry` is `Ok` and `matches_kit` true for `context7`, `grep` and `osv`; `osv` on the Product Manager is `connector_not_in_kit`.
 - `live_kit_pins_hold`: a connector whose command is `farik` is skipped with a line saying `osv_server_lists_the_kits_tools` pins it; `grep` is listed with no key; `context7` reads `FARIK_KIT_CONTEXT7_BEARER`. Header comment updated. No RED: it needs the founder's run.
 
-- [ ] `test(runtime): connect each of the Architect's services by name`
+- [x] `test(runtime): connect each of the Architect's services by name`
 
 ### Task 6: Spec and plan
 
