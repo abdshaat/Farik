@@ -14,8 +14,8 @@ A library is code the team did not write and will have to keep. Decide before it
 
 ## 2. Licence
 
-Read the package's own licence file in the project's lock or vendor folder (you can read it), or,
-in a document session, the registry's page with `WebFetch`. In a review session you run no
+Read the package's own licence file where the project keeps a copy of it (a vendored folder, when
+there is one), or, in a document session, the registry's page with `WebFetch`. In a review session you run no
 commands and have no `WebFetch`: judge from what the diff and the project show, and say what you
 could not check.
 
@@ -35,6 +35,7 @@ Name the version the lock file pins, or should. Prefer an exact one.
 
 ## 6. Write it down
 
-Record the choice with `farik_write_decision`: the library, the version, why, and what it rules
-out. In a review session, a finding goes to the `review` criterion it bears on, with the file and
-line, through `farik_record_criterion_result`.
+In a document task, record the choice with `farik_write_decision`: the library, the version, why,
+and what it rules out. In a review session, a finding goes to the `review` criterion it bears on,
+with the file and line, through `farik_record_criterion_result`; record a decision there only when
+the contract asks for one.

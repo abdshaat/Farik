@@ -6,8 +6,8 @@ description: Use when a contract asks for an API, a data model or a module bound
 # Designing APIs and data
 
 Your task is a document. The design is a note in the task's worktree, inside the contract's
-`allowed_paths` (normally `system.md` or a file beside it), never code, however small the change
-looks. The Developer builds from your note.
+`allowed_paths` (a document path, such as a file under `docs/`), never code, however small the
+change looks. The Developer builds from your note.
 
 ## 1. The interface
 

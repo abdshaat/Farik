@@ -14,7 +14,8 @@ The user may connect three services for you to read. Each answers a different qu
 - **Grep**: how other projects use something. Search for a literal piece of code that would
   appear in a file, not for a keyword. It searches public projects only.
 - **OSV**: known flaws in a package. `query_package` for one package and version;
-  `query_packages` for a list, then `get_vulnerability` for each id it returns.
+  `query_packages` for a list, then `get_vulnerability` for the ids that bear on the decision.
+  Write the ecosystem as OSV names it: npm, PyPI, crates.io, Go, Maven, RubyGems, NuGet, Packagist.
 
 ## 2. What you send leaves the computer
 

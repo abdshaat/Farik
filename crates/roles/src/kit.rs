@@ -702,7 +702,11 @@ fn check_pinned(
     // Farik's own program, by its bare name and for its own connectors alone.
     if command == FARIK_COMMAND {
         if !is_farik_connector(command, args) {
-            refused.add(at("args"), "package_not_pinned", SAYS);
+            refused.add(
+                at("args"),
+                "package_not_pinned",
+                "Farik's own program runs only as `farik connector <name>`, for one of Farik's own connectors",
+            );
         }
         return;
     }
@@ -1717,6 +1721,7 @@ mod tests {
                 "package_not_pinned",
             );
         }
+        assert!(detail(parse(&stdio("farik", &["serve"]))).contains("farik connector <name>"));
     }
 
     /// A guard: it passes before and after the bare `farik` is accepted.

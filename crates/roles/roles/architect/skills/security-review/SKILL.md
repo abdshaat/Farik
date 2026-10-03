@@ -26,9 +26,9 @@ Read the diff for each, and cite the file and line of every finding.
 ## 3. Record what you found
 
 A finding that a `review` criterion covers fails that criterion: record it with
-`farik_record_criterion_result`, then request `rejected` with `farik_request_transition`,
-naming the criterion and the reason. A finding no criterion covers goes in the review note for
-the Product Manager. Never invent a criterion for it.
+`farik_record_criterion_result`, citing the file and line. A finding no criterion covers goes in
+the review note for the Product Manager. Never invent a criterion for it. Then end the review as
+your role's prompt says: the review note, and `rejected` when a criterion failed.
 
 ## 4. A threat model in a document task
 
