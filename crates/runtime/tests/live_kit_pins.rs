@@ -38,6 +38,8 @@ async fn live_kit_pins_hold() {
         return;
     }
     let folder = std::env::temp_dir();
+    // Every drift is listed at once, so one run is enough to fix them all.
+    let mut drifted: Vec<String> = Vec::new();
     for role in SHIPPED_ROLES {
         let kit = load_kit(role).expect("a shipped kit loads");
         for connector in &kit.connectors {
@@ -68,15 +70,19 @@ async fn live_kit_pins_hold() {
                 .map(|tool| tool.name.clone())
                 .collect();
             let drift = pin_drift(&server.tools, &usable);
-            assert!(
-                drift.added.is_empty() && drift.removed.is_empty(),
-                "{role}'s {name} drifted: the service added {:?} and dropped {:?}; a pin update \
-                 re-reviews every tag",
-                drift.added,
-                drift.removed
-            );
+            if !(drift.added.is_empty() && drift.removed.is_empty()) {
+                drifted.push(format!(
+                    "{role}'s {name}: added {:?}, dropped {:?}",
+                    drift.added, drift.removed
+                ));
+            }
         }
     }
+    assert!(
+        drifted.is_empty(),
+        "kit pins drifted; a pin update re-reviews every tag:\n{}",
+        drifted.join("\n")
+    );
 }
 
 #[test]
