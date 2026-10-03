@@ -966,7 +966,7 @@ mod tests {
             assert_eq!(
                 kit.connectors.len(),
                 match role {
-                    Role::UiUxDesigner => 1,
+                    Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
                     Role::ProductManager | Role::Architect => 3,
                     _ => 0,
                 },
@@ -1244,6 +1244,44 @@ mod tests {
             server.tools,
             BTreeMap::from([("searchGitHub".to_string(), ConnectorTag::Network)])
         );
+    }
+
+    #[test]
+    fn the_developers_context7_is_the_architects() {
+        let (developers, developer_copy) = service(Role::SoftwareDeveloper, "context7");
+        let (architects, architect_copy) = service(Role::Architect, "context7");
+        assert_eq!(developers, architects);
+        assert_ne!(developer_copy.why, architect_copy.why);
+        let same = SetupCopy {
+            why: architect_copy.why.clone(),
+            ..developer_copy
+        };
+        assert_eq!(same, architect_copy);
+    }
+
+    #[test]
+    fn the_developers_kit_only_reads() {
+        let kit = load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
+        let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
+        assert_eq!(names, ["context7"]);
+        let KitConnector::Server {
+            entry,
+            copy,
+            allowances,
+        } = &kit.connectors[0]
+        else {
+            panic!("context7 is a server");
+        };
+        let server = custom_server(entry).expect("a custom server");
+        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 0);
+        assert!(allowances.is_empty());
+        let network: Vec<&String> = server
+            .tools
+            .iter()
+            .filter(|(_, tag)| **tag == ConnectorTag::Network)
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(copy.labels.keys().collect::<Vec<_>>(), network);
     }
 
     #[test]

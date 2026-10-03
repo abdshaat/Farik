@@ -71,7 +71,7 @@ Files: `software_developer/kit.yaml` `connectors`; `kit.rs` tests (`loads_every_
 - `the_developers_context7_is_the_architects`: `custom_server` of the Developer's `context7` entry equals the Architect's, and the two `SetupCopy`s differ in `why` alone. RED: no such connector.
 - `the_developers_kit_only_reads`: its connectors are exactly `context7`; no `external_effect` tool and no `allowances`; its labels' keys equal its `network` names exactly. RED: no connector.
 
-- [ ] `feat(roles): give the Developer Context7`
+- [x] `feat(roles): give the Developer Context7`
 
 ### Task 3: It connects by name, and the browser stays the built-in one
 

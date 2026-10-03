@@ -1,3 +1,6 @@
+# The Software Developer's kit: six skills and Context7, which it only reads and signs in to (route 1,
+# ADR 0035). The entry is the Architect's, whole (ADR 0036), but for `why`; the browser is the
+# built-in Playwright, which the user turns on on the agent's page, not a connector of this kit.
 role: software_developer
 skills:
   - test-driven-development
@@ -6,4 +9,18 @@ skills:
   - testing-per-stack
   - answering-a-review
   - using-docs-and-the-browser
-connectors: []
+connectors:
+  - name: context7
+    transport: http
+    url: https://mcp.context7.com/mcp/oauth
+    oauth: { scopes: [profile, email, offline_access] }
+    title: Context7
+    about: "Context7 keeps up-to-date documentation and code examples for thousands of programming libraries."
+    why: "So the Developer writes code against the library as it is now, in the version your project uses, not as it was when the AI learned it. It only reads."
+    setup: "Sign in with a free Context7 account and allow Farik to use it. The questions your agent asks about a library go to Context7; the free plan allows about a thousand a month."
+    labels:
+      resolve-library-id: "find a library"
+      query-docs: "read a library's documentation"
+    tools:
+      resolve-library-id: network
+      query-docs: network
