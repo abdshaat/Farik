@@ -4254,7 +4254,11 @@ pub(super) mod tests {
     fn team_get_says_what_a_kit_offers_to_allow() {
         let (harness, _) = keeping_an_allowance_kit("allow-team-get");
         let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
-        let row = &got["kits"][0]["connectors"][0];
+        let developer = got["kits"]
+            .as_array()
+            .and_then(|kits| kits.iter().find(|kit| kit["role"] == "software_developer"))
+            .expect("the Developer's kit");
+        let row = &developer["connectors"][0];
         assert_eq!(
             row["allowances"],
             json!([{ "tool": "make", "calls": 20, "what": "pictures" }])
@@ -4495,8 +4499,16 @@ pub(super) mod tests {
     fn team_get_lists_each_roles_kit_and_each_rows_source() {
         let (harness, _) = keeping_a_kit("kit-team-get");
         let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+        // The team's Product Manager has a kit of services too, since step 06, and it lists first.
+        let kits = got["kits"].as_array().expect("kits");
         assert_eq!(
-            got["kits"],
+            kits.iter()
+                .map(|kit| kit["role"].clone())
+                .collect::<Vec<_>>(),
+            [json!("product_manager"), json!("software_developer")]
+        );
+        assert_eq!(
+            json!([kits[1]]),
             json!([{
                 "role": "software_developer",
                 "connectors": [{
@@ -4509,7 +4521,7 @@ pub(super) mod tests {
                     "auth": "keys", "credential_keys": ["API_KEY"],
                 }],
             }]),
-            "no container connector, and no role whose kit has no service"
+            "no container connector in the Developer's kit"
         );
         call(
             &harness.daemon,
@@ -4564,7 +4576,7 @@ pub(super) mod tests {
         assert!(retired["result"]["said"].is_string(), "{retired}");
         assert_eq!(
             roles(&harness),
-            [json!("software_developer")],
+            [json!("product_manager"), json!("software_developer")],
             "a retired agent's role lists no kit"
         );
     }

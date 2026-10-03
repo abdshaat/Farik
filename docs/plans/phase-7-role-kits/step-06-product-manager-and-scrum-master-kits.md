@@ -96,7 +96,7 @@ Tests (`kit.rs`):
 - `the_product_managers_kit_only_reads`: the kit's connectors are exactly `amplitude`, `linear`, `notion`, in that order; no tool in its kit is `external_effect`, no connector has `allowances`, and each has `oauth` and no `credential_keys`. RED: the kit has none.
 - `every_network_tool_of_the_product_manager_has_a_label`: each `network` tool has a `labels` entry (a guard; it passes vacuously before the connectors exist).
 
-- [ ] `feat(roles): give the Product Manager Amplitude, Linear and Notion`
+- [x] `feat(roles): give the Product Manager Amplitude, Linear and Notion`
 
 ### Task 4: Each Product Manager service connects by name
 
@@ -124,3 +124,7 @@ FARIK_LIVE_TESTS=1 cargo test -p farik-runtime --test live_kit_pins
 The live run reads `FARIK_KIT_AMPLITUDE_BEARER`, `FARIK_KIT_LINEAR_BEARER` and `FARIK_KIT_NOTION_BEARER`. Linear takes a personal key from its settings as the bearer. For Amplitude and Notion, sign in through the MCP Inspector (`npx @modelcontextprotocol/inspector`, its sign-in panel shows the access value).
 
 Then, in the web app, by the founder: connect Notion, Linear and Amplitude to a Product Manager, reading each setup copy as a user would. Each "Done" lists the labels above. The Execution notes record whether Notion's sign-in showed a page picker (B4), and whether Amplitude's read-only sign-in worked (S3).
+
+## Execution notes
+
+- **Live pins not run (S1c, the controller's ruling, 2026-10-02).** The Linear key is the founder's credential and no agent holds or sets it, so Task 3 took its tool lists from the services' documentation as this plan gives them, and did not stop. Before this step lands the founder must run `FARIK_LIVE_TESTS=1 cargo test -p farik-runtime --test live_kit_pins` with `FARIK_KIT_AMPLITUDE_BEARER`, `FARIK_KIT_LINEAR_BEARER` and `FARIK_KIT_NOTION_BEARER` set. Any difference it reports is applied by the mechanical rule in "Pins against the live service": a listed tool this plan lacks goes in `denied` with no label; a named tool the service no longer lists, and whose documentation fetched that day no longer names it, is removed; the counts in Task 3's tests and lists follow in the same commit.

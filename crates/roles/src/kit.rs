@@ -894,11 +894,13 @@ mod tests {
     use farik_core::governor::permissions::ConnectorTag;
     use serde_json::{Value, json};
 
+    use super::SetupCopy;
     use super::{
         Kit, KitConnector, KitError, load_kit, parse_kit, pin_drift, quoted_labels,
         shipped_skill_names,
     };
     use crate::{builtin_connector, core_skill_names, load_role};
+    use farik_core::team::{CustomServer, CustomTransport, custom_server};
 
     const SHIPPED: [Role; 6] = [
         Role::ProductManager,
@@ -966,7 +968,11 @@ mod tests {
             assert_eq!(kit.role, role);
             assert_eq!(
                 kit.connectors.len(),
-                usize::from(role == Role::UiUxDesigner),
+                match role {
+                    Role::UiUxDesigner => 1,
+                    Role::ProductManager => 3,
+                    _ => 0,
+                },
                 "{role}"
             );
         }
@@ -1017,6 +1023,129 @@ mod tests {
                 "{}",
                 skill.name
             );
+        }
+    }
+
+    /// A Product Manager service's server, its copy and its tags, by name.
+    fn pm_service(name: &str) -> (CustomServer, SetupCopy) {
+        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        for connector in kit.connectors {
+            if let KitConnector::Server { entry, copy, .. } = connector {
+                let server = custom_server(&entry).expect("a custom server");
+                if server.name == name {
+                    return (server, copy);
+                }
+            }
+        }
+        panic!("the Product Manager's kit has no {name}");
+    }
+
+    fn tagged(server: &CustomServer, tag: ConnectorTag) -> usize {
+        server.tools.values().filter(|found| **found == tag).count()
+    }
+
+    fn signed_in(server: &CustomServer) -> (&str, Option<&[String]>) {
+        let CustomTransport::Http { url, oauth, .. } = &server.transport else {
+            panic!("{} is http", server.name);
+        };
+        (
+            url,
+            oauth.as_ref().map(|settings| settings.scopes.as_slice()),
+        )
+    }
+
+    #[test]
+    fn amplitude_reads_usage_and_never_writes() {
+        let (server, _) = pm_service("amplitude");
+        let (url, scopes) = signed_in(&server);
+        assert_eq!(url, "https://mcp.amplitude.com/mcp");
+        assert_eq!(
+            scopes,
+            Some(&["mcp:read".to_string(), "offline_access".to_string()][..])
+        );
+        assert!(server.credential_keys.is_empty());
+        assert_eq!(server.tools["query_amplitude_data"], ConnectorTag::Network);
+        for name in [
+            "get_amp_user_data",
+            "use_amp_dashboards",
+            "create_flags",
+            "get_deployments",
+        ] {
+            assert_eq!(server.tools[name], ConnectorTag::Denied, "{name}");
+        }
+        assert_eq!(tagged(&server, ConnectorTag::Network), 15);
+        assert_eq!(tagged(&server, ConnectorTag::Denied), 30);
+    }
+
+    #[test]
+    fn linear_reads_from_its_read_only_address() {
+        let (server, _) = pm_service("linear");
+        let (url, scopes) = signed_in(&server);
+        assert!(url.ends_with("/mcp/readonly"), "{url}");
+        assert_eq!(scopes, Some(&["read".to_string()][..]));
+        assert_eq!(server.tools.len(), 21);
+        assert_eq!(tagged(&server, ConnectorTag::Network), 21);
+    }
+
+    #[test]
+    fn notion_reads_pages_and_never_changes_them() {
+        let (server, _) = pm_service("notion");
+        for name in ["notion-search", "notion-fetch"] {
+            assert_eq!(server.tools[name], ConnectorTag::Network, "{name}");
+        }
+        for name in [
+            "notion-create-pages",
+            "notion-update-page",
+            "notion-spawn-session",
+        ] {
+            assert_eq!(server.tools[name], ConnectorTag::Denied, "{name}");
+        }
+        assert_eq!(tagged(&server, ConnectorTag::Network), 8);
+        assert_eq!(tagged(&server, ConnectorTag::Denied), 28);
+    }
+
+    #[test]
+    fn the_product_managers_kit_only_reads() {
+        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
+        assert_eq!(names, ["amplitude", "linear", "notion"]);
+        for connector in &kit.connectors {
+            let KitConnector::Server {
+                entry, allowances, ..
+            } = connector
+            else {
+                panic!("{} is a server", connector.name());
+            };
+            let server = custom_server(entry).expect("a custom server");
+            assert_eq!(
+                tagged(&server, ConnectorTag::ExternalEffect),
+                0,
+                "{}",
+                server.name
+            );
+            assert!(allowances.is_empty(), "{}", server.name);
+            assert!(server.credential_keys.is_empty(), "{}", server.name);
+            let CustomTransport::Http { oauth, .. } = &server.transport else {
+                panic!("{} is http", server.name);
+            };
+            assert!(oauth.is_some(), "{} signs in", server.name);
+        }
+    }
+
+    /// A guard: it passes with no connector at all.
+    #[test]
+    fn every_network_tool_of_the_product_manager_has_a_label() {
+        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        for connector in kit.connectors {
+            let KitConnector::Server { entry, copy, .. } = connector else {
+                continue;
+            };
+            let server = custom_server(&entry).expect("a custom server");
+            for (tool, tag) in &server.tools {
+                if *tag == ConnectorTag::Network {
+                    assert!(copy.labels.contains_key(tool), "{}: {tool}", server.name);
+                }
+            }
         }
     }
 
