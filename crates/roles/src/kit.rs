@@ -155,6 +155,21 @@ pub fn load_kit(role: Role) -> Result<Kit, KitError> {
 /// A kit's skills as `(name, files)`, each file embedded in the binary.
 type EmbeddedSkills = Vec<(&'static str, &'static [(&'static str, &'static str)])>;
 
+/// The bare command with which a kit names Farik's own program (ADR 0038).
+pub const FARIK_COMMAND: &str = "farik";
+
+/// The names of Farik's own connectors, each started as `farik connector <name>`.
+pub const FARIK_CONNECTORS: &[&str] = &["osv"];
+
+/// Whether `command` and `args` are, exactly, `farik connector <name>` for one of Farik's own
+/// connectors. Nothing else, a user's own `farik` command included, is Farik's.
+#[must_use]
+pub fn is_farik_connector(command: &str, args: &[String]) -> bool {
+    command == FARIK_COMMAND
+        && matches!(args, [connector, name]
+            if connector == "connector" && FARIK_CONNECTORS.contains(&name.as_str()))
+}
+
 /// One role's embedded skills: each folder's `SKILL.md`, in the order the kit names them.
 macro_rules! embedded {
     ($folder:literal: $($name:literal),+ $(,)?) => {
@@ -676,6 +691,13 @@ fn check_pinned(
         "--index-url",
     ];
     let command = command.as_str().unwrap_or_default();
+    // Farik's own program, by its bare name and for its own connectors alone.
+    if command == FARIK_COMMAND {
+        if !is_farik_connector(command, args) {
+            refused.add(at("args"), "package_not_pinned", SAYS);
+        }
+        return;
+    }
     let file = command.rsplit(['/', '\\']).next().unwrap_or(command);
     let program = file
         .strip_suffix(".cmd")
@@ -1569,6 +1591,50 @@ mod tests {
             );
         }
         parse(&stdio("/usr/local/bin/farik-mcp", &["--flag"])).expect("Farik's own binary");
+    }
+
+    #[test]
+    fn accepts_farik_by_its_bare_name() {
+        parse(&stdio("farik", &["connector", "osv"])).expect("Farik's own OSV server loads");
+    }
+
+    #[test]
+    fn refuses_farik_with_other_arguments() {
+        for args in [
+            vec!["serve"],
+            vec!["connector", "run"],
+            vec!["connector", "osv", "--x"],
+            vec!["connector", "other"],
+            vec![],
+        ] {
+            refused(
+                &stdio("farik", &args),
+                "/connectors/0/args",
+                "package_not_pinned",
+            );
+        }
+    }
+
+    /// A guard: it passes before and after the bare `farik` is accepted.
+    #[test]
+    fn refuses_any_other_bare_program() {
+        for command in [
+            "farik-osv",
+            "./farik",
+            "bin/farik",
+            "farikx",
+            "FARIK",
+            "farik.exe",
+            "farik.cmd",
+        ] {
+            let found = detail(parse(&stdio(command, &["connector", "osv"])));
+            assert!(
+                found.contains("/connectors/0/command: package_not_pinned"),
+                "{command}: {found}"
+            );
+        }
+        parse(&stdio("/usr/local/bin/farik-mcp", &["connector", "osv"]))
+            .expect("an absolute Farik binary stays accepted");
     }
 
     fn browser(role: Role, name: &str, image: &str) -> Result<Kit, KitError> {

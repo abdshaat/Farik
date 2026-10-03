@@ -11,7 +11,7 @@ use std::os::unix::process::CommandExt as _;
 use std::path::Path;
 use std::time::Duration;
 
-use farik_runtime::connectors::KEPT_ENV;
+use farik_runtime::connectors::{KEPT_ENV, own_program_for, program};
 use serde_json::Value;
 
 use crate::CliIo;
@@ -55,7 +55,10 @@ pub fn run(daemon_file: &Path, session: &str, server: &str, io: &mut CliIo<'_>) 
         ) else {
             return Err("the daemon's answer names no command or folder".to_string());
         };
-        let mut process = std::process::Command::new(command);
+        let owned: Vec<String> = args.iter().map(ToString::to_string).collect();
+        let own = own_program_for(command, &owned).map_err(str::to_string)?;
+        // Farik's own connector is this executable, never a `farik` the PATH finds (ADR 0038).
+        let mut process = std::process::Command::new(program(command, &owned, &own));
         // The folder Farik keeps for the server, never the worktree Claude Code started this in.
         process.args(args).current_dir(folder).env_clear();
         for name in KEPT_ENV {

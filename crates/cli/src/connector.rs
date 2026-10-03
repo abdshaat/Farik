@@ -10,7 +10,7 @@ use farik_core::team::{CustomServer, CustomTransport, spec_sha256};
 use farik_protocol::command::Command;
 use farik_runtime::claude::Secret;
 use farik_runtime::connectors::{
-    ConnectorEntry, ConnectorError, SecretAt, SecretStore, folder_refusal, list_tools,
+    ConnectorEntry, ConnectorError, SecretAt, SecretStore, folder_refusal, list_tools, own_program,
     working_folder,
 };
 use farik_runtime::credential::CredentialError;
@@ -289,8 +289,9 @@ fn keep_keys(
     let at = secret_at(&state, project, agent, &server.name)?;
     let folder = working_folder(&state, &project.root, &at)
         .map_err(|error| format!("{}: {}", server.name, folder_refusal(&error)))?;
+    let farik = own_program(server).map_err(str::to_string)?;
     let listed = runtime()?
-        .block_on(list_tools(server, &keys, None, &folder))
+        .block_on(list_tools(server, &keys, None, &folder, &farik))
         .map_err(|error| not_listed(&error))?;
     let tools = tools_of(&listed)?;
     let (entry, server) = build(tools).map_err(|e| errors(&e))?;
@@ -429,12 +430,14 @@ fn keep_sign_in(
         .block_on(signing.finish())
         .map_err(|error| refused(&error, &host))?;
     crate::say(&mut io.stderr, &format!("Signed in to {issuer}."));
+    let farik = own_program(server).map_err(str::to_string)?;
     let listed = runtime
         .block_on(list_tools(
             server,
             &BTreeMap::new(),
             Some(&grant.access_token),
             &folder,
+            &farik,
         ))
         .map_err(|error| not_listed(&error))?;
     let tools = tools_of(&listed)?;

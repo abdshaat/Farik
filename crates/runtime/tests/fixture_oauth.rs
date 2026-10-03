@@ -541,6 +541,7 @@ async fn lists_tools_with_the_signed_in_token() {
         &BTreeMap::new(),
         Some(&grant.access_token),
         &folder,
+        std::path::Path::new("farik"),
     )
     .await
     .expect("listed with the token");
@@ -550,9 +551,15 @@ async fn lists_tools_with_the_signed_in_token() {
         tools[0].description,
         format!("Bearer {}", grant.access_token.expose())
     );
-    list_tools(&server, &BTreeMap::new(), None, &folder)
-        .await
-        .expect_err("without the token the server answers 401");
+    list_tools(
+        &server,
+        &BTreeMap::new(),
+        None,
+        &folder,
+        std::path::Path::new("farik"),
+    )
+    .await
+    .expect_err("without the token the server answers 401");
 }
 
 #[tokio::test]

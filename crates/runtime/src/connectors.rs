@@ -742,8 +742,53 @@ fn usable_tool_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+/// The program that starts a stdio server: `farik` itself for Farik's own connector (the exact
+/// pair [`farik_roles::is_farik_connector`] holds for), whatever `farik` the `PATH` might find,
+/// and `command` as given for everything else (ADR 0038).
+#[must_use]
+pub fn program(command: &str, args: &[String], farik: &std::path::Path) -> PathBuf {
+    if farik_roles::is_farik_connector(command, args) {
+        farik.to_path_buf()
+    } else {
+        PathBuf::from(command)
+    }
+}
+
+/// What a caller of [`list_tools`] says when Farik cannot find its own program.
+pub const NO_OWN_PROGRAM: &str = "farik could not find its own program";
+
+/// The program Farik's own connector runs: this executable, for the exact pair
+/// [`farik_roles::is_farik_connector`] holds for. Any other command gets an empty path it never
+/// uses, so a failure to find this program stops only a Farik connector and no `PATH` lookup ever
+/// stands in for it (ADR 0038).
+///
+/// # Errors
+///
+/// [`NO_OWN_PROGRAM`], when the command is Farik's own connector and this executable cannot be
+/// found.
+pub fn own_program_for(command: &str, args: &[String]) -> Result<PathBuf, &'static str> {
+    if farik_roles::is_farik_connector(command, args) {
+        std::env::current_exe().map_err(|_| NO_OWN_PROGRAM)
+    } else {
+        Ok(PathBuf::new())
+    }
+}
+
+/// [`own_program_for`] a server's command, for the callers of [`list_tools`].
+///
+/// # Errors
+///
+/// As [`own_program_for`].
+pub fn own_program(server: &CustomServer) -> Result<PathBuf, &'static str> {
+    match &server.transport {
+        CustomTransport::Stdio { command, args } => own_program_for(command, args),
+        CustomTransport::Http { .. } => Ok(PathBuf::new()),
+    }
+}
+
 /// The tools `server` lists when started, or reached, with `keys`, and `bearer` as its `Authorization`. A stdio server runs in `folder`
-/// with only [`KEPT_ENV`] and its keys; the whole listing gives up after thirty seconds.
+/// with only [`KEPT_ENV`] and its keys; the whole listing gives up after thirty seconds. `farik` is
+/// the program Farik's own connector runs ([`program`]); no other server uses it.
 ///
 /// # Errors
 ///
@@ -754,6 +799,7 @@ pub async fn list_tools(
     keys: &BTreeMap<String, Secret>,
     bearer: Option<&Secret>,
     folder: &std::path::Path,
+    farik: &std::path::Path,
 ) -> Result<Vec<ListedTool>, ConnectorError> {
     use rmcp::ServiceExt as _;
 
@@ -766,7 +812,7 @@ pub async fn list_tools(
     let listing = async {
         let client = match &server.transport {
             CustomTransport::Stdio { command, args } => {
-                let mut process = tokio::process::Command::new(command);
+                let mut process = tokio::process::Command::new(program(command, args, farik));
                 // rmcp kills the server when the transport is dropped, as on the timeout below;
                 // this is the same promise again, should rmcp stop keeping it.
                 process
@@ -828,6 +874,48 @@ mod tests {
     use keyring_core::api::CredentialStoreApi as _;
 
     use super::*;
+
+    #[test]
+    fn runs_farik_by_its_own_path() {
+        let own = std::path::Path::new("/opt/farik/bin/farik-under-test");
+        let args =
+            |list: &[&str]| -> Vec<String> { list.iter().map(|a| (*a).to_string()).collect() };
+        assert_eq!(program("farik", &args(&["connector", "osv"]), own), own);
+        assert_eq!(
+            program("farik", &args(&["serve"]), own),
+            PathBuf::from("farik")
+        );
+        for other in ["farikx", "farik-osv", "FARIK", "farik.exe"] {
+            assert_eq!(
+                program(other, &args(&["connector", "osv"]), own),
+                PathBuf::from(other)
+            );
+        }
+        assert_eq!(
+            program("npx", &args(&["connector", "osv"]), own),
+            PathBuf::from("npx")
+        );
+        assert_eq!(
+            program("/usr/local/bin/farik", &args(&["connector", "osv"]), own),
+            PathBuf::from("/usr/local/bin/farik")
+        );
+    }
+
+    #[test]
+    fn finds_its_own_program_for_farik_s_connector_only() {
+        let farik = CustomServer {
+            transport: CustomTransport::Stdio {
+                command: "farik".to_string(),
+                args: vec!["connector".to_string(), "osv".to_string()],
+            },
+            ..stdio(&[])
+        };
+        assert_eq!(
+            own_program(&farik),
+            Ok(std::env::current_exe().expect("the test binary"))
+        );
+        assert_eq!(own_program(&stdio(&[])), Ok(PathBuf::new()));
+    }
 
     fn at(agent: &str, server: &str) -> SecretAt {
         SecretAt {

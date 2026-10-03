@@ -60,9 +60,15 @@ async fn live_kit_pins_hold() {
                 .map(|key| (key.clone(), secret(name, key)))
                 .collect();
             let bearer = signs_in.then(|| secret(name, "BEARER"));
-            let listed = list_tools(&server, &keys, bearer.as_ref(), &folder)
-                .await
-                .unwrap_or_else(|error| panic!("{role}'s {name} could not be listed: {error:?}"));
+            let listed = list_tools(
+                &server,
+                &keys,
+                bearer.as_ref(),
+                &folder,
+                std::path::Path::new("farik"),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{role}'s {name} could not be listed: {error:?}"));
             // A name Claude Code would rewrite is never offered, so no pin names it.
             let usable: Vec<String> = listed
                 .iter()

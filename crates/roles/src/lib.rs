@@ -27,8 +27,9 @@ mod skill_check;
 
 pub use connectors::{ConnectorDefinition, builtin_connector};
 pub use kit::{
-    Kit, KitAllowance, KitConnector, KitError, PinDrift, SetupCopy, load_kit, parse_fixture_kit,
-    parse_kit, pin_drift, quoted_labels, shipped_skill_names,
+    FARIK_COMMAND, FARIK_CONNECTORS, Kit, KitAllowance, KitConnector, KitError, PinDrift,
+    SetupCopy, is_farik_connector, load_kit, parse_fixture_kit, parse_kit, pin_drift,
+    quoted_labels, shipped_skill_names,
 };
 pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
 pub use skill_check::{

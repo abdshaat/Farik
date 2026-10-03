@@ -96,9 +96,15 @@ fn tool<'a>(tools: &'a [ListedTool], name: &str) -> &'a ListedTool {
 #[tokio::test]
 async fn lists_a_stdio_servers_tools() {
     let server = stdio_server("lists", STDIO_SERVER, &[]);
-    let tools = list_tools(&server, &BTreeMap::new(), None, &own_folder())
-        .await
-        .expect("the tools are listed");
+    let tools = list_tools(
+        &server,
+        &BTreeMap::new(),
+        None,
+        &own_folder(),
+        std::path::Path::new("farik"),
+    )
+    .await
+    .expect("the tools are listed");
     assert_eq!(
         names(&tools),
         ["search", "env", "delete_repo", "repo.delete"]
@@ -126,9 +132,15 @@ async fn the_server_sees_its_keys_and_not_the_model_key() {
     }
     let server = stdio_server("env", STDIO_SERVER, &["API_KEY"]);
     let folder = scratch("env-folder");
-    let tools = list_tools(&server, &keys(&[("API_KEY", "k")]), None, &folder)
-        .await
-        .expect("the tools are listed");
+    let tools = list_tools(
+        &server,
+        &keys(&[("API_KEY", "k")]),
+        None,
+        &folder,
+        std::path::Path::new("farik"),
+    )
+    .await
+    .expect("the tools are listed");
     assert_eq!(
         tool(&tools, "env").description,
         // `HOME` is one of the variables kept (`KEPT_ENV`); the server runs in the folder it is
@@ -205,14 +217,27 @@ async fn fills_http_headers_from_keys() {
         kit: false,
         allowances: BTreeMap::new(),
     };
-    let tools = list_tools(&server, &keys(&[("API_KEY", "k")]), None, &own_folder())
-        .await
-        .expect("the tools are listed");
+    let tools = list_tools(
+        &server,
+        &keys(&[("API_KEY", "k")]),
+        None,
+        &own_folder(),
+        std::path::Path::new("farik"),
+    )
+    .await
+    .expect("the tools are listed");
     assert_eq!(tool(&tools, "whoami").description, "Bearer k");
 
     // A key the header names, with no value kept for it, is refused before anything is sent.
     assert_eq!(
-        list_tools(&server, &BTreeMap::new(), None, &own_folder()).await,
+        list_tools(
+            &server,
+            &BTreeMap::new(),
+            None,
+            &own_folder(),
+            std::path::Path::new("farik")
+        )
+        .await,
         Err(ConnectorError::KeyMissing("API_KEY".to_string()))
     );
 }
@@ -220,9 +245,15 @@ async fn fills_http_headers_from_keys() {
 #[tokio::test]
 async fn marks_a_tool_name_claude_code_would_rewrite() {
     let server = stdio_server("marks", STDIO_SERVER, &[]);
-    let tools = list_tools(&server, &BTreeMap::new(), None, &own_folder())
-        .await
-        .expect("the tools are listed");
+    let tools = list_tools(
+        &server,
+        &BTreeMap::new(),
+        None,
+        &own_folder(),
+        std::path::Path::new("farik"),
+    )
+    .await
+    .expect("the tools are listed");
     assert!(tool(&tools, "search").usable);
     assert!(tool(&tools, "env").usable);
     assert!(!tool(&tools, "repo.delete").usable);
@@ -241,7 +272,13 @@ async fn gives_up_after_thirty_seconds() {
     let watched = pid_file.clone();
     let (no_keys, folder) = (BTreeMap::new(), own_folder());
     let (listed, pid) = tokio::join!(
-        list_tools(&server, &no_keys, None, &folder),
+        list_tools(
+            &server,
+            &no_keys,
+            None,
+            &folder,
+            std::path::Path::new("farik")
+        ),
         tokio::task::spawn_blocking(move || {
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
             loop {
@@ -291,6 +328,7 @@ async fn a_servers_own_error_text_is_not_repeated() {
         &keys(&[("API_KEY", "k-secret-value")]),
         None,
         &own_folder(),
+        std::path::Path::new("farik"),
     )
     .await
     .expect_err("the listing fails");
@@ -338,9 +376,15 @@ async fn pin_drift_is_empty_for_the_fixture_server() {
     let mut entry = entry.clone();
     entry.source = farik_core::team::McpServerSource::Kit;
     let server = farik_core::team::custom_server(&entry).expect("a kit entry");
-    let listed = list_tools(&server, &BTreeMap::new(), None, &own_folder())
-        .await
-        .expect("the tools are listed");
+    let listed = list_tools(
+        &server,
+        &BTreeMap::new(),
+        None,
+        &own_folder(),
+        std::path::Path::new("farik"),
+    )
+    .await
+    .expect("the tools are listed");
     // A tool whose name Claude Code would rewrite is not one Farik offers, so no pin names it.
     let usable: Vec<String> = listed
         .iter()

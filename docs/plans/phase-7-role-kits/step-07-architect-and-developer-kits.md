@@ -116,7 +116,7 @@ Files: `kit.rs` (`check_pinned` accepts `FARIK_COMMAND` only when `is_farik_conn
 - `refuses_farik_with_other_arguments` (`kit.rs`): `command: farik` with `args` `[serve]`, `[connector, run]`, `[connector, osv, --x]`, `[connector, other]` and `[]` is each `package_not_pinned` at `/connectors/0/args`. RED: `check_pinned` returns before the args for an accepted command.
 - `refuses_any_other_bare_program` (`kit.rs`): `farik-osv`, `./farik`, `bin/farik`, `farikx`, `FARIK`, `farik.exe` and `farik.cmd` bare (the loader strips those suffixes for runner names) are each `package_not_pinned` at `command` (the absolute `/usr/local/bin/farik-mcp` stays accepted, as `refuses_an_unpinned_package` already pins). A guard; it passes before and after, and the landing review's mutation is to accept any name starting `farik`.
 - `runs_farik_by_its_own_path` (`connectors.rs`, pure): `program("farik", ["connector","osv"], p) == p`; `program("farik", ["serve"], p) == "farik"`; `program("npx", […], p) == "npx"`; `program("/usr/local/bin/farik", ["connector","osv"], p) == "/usr/local/bin/farik"`. RED: a stub `program` returning `command` fails the first. The spawn proof is `osv_server_lists_the_kits_tools` (Task 4).
-- [ ] `feat(runtime): start Farik's own connector by its bare name`
+- [x] `feat(runtime): start Farik's own connector by its bare name`
 
 ### Task 4: The OSV server, and the Architect's third service
 

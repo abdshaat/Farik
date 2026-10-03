@@ -859,7 +859,9 @@ async fn list_with(
         Authority::Keys(keys) => (keys.clone(), None),
         Authority::SignedIn(grant) => (BTreeMap::new(), Some(grant.access_token.clone())),
     };
-    list_tools(server, &keys, bearer.as_ref(), &folder)
+    let farik = crate::connectors::own_program(server)
+        .map_err(|why| Failure::new(REFUSED, why.to_string()))?;
+    list_tools(server, &keys, bearer.as_ref(), &folder, &farik)
         .await
         .map_err(not_listed)
 }
