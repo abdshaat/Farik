@@ -60,7 +60,7 @@ Files: `software_developer/skills/{test-driven-development,debugging,safe-migrat
 
 - `developer_kit_carries_its_skills`: `load_kit(SoftwareDeveloper)`'s skills are those six names in that order, each with its `SKILL.md`. RED: the kit has none.
 
-- [ ] `feat(roles): give the Developer's kit its skills`
+- [x] `feat(roles): give the Developer's kit its skills`
 
 ### Task 2: Context7 for the Developer
 

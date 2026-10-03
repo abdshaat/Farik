@@ -205,6 +205,14 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "setting-performance-budgets",
             "using-architecture-sources",
         ),
+        Role::SoftwareDeveloper => embedded!("software_developer":
+            "test-driven-development",
+            "debugging",
+            "safe-migrations",
+            "testing-per-stack",
+            "answering-a-review",
+            "using-docs-and-the-browser",
+        ),
         _ => Vec::new(),
     }
 }
@@ -1004,6 +1012,30 @@ mod tests {
                 "planning-a-sprint",
                 "running-ceremonies",
                 "writing-escalation-digests",
+            ]
+        );
+        for skill in &kit.skills {
+            assert!(
+                skill.session_files.contains_key("SKILL.md"),
+                "{}",
+                skill.name
+            );
+        }
+    }
+
+    #[test]
+    fn developer_kit_carries_its_skills() {
+        let kit = load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
+        let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "test-driven-development",
+                "debugging",
+                "safe-migrations",
+                "testing-per-stack",
+                "answering-a-review",
+                "using-docs-and-the-browser",
             ]
         );
         for skill in &kit.skills {

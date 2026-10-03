@@ -367,6 +367,12 @@ fn farik_skill_list_shows_levels_and_states() {
         ran.out.lines().collect::<Vec<_>>(),
         [
             "role  implementing-a-contract  in use",
+            "role  test-driven-development  in use",
+            "role  debugging  in use",
+            "role  safe-migrations  in use",
+            "role  testing-per-stack  in use",
+            "role  answering-a-review  in use",
+            "role  using-docs-and-the-browser  in use",
             "team  api-style  in use",
             "agent  notes  review",
         ]
@@ -382,7 +388,7 @@ fn farik_skill_list_shows_levels_and_states() {
         &["--json", "skill", "list", "--agent", "dev-a"],
     );
     let value: serde_json::Value = serde_json::from_str(&json.out).expect("JSON");
-    assert_eq!(value["skills"][2]["state"], "review");
+    assert_eq!(value["skills"][8]["state"], "review");
     // A missing and a replaced state read as the words say.
     std::fs::remove_dir_all(repository.path.join(".farik/skills/api-style")).expect("gone");
     let ran = skill(&repository, &["list"], "", false);
@@ -408,6 +414,12 @@ fn farik_skill_list_shows_levels_and_states() {
         ran.out.lines().collect::<Vec<_>>(),
         [
             "role  implementing-a-contract  in use",
+            "role  test-driven-development  in use",
+            "role  debugging  in use",
+            "role  safe-migrations  in use",
+            "role  testing-per-stack  in use",
+            "role  answering-a-review  in use",
+            "role  using-docs-and-the-browser  in use",
             "team  api-style  replaced",
             "agent  notes  review",
             "agent  api-style  in use",

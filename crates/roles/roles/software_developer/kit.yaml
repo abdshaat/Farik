@@ -1,3 +1,9 @@
 role: software_developer
-skills: []
+skills:
+  - test-driven-development
+  - debugging
+  - safe-migrations
+  - testing-per-stack
+  - answering-a-review
+  - using-docs-and-the-browser
 connectors: []

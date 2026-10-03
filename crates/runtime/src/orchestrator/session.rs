@@ -2271,6 +2271,17 @@ mod tests {
         }
     }
 
+    /// What a Developer's session loads: `own` (the team's and the agent's skills), then the
+    /// Developer's kit, which ships its skills with the binary.
+    fn with_kit(own: &[&str]) -> Vec<String> {
+        let kit = farik_roles::load_kit(farik_core::contract::Role::SoftwareDeveloper)
+            .expect("the Developer's kit");
+        own.iter()
+            .map(ToString::to_string)
+            .chain(kit.skills.into_iter().map(|skill| skill.name))
+            .collect()
+    }
+
     fn skill_names(spec: &crate::session::SessionSpec) -> Vec<&str> {
         spec.skills
             .iter()
@@ -2321,7 +2332,11 @@ mod tests {
             SessionPurpose::Conversation,
             SessionPurpose::Chat,
         ] {
-            assert_eq!(skills(purpose, None), ["api-style"], "{purpose:?}");
+            assert_eq!(
+                skills(purpose, None),
+                with_kit(&["api-style"]),
+                "{purpose:?}"
+            );
         }
         for (purpose, only_tool) in [
             (SessionPurpose::Triage, Some(TRIAGE_TOOL)),
@@ -2364,7 +2379,7 @@ mod tests {
             &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
         )
         .expect("the spec");
-        assert_eq!(skill_names(&spec), ["api-style"]);
+        assert_eq!(skill_names(&spec), with_kit(&["api-style"]));
         assert!(
             spec.system_prompt
                 .contains("### Skill: implementing-a-contract"),
@@ -2489,7 +2504,7 @@ mod tests {
         )
         .expect("the spec");
         let (names, root) = super::skill_registration(deps, &spec);
-        assert_eq!(names, ["api-style"]);
+        assert_eq!(names, with_kit(&["api-style"]));
         let plugin = deps
             .daemon
             .skills_dir()
@@ -2537,7 +2552,7 @@ mod tests {
             &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
         )
         .expect("the spec");
-        assert!(spec.skills.is_empty(), "{:?}", skill_names(&spec));
+        assert_eq!(skill_names(&spec), with_kit(&[]));
     }
 
     #[tokio::test]
@@ -2562,7 +2577,7 @@ mod tests {
         orchestrator.tick().await.expect("the task starts");
         orchestrator.tick().await.expect("the session runs");
         let started = adapter.started();
-        assert_eq!(skill_names(&started[0]), ["api-style"]);
+        assert_eq!(skill_names(&started[0]), with_kit(&["api-style"]));
         let decided = witness.decided();
         assert!(
             decided[0][0].allow,
@@ -2608,7 +2623,7 @@ mod tests {
                 &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
             )
             .expect("the spec");
-            assert_eq!(skill_names(&spec), ["api-style"], "{kind}");
+            assert_eq!(skill_names(&spec), with_kit(&["api-style"]), "{kind}");
         }
     }
 
