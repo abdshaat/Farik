@@ -1,0 +1,54 @@
+# The Architect's kit: five skills and the services it only reads. Context7 signs in (route 1,
+# ADR 0035); Grep needs no account; OSV is Farik's own server, started by `farik connector osv`
+# (ADR 0038). Tool lists are from each service's documentation and a probe on 2026-10-02 (step 07's
+# plan); the live pin test compares them, except OSV's, whose pin is an offline test. A tool a
+# service lists that is not here is never offered (`tool_not_tagged`) until a pin update tags it.
+role: architect
+skills:
+  - designing-apis-and-data
+  - reviewing-dependencies
+  - security-review
+  - setting-performance-budgets
+  - using-architecture-sources
+connectors:
+  - name: context7
+    transport: http
+    url: https://mcp.context7.com/mcp/oauth
+    oauth: { scopes: [profile, email, offline_access] }
+    title: Context7
+    about: "Context7 keeps up-to-date documentation and code examples for thousands of programming libraries."
+    why: "So the Architect checks how a library works today, in the version your project uses, before it writes a decision. It only reads."
+    setup: "Sign in with a free Context7 account and allow Farik to use it. The questions your agent asks about a library go to Context7; the free plan allows about a thousand a month."
+    labels:
+      resolve-library-id: "find a library"
+      query-docs: "read a library's documentation"
+    tools:
+      resolve-library-id: network
+      query-docs: network
+  - name: grep
+    transport: http
+    url: https://mcp.grep.app
+    title: Grep
+    about: "Grep, run by Vercel, searches the code of over a million public projects on GitHub."
+    why: "So the Architect sees how other projects really use a library or solve a problem before it chooses a pattern. It only reads public code."
+    setup: "Nothing to set up: Grep needs no account. What the Architect searches for goes to Grep; it searches public projects only, never your private ones."
+    labels:
+      searchGitHub: "search public code"
+    tools:
+      searchGitHub: network
+  - name: osv
+    transport: stdio
+    command: farik
+    args: [connector, osv]
+    title: OSV
+    about: "OSV is a free, open database of known security flaws in open-source packages, run by Google."
+    why: "So the Architect can check whether a library your project uses, or one it is about to add, has a known flaw, and which version fixes it. It only reads."
+    setup: "Nothing to set up: Farik looks packages up in OSV itself, with no account. Farik sends OSV only the names and versions of the packages it checks."
+    labels:
+      query_package: "check a package for known flaws"
+      query_packages: "check many packages at once"
+      get_vulnerability: "read a known flaw"
+    tools:
+      query_package: network
+      query_packages: network
+      get_vulnerability: network

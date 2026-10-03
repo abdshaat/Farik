@@ -199,6 +199,7 @@ fn apply(
     deps.files
         .write_team(&applied.team)
         .map_err(|e| internal(&e))?;
+    crate::orchestrator::forget_removed_keys(deps, state, &before, &applied.team);
     for agent_id in &applied.retired {
         crate::orchestrator::status_effects(
             deps,
@@ -619,6 +620,109 @@ mod tests {
 
         assert!(applied.is_ok(), "{applied:?}");
         assert!(woken, "the wait ends");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn applying_deletes_a_removed_agents_connector_keys() {
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
+
+        let (harness, folder) = templated("templates-remove-keys", |wire| {
+            wire["agents"][3]["mcp_servers"] = json!([{
+                "name": "github", "source": "custom", "transport": "stdio",
+                "command": "github-mcp", "credential_keys": ["API_KEY"],
+                "tools": { "search": "network" }
+            }]);
+        });
+        saved(&folder, &pair());
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        assert!(harness.daemon.set_connector_secrets(store.clone()));
+        let at = harness
+            .daemon
+            .secret_at(harness.project.deps.files.root(), "kai", "github")
+            .expect("an address");
+        let entry = ConnectorEntry {
+            spec_sha256: "h".to_string(),
+            keys: [(
+                "API_KEY".to_string(),
+                crate::claude::Secret::new("k".to_string()),
+            )]
+            .into(),
+            oauth: None,
+        };
+        store.save(&at, &entry).expect("kept");
+        call(
+            &harness.daemon,
+            "template.apply",
+            &json!({ "slug": "pair", "digest": digest(&harness, "pair") }),
+            "templateAppliedResult",
+        );
+        // Kai never worked, so the template removes Kai, and Kai's keys with Kai.
+        assert_eq!(store.load(&at), Ok(None));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn applying_keeps_the_pinned_skills_of_who_stays() {
+        use crate::daemon::team::tests::save_a_skill;
+
+        let (harness, folder) = templated("templates-apply-skills", |_| {});
+        saved(&folder, &pair());
+        let shown = preview(&harness, "pair");
+        let kept = shown["kept"][0]
+            .as_str()
+            .expect("an agent stays")
+            .to_string();
+        let removed = shown["removed"][0]
+            .as_str()
+            .expect("an agent goes")
+            .to_string();
+        save_a_skill(&harness, None, "team-style", "");
+        save_a_skill(&harness, Some(&kept), "kept-style", "");
+        save_a_skill(&harness, Some(&removed), "gone-style", "");
+        let pins_of = |id: &str| {
+            let team = team_file(&harness);
+            team["agents"]
+                .as_array()
+                .expect("agents")
+                .iter()
+                .find(|agent| agent["id"] == id)
+                .map(|agent| agent["skills"].clone())
+        };
+        let (team_pins, kept_pins) = (team_file(&harness)["skills"].clone(), pins_of(&kept));
+        assert_eq!(team_pins[0]["name"], "team-style");
+        call(
+            &harness.daemon,
+            "template.apply",
+            &json!({ "slug": "pair", "digest": digest(&harness, "pair") }),
+            "templateAppliedResult",
+        );
+        assert_eq!(
+            team_file(&harness)["skills"],
+            team_pins,
+            "the team's pins stay"
+        );
+        assert_eq!(
+            pins_of(&kept),
+            kept_pins,
+            "and so do those of an agent that stays"
+        );
+        assert_eq!(
+            pins_of(&removed),
+            None,
+            "an agent that goes takes its pins with it"
+        );
+        // Its folder is the user's file and stays, unpinned and unused.
+        assert!(
+            harness
+                .project
+                .repo
+                .path
+                .join(".farik/agents")
+                .join(&removed)
+                .join("skills/gone-style/SKILL.md")
+                .exists()
+        );
     }
 
     #[test]

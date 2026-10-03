@@ -581,7 +581,7 @@ const SETUP_METHODS: [&str; 5] = [
 ];
 /// The methods whose params hold a secret, whose refusal never quotes them: the schema's errors
 /// quote the whole frame.
-const SECRET_METHODS: [&str; 1] = ["account.connect"];
+const SECRET_METHODS: [&str; 3] = ["account.connect", "connector.connect", "connector.tools"];
 
 /// The response to one text frame. A `subscribe` sets `sent` to its `from_seq`, and an
 /// `unsubscribe` clears it.
@@ -798,7 +798,10 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         }
         "task.screenshot" => screenshot(deps, params),
         "team.get" | "team.propose" | "team.validate" | "models.list" | "project.scan"
-        | "settings.defaults" => team::query(deps, name, params),
+        | "settings.defaults" | "skills.list" | "skill.get" => {
+            team::query(state, deps, name, params)
+        }
+        "allowances.list" => board::allowances(state, deps),
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
         name if templates::QUERIES.contains(&name) => templates::query(state, deps, name, params),
         _ => gates::query(deps, name, params),
@@ -1857,6 +1860,7 @@ mod tests {
             git: daemon.project.repo.adapter(),
             clock: Arc::clone(&deps.clock),
             ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
         })));
         let seqs: Vec<u64> = (0..3).map(|_| paused_through(&log)).collect();
         assert_eq!(seqs, [1, 2, 3]);
@@ -1896,6 +1900,7 @@ mod tests {
             git: daemon.project.repo.adapter(),
             clock: Arc::clone(&deps.clock),
             ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
         })));
         let (handle, secret) = on_a_socket(&state, &daemon.project.repo.path).await;
         let mut socket = open(handle.info.port, &secret).await;

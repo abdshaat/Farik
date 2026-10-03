@@ -18,21 +18,30 @@ pub(crate) struct Waiting {
     pub(crate) command: String,
     /// Whether it is a question, which is printed on two lines.
     question: bool,
+    /// A connector call's whole input, which the human is to see before allowing it.
+    input: Option<String>,
 }
 
 impl Waiting {
     /// The lines a person reads.
     pub(crate) fn lines(&self) -> Vec<String> {
-        if self.question {
+        let mut lines = if self.question {
             vec![self.what.clone(), format!("  {}", self.command)]
         } else {
             vec![format!("{} {}: {}", self.task_id, self.what, self.command)]
-        }
+        };
+        lines.extend(self.input.iter().map(|input| format!("  input: {input}")));
+        lines
     }
 
     /// The same, as JSON.
     pub(crate) fn json(&self) -> Value {
-        json!({ "task_id": self.task_id, "what": self.what, "command": self.command })
+        let mut item =
+            json!({ "task_id": self.task_id, "what": self.what, "command": self.command });
+        if let Some(input) = &self.input {
+            item["input"] = json!(input);
+        }
+        item
     }
 }
 
@@ -82,6 +91,13 @@ pub(crate) fn waiting(
                     "may need your acceptance".to_string(),
                     format!("farik accept {id} --message <your review>"),
                 ),
+                WaitingKind::ToolApproval => {
+                    let seq = item.approval.as_ref().map_or(0, |ask| ask.approval);
+                    (
+                        format!("waits: {}", item.line),
+                        format!("farik tool approve {seq}, or farik tool refuse {seq}"),
+                    )
+                }
                 WaitingKind::Integration => (
                     "waits for you to integrate it".to_string(),
                     format!("farik integrate {id}"),
@@ -92,6 +108,7 @@ pub(crate) fn waiting(
                 what,
                 command,
                 question: item.kind == WaitingKind::Question,
+                input: item.approval.as_ref().map(|ask| ask.input.clone()),
             }
         })
         .collect())

@@ -142,3 +142,12 @@
 	clip-path: inset(50%);
 	white-space: nowrap;
 }
+
+.allowances {
+	display: flex;
+	flex-direction: column;
+	gap: var(--farik-space-1);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}

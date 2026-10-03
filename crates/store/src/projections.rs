@@ -57,8 +57,9 @@ pub struct TaskProjection {
     /// set by its move into `accepted`, cleared by `task.integrated` (5.14). Never set for an
     /// epic, whose children carry the branches.
     pub awaiting_integration: bool,
-    /// Whether a question asked about the contract is still unanswered (5.7): a `question.asked`
-    /// counts one up and a `question.answered` one down.
+    /// Whether a question asked about the contract is still unanswered (5.7), or a connector's
+    /// call waits for the human to allow it (ADR 0031): a `question.asked` or a
+    /// `tool_approval.requested` counts one up, and its answer or decision one down.
     pub waiting_on_human: bool,
     /// Whether the contract waits for the human's approval (5.16 item 2): set by an
     /// `escalation.raised` with reason `approval` or `risk_gate`, cleared by its next move.
@@ -439,7 +440,8 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                  (SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_records \
                                   WHERE cost_records.task_id = task_projections.task_id), \
                                  assignee_id, reviewer_id, iteration, awaiting_integration, \
-                                 open_questions > 0, awaiting_approval, verifications, \
+                                 (open_questions > 0 OR open_approvals > 0), \
+                                 awaiting_approval, verifications, \
                                  rejections, interventions, sprint, \
                                  left_for_the_backlog \
                                  FROM task_projections";
@@ -579,6 +581,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
 }
 
 /// Applies one event to the projection tables, leaving the cursor to the caller.
+#[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
 fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), StoreError> {
     let seq = i64::try_from(event.envelope.seq).map_err(|_| StoreError::Sqlite {
         detail: format!(
@@ -637,7 +640,10 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         ),
         EventBody::QuestionAsked(_)
         | EventBody::QuestionAnswered(_)
-        | EventBody::EscalationRaised(_) => apply_waiting(transaction, &id, &event.body, seq),
+        | EventBody::EscalationRaised(_)
+        | EventBody::ToolApprovalRequested(_)
+        | EventBody::ToolApprovalGranted(_)
+        | EventBody::ToolApprovalRefused(_) => apply_waiting(transaction, &id, &event.body, seq),
         EventBody::DriftDetected(_)
         | EventBody::PullRequestOpened(_)
         | EventBody::ProjectScanned(_)
@@ -679,7 +685,13 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::PreviewStarted(_)
         | EventBody::PreviewStopped(_)
         | EventBody::PageChecked(_)
-        | EventBody::ChatMessagePosted(_) => Ok(()),
+        | EventBody::ChatMessagePosted(_)
+        | EventBody::ConnectorConnected(_)
+        | EventBody::ConnectorDisconnected(_)
+        | EventBody::SkillAdded(_)
+        | EventBody::SkillChanged(_)
+        | EventBody::SkillRemoved(_)
+        | EventBody::SkillConfirmed(_) => Ok(()),
     }
 }
 
@@ -728,8 +740,8 @@ fn apply_move(
     )
 }
 
-/// The two columns that say what the board waits on the human for: an open question (5.7) and an
-/// approval (5.16 item 2).
+/// The columns that say what the board waits on the human for: an open question (5.7), an open
+/// approval of a connector's call (ADR 0031), and an approval of a contract (5.16 item 2).
 fn apply_waiting(
     transaction: &Transaction<'_>,
     id: &str,
@@ -746,6 +758,19 @@ fn apply_waiting(
         EventBody::QuestionAnswered(_) => update(
             transaction,
             "UPDATE task_projections SET open_questions = max(0, open_questions - 1),
+                 updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::ToolApprovalRequested(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_approvals = open_approvals + 1, updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::ToolApprovalGranted(_) | EventBody::ToolApprovalRefused(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_approvals = max(0, open_approvals - 1),
                  updated_seq = ?2
              WHERE task_id = ?1",
             (id, seq),
@@ -1335,7 +1360,7 @@ mod tests {
         );
         assert_eq!(
             migrations::known_versions(),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
         );
     }
 

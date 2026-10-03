@@ -14,7 +14,8 @@ pub use farik_core::contract::{TaskId, ValidationError};
 pub use crate::generated::event::{
     AgentSleptBody, AgentUpdatedBody, AgentUpdatedBodyStatus, BudgetExhaustedBody,
     BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, ChatMessagePostedBody, CheckTheme,
-    CheckWidth, ConnectorTag as ConnectorTagWire, ContractEvaluatedBody, ContractEvaluatedBodyGate,
+    CheckWidth, ConnectorConnectedBody, ConnectorDisconnectedBody,
+    ConnectorTag as ConnectorTagWire, ContractEvaluatedBody, ContractEvaluatedBodyGate,
     ContractJudgedBody, ContractLockedBody, ContractSummary, ContractSummaryKind,
     ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody,
     ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose,
@@ -27,11 +28,12 @@ pub use crate::generated::event::{
     ProposedRequest, PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody,
     QuestionChoice, ReasonBody, RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody,
     ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
-    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody,
-    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
-    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
-    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
-    TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SkillPinnedBody,
+    SkillRemovedBody, SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody,
+    SprintStartedBody, TaskCreatedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
+    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy,
+    TeamPausedBodyReason, TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody,
+    ToolApprovalRequestedBody, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
     TransitionRefusedBody, TransitionRefusedBodyRefusal, Violation,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
@@ -149,6 +151,16 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::PreviewStarted => "previewStartedBody",
         EventKind::PageChecked => "pageCheckedBody",
         EventKind::ChatMessagePosted => "chatMessagePostedBody",
+        EventKind::ConnectorConnected => "connectorConnectedBody",
+        EventKind::ConnectorDisconnected => "connectorDisconnectedBody",
+        EventKind::ToolApprovalRequested => "toolApprovalRequestedBody",
+        EventKind::ToolApprovalGranted | EventKind::ToolApprovalRefused => {
+            "toolApprovalDecidedBody"
+        }
+        EventKind::SkillAdded | EventKind::SkillChanged | EventKind::SkillConfirmed => {
+            "skillPinnedBody"
+        }
+        EventKind::SkillRemoved => "skillRemovedBody",
     }
 }
 
@@ -186,6 +198,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::PreviewStarted
             | EventKind::PreviewStopped
             | EventKind::PageChecked
+            | EventKind::ToolApprovalRequested
+            | EventKind::ToolApprovalGranted
+            | EventKind::ToolApprovalRefused
     )
 }
 
@@ -201,7 +216,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// `design_plan.` kinds name no one in the body: their envelope names the agent and the session.
 /// Nor do the five kinds of step 12: `design_review.recorded` and `page.checked`, whose envelope
 /// names the Designer and the session, and `preview.prepared`, `preview.started` and
-/// `preview.stopped`, which record what Farik itself did with the task's preview.
+/// `preview.stopped`, which record what Farik itself did with the task's preview. Nor the two
+/// `connector.` kinds: only the human connects a server, and `agent` names whose it is, not who
+/// acted.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -255,13 +272,22 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::PreviewPrepared(_)
         | EventBody::PreviewStarted(_)
         | EventBody::PreviewStopped(_)
-        | EventBody::PageChecked(_) => None,
+        | EventBody::PageChecked(_)
+        | EventBody::ConnectorConnected(_)
+        | EventBody::ConnectorDisconnected(_)
+        | EventBody::ToolApprovalRequested(_)
+        | EventBody::ToolApprovalGranted(_)
+        | EventBody::ToolApprovalRefused(_)
+        | EventBody::SkillAdded(_)
+        | EventBody::SkillChanged(_)
+        | EventBody::SkillRemoved(_)
+        | EventBody::SkillConfirmed(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 52] = [
+pub const EVERY_KIND: [EventKind; 61] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -314,6 +340,15 @@ pub const EVERY_KIND: [EventKind; 52] = [
     EventKind::PreviewStopped,
     EventKind::PageChecked,
     EventKind::ChatMessagePosted,
+    EventKind::ConnectorConnected,
+    EventKind::ConnectorDisconnected,
+    EventKind::ToolApprovalRequested,
+    EventKind::ToolApprovalGranted,
+    EventKind::ToolApprovalRefused,
+    EventKind::SkillAdded,
+    EventKind::SkillChanged,
+    EventKind::SkillRemoved,
+    EventKind::SkillConfirmed,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -509,6 +544,33 @@ pub enum EventBody {
     /// The user or an agent said something in their one-to-one chat.
     #[serde(rename = "chat_message.posted")]
     ChatMessagePosted(ChatMessagePostedBody),
+    /// The human gave an agent a custom MCP server, or connected it again.
+    #[serde(rename = "connector.connected")]
+    ConnectorConnected(ConnectorConnectedBody),
+    /// The human took a custom MCP server away from an agent.
+    #[serde(rename = "connector.disconnected")]
+    ConnectorDisconnected(ConnectorDisconnectedBody),
+    /// A connector's `external_effect` call waits for the human; its seq is the approval's id.
+    #[serde(rename = "tool_approval.requested")]
+    ToolApprovalRequested(ToolApprovalRequestedBody),
+    /// The human allowed one call an agent asked about.
+    #[serde(rename = "tool_approval.granted")]
+    ToolApprovalGranted(ToolApprovalDecidedBody),
+    /// The human refused one call an agent asked about.
+    #[serde(rename = "tool_approval.refused")]
+    ToolApprovalRefused(ToolApprovalDecidedBody),
+    /// The human added a skill for the team or one agent.
+    #[serde(rename = "skill.added")]
+    SkillAdded(SkillPinnedBody),
+    /// The human saved a changed version of a skill.
+    #[serde(rename = "skill.changed")]
+    SkillChanged(SkillPinnedBody),
+    /// The human removed a skill.
+    #[serde(rename = "skill.removed")]
+    SkillRemoved(SkillRemovedBody),
+    /// The human confirmed a skill's folder on this computer.
+    #[serde(rename = "skill.confirmed")]
+    SkillConfirmed(SkillPinnedBody),
 }
 
 impl EventBody {
@@ -568,6 +630,15 @@ impl EventBody {
             Self::PreviewStopped(_) => EventKind::PreviewStopped,
             Self::PageChecked(_) => EventKind::PageChecked,
             Self::ChatMessagePosted(_) => EventKind::ChatMessagePosted,
+            Self::ConnectorConnected(_) => EventKind::ConnectorConnected,
+            Self::ConnectorDisconnected(_) => EventKind::ConnectorDisconnected,
+            Self::ToolApprovalRequested(_) => EventKind::ToolApprovalRequested,
+            Self::ToolApprovalGranted(_) => EventKind::ToolApprovalGranted,
+            Self::ToolApprovalRefused(_) => EventKind::ToolApprovalRefused,
+            Self::SkillAdded(_) => EventKind::SkillAdded,
+            Self::SkillChanged(_) => EventKind::SkillChanged,
+            Self::SkillRemoved(_) => EventKind::SkillRemoved,
+            Self::SkillConfirmed(_) => EventKind::SkillConfirmed,
         }
     }
 }
@@ -892,10 +963,20 @@ mod tests {
         for kind in EVERY_KIND {
             for other in EVERY_KIND {
                 // team.paused and team.resumed share one body, so each carries the other's, and so
-                // do design_plan.approved, design_plan.returned and preview.stopped; no others do,
-                // and a fixture that made one equal must not hide it.
-                let shared: [&[EventKind]; 2] = [
+                // do design_plan.approved, design_plan.returned and preview.stopped, and
+                // tool_approval.granted and tool_approval.refused; no others do, and a
+                // fixture that made one equal must not hide it.
+                let shared: [&[EventKind]; 4] = [
+                    &[
+                        EventKind::SkillAdded,
+                        EventKind::SkillChanged,
+                        EventKind::SkillConfirmed,
+                    ],
                     &[EventKind::TeamPaused, EventKind::TeamResumed],
+                    &[
+                        EventKind::ToolApprovalGranted,
+                        EventKind::ToolApprovalRefused,
+                    ],
                     &[
                         EventKind::DesignPlanApproved,
                         EventKind::DesignPlanReturned,
@@ -1445,7 +1526,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 52);
+        assert_eq!(EVERY_KIND.len(), 61);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

@@ -18,11 +18,24 @@ use crate::generated::role::{FarikRole, FarikRoleModelEffort};
 mod connectors;
 /// Types generated from `docs/schemas/role.schema.json`.
 pub mod generated;
+/// A role's kit: skills and services.
+mod kit;
 /// Which role reviews a task (D7).
 mod reviewer;
+/// Checking a skill a user adds.
+mod skill_check;
 
 pub use connectors::{ConnectorDefinition, builtin_connector};
+pub use kit::{
+    FARIK_COMMAND, FARIK_CONNECTORS, Kit, KitAllowance, KitConnector, KitError, PinDrift,
+    SetupCopy, is_farik_connector, load_kit, parse_fixture_kit, parse_kit, pin_drift,
+    quoted_labels, shipped_skill_names,
+};
 pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
+pub use skill_check::{
+    CheckedSkill, SHIPPED_ROLES, SkillRefusal, check_skill, core_skill_names,
+    declared_name_and_description, skill_name_ok,
+};
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/role.schema.json");
 
@@ -47,6 +60,10 @@ pub struct Skill {
     pub description: String,
     /// The procedure: everything after the frontmatter's closing line.
     pub body: String,
+    /// The size of the whole `SKILL.md`, frontmatter included, in bytes.
+    pub bytes: usize,
+    /// The whole `SKILL.md`, as shipped.
+    pub text: String,
 }
 
 /// A role as Farik ships it (`docs/SPEC.md` section 6).
@@ -300,6 +317,8 @@ fn parse_skill(name: &str, text: &str) -> Result<Skill, String> {
         name: front.name,
         description: front.description,
         body: body.to_string(),
+        bytes: text.len(),
+        text: text.to_string(),
     })
 }
 
@@ -637,6 +656,26 @@ mod tests {
                 let front: Value = serde_saphyr::from_str_with_options(front, yaml_options())
                     .expect("YAML frontmatter");
                 assert_eq!(front["name"], Value::String(skill.to_string()));
+            }
+        }
+    }
+
+    #[test]
+    fn counts_each_shipped_skills_bytes() {
+        let roles = Path::new(env!("CARGO_MANIFEST_DIR")).join("roles");
+        for role in [Role::ProductManager, Role::UiUxDesigner] {
+            for skill in loaded(role).skills {
+                let file = roles
+                    .join(role.to_string())
+                    .join("skills")
+                    .join(&skill.name)
+                    .join("SKILL.md");
+                assert_eq!(
+                    skill.bytes as u64,
+                    std::fs::metadata(&file).expect("a SKILL.md").len(),
+                    "{}",
+                    file.display()
+                );
             }
         }
     }

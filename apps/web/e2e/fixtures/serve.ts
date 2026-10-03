@@ -17,6 +17,8 @@ import { tmpdir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
+import { test } from "@playwright/test";
+import { FOLDERS } from "./cleanup-reporter.ts";
 
 // Both built by `cargo xtask check --integration`: farik by its cargo tests, the server by its build step.
 const target = resolve(import.meta.dirname, "../../../../target/debug");
@@ -133,6 +135,7 @@ export async function startServe(o: {
 	stop(): Promise<void>;
 }> {
 	const project = mkdtempSync(join(tmpdir(), "farik-e2e-project-"));
+	const made = [project, env.XDG_CONFIG_HOME];
 	const args: string[] = [];
 	const docker = o.project !== false && o.team?.endsWith("-designer") === true;
 	let serveEnv: NodeJS.ProcessEnv = env;
@@ -143,9 +146,11 @@ export async function startServe(o: {
 			XDG_CONFIG_HOME: _config,
 			...rest
 		} = process.env;
+		const home = o.home ?? mkdtempSync(join(tmpdir(), "farik-e2e-home-"));
+		if (!o.home) made.push(home);
 		serveEnv = {
 			...rest,
-			HOME: o.home ?? mkdtempSync(join(tmpdir(), "farik-e2e-home-")),
+			HOME: home,
 			PATH: `${resolve(import.meta.dirname, "fake-bin")}:${process.env.PATH}`,
 		};
 		args.push("--no-keychain");
@@ -180,6 +185,9 @@ export async function startServe(o: {
 			await exited;
 			clearTimeout(settled);
 			if (docker) removeContainers(project);
+			// The folders go once the server has exited, and only if the test passed: the
+			// reporter reads this, and a failed test keeps them for its event log.
+			await test.info().attach(FOLDERS, { body: JSON.stringify(made) });
 		},
 	};
 }

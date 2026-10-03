@@ -14,7 +14,7 @@ use farik_core::governor::permissions::PermissionTier;
 use farik_core::team::Team;
 use farik_protocol::clock::IdSource;
 use farik_protocol::command::{Command, CommandReply, ReplyKind};
-use farik_roles::RoleError;
+use farik_roles::{KitError, RoleError};
 use farik_store::files::FilesError;
 use farik_store::{GitError, StoreError};
 
@@ -34,7 +34,7 @@ mod design;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod human;
-pub(crate) use human::{status_effects, update_agent_held};
+pub(crate) use human::{forget_removed_keys, status_effects, update_agent_held};
 mod integrate;
 mod messages;
 mod recover;
@@ -81,6 +81,8 @@ pub enum OrchestratorError {
     Sandbox(SandboxError),
     /// A role could not be loaded.
     Role(RoleError),
+    /// A role's kit could not be loaded.
+    Kit(KitError),
     /// A transition could not be judged or recorded.
     Transition(TransitionError),
     /// A cost could not be recorded, or a budget read.
@@ -109,6 +111,7 @@ impl fmt::Display for OrchestratorError {
             Self::Runtime(error) => write!(formatter, "the runtime failed: {error}"),
             Self::Sandbox(error) => write!(formatter, "the sandbox failed: {error}"),
             Self::Role(error) => write!(formatter, "the role failed: {error}"),
+            Self::Kit(error) => write!(formatter, "the kit failed: {error}"),
             Self::Transition(error) => write!(formatter, "the transition failed: {error}"),
             Self::Cost(error) => write!(formatter, "the cost failed: {error}"),
             Self::Refused { reason } => write!(formatter, "refused: {reason}"),
@@ -152,6 +155,12 @@ impl From<RuntimeError> for OrchestratorError {
 impl From<SandboxError> for OrchestratorError {
     fn from(error: SandboxError) -> Self {
         Self::Sandbox(error)
+    }
+}
+
+impl From<KitError> for OrchestratorError {
+    fn from(error: KitError) -> Self {
+        Self::Kit(error)
     }
 }
 

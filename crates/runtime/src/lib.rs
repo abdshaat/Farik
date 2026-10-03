@@ -1,6 +1,8 @@
 //! Farik's agent runtime: a session is started, read, talked to, and stopped through one trait
 //! (`docs/SPEC.md` section 8.2), whatever program or recording is behind it.
 
+/// A kit connector's allowances: the period, the count and what a connect may set.
+pub mod allowances;
 /// The team's ceremonies: the facts each is given.
 pub mod ceremonies;
 /// The team's channel: messages, and whom they mention.
@@ -13,6 +15,9 @@ pub mod claude;
 /// What the first-run wizard finds on the computer, and the sandbox image it builds.
 #[cfg(unix)]
 pub mod computer;
+/// A custom connector's keys, per agent: the keychain, or a private file.
+#[cfg(unix)]
+pub mod connectors;
 /// What a session cost, and what each budget has left.
 pub mod cost;
 /// Where the model credential is kept: the environment, the keychain, or a private file.
@@ -27,11 +32,20 @@ pub mod daemon;
 pub mod exec;
 /// The forge pull requests live on, driven through the `gh` program.
 pub mod forge;
+/// An OAuth authorization server and a protected MCP server for the sign-in tests.
+#[cfg(all(test, unix))]
+#[path = "../tests/support/oauth_fixture.rs"]
+mod oauth_fixture;
 /// Farik running its team: the board read, the next thing on it done, one session at a time.
 #[cfg(unix)]
 pub mod orchestrator;
+/// Farik's own server over the open vulnerability database (ADR 0038).
+pub mod osv;
 /// Whether the human has paused the team.
 pub mod pause;
+#[cfg(all(test, unix))]
+#[path = "../tests/support/ports.rs"]
+mod ports;
 /// The project's preview, and the confined browser beside it.
 pub mod preview;
 /// A session's system prompt, assembled in one fixed order.
@@ -44,6 +58,12 @@ pub mod sandbox;
 pub mod session;
 /// When each session started and how it ended, in the log.
 pub mod sessions;
+/// Signing in to a connector's service: the grant, and its refresh and revocation.
+#[cfg(unix)]
+pub mod sign_in;
+/// Skills an agent is given beyond its role's: reading, confirming, loading.
+#[cfg(unix)]
+pub mod skills;
 /// An agent asleep until its model provider's limit resets.
 pub mod sleep;
 /// Starting and ending a sprint.
@@ -109,4 +129,6 @@ pub use session::{
 pub use stream::StreamParser;
 #[cfg(unix)]
 pub use templates::{TemplateError, TemplateListing, Templates};
-pub use tools::{FarikTool, ToolContext, ToolDeps, ToolError, call_tool, tool_descriptors};
+pub use tools::{
+    FarikTool, KitSource, ToolContext, ToolDeps, ToolError, call_tool, tool_descriptors,
+};

@@ -55,6 +55,11 @@ impl Harness {
         });
         let project = TestProject::new(name, &team);
         let daemon = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
+        // The user's state folder, beside the repository and outside it, as `~/.config/farik` is.
+        daemon.set_state_dir(std::path::PathBuf::from(format!(
+            "{}-state",
+            project.repo.path.display()
+        )));
         let gh = FakeGh::new(name);
         Self {
             project,
@@ -156,6 +161,7 @@ impl Harness {
             git: self.project.repo.adapter(),
             clock: Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
             ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
         });
         tools.transitions.set_previews(Arc::clone(&self.previews));
         Orchestrator::new(OrchestratorDeps {
@@ -725,11 +731,29 @@ pub(crate) struct ExecutorWitness {
     tools: Mutex<Vec<Vec<String>>>,
     listed: Mutex<Vec<Vec<String>>>,
     tiers: Mutex<Vec<Vec<farik_core::governor::permissions::PermissionTier>>>,
+    connectors: Mutex<Vec<Vec<String>>>,
+    probes: Vec<String>,
+    /// What a probe calls its tool with, until a session's prompt tells it better.
+    input: serde_json::Value,
+    /// Whether a probe takes its input from the `tool_input` block of the session's prompt, as an
+    /// agent that has only that message to go on does.
+    replay: bool,
+    decided: Mutex<Vec<Vec<crate::daemon::HookDecision>>>,
 }
 
 impl ExecutorWitness {
     /// A witness of `inner`'s sessions as `daemon` registered them.
     pub(crate) fn new(inner: Arc<dyn RuntimeAdapter>, daemon: Arc<DaemonState>) -> Self {
+        Self::probing(inner, daemon, &[])
+    }
+
+    /// A witness that also asks the hook, as each session starts, about a call of each tool
+    /// `probes` names.
+    pub(crate) fn probing(
+        inner: Arc<dyn RuntimeAdapter>,
+        daemon: Arc<DaemonState>,
+        probes: &[&str],
+    ) -> Self {
         Self {
             inner,
             daemon,
@@ -737,7 +761,41 @@ impl ExecutorWitness {
             tools: Mutex::new(Vec::new()),
             listed: Mutex::new(Vec::new()),
             tiers: Mutex::new(Vec::new()),
+            connectors: Mutex::new(Vec::new()),
+            probes: probes.iter().map(ToString::to_string).collect(),
+            input: serde_json::json!({ "url": "https://example.com/" }),
+            replay: false,
+            decided: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The same, calling each probe with `input`.
+    pub(crate) fn with_input(mut self, input: serde_json::Value) -> Self {
+        self.input = input;
+        self
+    }
+
+    /// The same, but a session whose prompt holds a `tool_input` block calls each probe with
+    /// what that block says, and nothing else.
+    pub(crate) fn replaying(mut self) -> Self {
+        self.replay = true;
+        self
+    }
+
+    /// For each session started, in order, the servers of the connectors its registration holds.
+    pub(crate) fn given_connectors(&self) -> Vec<Vec<String>> {
+        self.connectors
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
+    }
+
+    /// For each session started, in order, the hook's answer to each probe.
+    pub(crate) fn decided(&self) -> Vec<Vec<crate::daemon::HookDecision>> {
+        self.decided
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
     }
 
     /// For each session started, in order, the tiers its registration holds it to.
@@ -779,6 +837,48 @@ impl RuntimeAdapter for ExecutorWitness {
             .tool_context(&spec.session_id)
             .expect("the session is registered before it starts");
         let executor = context.executor.is_some();
+        self.connectors
+            .lock()
+            .expect("no test panics holding it")
+            .push(
+                context
+                    .connectors
+                    .iter()
+                    .map(|connector| connector.server.clone())
+                    .collect(),
+            );
+        let replayed = self
+            .replay
+            .then(|| {
+                let (_, after) = spec
+                    .system_prompt
+                    .split_once("<untrusted source=\"tool_input\">\n")?;
+                let (block, _) = after.split_once("\n</untrusted>")?;
+                serde_json::from_str(block).ok()
+            })
+            .flatten();
+        let input = replayed.unwrap_or_else(|| self.input.clone());
+        let decided = self
+            .probes
+            .iter()
+            .map(|tool| {
+                let request = crate::daemon::HookRequest {
+                    session_id: spec.session_id.clone(),
+                    cwd: spec.cwd.clone(),
+                    hook_event_name: "PreToolUse".to_string(),
+                    tool_name: tool.clone(),
+                    tool_input: input.clone(),
+                    tool_use_id: Some(format!("probe-{tool}")),
+                    tool_response: None,
+                    duration_ms: None,
+                };
+                crate::daemon::decide_pre_tool_use(&request, &self.daemon)
+            })
+            .collect();
+        self.decided
+            .lock()
+            .expect("no test panics holding it")
+            .push(decided);
         self.tiers
             .lock()
             .expect("no test panics holding it")

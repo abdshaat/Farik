@@ -1,6 +1,6 @@
 # The DevOps Engineer
 
-Status: approved by the founder on 2026-09-30, in conversation. It is the design input to phase 7 steps 09 and 10 (phase 9 steps 06 and 07 until ADR 0029). ADR 0027 records the decision, and spec 0.32 (section 6.9) carries its rules.
+Status: approved by the founder on 2026-09-30, in conversation. It is the design input to phase 7 steps 11 and 12 (phase 9 steps 06 and 07 until ADR 0029, phase 7 steps 09 and 10 until revision 27). ADR 0027 records the decision, and spec 0.32 (section 6.9) carries its rules.
 
 ## Why
 
@@ -35,7 +35,7 @@ Skills, first cut: `deployment-checklists`, `reading-production-logs`, `incident
 
 ## Planned deploys
 
-A deployment is a deploy task, a contract whose `change` is `deploy` (a value step 06 adds to the field), planned into a sprint like any other. Starting the sprint is the human's approval of its deploys.
+A deployment is a deploy task, a contract whose `change` is `deploy` (a value phase 7 step 11 adds to the field), planned into a sprint like any other. Starting the sprint is the human's approval of its deploys.
 
 The deploy task depends on the tasks whose work it ships. It is assigned once they are all integrated. Its session may call `farik_deploy`, which takes no version: Farik deploys the commit the default branch holds after the last of those integrations, to the service the connector names.
 
@@ -114,15 +114,15 @@ On the hosted service, Farik runs everything in the cloud, the watching included
 
 ## Steps
 
-- Phase 7 step 09, the role and its flow. It covers:
+- Phase 7 step 11, the role and its flow. It covers:
   - the role, its rules and its mockups;
   - the deploy task;
   - the three Farik tools, over a fake platform;
   - the watch tick;
   - the incident flow and its events;
   - the pages: the DevOps Engineer's card, incidents on Today, and a project's production settings (health URL, settling period, error threshold).
-- Phase 7 step 10, the kit: its skills and its four connectors, each chosen, pinned, tagged, and with its setup copy checked in the web app.
-- Phase 7 step 11, the kit check, gains a DevOps task: a planned deploy of a test project, then a deliberately broken deploy. The check sees the restart, the rollback, the fix, the review and the redeploy.
+- Phase 7 step 12, the kit: its skills and its four connectors, each chosen, pinned, tagged, and with its setup copy checked in the web app.
+- Phase 7 step 13, the kit check, gains a DevOps task: a planned deploy of a test project, then a deliberately broken deploy. The check sees the restart, the rollback, the fix, the review and the redeploy.
 
 ## Tests
 

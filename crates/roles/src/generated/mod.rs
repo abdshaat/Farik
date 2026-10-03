@@ -11,3 +11,14 @@ pub mod role {
         derives = [PartialEq],
     );
 }
+
+/// Types generated from `docs/schemas/kit.schema.json`; a kit file is validated against the schema
+/// before it is deserialised into these.
+#[allow(clippy::all, clippy::pedantic, missing_docs)]
+pub mod kit {
+    typify::import_types!(
+        schema = "../../docs/schemas/kit.schema.json",
+        struct_builder = false,
+        derives = [PartialEq],
+    );
+}

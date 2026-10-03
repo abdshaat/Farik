@@ -144,7 +144,7 @@ pub fn activity(
             .iter()
             .find(|item| item.agent_id.as_deref() == Some(id))
         {
-            let line = format!("Waiting on you: {}", item.line);
+            let line = waiting_line(team, id, item);
             all.push(one(
                 ActivityState::Waiting,
                 line,
@@ -165,6 +165,19 @@ pub fn activity(
         ));
     }
     Ok(all)
+}
+
+/// What an agent waiting on the human is doing, in a sentence: for a connector call, the
+/// approved board's question, which the dialog answers.
+fn waiting_line(team: &Team, agent: &str, item: &crate::waiting::Waiting) -> String {
+    match &item.approval {
+        Some(ask) => format!(
+            "Waiting on you: may {} use {}?",
+            name_of(team, agent),
+            ask.server
+        ),
+        None => format!("Waiting on you: {}", item.line),
+    }
 }
 
 /// The task in progress whose latest design plan `agent` proposed and nobody decided yet, with
@@ -382,6 +395,40 @@ mod tests {
             { "id": "theo", "display_name": "Theo", "role": "software_developer", "status": "paused" },
         ]);
         validate_team(&wire).expect("the fixture is a team")
+    }
+
+    #[test]
+    fn an_agent_waiting_on_a_connector_call_is_asked_about_in_one_line() {
+        let board = Board::new("activity-tool-approval");
+        let team = five();
+        board.file("FRK-1", "Login form", |_| {});
+        board.put(
+            at(9, 2),
+            Some("FRK-1"),
+            Some("linus"),
+            "tool_approval.requested",
+            json!({
+                "server": "airtable", "tool": "create_record", "input": "{}",
+                "input_sha256": "0".repeat(64)
+            }),
+        );
+
+        let all = activity(
+            &board.log,
+            &board.projections,
+            &board.files,
+            &team,
+            at(12, 0),
+        )
+        .expect("the store reads");
+
+        let linus = all
+            .iter()
+            .find(|one| one.agent_id == "linus")
+            .expect("Linus");
+        assert_eq!(linus.state, ActivityState::Waiting);
+        assert_eq!(linus.line, "Waiting on you: may Linus use airtable?");
+        assert_eq!(linus.task_id.as_ref().map(|id| id.as_str()), Some("FRK-1"));
     }
 
     #[test]

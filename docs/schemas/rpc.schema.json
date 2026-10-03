@@ -58,7 +58,10 @@
         "chat.messages",
         "templates.list",
         "template.preview",
-        "backlog.summary"
+        "backlog.summary",
+        "skills.list",
+        "skill.get",
+        "allowances.list"
       ]
     },
     "subscribeRequest": {
@@ -272,6 +275,9 @@
               "$ref": "#/$defs/costsSummaryQuery"
             },
             {
+              "$ref": "#/$defs/allowancesListQuery"
+            },
+            {
               "$ref": "#/$defs/metricsQuery"
             },
             {
@@ -291,6 +297,12 @@
             },
             {
               "$ref": "#/$defs/templatePreviewQuery"
+            },
+            {
+              "$ref": "#/$defs/skillsListQuery"
+            },
+            {
+              "$ref": "#/$defs/skillGetQuery"
             }
           ]
         }
@@ -480,6 +492,24 @@
         },
         {
           "$ref": "#/$defs/templateDeleteRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorToolsRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorConnectRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorAllowancesRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorDisconnectRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorSignInRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorSignInStatusRequest"
         }
       ]
     },
@@ -826,13 +856,182 @@
           "type": "integer",
           "minimum": 1,
           "description": "The most agents a team may have that are not retired (spec 4.1)."
+        },
+        "sandboxed": {
+          "type": "boolean",
+          "description": "Whether sessions run in Docker's sandbox. False in no-sandbox mode, where a command an agent runs can reach a connector's keys (spec 8.6), so no page promises that the agent never sees them."
+        },
+        "connectors": {
+          "type": "array",
+          "description": "Each agent's custom MCP servers and whether each runs (ADR 0030): connected when the definition kept on this machine beside its keys is the team file's and every key it names is kept; connect_again when none is kept or the team file changed since, or, for a kit's service, when the kit's tags or fields changed with a release (ADR 0036), so it runs nothing until the user connects it again; sign_in_again when the service ended the agent's sign-in, so it runs nothing until the user signs in again; not_in_kit when a kit's service is no longer in its agent's role's kit, so the page offers Remove alone (ADR 0036); store_unavailable when the keychain or the private file could not be read, the last time Farik read it, so it is left out of sessions until it can be. The kept definition is read once per connect and disconnect, when a session is set up, and the first time it is asked for.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent",
+              "server",
+              "state",
+              "auth",
+              "source"
+            ],
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "connected",
+                  "connect_again",
+                  "sign_in_again",
+                  "store_unavailable",
+                  "not_in_kit"
+                ]
+              },
+              "auth": {
+                "type": "string",
+                "enum": [
+                  "keys",
+                  "oauth"
+                ],
+                "description": "How the server is reached with the user's authority: keys the user gave, or a sign-in to the service (ADR 0033)."
+              },
+              "revokes": {
+                "type": "boolean",
+                "description": "For a server signed in to: whether the service has a way to be asked to forget the sign-in when it is removed. Absent for a server with keys."
+              },
+              "stored_in": {
+                "type": "string",
+                "enum": [
+                  "keychain",
+                  "file"
+                ],
+                "description": "Where the agent's keys for this server are kept, when an entry is: the computer's keychain, or a private file only the user can read. Absent when none is kept or the store could not be read."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "custom",
+                  "kit"
+                ],
+                "description": "Where the server came from: the user's own, or a service of the agent's role's kit (ADR 0036)."
+              }
+            }
+          }
+        },
+        "kits": {
+          "type": "array",
+          "description": "Each role on the team whose kit has a service to connect by name, with the copy the page shows (ADR 0036). A container connector, which Farik runs itself, is not listed, and nor is a role with no service.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "connectors"
+            ],
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "connectors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "title",
+                    "about",
+                    "why",
+                    "setup",
+                    "labels",
+                    "auth",
+                    "credential_keys"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "about": {
+                      "type": "string"
+                    },
+                    "why": {
+                      "type": "string"
+                    },
+                    "setup": {
+                      "type": "string"
+                    },
+                    "key_page": {
+                      "type": "string",
+                      "description": "Where the key is made; present when the service takes keys."
+                    },
+                    "labels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "A tool to what it does in the user's words."
+                    },
+                    "auth": {
+                      "type": "string",
+                      "enum": [
+                        "keys",
+                        "oauth"
+                      ]
+                    },
+                    "credential_keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "allowances": {
+                      "type": "array",
+                      "description": "What the kit lets the user pre-approve (ADR 0037): each spending tool with its default calls each period and the plural noun for what a call makes. Present when the kit offers any.",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "tool",
+                          "calls",
+                          "what"
+                        ],
+                        "properties": {
+                          "tool": {
+                            "type": "string"
+                          },
+                          "calls": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000
+                          },
+                          "what": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       },
       "required": [
         "team",
         "agents",
         "judges",
-        "max_agents"
+        "max_agents",
+        "connectors",
+        "kits",
+        "sandboxed"
       ]
     },
     "serveStatusResult": {
@@ -1929,6 +2128,25 @@
         }
       }
     },
+    "allowancesListQuery": {
+      "title": "Allowances List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "allowances.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
     "metricsQuery": {
       "title": "Metrics Query",
       "type": "object",
@@ -2037,7 +2255,7 @@
       }
     },
     "waitingListResult": {
-      "description": "What waits on the human, questions first, then approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
+      "description": "What waits on the human, questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2059,6 +2277,7 @@
                   "question",
                   "help",
                   "integration",
+                  "tool_approval",
                   "preview_missing",
                   "designer_needs_sandbox",
                   "designer_needs_browser"
@@ -2074,6 +2293,19 @@
                 "type": "string"
               },
               "line": {
+                "type": "string"
+              },
+              "approval": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "server": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "input": {
                 "type": "string"
               }
             },
@@ -2833,6 +3065,93 @@
         "meetings"
       ]
     },
+    "allowancesListResult": {
+      "description": "What each connected kit connector of an active agent lets it make without asking, and how many it has made this period (docs/SPEC.md 6.7, ADR 0037): the period, the open sprint's or, with none open, the UTC day's since the later of its start and the last sprint's end, and one row per allowance. used counts every call of the tool in the period, those a grant allowed among them, so it may exceed of. what is the kit's plural noun for what a call makes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "period",
+        "rows"
+      ],
+      "properties": {
+        "period": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "sprint_id"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "sprint"
+                },
+                "sprint_id": {
+                  "type": "string",
+                  "pattern": "^S[1-9][0-9]{0,5}$"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "day"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "day"
+                },
+                "day": {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                }
+              }
+            }
+          ]
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent",
+              "server",
+              "tool",
+              "what",
+              "used",
+              "of"
+            ],
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "what": {
+                "type": "string"
+              },
+              "used": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "of": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              }
+            }
+          }
+        }
+      }
+    },
     "costsSummaryResult": {
       "description": "Today's spending (UTC) and the team's daily limit, today's one-to-one chats (purpose chat), the last sprint's (the open one while one is), and each agent's that is not retired, in the team's order.",
       "type": "object",
@@ -3560,6 +3879,456 @@
         }
       }
     },
+    "connectorServer": {
+      "description": "A service as the user connects it, before its tools are labelled: either a custom MCP server, an mcp_servers entry of team.schema.json without tools (name, transport, and command and args, or url and headers, credential_keys, and oauth for a web address the user signs in to; source, when given, is custom), held to validate_team as the agent's entry; or a service of the agent's role's kit, { name, source: kit }, a form of its own that carries nothing else, so a browser cannot send fields the kit decides (ADR 0036).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "const": "custom"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/kitServer"
+        }
+      ]
+    },
+    "kitServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,39}$"
+        },
+        "source": {
+          "const": "kit"
+        }
+      },
+      "description": "A service of the agent's role's kit, by name: the daemon builds its entry from the kit (kit_entry), its tags included. connector.connect with it takes tags {} (kit_names_these otherwise); a name the agent's role's kit does not have is connector_not_in_kit."
+    },
+    "connectorKeys": {
+      "type": "object",
+      "maxProperties": 8,
+      "propertyNames": {
+        "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      },
+      "description": "Each of the server's keys by name, with its value. Never echoed: a refusal of these params carries no data."
+    },
+    "connectorToolsRequest": {
+      "title": "Connector Tools Request",
+      "description": "Lists a custom MCP server's tools, started or reached with the agent's keys, or with the sign-in an attempt made when the server has oauth, as ConnectorAdd's second step shows them (docs/SPEC.md 5.6; ADRs 0030 and 0033). Nothing is kept, and the attempt is not used up. A server with oauth and no attempt is refused sign_in_needed; an attempt that is unknown, used, expired, unfinished, or another server's is refused sign_in_unknown. A refusal of these params carries no data, as account.connect's does.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.tools"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "$ref": "#/$defs/connectorServer"
+            },
+            "keys": {
+              "$ref": "#/$defs/connectorKeys"
+            },
+            "attempt": {
+              "$ref": "#/$defs/signInAttempt"
+            }
+          }
+        }
+      }
+    },
+    "connectorToolsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tools"
+      ],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "description",
+              "usable"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "usable": {
+                "type": "boolean",
+                "description": "False for a name Claude Code would rewrite (outside ^[A-Za-z0-9_-]{1,64}$): Farik can't use this tool, and it is never written to the team file."
+              }
+            }
+          }
+        }
+      }
+    },
+    "connectorConnectRequest": {
+      "title": "Connector Connect Request",
+      "description": "Gives the agent a custom MCP server (docs/SPEC.md 5.6, 6.7; ADR 0030): its tools listed with the keys, each usable one labelled by tags or else external_effect, the keys kept in the keychain or a private file beside the definition's spec_sha256, then connector_connect handled, which writes the team file and appends connector.connected. A server with oauth takes attempt, a finished sign-in, in place of keys, and uses it up; its grant is kept where keys are, and a grant it replaces is asked to be forgotten. A refusal of these params carries no data, as account.connect's does; a refusal of the entry carries the team's errors, each at its field.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.connect"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server",
+            "tags"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "$ref": "#/$defs/connectorServer"
+            },
+            "keys": {
+              "$ref": "#/$defs/connectorKeys"
+            },
+            "attempt": {
+              "$ref": "#/$defs/signInAttempt"
+            },
+            "allowances": {
+              "$ref": "#/$defs/connectorAllowances"
+            },
+            "tags": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/connectorTag"
+              },
+              "description": "The user's label for each tool by name; a listed tool not named here is external_effect."
+            }
+          }
+        }
+      }
+    },
+    "connectorAllowances": {
+      "type": "object",
+      "maxProperties": 256,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_-]{1,64}$"
+      },
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "description": "How many calls each period the agent makes of each spending tool without asking (ADR 0037), 0 to 1000; the daemon refuses one outside it allowance_out_of_range, and one for a tool the kit gives none allowance_not_offered. A kit service only; left out at a connect, each tool starts at the kit's default."
+    },
+    "connectorAllowancesRequest": {
+      "title": "Connector Allowances Request",
+      "description": "Changes a kit connector's allowances without its key typed again (docs/SPEC.md 6.7; ADR 0037): the kept entry must be the team file's (connector_not_confirmed), the numbers are checked as connect checks them over the ones the entry holds, the same keys or sign-in are kept beside the new entry's hash, then connector_connect is handled, which writes the team file and appends connector.connected. A kit that has changed the service is connector_not_in_kit: connect it again. A tool left out keeps its number. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.allowances"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server",
+            "allowances"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            },
+            "allowances": {
+              "$ref": "#/$defs/connectorAllowances"
+            }
+          }
+        }
+      }
+    },
+    "connectorConnectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stored_in",
+        "tools"
+      ],
+      "properties": {
+        "stored_in": {
+          "type": "string",
+          "enum": [
+            "keychain",
+            "file"
+          ],
+          "description": "Where the keys were kept: the computer's keychain, or a private file only the user can read."
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/connectorTag"
+          },
+          "description": "Each tool as it was written to the team file, with its label."
+        }
+      }
+    },
+    "signInAttempt": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "A sign-in under way, held in the daemon's memory for ten minutes, bound to the agent and the server (name, url and oauth) it was made for, and used up by connector.connect."
+    },
+    "connectorSignInRequest": {
+      "title": "Connector Sign In Request",
+      "description": "Starts signing the agent in to the service of a web-address server (docs/SPEC.md 6.7; ADR 0033): finds how the server offers it, registers Farik as a client or uses the one the server names, opens a listener for the way back on this computer's loopback, and answers the address the user opens in the browser. A new attempt for the same agent and server ends the old one. Refused sign_in_not_offered (the server does not say it can be signed in to), sign_in_not_supported (it does, and Farik has no way to register), pkce_not_supported, or sign_in_failed, each as the message's first word and a colon. server is the object connector.tools takes, and holds oauth.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.sign_in"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "$ref": "#/$defs/connectorServer"
+            }
+          }
+        }
+      }
+    },
+    "connectorSignInResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt",
+        "authorize_url",
+        "issuer"
+      ],
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/signInAttempt"
+        },
+        "authorize_url": {
+          "type": "string",
+          "description": "The service's page, which the browser opens. No token is in it."
+        },
+        "issuer": {
+          "type": "string",
+          "description": "Who signs the user in, as the service says. Its host is what the page names; it can differ from the server's, as Stripe's sign-in is at access.stripe.com."
+        }
+      }
+    },
+    "connectorSignInStatusRequest": {
+      "title": "Connector Sign In Status Request",
+      "description": "How an attempt is going. Refused sign_in_unknown for one that is not known, was used up, ended, or expired. Never answers a token.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.sign_in_status"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attempt"
+          ],
+          "properties": {
+            "attempt": {
+              "$ref": "#/$defs/signInAttempt"
+            }
+          }
+        }
+      }
+    },
+    "connectorSignInStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "waiting",
+            "signed_in",
+            "failed"
+          ]
+        },
+        "reason": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "access_denied",
+                "sign_in_timed_out",
+                "sign_in_mismatch",
+                "sign_in_failed"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "description": "Farik's words for the step that failed and, where there was one, the HTTP status. It quotes nothing the service sent."
+            }
+          },
+          "description": "Present when state is failed."
+        }
+      }
+    },
+    "connectorTag": {
+      "type": "string",
+      "enum": [
+        "network",
+        "external_effect",
+        "denied"
+      ],
+      "description": "A connector tool's label (docs/SPEC.md 5.6): network, only reads; external_effect, changes something outside the sandbox; denied, never offered."
+    },
+    "connectorDisconnectRequest": {
+      "title": "Connector Disconnect Request",
+      "description": "Takes a custom MCP server away from the agent: connector_disconnect handled, which removes its team file entry and appends connector.disconnected, then its keys deleted from wherever they are kept; another agent's are never touched. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.disconnect"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "agentReplaceRequest": {
       "title": "Agent Replace Request",
       "description": "Replace: the agent retired and a newcomer added, in one validated change to the team file, so that a team is never left without the role the agent held. Appends agent.updated, then team.updated. Answers emptyResult; a refusal's data holds errors, each a path, a message and a code, as team.validate answers them, as team.save's does.",
@@ -4121,6 +4890,81 @@
         }
       },
       "description": "The saved teams on this computer, each whole, and the files in the templates folder that are not one. Every template query and method is refused with -32005 and the code no_state_folder at / when Farik has no state folder."
+    },
+    "skillsListQuery": {
+      "title": "Skills List Query",
+      "description": "The skills one agent has (docs/SPEC.md 6.7; ADR 0034): its role's, the team's and its own, each with how it stands for that agent. An agent the team does not have is -32002.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "skills.list" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["agent"],
+          "properties": {
+            "agent": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "skillGetQuery": {
+      "title": "Skill Get Query",
+      "description": "Every file of the team's or one agent's skill name, as its folder holds them now, for the person to read (docs/SPEC.md 6.7; ADR 0034). A folder that is not there is -32002; one the checks refuse, a file that is not UTF-8 text among them (skill_file_not_text), is refused with -32005 and a message starting with the refusal's skill_* code, and no files. An agent level names its agent, a team level names none and a role level names its role; any other is refused with -32005. A role level answers the SKILL.md Farik ships for that role, with no hash.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "skill.get" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["level", "name"],
+          "properties": {
+            "level": { "type": "string", "enum": ["role", "team", "agent"] },
+            "agent": { "type": "string", "minLength": 1 },
+            "role": { "type": "string", "minLength": 1, "description": "A role level's role id, such as software_developer." },
+            "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 }
+          }
+        }
+      }
+    },
+    "skillRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name", "description", "state", "bytes"],
+      "properties": {
+        "level": { "type": "string", "enum": ["role", "team", "agent"] },
+        "name": { "type": "string" },
+        "description": { "type": "string", "description": "When the skill applies, as its SKILL.md says; empty when that cannot be read." },
+        "state": {
+          "type": "string",
+          "enum": ["in_use", "replaced", "review", "missing"],
+          "description": "in_use: it loads in the agent's sessions (a role's, unless replaced). replaced: another level's skill of the same name stands in its place. review: its folder, its pin and this computer's confirmation do not agree, or a check refuses it; it waits for the person to read and confirm it. missing: pinned, and its folder is not there."
+        },
+        "bytes": { "type": "integer", "minimum": 0, "description": "The folder's total size; 0 when missing; a role's, its SKILL.md's." }
+      }
+    },
+    "skillsListResult": {
+      "description": "skills.list's answer: the agent's skills, role rows first, then the team's, then its own, each in the order its list holds. Role rows are read-only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skills"],
+      "properties": {
+        "skills": { "type": "array", "items": { "$ref": "#/$defs/skillRow" } }
+      }
+    },
+    "skillGetResult": {
+      "description": "skill.get's answer: files maps each path to its text as the folder holds it, sha256 is skill_sha256 of the folder (the hash skill_confirm is given; a role level answers none, since a shipped skill is trusted and pinned in the binary), and ignored_fields names the frontmatter keys other than name and description, which Farik drops from a session's copy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files", "ignored_fields"],
+      "properties": {
+        "files": { "type": "object", "additionalProperties": { "type": "string" } },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "ignored_fields": { "type": "array", "items": { "type": "string" } }
+      }
     },
     "templatePreviewQuery": {
       "title": "Template Preview Query",

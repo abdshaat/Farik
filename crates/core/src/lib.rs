@@ -15,6 +15,8 @@ pub mod generated;
 pub mod governor;
 /// The price table and the cost of model usage.
 pub mod pricing;
+/// A skill's hash.
+pub mod skill;
 /// The sprint and its validator.
 pub mod sprint;
 /// The team, its rules, and its validator.

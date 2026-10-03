@@ -210,6 +210,23 @@ pub(crate) fn command_orchestrator(
     }))
 }
 
+/// A daemon over `tools` that keeps connector keys where `io` says, and runs each stdio
+/// connector in a folder of the user's state folder (ADR 0030).
+fn connected_daemon(
+    tools: &Arc<farik_runtime::tools::ToolDeps>,
+    io: &CliIo<'_>,
+) -> Arc<DaemonState> {
+    let daemon = Arc::new(DaemonState::new(Arc::clone(tools)));
+    daemon.set_connector_secrets(Arc::clone(&io.connector_secrets));
+    if let Some(directory) = state_dir(&io.env) {
+        daemon.set_state_dir(directory);
+    }
+    if let Some(program) = &io.own_program {
+        daemon.set_own_program(program.clone());
+    }
+    daemon
+}
+
 /// What a driving process waits on: the test's sleeper, else the machine's timer over the clock.
 fn sleeper(io: &CliIo<'_>) -> Arc<dyn Sleeper> {
     io.sleeper.clone().unwrap_or_else(|| {
@@ -278,8 +295,9 @@ pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.farik/lo
     read your credential files (~/.git-credentials, ~/.ssh, ~/.claude/.credentials.json, the gh \
     configuration), push with a git hidden in a script, which farik_exec's check does not see, and \
     read .farik/local/daemon.json, whose token lets them act as you through farik: approve, \
-    accept, answer, and integrate. The governor still checks every path and permission it is \
-    asked about.";
+    accept, answer, add skills, and integrate, and get the keys you gave a connector, which they can also read \
+    from a running connector's /proc/<pid>/environ. The governor still checks every path and \
+    permission it is asked about.";
 
 /// The variables of the environment a Claude Code session is given besides its credential.
 const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];
@@ -424,7 +442,7 @@ async fn start_listening(
         );
     }
     let tools = tool_deps(project, io)?;
-    let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));
+    let daemon = connected_daemon(&tools, io);
     let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
     let web = options
         .web
@@ -581,6 +599,15 @@ fn adapter(
                 daemon_file: project.root.join(DAEMON_FILE),
                 daemon: handle.info.clone(),
                 sessions_dir: project.root.join(".farik/local/sessions"),
+                // No state folder, or no id for the project: the orchestrator offers no skills
+                // either, so nothing is written here.
+                skills_dir: state_dir(&io.env)
+                    .and_then(|state| {
+                        let id = farik_runtime::connectors::local_project_id(&state, &project.root)
+                            .ok()?;
+                        Some(farik_runtime::skills::skills_dir(&state, &id))
+                    })
+                    .unwrap_or_default(),
                 team_file: project.root.join(".farik/team.yaml"),
                 env: SESSION_ENV
                     .iter()

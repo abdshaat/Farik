@@ -379,3 +379,202 @@
 .waiting li span:first-child {
 	font-family: var(--farik-type-code-family);
 }
+
+/* An agent's connectors and ConnectorAdd's tools: one ruled row each (phase 7 step 01's mockups). */
+.ruled {
+	display: grid;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-top: 1px solid var(--farik-color-rule);
+}
+
+.ruled > li {
+	display: grid;
+	gap: var(--farik-space-1);
+	padding: var(--farik-space-3) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.ruled p {
+	margin: 0;
+}
+
+.code {
+	margin: 0;
+	padding: 0;
+	font-family: var(--farik-type-code-family);
+	overflow-wrap: anywhere;
+}
+
+/* A tool's three labels, side by side where they fit; each a 44 px target. */
+.labels {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-2);
+}
+
+.labels label {
+	display: flex;
+	align-items: center;
+	gap: var(--farik-space-2);
+	min-height: 44px;
+	padding: 0 var(--farik-space-3);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+	background: var(--farik-color-surface);
+	cursor: pointer;
+}
+
+.labels label:has(input:focus-visible) {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.tagWords {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+	padding: var(--farik-space-3);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+}
+
+.tagWords dt {
+	font-weight: 600;
+}
+
+.tagWords dd {
+	margin: 0;
+}
+
+/* A key's name, its value and Remove: in a row where they fit, stacked on a phone. */
+.keyRow {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: end;
+	gap: var(--farik-space-2) var(--farik-space-3);
+}
+
+.keyRow > * {
+	flex: 1 1 12rem;
+}
+
+.keyRow > button {
+	flex: 0 0 auto;
+}
+
+.rowHead {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--farik-space-2);
+}
+
+.group {
+	display: grid;
+	gap: var(--farik-space-2);
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.group > legend {
+	padding: 0;
+	margin-bottom: var(--farik-space-1);
+	font-weight: 600;
+}
+
+/* The tool approval dialog: what the agent wants to send, framed as untrusted text. */
+.toolApproval {
+	display: grid;
+	gap: var(--farik-space-3);
+}
+
+.toolApproval p,
+.toolApproval h3 {
+	margin: 0;
+}
+
+.toolApproval h3 {
+	font-size: inherit;
+}
+
+.toolApproval dl {
+	display: grid;
+	grid-template-columns: 6rem minmax(0, 1fr);
+	gap: var(--farik-space-1) var(--farik-space-3);
+	margin: 0;
+}
+
+.toolApproval dt,
+.toolHint {
+	color: var(--farik-color-ink-muted);
+}
+
+.toolApproval dd {
+	margin: 0;
+}
+
+.untrusted {
+	margin: 0;
+	max-height: 18rem;
+	overflow: auto;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	font-family: var(--farik-type-code-family);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-left: 3px solid var(--farik-color-ink);
+	border-radius: var(--farik-radius-control);
+}
+
+.untrusted pre {
+	margin: 0;
+	font: inherit;
+	white-space: inherit;
+}
+
+.untrusted:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+/* A skill's instructions: the text is code-like, so it is set in the code face. */
+.code textarea {
+	font-family: var(--farik-type-code-family);
+}
+
+/* A service of a role's kit: its words in one column and its buttons in the other, and on a phone
+   the buttons come last, under the words. */
+.kitRow {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	column-gap: var(--farik-space-3);
+}
+
+.kitRow > .actions {
+	grid-column: 2;
+	grid-row: 1 / span 9;
+	align-self: start;
+}
+
+@media (max-width: 40rem) {
+	.kitRow {
+		grid-template-columns: 1fr;
+	}
+
+	.kitRow > .actions {
+		grid-column: auto;
+		grid-row: auto;
+	}
+}
+
+/* A line that says a service needs the user: the one warning colour. */
+.warn {
+	color: var(--farik-color-status-waiting);
+}

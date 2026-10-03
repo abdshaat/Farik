@@ -108,7 +108,16 @@
         "preview.started",
         "preview.stopped",
         "page.checked",
-        "chat_message.posted"
+        "chat_message.posted",
+        "connector.connected",
+        "connector.disconnected",
+        "tool_approval.requested",
+        "tool_approval.granted",
+        "tool_approval.refused",
+        "skill.added",
+        "skill.changed",
+        "skill.removed",
+        "skill.confirmed"
       ]
     },
     "eventBodyWire": {
@@ -163,7 +172,13 @@
         { "$ref": "#/$defs/previewPreparedBody" },
         { "$ref": "#/$defs/previewStartedBody" },
         { "$ref": "#/$defs/pageCheckedBody" },
-        { "$ref": "#/$defs/chatMessagePostedBody" }
+        { "$ref": "#/$defs/chatMessagePostedBody" },
+        { "$ref": "#/$defs/connectorConnectedBody" },
+        { "$ref": "#/$defs/connectorDisconnectedBody" },
+        { "$ref": "#/$defs/toolApprovalRequestedBody" },
+        { "$ref": "#/$defs/toolApprovalDecidedBody" },
+        { "$ref": "#/$defs/skillPinnedBody" },
+        { "$ref": "#/$defs/skillRemovedBody" }
       ]
     },
     "contractSummary": {
@@ -837,6 +852,83 @@
         "screenshot": { "type": "string", "minLength": 1 }
       }
     },
+    "connectorConnectedBody": {
+      "title": "Connector Connected Body",
+      "description": "The human gave the agent agent the custom MCP server server, or connected it again (docs/SPEC.md 5.6, 6.7; ADR 0030): how it is reached, the names of the keys it is given, the label of each of its tools, and spec_sha256, the hash of that definition kept beside the keys on this machine. No key's value is ever here. The envelope names no agent: the human acted, and the agent did no work.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "server", "transport", "credential_keys", "tools", "spec_sha256"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "server": { "type": "string", "minLength": 1 },
+        "issuer": { "type": "string", "minLength": 1, "description": "Who signed the agent in, when it signed in to the service instead of being given keys (ADR 0033). No token is ever here." },
+        "transport": { "type": "string", "enum": ["stdio", "http"] },
+        "credential_keys": { "type": "array", "items": { "type": "string" } },
+        "tools": { "type": "object", "additionalProperties": { "$ref": "#/$defs/connectorTag" } },
+        "allowances": { "type": "object", "description": "A kit connector's allowances when it has any (ADR 0037): each tool to the calls each period its agent makes without asking, 0 to 1000.", "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 1000 } },
+        "spec_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "connectorDisconnectedBody": {
+      "title": "Connector Disconnected Body",
+      "description": "The human took the custom MCP server server away from the agent agent, and its keys were deleted (docs/SPEC.md 6.7; ADR 0030).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "server"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "server": { "type": "string", "minLength": 1 }
+      }
+    },
+    "toolApprovalRequestedBody": {
+      "title": "Tool Approval Requested Body",
+      "description": "An agent's session called a connector's tool tagged external_effect with no grant of the human's for it, so the call was denied and waits for the human like a question (docs/SPEC.md 5.6, 5.7; ADR 0031). The event's sequence number is the approval's id. input is the call's whole input as compact JSON, never cut, so the human sees all of what they allow; input_sha256 is the sha256 of its canonical JSON, object keys sorted at every depth, which a grant binds. The envelope names the session, the agent, and the task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server", "tool", "input", "input_sha256"],
+      "properties": {
+        "server": { "type": "string", "minLength": 1 },
+        "tool": { "type": "string", "minLength": 1 },
+        "input": { "type": "string" },
+        "input_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "toolApprovalDecidedBody": {
+      "title": "Tool Approval Decided Body",
+      "description": "The human allowed (tool_approval.granted) or refused (tool_approval.refused) the call an agent asked about (docs/SPEC.md 5.7; ADR 0031): approval is the sequence number of its tool_approval.requested, whose task is on this event's envelope too, and note is what the human said, absent when they said nothing. A grant allows one later call, by the asking agent's next session about the task, with the same server, tool, and input_sha256. Only the human decides: the envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval"],
+      "properties": {
+        "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "note": { "type": "string" }
+      }
+    },
+    "skillPinnedBody": {
+      "title": "Skill Pinned Body",
+      "description": "The human added a skill (skill.added), saved a changed one (skill.changed) or confirmed one on this computer (skill.confirmed) (docs/SPEC.md 6.7; ADR 0034): level is team or agent, agent names the agent for level agent and is absent for team, name is the skill's, and sha256 is skill_sha256 of its folder, the hash the person read and that the team file now pins. The envelope names no agent: the human acted. These events stay in this machine's log and a skill loads only when the newest of them for it carries its pin.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name", "sha256"],
+      "properties": {
+        "level": { "type": "string", "enum": ["team", "agent"] },
+        "agent": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "skillRemovedBody": {
+      "title": "Skill Removed Body",
+      "description": "The human removed a skill and its pin (docs/SPEC.md 6.7; ADR 0034): level, agent (for level agent) and name as in skill.added. A skill.removed after the newest skill.added, skill.changed or skill.confirmed for a skill means it is not confirmed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name"],
+      "properties": {
+        "level": { "type": "string", "enum": ["team", "agent"] },
+        "agent": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
     "connectorTag": {
       "type": "string",
       "enum": ["network", "external_effect", "denied"],
@@ -882,7 +974,7 @@
     },
     "toolCalledBody": {
       "title": "Tool Called Body",
-      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one. A connector's call also names its server and the tool's tag.",
+      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one. A connector's call also names its server and the tool's tag, and a call the human allowed names approval, the sequence number of its tool_approval.requested, which this call uses up.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tool", "input"],
@@ -891,7 +983,9 @@
         "tool_use_id": { "type": "string" },
         "input": { "type": "string" },
         "server": { "type": "string", "minLength": 1 },
-        "tag": { "$ref": "#/$defs/connectorTag" }
+        "tag": { "$ref": "#/$defs/connectorTag" },
+        "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "allowance": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "A connector call that ran inside its allowance (ADR 0037) names the number it ran inside, the calls each period its agent makes of the tool without asking. A call a grant allowed names approval instead." }
       }
     },
     "toolDeniedBody": {

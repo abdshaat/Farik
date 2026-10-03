@@ -16,6 +16,7 @@ fn main() -> std::process::ExitCode {
         Arc::new(SystemClock),
     );
     io.stdin = Box::new(std::io::stdin());
+    io.stdin_is_terminal = std::io::IsTerminal::is_terminal(&std::io::stdin());
     io.env = std::env::vars_os()
         .map(|(name, value)| {
             (
@@ -29,6 +30,8 @@ fn main() -> std::process::ExitCode {
     io.session_ids = Arc::new(RandomSessionIds);
     io.open_url = Arc::new(open_in_browser);
     io.credential_stores = farik::system_credential_stores(&io.env, true);
+    io.connector_secrets = farik::system_connector_secrets(&io.env);
+    io.own_program = std::env::current_exe().ok();
     let code = run_cli(&arguments, &mut io);
     std::process::ExitCode::from(u8::try_from(code).unwrap_or(1))
 }

@@ -55,6 +55,15 @@ pub enum McpTransport {
         /// Its arguments.
         args: Vec<String>,
     },
+    /// A user's connector started on the host by `farik connector run`, which asks the daemon
+    /// for its command and keys (ADR 0030).
+    Launched,
+    /// A user's connector at `url`, whose headers `farik connector headers` asks the daemon for
+    /// (ADR 0030).
+    Helped {
+        /// Where the server listens.
+        url: String,
+    },
 }
 
 /// One MCP server a session is given.
@@ -66,6 +75,16 @@ pub struct McpServerConfig {
     pub transport: McpTransport,
     /// Headers sent with every request, for the HTTP transport.
     pub headers: BTreeMap<String, String>,
+}
+
+/// One skill a session loads on demand (ADR 0034): its name and the session copy of each file,
+/// `SKILL.md`'s frontmatter rewritten to `name` and `description` alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSkill {
+    /// The skill's name.
+    pub name: String,
+    /// Every file as text, by path relative to the skill's folder.
+    pub files: BTreeMap<String, String>,
 }
 
 /// Everything a runtime needs to start one session.
@@ -97,6 +116,9 @@ pub struct SessionSpec {
     /// The connector tools it may never call, as `mcp__<server>__<tool>`: refused by the program
     /// beside `Bash`, and by the hook whatever the program does.
     pub disallowed_tools: Vec<String>,
+    /// The skills it loads on demand. A runtime that can load skills makes them available under
+    /// their names; one that cannot ignores them.
+    pub skills: Vec<SessionSkill>,
     /// The directory it works in.
     pub cwd: PathBuf,
     /// When it is stopped.

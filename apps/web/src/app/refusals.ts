@@ -46,6 +46,16 @@ const WORDS: Record<string, keyof typeof en> = {
 	no_sprint_open: "refuseNoSprintOpen",
 	triage_refused: "refuseTriage",
 	lock_refused: "refuseLock",
+	// A skill's refusals (SPEC 6.7), said at the field they belong to.
+	skill_runs_commands: "skillRunsCommands",
+	skill_attaches_files: "skillAttachesFiles",
+	skill_too_large: "skillTooLarge",
+	skill_file_not_text: "skillNotText",
+	skill_name_invalid: "skillNameInvalid",
+	skill_name_mismatch: "skillNameMismatch",
+	skill_description_invalid: "skillDescriptionInvalid",
+	skill_name_taken: "skillNameTaken",
+	skill_limit_reached: "skillLimitReached",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or `other` for any other. */

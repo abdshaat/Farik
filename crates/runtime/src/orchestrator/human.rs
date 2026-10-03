@@ -9,12 +9,12 @@ use farik_core::governor::gates::{Blocker, Rejection};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::sprint::{Sprint, SprintStatus};
-use farik_core::team::{Agent, AgentStatus, Team, plain_role};
-use farik_protocol::command::{AcceptSubject, Command, RequestSize};
+use farik_core::team::{Agent, AgentStatus, Team, custom_server, plain_role};
+use farik_protocol::command::{AcceptSubject, Command, RequestSize, SkillScope};
 use farik_protocol::event::{
-    AgentUpdatedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventBody, EventIds,
-    EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody,
-    new_event,
+    AgentUpdatedBody, ConnectorDisconnectedBody, EscalationRaisedBodyReason,
+    EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
+    HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody, new_event,
 };
 use farik_store::requests::{RequestError, hold_contract, triage_by_human};
 use farik_store::{EventQuery, TaskProjection};
@@ -25,7 +25,12 @@ use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, Orche
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
 use crate::chat::{ChatError, NewChatMessage, post_chat};
 use crate::daemon::DaemonState;
+use crate::daemon::{secret_at, with_server};
 use crate::pause::paused;
+use crate::skills::{
+    SkillCommandError, SkillLevel, confirm_skill, confirmed_sentence, remove_skill,
+    removed_sentence, save_skill, saved_sentence,
+};
 use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::transitions::{
@@ -45,6 +50,7 @@ const STOPPED: &str = "stopped by the human";
 
 /// Handles one command the human gave, after bringing this process's board up to the log, so that
 /// a command another process handled is seen.
+#[allow(clippy::too_many_lines, reason = "one arm per command")]
 pub(super) async fn handle(
     orchestrator: &Orchestrator,
     command: Command,
@@ -118,6 +124,36 @@ pub(super) async fn handle(
         Command::TeamResume => pause(tools, false),
         Command::MessagePost { text } => post_message(tools, text),
         Command::ChatMessagePost { agent_id, text } => post_chat_message(tools, &agent_id, text),
+        Command::ConnectorConnect {
+            agent,
+            server,
+            spec_sha256,
+            issuer,
+        } => connect_server(
+            tools,
+            &orchestrator.deps.daemon,
+            &agent,
+            server,
+            &spec_sha256,
+            issuer.as_deref(),
+        ),
+        Command::ConnectorDisconnect { agent, server } => {
+            disconnect_server(tools, &orchestrator.deps.daemon, &agent, &server)
+        }
+        Command::SkillSave {
+            scope,
+            files,
+            replace_shipped,
+        } => save_skill_for(orchestrator, &scope, &files, replace_shipped),
+        Command::SkillRemove { scope, name } => remove_skill_for(orchestrator, &scope, &name),
+        Command::SkillConfirm {
+            scope,
+            name,
+            sha256,
+            replace_shipped,
+        } => confirm_skill_for(orchestrator, &scope, &name, &sha256, replace_shipped),
+        Command::ToolApprove { approval, note } => decide_tool_call(tools, approval, note, true),
+        Command::ToolRefuse { approval, note } => decide_tool_call(tools, approval, note, false),
         Command::RunStop => {
             orchestrator.stop();
             Ok(CommandReport {
@@ -396,6 +432,86 @@ fn answer_question(
     )?;
     Ok(CommandReport {
         said: format!("question {question_id} is answered"),
+        events: vec![seq],
+    })
+}
+
+/// Allows (`tool_approve`) or refuses (`tool_refuse`) the connector call asked at `approval`,
+/// once (ADR 0031): `tool_approval.granted` or `.refused`, with the note and the request's task
+/// on its envelope and no agent or session, since only the human decides. Refused
+/// `unknown_approval` for a seq that is no `tool_approval.requested`, and `approval_decided` for
+/// one already decided either way.
+fn decide_tool_call(
+    tools: &ToolDeps,
+    approval: u64,
+    note: Option<String>,
+    granted: bool,
+) -> Result<CommandReport, CommandError> {
+    // The check that nobody has decided and the write of the decision are one step: the browser
+    // and a command can both arrive at once, and `open_approvals` is lowered once per decision
+    // event, so a second decision would zero the count while another approval still waits.
+    // ponytail: one lock for every approval, per approval if deciders ever queue behind it.
+    static DECIDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _deciding = DECIDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let unknown = || CommandError::Refused {
+        reason: format!(
+            "unknown_approval: event {approval} is no connector call waiting for you to allow it"
+        ),
+    };
+    let asked = tools
+        .log
+        .read(&EventQuery {
+            after_seq: Some(approval.saturating_sub(1)),
+            limit: Some(1),
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .into_iter()
+        .find(|event| event.envelope.seq == approval)
+        .ok_or_else(unknown)?;
+    let EventBody::ToolApprovalRequested(request) = &asked.body else {
+        return Err(unknown());
+    };
+    let decisions = tools
+        .log
+        .read(&EventQuery {
+            task_id: asked.envelope.ids.task_id.clone(),
+            kinds: vec![
+                EventKind::ToolApprovalGranted,
+                EventKind::ToolApprovalRefused,
+            ],
+            ..EventQuery::default()
+        })
+        .map_err(failed)?;
+    if farik_store::waiting::decision_on(&decisions, approval).is_some() {
+        return Err(CommandError::Refused {
+            reason: format!("approval_decided: approval {approval} was already decided"),
+        });
+    }
+    let body = farik_protocol::event::ToolApprovalDecidedBody {
+        approval: NonZeroU64::new(approval).ok_or_else(unknown)?,
+        note,
+    };
+    let tool = request.tool.as_str();
+    let agent = asked.envelope.ids.agent_id.as_deref().unwrap_or("an agent");
+    let (event, said) = if granted {
+        (
+            EventBody::ToolApprovalGranted(body),
+            format!("Allowed {tool} once for {agent}"),
+        )
+    } else {
+        (
+            EventBody::ToolApprovalRefused(body),
+            format!("Not allowed: {tool} for {agent}"),
+        )
+    };
+    let seq = append(tools, asked.envelope.ids.task_id.clone(), event)?;
+    Ok(CommandReport {
+        // The human sees the whole input at the moment of deciding, in the terminal as in the
+        // browser (ADR 0031); the printer escapes what a terminal would obey.
+        said: format!("{said} (approval {approval}).\nInput: {}", request.input),
         events: vec![seq],
     })
 }
@@ -924,6 +1040,9 @@ pub(crate) fn status_effects(
                     daemon.request_stop(&session_id, words);
                 }
             }
+            if status == AgentStatus::Retired {
+                forget_connector_keys(tools, daemon, team, agent_id);
+            }
             // A retired agent never starts what it was assigned, so that is blocked for the human
             // too; a paused one starts it once resumed, so it waits.
             for row in held.filter(|row| {
@@ -972,6 +1091,55 @@ pub(crate) fn status_effects(
         }
     }
     Ok(events)
+}
+
+/// Deletes the keys of each custom server an agent has in `before` and not in `after`: one taken
+/// away by a save, or whose agent was removed from the team rather than retired, never runs again
+/// either (ADR 0030; re-review N8).
+pub(crate) fn forget_removed_keys(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    before: &Team,
+    after: &Team,
+) {
+    let custom = |team: &Team| -> Vec<(String, String)> {
+        team.agents
+            .iter()
+            .flat_map(|agent| {
+                agent
+                    .mcp_servers
+                    .iter()
+                    .flatten()
+                    .filter_map(custom_server)
+                    .map(|server| (agent.id.to_string(), server.name))
+            })
+            .collect()
+    };
+    let kept = custom(after);
+    for (agent, server) in custom(before) {
+        if !kept.contains(&(agent.clone(), server.clone()))
+            && let Ok(at) = secret_at(daemon, tools, &agent, &server)
+        {
+            daemon.forget_entry(&at);
+        }
+    }
+}
+
+/// Deletes the keys kept for each custom server `agent_id` has in `team`, which a retired agent
+/// never uses again (ADR 0030). A store that fails to delete one leaves it, as a refused connect
+/// does: it is sent to nothing, since the agent runs no session.
+fn forget_connector_keys(tools: &ToolDeps, daemon: &DaemonState, team: &Team, agent_id: &str) {
+    let servers = team
+        .agents
+        .iter()
+        .filter(|agent| agent.id.as_str() == agent_id)
+        .flat_map(|agent| agent.mcp_servers.iter().flatten())
+        .filter_map(custom_server);
+    for server in servers {
+        if let Ok(at) = secret_at(daemon, tools, agent_id, &server.name) {
+            daemon.forget_entry(&at);
+        }
+    }
 }
 
 /// Why `name`, of `role`, may not be paused or retired, in `team` as it would be after: it was the
@@ -1196,6 +1364,226 @@ fn failed(error: impl std::fmt::Display) -> CommandError {
     }
 }
 
+/// `connector_connect`: `server` given to `agent` in the team file, in place of the one of its
+/// name, when the team validates with it and it hashes to `spec_sha256`, the hash kept beside its
+/// keys; then `connector.connected`, and the store read once for `team.get` (ADR 0030).
+fn connect_server(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    agent: &str,
+    server: serde_json::Map<String, serde_json::Value>,
+    spec_sha256: &str,
+    issuer: Option<&str>,
+) -> Result<CommandReport, CommandError> {
+    let entry = serde_json::Value::Object(server);
+    let name = entry["name"].as_str().unwrap_or_default().to_string();
+    let _writing = daemon.team_writes();
+    let team = tools.files.read_team().map_err(failed)?;
+    let after = connector_team(&team, agent, &name, Some(&entry))?;
+    let custom = after
+        .agents
+        .iter()
+        .filter(|held| held.id.as_str() == agent)
+        .flat_map(|held| held.mcp_servers.iter().flatten())
+        .find(|held| held.name.as_str() == name)
+        .and_then(custom_server)
+        .ok_or_else(|| CommandError::Refused {
+            reason: format!("connector_not_custom: {name} is not a custom server"),
+        })?;
+    if custom.kit {
+        // The service must be exactly the kit's, for this agent's role: a team file or a clone
+        // that widened a tag, or a service of another role's kit, is refused (ADR 0036).
+        let role = after
+            .agents
+            .iter()
+            .find(|held| held.id.as_str() == agent)
+            .map(|held| farik_core::contract::Role::from(held.role))
+            .ok_or_else(|| CommandError::NotFound {
+                what: format!("the agent {agent}"),
+            })?;
+        let kit = (tools.kits)(role).map_err(failed)?;
+        if !crate::daemon::matches_kit(&kit, &custom) {
+            return Err(CommandError::Refused {
+                reason: format!(
+                    "connector_not_in_kit: {name} is not what the kit of the {role} says it is; \
+                     connect it by name"
+                ),
+            });
+        }
+    }
+    if farik_core::team::spec_sha256(&custom) != spec_sha256 {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "connector_not_confirmed: {name} was not kept on this machine as it is described \
+                 here; connect it again"
+            ),
+        });
+    }
+    tools.files.write_team(&after).map_err(failed)?;
+    let mut body = serde_json::json!({
+        "agent": agent,
+        "server": name,
+        "transport": entry["transport"],
+        "credential_keys": entry.get("credential_keys").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "tools": entry.get("tools").cloned().unwrap_or_else(|| serde_json::json!({})),
+        "spec_sha256": spec_sha256,
+    });
+    if let Some(issuer) = issuer {
+        body["issuer"] = issuer.into();
+    }
+    if !custom.allowances.is_empty() {
+        body["allowances"] = serde_json::json!(custom.allowances);
+    }
+    let body = serde_json::from_value(body).map_err(failed)?;
+    let event = append(tools, None, EventBody::ConnectorConnected(body))?;
+    if let Ok(at) = secret_at(daemon, tools, agent, &name) {
+        daemon.read_kept(&at);
+    }
+    Ok(CommandReport {
+        said: format!("{agent} has the connector {name}"),
+        events: vec![event],
+    })
+}
+
+/// `connector_disconnect`: the custom server `server` taken away from `agent` in the team file;
+/// then `connector.disconnected`. Its keys are deleted by whoever sent it.
+fn disconnect_server(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    agent: &str,
+    server: &str,
+) -> Result<CommandReport, CommandError> {
+    let _writing = daemon.team_writes();
+    let team = tools.files.read_team().map_err(failed)?;
+    let custom = team
+        .agents
+        .iter()
+        .filter(|held| held.id.as_str() == agent)
+        .flat_map(|held| held.mcp_servers.iter().flatten())
+        .any(|held| held.name.as_str() == server && custom_server(held).is_some());
+    if !custom {
+        return Err(CommandError::NotFound {
+            what: format!("{agent}'s custom connector {server}"),
+        });
+    }
+    let after = connector_team(&team, agent, server, None)?;
+    tools.files.write_team(&after).map_err(failed)?;
+    let event = append(
+        tools,
+        None,
+        EventBody::ConnectorDisconnected(ConnectorDisconnectedBody {
+            agent: agent.parse().map_err(failed)?,
+            server: server.parse().map_err(failed)?,
+        }),
+    )?;
+    if let Ok(at) = secret_at(daemon, tools, agent, server) {
+        daemon.forget_kept(&at);
+    }
+    Ok(CommandReport {
+        said: format!("{agent} no longer has the connector {server}"),
+        events: vec![event],
+    })
+}
+
+/// The level of a skill command.
+fn skill_level(scope: &SkillScope) -> SkillLevel {
+    match scope {
+        SkillScope::Team => SkillLevel::Team,
+        SkillScope::Agent(agent) => SkillLevel::Agent(agent.clone()),
+    }
+}
+
+/// A skill command's refusal as the command's: the skill's and the count's, the name's and the
+/// agent's are refusals; a failure to write is a failure.
+fn skill_refused(error: SkillCommandError) -> CommandError {
+    match error {
+        SkillCommandError::Io(_) => CommandError::Failed {
+            detail: error.to_string(),
+        },
+        refused => CommandError::Refused {
+            reason: refused.to_string(),
+        },
+    }
+}
+
+/// `skill_save`: the skill added for `scope`, or replaced, under the lock the team file's writers
+/// share (ADR 0034).
+fn save_skill_for(
+    orchestrator: &Orchestrator,
+    scope: &SkillScope,
+    files: &std::collections::BTreeMap<String, String>,
+    replace_shipped: bool,
+) -> Result<CommandReport, CommandError> {
+    let level = skill_level(scope);
+    let bytes = files
+        .iter()
+        .map(|(path, text)| (path.clone(), text.clone().into_bytes()))
+        .collect();
+    let _writing = orchestrator.deps.daemon.team_writes();
+    let saved = save_skill(&orchestrator.deps.tools, &level, &bytes, replace_shipped)
+        .map_err(skill_refused)?;
+    Ok(CommandReport {
+        said: saved_sentence(&saved, &level),
+        events: vec![saved.event],
+    })
+}
+
+/// `skill_remove`: the skill `name` of `scope` taken away.
+fn remove_skill_for(
+    orchestrator: &Orchestrator,
+    scope: &SkillScope,
+    name: &str,
+) -> Result<CommandReport, CommandError> {
+    let level = skill_level(scope);
+    let _writing = orchestrator.deps.daemon.team_writes();
+    let event = remove_skill(&orchestrator.deps.tools, &level, name).map_err(skill_refused)?;
+    Ok(CommandReport {
+        said: removed_sentence(name, &level),
+        events: vec![event],
+    })
+}
+
+/// `skill_confirm`: the skill `name` of `scope` confirmed on this computer as its folder is now.
+fn confirm_skill_for(
+    orchestrator: &Orchestrator,
+    scope: &SkillScope,
+    name: &str,
+    sha256: &str,
+    replace_shipped: bool,
+) -> Result<CommandReport, CommandError> {
+    let level = skill_level(scope);
+    let _writing = orchestrator.deps.daemon.team_writes();
+    let event = confirm_skill(
+        &orchestrator.deps.tools,
+        &level,
+        name,
+        sha256,
+        replace_shipped,
+    )
+    .map_err(skill_refused)?;
+    Ok(CommandReport {
+        said: confirmed_sentence(name, &level),
+        events: vec![event],
+    })
+}
+
+/// `team` with `agent`'s connector `name` set to `entry`, or removed, or the refusal naming each
+/// rule it breaks.
+fn connector_team(
+    team: &Team,
+    agent: &str,
+    name: &str,
+    entry: Option<&serde_json::Value>,
+) -> Result<Team, CommandError> {
+    with_server(team, agent, name, entry).map_err(|errors| CommandError::Refused {
+        reason: errors
+            .iter()
+            .map(|error| format!("{}: {}", error.path, error.message))
+            .collect::<Vec<_>>()
+            .join("; "),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -1290,6 +1678,169 @@ mod tests {
             "escalation.raised",
             &json!({ "reason": reason, "detail": "contract_requires_human" }),
         );
+    }
+
+    /// dev-a's session `s-1` on FRK-1 asked to call `create_issue`: the approval's seq.
+    fn an_approval_asked(harness: &Harness) -> u64 {
+        use farik_protocol::event::{NewEvent, event_from_value};
+
+        let event = event_from_value(&json!({
+            "seq": 1, "recorded_at": "2026-09-17T10:00:00Z", "team_id": "farik",
+            "project_id": "farik", "task_id": "FRK-1", "agent_id": "dev-a", "session_id": "s-1",
+            "kind": "tool_approval.requested",
+            "body": {
+                "server": "github", "tool": "create_issue", "input": "{}",
+                "input_sha256": "0".repeat(64)
+            },
+        }))
+        .expect("schema-valid");
+        let deps = &harness.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
+        appended.envelope.seq
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn approve_records_the_grant_on_the_task() {
+        let harness = Harness::new("human-tool-approve", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let orchestrator = an_orchestrator(&harness);
+        let approval = an_approval_asked(&harness);
+        assert!(harness.row("FRK-1").waiting_on_human);
+        let report = handled(
+            &orchestrator,
+            Command::ToolApprove {
+                approval,
+                note: Some("Only this one.".to_string()),
+            },
+        )
+        .await;
+        assert_eq!(
+            report.said,
+            format!("Allowed create_issue once for dev-a (approval {approval}).\nInput: {{}}")
+        );
+        let granted = last(&harness, EventKind::ToolApprovalGranted).expect("recorded");
+        assert_eq!(report.events, vec![granted.envelope.seq]);
+        assert_eq!(granted.envelope.ids.task_id, Some(task("FRK-1")));
+        assert_eq!(granted.envelope.ids.agent_id, None);
+        assert_eq!(granted.envelope.ids.session_id, None);
+        let EventBody::ToolApprovalGranted(body) = &granted.body else {
+            panic!("a grant");
+        };
+        assert_eq!(body.approval.get(), approval);
+        assert_eq!(body.note.as_deref(), Some("Only this one."));
+        assert!(!harness.row("FRK-1").waiting_on_human);
+
+        let other = an_approval_asked(&harness);
+        let report = handled(
+            &orchestrator,
+            Command::ToolRefuse {
+                approval: other,
+                note: None,
+            },
+        )
+        .await;
+        assert_eq!(
+            report.said,
+            format!("Not allowed: create_issue for dev-a (approval {other}).\nInput: {{}}")
+        );
+        let refused = last(&harness, EventKind::ToolApprovalRefused).expect("recorded");
+        let EventBody::ToolApprovalRefused(body) = &refused.body else {
+            panic!("a refusal");
+        };
+        assert_eq!((body.approval.get(), body.note.as_deref()), (other, None));
+        assert!(!harness.row("FRK-1").waiting_on_human);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn approve_refuses_an_unknown_or_decided_approval() {
+        let harness = Harness::new("human-tool-refusals", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let orchestrator = an_orchestrator(&harness);
+        let approve = |approval| Command::ToolApprove {
+            approval,
+            note: None,
+        };
+        let refuse = |approval| Command::ToolRefuse {
+            approval,
+            note: None,
+        };
+        let created = harness.events(&[EventKind::TaskCreated])[0].envelope.seq;
+        for command in [
+            approve(9_999),
+            refuse(9_999),
+            approve(created),
+            refuse(created),
+        ] {
+            let reason = refused(&orchestrator, command).await;
+            assert!(reason.starts_with("unknown_approval: "), "{reason}");
+        }
+        let first = an_approval_asked(&harness);
+        handled(&orchestrator, approve(first)).await;
+        let second = an_approval_asked(&harness);
+        handled(&orchestrator, refuse(second)).await;
+        for command in [
+            approve(first),
+            refuse(first),
+            approve(second),
+            refuse(second),
+        ] {
+            let reason = refused(&orchestrator, command).await;
+            assert!(reason.starts_with("approval_decided: "), "{reason}");
+        }
+        assert_eq!(harness.events(&[EventKind::ToolApprovalGranted]).len(), 1);
+        assert_eq!(harness.events(&[EventKind::ToolApprovalRefused]).len(), 1);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn two_decisions_racing_on_one_approval_let_one_through() {
+        let harness = Harness::new("human-tool-race", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let first = an_approval_asked(&harness);
+        // A second approval on the same task, which nobody decides.
+        an_approval_asked(&harness);
+        // A clock that sleeps in every append puts the gap between the check and the write where
+        // both deciders are inside it.
+        let deps = crate::daemon::fixtures::slowed_deps(
+            &harness.project,
+            std::time::Duration::from_millis(50),
+        );
+        let barrier = std::sync::Barrier::new(2);
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let decisions: Vec<_> = [true, false]
+                .into_iter()
+                .map(|granted| {
+                    let (deps, barrier) = (&deps, &barrier);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        super::decide_tool_call(deps, first, None, granted)
+                    })
+                })
+                .collect();
+            decisions
+                .into_iter()
+                .map(|decision| decision.join().expect("the decision ends"))
+                .collect()
+        });
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let decided = harness.events(&[
+            EventKind::ToolApprovalGranted,
+            EventKind::ToolApprovalRefused,
+        ]);
+        assert_eq!(decided.len(), 1, "one decision is in force");
+        // The task still waits on the approval nobody has decided.
+        assert!(harness.row("FRK-1").waiting_on_human);
     }
 
     #[tokio::test]
@@ -1960,6 +2511,135 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one scenario, read from top to bottom"
+    )]
+    async fn saves_confirms_and_removes_a_skill_for_the_human() {
+        use farik_protocol::command::SkillScope;
+
+        let harness = Harness::new("human-skills", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+        let files: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::from([
+            (
+                "SKILL.md".to_string(),
+                "---\nname: api-style\ndescription: Use when styling.\n---\nbody".to_string(),
+            ),
+            ("references/a.md".to_string(), "details".to_string()),
+        ]);
+        let scope = SkillScope::Agent("dev-a".to_string());
+        let saved = handled(
+            &orchestrator,
+            Command::SkillSave {
+                scope: scope.clone(),
+                files: files.clone(),
+                replace_shipped: false,
+            },
+        )
+        .await;
+        assert_eq!(saved.said, "Added api-style for dev-a.");
+        assert_eq!(saved.events.len(), 1);
+        let again = handled(
+            &orchestrator,
+            Command::SkillSave {
+                scope: scope.clone(),
+                files: files.clone(),
+                replace_shipped: false,
+            },
+        )
+        .await;
+        assert_eq!(again.said, "Updated api-style for dev-a.");
+        let bytes = files
+            .iter()
+            .map(|(p, t)| (p.clone(), t.clone().into_bytes()))
+            .collect();
+        let sha = farik_core::skill::skill_sha256(&bytes);
+        let folder = harness
+            .project
+            .repo
+            .path
+            .join(".farik/agents/dev-a/skills/api-style");
+        std::fs::write(folder.join("references/a.md"), "edited").expect("an edit outside Farik");
+        let reason = refused(
+            &orchestrator,
+            Command::SkillConfirm {
+                scope: scope.clone(),
+                name: "api-style".to_string(),
+                sha256: sha,
+                replace_shipped: false,
+            },
+        )
+        .await;
+        assert!(reason.starts_with("skill_hash_mismatch: "), "{reason}");
+        let edited = farik_core::skill::skill_sha256(
+            &crate::skills::read_skill_folder(&folder).expect("readable"),
+        );
+        let confirmed = handled(
+            &orchestrator,
+            Command::SkillConfirm {
+                scope: scope.clone(),
+                name: "api-style".to_string(),
+                sha256: edited,
+                replace_shipped: false,
+            },
+        )
+        .await;
+        assert_eq!(confirmed.said, "Confirmed api-style for dev-a.");
+        assert_eq!(confirmed.events.len(), 1);
+        let reason = refused(
+            &orchestrator,
+            Command::SkillSave {
+                scope: SkillScope::Team,
+                files: std::collections::BTreeMap::from([(
+                    "SKILL.md".to_string(),
+                    "---\nname: a-b\ndescription: d\n---\nrun !`ls`".to_string(),
+                )]),
+                replace_shipped: false,
+            },
+        )
+        .await;
+        assert!(reason.starts_with("skill_runs_commands: "), "{reason}");
+        let removed = handled(
+            &orchestrator,
+            Command::SkillRemove {
+                scope: scope.clone(),
+                name: "api-style".to_string(),
+            },
+        )
+        .await;
+        assert_eq!(removed.said, "Removed api-style for dev-a.");
+        assert_eq!(removed.events.len(), 1);
+        let reason = refused(
+            &orchestrator,
+            Command::SkillRemove {
+                scope,
+                name: "api-style".to_string(),
+            },
+        )
+        .await;
+        assert!(reason.starts_with("skill_unknown: "), "{reason}");
+        let kinds: Vec<EventKind> = harness
+            .project
+            .events(&[
+                EventKind::SkillAdded,
+                EventKind::SkillConfirmed,
+                EventKind::SkillRemoved,
+            ])
+            .iter()
+            .map(|event| event.body.kind())
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                EventKind::SkillAdded,
+                EventKind::SkillConfirmed,
+                EventKind::SkillRemoved
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn lets_a_paused_agent_finish_its_chat_answer() {
         // The founder's rule: a paused agent still answers its chats, so pausing it stops only
         // its other sessions; retiring it stops them all.
@@ -1979,6 +2659,8 @@ mod tests {
                     purpose,
                     in_reply_to: None,
                     thread: None,
+                    skills: Vec::new(),
+                    skills_root: None,
                     cwd: harness.project.repo.path.clone(),
                     executor: None,
                     limits: farik_core::budget::DEFAULT_SESSION_LIMITS,
@@ -2042,6 +2724,48 @@ mod tests {
                 .as_deref(),
             Some(super::RETIRED)
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retiring_an_agent_deletes_its_connector_keys() {
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
+
+        let server = json!([{
+            "name": "github", "source": "custom", "transport": "stdio",
+            "command": "github-mcp", "credential_keys": ["API_KEY"],
+            "tools": { "search": "network" }
+        }]);
+        let harness = Harness::new("human-retire-keys", |wire| {
+            wire["agents"][1]["mcp_servers"] = server.clone();
+            wire["agents"][2]["mcp_servers"] = server.clone();
+        });
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        assert!(harness.daemon.set_connector_secrets(store.clone()));
+        let root = harness.project.deps.files.root();
+        let at = |agent: &str| {
+            harness
+                .daemon
+                .secret_at(root, agent, "github")
+                .expect("an address")
+        };
+        let entry = ConnectorEntry {
+            spec_sha256: "h".to_string(),
+            keys: [(
+                "API_KEY".to_string(),
+                crate::claude::Secret::new("k".to_string()),
+            )]
+            .into(),
+            oauth: None,
+        };
+        for agent in ["dev-a", "dev-b"] {
+            store.save(&at(agent), &entry).expect("kept");
+        }
+        let orchestrator = an_orchestrator(&harness);
+        handled(&orchestrator, a_pause("dev-b", AgentStatus::Retired)).await;
+        // A retired agent never runs again: nothing it was given is kept for it (carry M4).
+        assert_eq!(store.load(&at("dev-b")), Ok(None));
+        assert_eq!(store.load(&at("dev-a")), Ok(Some(entry)));
     }
 
     #[tokio::test]

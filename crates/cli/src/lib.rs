@@ -12,6 +12,14 @@ pub mod board;
 pub mod channel;
 /// The human's one-to-one chats.
 pub mod chat;
+/// `farik connect` and `farik disconnect`: one agent's MCP server, its keys kept by this process
+/// and only names sent on (ADR 0030).
+#[cfg(unix)]
+mod connector;
+/// `farik connector run` and `farik connector headers`: a custom connector's keys, from the
+/// daemon to the server, never through a file (ADR 0030).
+#[cfg(unix)]
+pub mod connector_run;
 /// Taking a contract from the team, and giving it back.
 pub mod contract;
 /// Writing a contract with the Product Manager at the terminal.
@@ -51,6 +59,9 @@ mod serve;
 mod setup;
 /// One contract, and what happened to it.
 pub mod show;
+
+#[cfg(unix)]
+mod skill;
 /// One sprint, and how it went.
 pub mod sprint;
 /// Who drives a project, and how a command reaches it.
@@ -80,6 +91,10 @@ use farik_protocol::clock::{Clock, IdSource, SequentialIds};
 use farik_protocol::command::{AcceptSubject, Command};
 #[cfg(unix)]
 use farik_runtime::RuntimeAdapter;
+#[cfg(unix)]
+use farik_runtime::connectors::{
+    ConnectorSecretStores, ConnectorSecrets, KeychainConnectorSecrets, MemoryConnectorSecrets,
+};
 #[cfg(unix)]
 use farik_runtime::credential::{CredentialStore, FileStore, KeychainStore, MemoryStore};
 #[cfg(unix)]
@@ -122,6 +137,9 @@ pub struct CliIo<'a> {
     /// What a command reads: the hook commands' JSON from Claude Code, and the answers
     /// `farik contract new` asks for. Owned, so that one reader thread can hold it.
     pub stdin: Box<dyn Read + Send>,
+    /// Whether `stdin` is a terminal, where a key is read with its echo off: `false` here, and
+    /// what the process's standard input is in `main`.
+    pub stdin_is_terminal: bool,
     /// What a person or a script asked for.
     pub stdout: Box<dyn Write + 'a>,
     /// Why Farik would not do something, and warnings.
@@ -149,6 +167,16 @@ pub struct CliIo<'a> {
     /// real keychain, and the keychain then the file in `main`.
     #[cfg(unix)]
     pub credential_stores: CredentialStores,
+    /// Where each role's kit comes from (ADR 0036): the shipped kits here and in `main`, which a
+    /// test replaces with a fixture kit whose server is its own.
+    pub kits: farik_runtime::KitSource,
+    /// Where each agent's connector keys are kept (ADR 0030): in memory here, so that no test
+    /// touches a real keychain, and the keychain then `connectors.json` in `main`.
+    #[cfg(unix)]
+    pub connector_secrets: Arc<dyn ConnectorSecrets>,
+    /// Farik's own executable, which runs Farik's own connectors (ADR 0038): none here, so a
+    /// test names the binary it built, and `std::env::current_exe()` in `main`.
+    pub own_program: Option<PathBuf>,
     /// Whether `farik serve` lets a browser at `http://localhost:<port>` in without a code: the
     /// end-to-end server's `--preview` (step 12, D1). The release build has no such field.
     #[cfg(feature = "e2e")]
@@ -184,6 +212,17 @@ pub fn system_credential_stores(
     })
 }
 
+/// The computer's connector key stores (ADR 0030): its keychain, then `connectors.json` in the
+/// state folder of `env`, when there is one.
+#[cfg(unix)]
+#[must_use]
+pub fn system_connector_secrets(env: &BTreeMap<String, String>) -> Arc<dyn ConnectorSecrets> {
+    Arc::new(ConnectorSecretStores::new(
+        Arc::new(KeychainConnectorSecrets::default()),
+        state::state_dir(env).map(|directory| directory.join("connectors.json")),
+    ))
+}
+
 /// Opens a link in a browser, or says why it could not.
 pub type Opener = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
@@ -201,6 +240,7 @@ impl<'a> CliIo<'a> {
         let (_, never) = tokio::sync::mpsc::unbounded_channel();
         CliIo {
             stdin: Box::new(std::io::empty()),
+            stdin_is_terminal: false,
             stdout,
             stderr,
             cwd,
@@ -217,6 +257,10 @@ impl<'a> CliIo<'a> {
                 let memory: Arc<dyn CredentialStore> = Arc::new(MemoryStore::default());
                 Arc::new(move || vec![Arc::clone(&memory)])
             },
+            kits: Arc::new(farik_roles::load_kit),
+            own_program: None,
+            #[cfg(unix)]
+            connector_secrets: Arc::new(MemoryConnectorSecrets::default()),
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
             #[cfg(feature = "e2e")]
@@ -328,6 +372,73 @@ enum Commands {
         #[command(subcommand)]
         command: HookCommands,
     },
+    /// Start a custom connector, or fill its headers, with its keys from the daemon: what a
+    /// session's `mcp.json` names (ADR 0030).
+    #[cfg(unix)]
+    Connector {
+        #[command(subcommand)]
+        command: ConnectorCommands,
+    },
+    /// Give one agent an MCP server, with its keys read from standard input, and label its tools
+    /// (5.6, ADR 0030).
+    #[cfg(unix)]
+    #[command(group(clap::ArgGroup::new("start").required(false).args(["command", "url"])))]
+    Connect {
+        /// The agent's id.
+        agent: String,
+        /// The server's name: lower-case letters, digits and dashes.
+        name: String,
+        /// The program that starts the server.
+        #[arg(long)]
+        command: Option<String>,
+        /// One argument to that program; repeat it for each.
+        #[arg(long = "arg", allow_hyphen_values = true)]
+        args: Vec<String>,
+        /// The server's web address.
+        #[arg(long)]
+        url: Option<String>,
+        /// A header, as 'Name: template', where {KEY} is a key's value; repeat it for each.
+        #[arg(long = "header")]
+        headers: Vec<String>,
+        /// A key's name; its value is read from standard input. Repeat it for each.
+        #[arg(long = "key")]
+        keys: Vec<String>,
+        /// Sign in to the server's service in your browser instead of giving a key (ADR 0033).
+        #[arg(long, conflicts_with_all = ["keys", "command"])]
+        sign_in: bool,
+        /// The client the service's app registration gave Farik, when it offers no registration.
+        #[arg(long)]
+        client_id: Option<String>,
+        /// The port that client's redirect address names (33418 when left out).
+        #[arg(long)]
+        callback_port: Option<u16>,
+        /// What to ask the service for; repeat it for each. Left out, the service chooses.
+        #[arg(long = "scope")]
+        scopes: Vec<String>,
+        /// A tool's label: `<tool>=network`, `<tool>=external_effect` or `<tool>=denied`. A tool
+        /// left unlabelled is `external_effect`.
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        /// How many calls each sprint the agent makes of a kit service's spending tool without
+        /// asking, `<tool>=<number>` from 0 to 1000; repeat it for each. Left out, the kit's number.
+        #[arg(long = "allowance")]
+        allowances: Vec<String>,
+    },
+    /// Take an MCP server from one agent, and delete its keys.
+    #[cfg(unix)]
+    Disconnect {
+        /// The agent's id.
+        agent: String,
+        /// The server's name.
+        name: String,
+    },
+    /// Give the team or one agent a skill in the Agent Skills format, read before it is added
+    /// (6.7, ADR 0034).
+    #[cfg(unix)]
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommands,
+    },
     /// Drive the team until nothing needs doing, a stop, or Ctrl-C (8.2).
     Run,
     /// Drive the team and keep driving when the board is idle, until a stop or Ctrl-C (8.1).
@@ -394,6 +505,11 @@ enum Commands {
         /// Why.
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         reason: Vec<String>,
+    },
+    /// Allow or refuse one call an agent asked to make to a connector (5.7).
+    Tool {
+        #[command(subcommand)]
+        command: ToolCommands,
     },
     /// Start, end, or show a sprint (5.5).
     Sprint {
@@ -483,6 +599,103 @@ enum HookCommands {
     },
 }
 
+/// `--team` or `--agent <id>`: whose skill.
+#[cfg(unix)]
+#[derive(clap::Args)]
+#[command(group(clap::ArgGroup::new("whom").required(true).args(["team", "agent"])))]
+struct WhoseSkill {
+    /// The team's skill.
+    #[arg(long)]
+    team: bool,
+    /// One agent's skill, by id.
+    #[arg(long)]
+    agent: Option<String>,
+}
+
+#[cfg(unix)]
+impl WhoseSkill {
+    fn whom(&self) -> skill::Whom<'_> {
+        self.agent
+            .as_deref()
+            .map_or(skill::Whom::Team, skill::Whom::Agent)
+    }
+}
+
+/// What `farik skill` does.
+#[cfg(unix)]
+#[derive(Subcommand)]
+enum SkillCommands {
+    /// List the skills the team has, or with --agent what one agent has and how each stands.
+    List {
+        /// The agent's id.
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Print every file of a skill, and the hash that confirms it.
+    Show {
+        /// The skill's name.
+        name: String,
+        #[command(flatten)]
+        whose: WhoseSkill,
+    },
+    /// Read a skill folder, see all of it, and add it.
+    Add {
+        /// The folder: a SKILL.md and the files it refers to.
+        folder: PathBuf,
+        #[command(flatten)]
+        whose: WhoseSkill,
+        /// Add without asking, once you have read it.
+        #[arg(long)]
+        yes: bool,
+        /// Let it replace a skill Farik ships with its name.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Remove a skill and its folder.
+    Remove {
+        /// The skill's name.
+        name: String,
+        #[command(flatten)]
+        whose: WhoseSkill,
+    },
+    /// Confirm on this computer a skill as its folder is now: after a pull, a clone or an edit.
+    Confirm {
+        /// The skill's name.
+        name: String,
+        #[command(flatten)]
+        whose: WhoseSkill,
+        /// The Hash `farik skill show` printed: all of it, or its first 12 digits.
+        hash: String,
+        /// Let it replace a skill Farik ships with its name.
+        #[arg(long)]
+        replace: bool,
+    },
+}
+
+/// Which session's server `farik connector` asks the daemon for.
+#[derive(clap::Args)]
+struct ConnectorAsk {
+    /// The daemon's `daemon.json`.
+    #[arg(long)]
+    daemon: PathBuf,
+    /// The session's id.
+    #[arg(long)]
+    session: String,
+    /// The server's name.
+    #[arg(long)]
+    server: String,
+}
+
+#[derive(Subcommand)]
+enum ConnectorCommands {
+    /// Start the server with only its keys and the variables Farik keeps.
+    Run(ConnectorAsk),
+    /// Print the server's headers, filled with its keys, as one JSON object.
+    Headers(ConnectorAsk),
+    /// Look packages up in the open vulnerability database (used by the Architect's kit).
+    Osv,
+}
+
 #[derive(Subcommand)]
 enum SprintCommands {
     /// Start a sprint, which the team plans from the ready backlog.
@@ -497,6 +710,26 @@ enum SprintCommands {
     Show {
         /// The sprint, as S<n>.
         sprint_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ToolCommands {
+    /// Allow the call once, with exactly the input the agent asked with.
+    Approve {
+        /// The approval's number, as farik run prints it.
+        approval: u64,
+        /// A note for the agent's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Refuse the call.
+    Refuse {
+        /// The approval's number, as farik run prints it.
+        approval: u64,
+        /// Why, for the agent's next session.
+        #[arg(long)]
+        note: Option<String>,
     },
 }
 
@@ -598,6 +831,18 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             HookCommands::PostToolUse { daemon } => hook::post_tool_use(&io.cwd.join(daemon), io),
         };
     }
+    #[cfg(unix)]
+    if let Commands::Connector { command } = &parsed.command {
+        return match command {
+            ConnectorCommands::Run(ask) => {
+                connector_run::run(&io.cwd.join(&ask.daemon), &ask.session, &ask.server, io)
+            }
+            ConnectorCommands::Headers(ask) => {
+                connector_run::headers(&io.cwd.join(&ask.daemon), &ask.session, &ask.server, io)
+            }
+            ConnectorCommands::Osv => connector_run::osv(io),
+        };
+    }
     if parsed.json && matches!(parsed.command, Commands::Serve { .. }) {
         say(
             &mut io.stderr,
@@ -634,6 +879,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         | Commands::Accept { .. }
         | Commands::SendBack { .. }
         | Commands::Answer { .. }
+        | Commands::Tool { .. }
         | Commands::Integrate { .. }
         | Commands::Resolve { .. }
         | Commands::Cancel { .. }
@@ -682,6 +928,69 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Criteria {
             command: CriteriaCommands::List,
         } => open_project(&io.cwd, now).and_then(|project| team::criteria(&project)),
+        #[cfg(unix)]
+        Commands::Connect {
+            agent,
+            name,
+            command,
+            args,
+            url,
+            headers,
+            keys,
+            sign_in,
+            client_id,
+            callback_port,
+            scopes,
+            tags,
+            allowances,
+        } => open_project(&io.cwd, now).and_then(|project| {
+            connector::connect(
+                &project,
+                &connector::Asked {
+                    agent,
+                    name,
+                    command: command.as_deref(),
+                    args,
+                    url: url.as_deref(),
+                    headers,
+                    keys,
+                    tags,
+                    allowances,
+                    sign_in: *sign_in,
+                    client_id: client_id.as_deref(),
+                    callback_port: *callback_port,
+                    scopes,
+                },
+                io,
+            )
+        }),
+        #[cfg(unix)]
+        Commands::Disconnect { agent, name } => open_project(&io.cwd, now)
+            .and_then(|project| connector::disconnect(&project, agent, name, io)),
+        #[cfg(unix)]
+        Commands::Skill { command } => {
+            open_project(&io.cwd, now).and_then(|project| match command {
+                SkillCommands::List { agent } => skill::list(&project, agent.as_deref(), io),
+                SkillCommands::Show { name, whose } => skill::show(&project, name, &whose.whom()),
+                SkillCommands::Add {
+                    folder,
+                    whose,
+                    yes,
+                    replace,
+                } => skill::add(&project, folder, &whose.whom(), *yes, *replace, io),
+                SkillCommands::Remove { name, whose } => {
+                    skill::remove(&project, name, &whose.whom(), io)
+                }
+                SkillCommands::Confirm {
+                    name,
+                    whose,
+                    hash,
+                    replace,
+                } => skill::confirm(&project, name, &whose.whom(), hash, *replace, io),
+            })
+        }
+        #[cfg(unix)]
+        Commands::Connector { .. } => unreachable!("a connector command returned above"),
         Commands::Hook { .. }
         | Commands::Run
         | Commands::Serve { .. }
@@ -743,6 +1052,7 @@ pub(crate) fn task(task_id: &str) -> Result<TaskId, String> {
 }
 
 /// The human's command a subcommand stands for, and its name as typed.
+#[allow(clippy::too_many_lines, reason = "one arm per command")]
 fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
     Ok(match command {
         Commands::Approve { task_id } => (
@@ -782,6 +1092,24 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
             Command::QuestionAnswer {
                 question_id: *question_id,
                 answer: answer.join(" "),
+            },
+        ),
+        Commands::Tool {
+            command: ToolCommands::Approve { approval, note },
+        } => (
+            "tool approve",
+            Command::ToolApprove {
+                approval: *approval,
+                note: note.clone(),
+            },
+        ),
+        Commands::Tool {
+            command: ToolCommands::Refuse { approval, note },
+        } => (
+            "tool refuse",
+            Command::ToolRefuse {
+                approval: *approval,
+                note: note.clone(),
             },
         ),
         Commands::Integrate { task_id } => (

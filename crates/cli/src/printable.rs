@@ -1,16 +1,26 @@
 //! Text as a terminal may be given it. Questions, reasons, notes, titles, and diffs are written
 //! by agents, and an escape sequence among them would be obeyed by the terminal that prints it:
-//! it could clear the screen, rewrite a line already printed, or set the window's title.
+//! it could clear the screen, rewrite a line already printed, or set the window's title. The
+//! characters that reorder or hide text (bidirectional controls, zero-width characters) are
+//! escaped the same way, so that what a person reads is what was written.
 
 use std::borrow::Cow;
 
-/// `text` with every control character but a line break and a tab written as `\u` and four hex
-/// digits, `\u001b` for an escape, so that the terminal shows it rather than obeys it. Every
+/// `text` with every control character but a line break and a tab, and every character that
+/// reorders or hides text, written as `\u` and four hex digits, `\u001b` for an escape, so that the
+/// terminal shows it rather than obeys it. Every
 /// control character is one such escape, and it is JSON's own, so a JSON line stays the same JSON:
 /// a control character is found only inside its strings, and there it is the same character.
 #[must_use]
 pub fn printable(text: &str) -> Cow<'_, str> {
-    let is_escaped = |character: char| character.is_control() && !matches!(character, '\n' | '\t');
+    let is_escaped = |character: char| {
+        (character.is_control() && !matches!(character, '\n' | '\t'))
+            || matches!(
+                character,
+                '\u{61c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}'
+                    | '\u{2066}'..='\u{2069}' | '\u{feff}'
+            )
+    };
     if !text.chars().any(is_escaped) {
         return Cow::Borrowed(text);
     }

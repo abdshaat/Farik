@@ -3,13 +3,13 @@
   "attachments": {},
   "boards": {
     "AgentEdit.dc.html": {
-      "h": 1000,
-      "is_interactive": true,
-      "page": "team",
-      "title": "Edit Theo",
+      "x": 0,
+      "y": 0,
       "w": 1440,
-      "x": 1520,
-      "y": 0
+      "h": 6498,
+      "title": "Edit Theo and Mira: the role’s kit, connectors added by you, Sign in again, skills, Remove",
+      "page": "connectors",
+      "is_interactive": true
     },
     "AnswerQuestion.dc.html": {
       "h": 1000,
@@ -30,10 +30,10 @@
       "y": 0
     },
     "Board.dc.html": {
-      "h": 900,
+      "h": 1267,
       "is_interactive": true,
       "page": "daily",
-      "title": "Board",
+      "title": "Board, with what agents made on other services",
       "w": 1440,
       "x": 3040,
       "y": 0
@@ -60,7 +60,7 @@
       "h": 1000,
       "is_interactive": true,
       "page": "daily",
-      "title": "Costs",
+      "title": "Costs, with what agents made on other services",
       "w": 1440,
       "x": 3040,
       "y": 2240
@@ -310,7 +310,7 @@
       "y": 0,
       "w": 1440,
       "h": 2080,
-      "title": "Iris\u2019s plan, and checking the screens",
+      "title": "Iris’s plan, and checking the screens",
       "page": "designer",
       "is_interactive": true
     },
@@ -319,7 +319,7 @@
       "y": 0,
       "w": 1440,
       "h": 2200,
-      "title": "Accept work, with Iris\u2019s check",
+      "title": "Accept work, with Iris’s check",
       "page": "designer",
       "is_interactive": true
     },
@@ -448,6 +448,105 @@
       "title": "Setup: sprints on by default",
       "page": "sprints",
       "is_interactive": true
+    },
+    "ConnectorAdd.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 18065,
+      "title": "Add a connector: custom (start it or sign in, label its tools) or from a kit (key or sign-in, done)",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "ToolApproval.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 3490,
+      "title": "Theo wants to use airtable: Today and Allow once; Kai past an allowance",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "PhoneToolApproval.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 360,
+      "h": 1626,
+      "title": "Theo wants to use airtable, on a phone",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "PhoneSignIn.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 360,
+      "h": 11372,
+      "title": "Signing in to a service, on a phone",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "PhoneSkills.dc.html": {
+      "x": 5000,
+      "y": 0,
+      "w": 360,
+      "h": 7425,
+      "title": "Skills on the agent page, on a phone",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "SignInDone.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 1095,
+      "title": "Signed in: the tab Farik serves",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "SkillEdit.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 4025,
+      "title": "Add or edit a skill",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "SkillReview.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 1320,
+      "title": "Review a skill",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "ConnectorAllowance.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 3900,
+      "title": "How many Kai may make: after signing in, and Change how many",
+      "page": "team",
+      "is_interactive": true
+    },
+    "PhoneKit.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 360,
+      "h": 5587,
+      "title": "Connecting a kit’s service, on a phone",
+      "page": "team",
+      "is_interactive": true
+    },
+    "PhoneAllowances.dc.html": {
+      "x": 5000,
+      "y": 0,
+      "w": 360,
+      "h": 2247,
+      "title": "Allowances on the board, on Costs and when asking, on a phone",
+      "page": "team",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -549,6 +648,24 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_connectors": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "connectors",
+      "text": "Connectors per agent, and approving their calls",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_signin-skills": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "signin-skills",
+      "text": "Signing in to a service, and skills per agent",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -601,7 +718,18 @@
     "BoardBacklog.dc.html",
     "TodayBacklog.dc.html",
     "SettingsSprints.dc.html",
-    "SetupSprints.dc.html"
+    "SetupSprints.dc.html",
+    "ConnectorAdd.dc.html",
+    "ToolApproval.dc.html",
+    "PhoneToolApproval.dc.html",
+    "PhoneSignIn.dc.html",
+    "PhoneSkills.dc.html",
+    "SignInDone.dc.html",
+    "SkillEdit.dc.html",
+    "SkillReview.dc.html",
+    "ConnectorAllowance.dc.html",
+    "PhoneKit.dc.html",
+    "PhoneAllowances.dc.html"
   ],
   "pages": [
     {
@@ -643,6 +771,14 @@
     {
       "id": "sprints",
       "name": "Sprints"
+    },
+    {
+      "id": "connectors",
+      "name": "Connectors"
+    },
+    {
+      "id": "signin-skills",
+      "name": "Sign-in and skills"
     }
   ],
   "title": "Farik web UI mockup"

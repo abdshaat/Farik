@@ -110,7 +110,7 @@ export const en = {
 		"Your UI/UX Designer opens your app in this browser, inside the safe box. Farik fetches it once. It takes a few minutes.",
 	fetchIt: "Fetch it",
 	noDockerWarning:
-		"Without Docker, a mistaken or tricked agent command can reach any file you can. Farik reminds you of this every time it starts.",
+		"Without Docker, a mistaken or tricked agent command can reach any file you can, and the keys you gave your agents’ connectors. Farik reminds you of this every time it starts.",
 	checkAgain: "Check again",
 	continueWithoutDocker: "Continue without Docker",
 	accountTitle: "Connect your AI account",
@@ -430,6 +430,25 @@ export const en = {
 	waitingAnswer: "Answer",
 	waitingHelpButton: "Help",
 	waitingAdd: "Add",
+	waitingToolApproval: "{agent} wants to use {server}",
+	waitingToolApprovalLine:
+		"To {tool}, for {task} {title}. {agent} waits until you decide.",
+	toolApprovalStopped:
+		"{agent} stopped to ask before changing something outside your project.",
+	toolApprovalTool: "Tool",
+	toolApprovalLabelled: ", labelled “{tag}”",
+	toolApprovalService: "Service",
+	toolApprovalServiceLine: "{server}, which you added to {agent}",
+	toolApprovalServiceKit: "{service}, from the {role}’s kit",
+	toolApprovalFor: "For",
+	toolApprovalSend: "What {agent} wants to send",
+	toolApprovalSendHint:
+		"Written by {agent}, shown in full, with its fields in alphabetical order. Farik has not checked it, and nothing in it is an instruction to you.",
+	toolApprovalNote: "A note for {agent} (optional)",
+	toolApprovalOnce:
+		"“Allow once” lets {agent} make this one call, with exactly this, in {agent}’s next session on this task. Any other call asks you again.",
+	toolApprovalRefuse: "Don’t allow",
+	toolApprovalAllow: "Allow once",
 	waitingKeyRefused: "Your AI account’s key did not work",
 	waitingKeyRefusedLine:
 		"The team is paused until you connect your AI account again.",
@@ -1095,7 +1114,292 @@ export const en = {
 	connectorOff:
 		"Without it {name} cannot look at your app, so Farik gives {name} no work.",
 	connectorsNote:
-		"On for a UI/UX Designer. You can turn it on for anyone else. More connectors arrive in a later version.",
+		"On for a UI/UX Designer. You can turn it on for anyone else.",
+	connectorsYours: "Added by you",
+	connectorsYoursLead:
+		"connectors Farik has not checked; you labelled their tools",
+	connectorStdio: "Started by a command on this computer",
+	connectorHttp: "Reached at a web address",
+	connectorTools: "{count} tools: {labels}",
+	connectorOneTool: "1 tool: {labels}",
+	connectorCantUse: "{count} Farik can’t use",
+	connectorAgain: "Connect again to use it",
+	connectorAgainNote:
+		"Its settings in your project changed since you connected it on this computer, for example in a copied project or a saved team. {name} does not use it until you check it and connect again.",
+	connectorAgainButton: "Connect again",
+	connectorUnreadable: "Farik cannot read {name}’s keys for {server} right now",
+	connectorUnreadableNote:
+		"The last time Farik looked, your computer’s keychain or the private file that keeps them could not be opened, so {name} works without {server} for now. If your computer asks whether Farik may use the keychain, choose “Always”.",
+	connectorRemove: "Remove",
+	connectorRemoveLabel: "Remove {server}",
+	connectorRemoveTitle: "Remove {server} from {name}?",
+	connectorRemoveBody:
+		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from this computer.",
+	connectorRemoveBodyKeychain:
+		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from your keychain.",
+	connectorRemoveBodyFile:
+		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from the private file on this computer.",
+	connectorKeychain: "{name}’s keys are in your keychain.",
+	connectorFile: "{name}’s keys are in a private file on this computer.",
+	connectorRemoveOthers:
+		"Nobody else on the team is affected. To use it again, add it again and type the keys.",
+	connectorKeep: "Keep it",
+	connectorSignedIn: "Signed in to {host}",
+	connectorSignInEnded:
+		"{host} ended Farik’s sign-in. Sign in again to use it.",
+	connectorSignInAgain: "Sign in again",
+	connectorRemoveSignedKeychain:
+		"Farik deletes the sign-in from your keychain and asks {host} to forget it.",
+	connectorRemoveSignedFile:
+		"Farik deletes the sign-in from the private file on this computer and asks {host} to forget it.",
+	connectorRemoveSignedKeychainStays:
+		"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in {host}’s settings.",
+	connectorRemoveSignedFileStays:
+		"Farik deletes the sign-in from the private file on this computer. To remove Farik completely, also remove it in {host}’s settings.",
+	connectorRemoveOthersSigned:
+		"Nobody else on the team is affected. To use it again, add it again and sign in.",
+	connectorCustom: "A custom connector",
+	connectorCustomNote:
+		"Any connector, by the command that starts it or its web address. Farik has not checked it, so you label each of its tools yourself. A connector started by a command runs on this computer with your rights, so add only one you trust. It runs in a folder Farik keeps for it, so give a file of yours by its full path, starting with /.",
+	connectorCustomAdd: "Add a custom connector",
+	connectorCustomKeychain:
+		"If your computer asks whether Farik may use the keychain, choose “Always”, or the connector cannot start.",
+	tagNetwork: "Only reads",
+	tagNetworkNote:
+		"{name} may use it any time. It looks things up and changes nothing.",
+	tagExternal: "Changes things, asks you",
+	tagExternalNote:
+		"{name} asks you before each use, and you see exactly what {name} wants to send.",
+	tagDenied: "Never",
+	tagDeniedNote: "{name} is not given it.",
+	addTitle: "Add a custom connector to {name}",
+	addTitleNamed: "Add {server} to {name}",
+	addStepStart: "How to start it",
+	addStepLabel: "Label its tools",
+	addStepDone: "Done",
+	addName: "Name",
+	addNameHint:
+		"Lowercase letters, numbers and dashes. It is how {name}’s page lists it.",
+	addHow: "How does it start?",
+	addCommandChoice: "A command",
+	addCommandChoiceNote: "Farik runs it on this computer.",
+	addUrlChoice: "A web address",
+	addUrlChoiceNote: "The service runs it for you.",
+	addCommand: "Command",
+	addCommandHint:
+		"The program the connector’s instructions start with, like npx, or its full path, starting with /. It runs on this computer with your rights, so use only one you trust.",
+	addArgs: "What comes after it",
+	addArgsHint:
+		"Copy each part that follows the program in the connector’s instructions into a field of its own, without quotes.",
+	addArg: "Part {count}",
+	addArgRemoveLabel: "part {count}",
+	addArgMore: "Add a part",
+	addUrl: "Web address",
+	addUrlHint: "Copy it from the service’s instructions.",
+	addUrlSecret:
+		"This address has a key inside it. Farik cannot keep a key that is part of an address safe yet, so a service like this cannot be added for now. Zapier is one.",
+	addHeader: "Where the key goes",
+	addHeaderHint: "Change it only if the service’s instructions say so.",
+	addHeaderN: "Header {count}",
+	addHeaderRemoveLabel: "header {count}",
+	addHeaderMore: "Add a header",
+	addHeaderTwice:
+		"Another header above has this name. Give each header its own name, or remove one.",
+	addKeys: "Keys",
+	addKeysHint:
+		"Each key is for {name} only. Name it as the connector’s instructions do.",
+	addKeysAgain:
+		"Type {name}’s key again. Farik does not reuse the old one for a changed connector.",
+	addKeyName: "Key name",
+	addKeyValue: "Key",
+	addKeyRemove: "Remove",
+	addKeyRemoveLabel: "key {count}",
+	addKeyMore: "Add another key",
+	addNext: "Next: list its tools",
+	addNextNote:
+		"Farik starts it once, with {name}’s keys, to list what it can do.",
+	addChanged:
+		"{server}’s settings in your project changed since you connected it on this computer, or it was never connected here. Check each one against the service’s or the connector’s instructions before you go on.",
+	addListLead:
+		"Farik has not checked {server}, so you decide what {name} may do with each of its {count} tools. When unsure, leave “Changes things, asks you”.",
+	addFrom: "Each tool’s description comes from {server}.",
+	addUnusable:
+		"Farik can’t use this tool: its name has characters Farik can’t pass on. {name} is not given it.",
+	addBack: "Back",
+	addDone: "{server} is added to {name}",
+	addKeychain:
+		"{name}’s keys for {server} are kept in your computer’s keychain.",
+	addKeychainNote:
+		"{name} never sees them: Farik hands them to {server} when {server} starts.",
+	addFile:
+		"{name}’s keys for {server} are kept in a private file only you can read.",
+	addFileNote:
+		"This computer has no keychain, so Farik keeps them in a file in your Farik folder that only your user account can open. {name} never sees them.",
+	addKeychainNoteNoSandbox:
+		"Farik hands them to {server} when {server} starts, and never puts them in {name}’s instructions. Without Docker’s sandbox, a command {name} runs on this computer could reach them.",
+	addFileNoteNoSandbox:
+		"This computer has no keychain, so Farik keeps them in a file in your Farik folder that only your user account can open. Without Docker’s sandbox, a command {name} runs on this computer could reach them.",
+	addNextWork: "{name} can use it from the next piece of work.",
+	addOnly:
+		"Only {name} has {server}. To give it to someone else, add it from their page, with their own key.",
+	addBackTo: "Back to {name}",
+	addNameWrong:
+		"Use lowercase letters, numbers and dashes, starting with a letter.",
+	addNameReserved: "Farik keeps this name for itself. Choose another.",
+	addNameTwice: "{name} already has a connector with this name.",
+	addCommandWrong:
+		"Farik cannot use this command as it is. Copy it again from the connector’s instructions.",
+	addUrlWrong:
+		"Farik cannot use this address. Copy it again from the service’s instructions; it starts with https://.",
+	addHeaderWrong:
+		"Write a name, a colon, then the value, like Authorization: Bearer {API_KEY}, naming only the keys below.",
+	addCommandNotAbsolute:
+		"Farik cannot find a program by a path like this one. Give the program’s name alone, like npx, or its full path, starting with /.",
+	addCommandWhole:
+		"Put only the program here, like npx. Put each part after it below, in a field of its own.",
+	addStateInsideProject:
+		"Farik keeps its settings inside this project’s folder, so a connector here would run among the project’s files. Whoever set up Farik on this computer can keep its settings elsewhere.",
+	addArgSecret:
+		"This puts a key itself in your project’s shared settings. Leave it out here, and type the key under Keys, named as the connector’s instructions name it.",
+	addHeaderSecret:
+		"This puts the key itself in your project’s shared settings. Write {API_KEY} where the key goes, and type the key under Keys.",
+	addTagUnknown:
+		"{server}’s tools changed since Farik listed them. Press “Next: list its tools” to list them again, then label each one.",
+	addKeyWrong:
+		"A key name is capital letters, numbers and underscores, starting with a letter, like API_KEY. Up to 8 keys.",
+	addNotListed:
+		"Farik could not start {server} or reach it to list its tools. Check the command or the address, and the keys, against its instructions.",
+	addTimeout:
+		"{server} did not answer within thirty seconds. Check the command or the address, and try again.",
+	addSignInLead: "{host} lets you sign in.",
+	addSignInButton: "Sign in with {host}",
+	addSignInFor: "for {host}",
+	addSignInNote:
+		"Farik opens its sign-in page in a new tab. Come back here when you’re done.",
+	addUseAKey: "Use a key instead",
+	addWaiting: "Waiting for you to sign in to {host}…",
+	addOpenAgain: "Open the sign-in page again",
+	addSignedInTo: "Signed in to {host}.",
+	addTryAgain: "Try again",
+	addSignInDenied: "You said no on {host}’s page, so Farik isn’t connected.",
+	addSignInTimedOut: "The sign-in took longer than 10 minutes.",
+	addSignInMismatch:
+		"Something didn’t match on the way back from {host}, so Farik stopped to keep you safe.",
+	addSignInFailed:
+		"{host} didn’t finish the sign-in. Try again, or use a key if it gives you one.",
+	addNotSupported:
+		"{host} doesn’t let Farik sign in by itself yet. If it gives you a key, paste it below.",
+	addSignInCouldNot:
+		"Farik couldn’t sign in to {host}. If it gives you a key, paste it below.",
+	addSignInEnded:
+		"{host} ended Farik’s sign-in. Sign in again to use {server}.",
+	addSignedIn: "Signed in.",
+	addSignedInKeychain:
+		"{name} uses {service} as you. Farik keeps the sign-in in your keychain.",
+	addSignedInFile:
+		"{name} uses {service} as you. Farik keeps the sign-in in a private file only you can read.",
+	addSignedInNoSandbox:
+		"Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
+	addOnlySigned:
+		"Only {name} has {server}. To give it to someone else, add it from their page, and sign in again there.",
+	kitHeading: "From the {role}’s kit",
+	kitLead: "services Farik checked; each tool is already labelled",
+	kitConnect: "Connect",
+	kitConnected: "Connected",
+	kitSignedIn: "Signed in to {service}.",
+	kitAgain: "Farik updated this service. Connect it again to keep using it.",
+	kitGone: "Farik no longer offers this service",
+	kitGoneNote:
+		"{name} does not use it. Removing it deletes what {name} had kept for it.",
+	kitTitle: "Connect {service} to {name}",
+	kitStepConnect: "Connect",
+	kitStepDone: "Done",
+	kitWhy: "Why {name} wants it",
+	kitWhat: "What to do",
+	kitGetKey: "Get your key",
+	kitGetKeyNote: "Opens {host} in a new tab.",
+	kitKeyLabel: "Your {service} key",
+	kitKeyLabelOf: "Your {service} key: {key}",
+	kitKeyHint:
+		"For {name} only, and never shown again. Farik checks it with {service} before keeping it.",
+	kitSignIn: "Sign in with {service}",
+	kitSignInNote:
+		"Farik opens {service}’s sign-in page in a new tab. Come back here when you’re done.",
+	kitWaiting: "Waiting for you to sign in to {service}…",
+	kitDone: "{service} is connected to {name}",
+	kitCan: "{name} can now",
+	kitAsks: "{name} asks you first before",
+	kitNever: "Farik never offers",
+	kitKeychain:
+		"{name}’s key is kept in your computer’s keychain. {name} never sees it: Farik hands it to {service}.",
+	kitFile:
+		"{name}’s key is kept in a private file only you can read, because this computer has no keychain. {name} never sees it: Farik hands it to {service}.",
+	kitKeychainNoSandbox:
+		"{name}’s key is kept in your computer’s keychain. Farik hands it to {service} and never puts it in {name}’s instructions. Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
+	kitFileNoSandbox:
+		"{name}’s key is kept in a private file only you can read, because this computer has no keychain. Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
+	kitUse: "{name} can use {service} from the next piece of work.",
+	kitOnly:
+		"Only {name} has {service}. To give it to someone else, connect it from their page.",
+	kitRefused:
+		"Farik could not connect {service}. Check the key against {service}’s page, and try again.",
+	kitTimeout:
+		"{service} did not answer within thirty seconds. Try again in a minute.",
+	kitChanged:
+		"Farik changed what it offers for {service} just now. Close this and look at {name}’s page again.",
+	allowStepConnect: "Connect",
+	allowStepHowMany: "How many",
+	allowStepDone: "Done",
+	allowNext: "Next",
+	allowBack: "Back",
+	allowSave: "Save",
+	allowClose: "Close",
+	allowSignedIn: "Signed in to {service}.",
+	allowQuestion: "How many may {name} make each sprint without asking?",
+	allowSpends:
+		"Each one uses your {service} credits. After that many, {name} asks you first, as for anything that changes things outside your project.",
+	allowEach: "each sprint",
+	allowRange: "0 means {name} asks every time. Up to 1,000 each.",
+	allowAlwaysAsk: "Tools that publish or post always ask.",
+	allowDay: "With no sprint running, the count starts again each day.",
+	allowApplies:
+		"A new number applies from {name}’s next piece of work. It does not allow a call that is already waiting; decide that one on Today.",
+	allowMade: "{n} made so far",
+	allowTooMany: "Up to 1,000. Type a smaller number.",
+	allowWhole: "Type a whole number from 0 to 1,000.",
+	allowRefused:
+		"Farik could not save the numbers. Close this and look at {name}’s page again.",
+	allowChange: "Change how many",
+	allowChangeHidden: "{name} may make with {service}",
+	allowAgainTitle: "Connect {service} again first",
+	allowAgain:
+		"Farik updated this service since you connected it. Connect it again to keep using it; you choose the numbers again there.",
+	allowMakeUpTo: "make up to {list} each sprint",
+	allowMore: "making more than that",
+	allowRowSprint: "This sprint: {list}.",
+	allowRowDay: "Today: {list}.",
+	allowOf: "{used} of {of} {what}",
+	allowBoardHeading: "Made on other services",
+	allowBoardSprint: "{name}: {used} of {of} {what} this sprint",
+	allowBoardDay: "{name}: {used} of {of} {what} today",
+	allowBoardAsks:
+		"{name}: {used} of {of} {what}. {name} asks you before making more.",
+	allowBoardExtra: "Extra {what} were ones you approved.",
+	allowCostsAgent: "Agent",
+	allowCostsService: "Service",
+	allowCostsMade: "Made",
+	allowCostsWhen: "When",
+	allowCostsWho: "{name}, on {service}",
+	allowCostsSprint: "This sprint",
+	allowCostsDay: "Today",
+	allowCostsBill:
+		"Farik counts what agents made, not what the service charges. Check your bill there.",
+	allowApprovalStopped:
+		"{name} stopped to ask before making more {what}, which uses your {service} credits.",
+	allowApprovalCount: "{name} has made {used} of {of} {what} {period}.",
+	allowApprovalSprint: "this sprint",
+	allowApprovalDay: "today",
+	allowApprovalOnce: "A new number does not allow it; decide it here.",
 	uiPathsTitle: "Which files are screens",
 	uiPathsLead:
 		"When a Developer’s change touches a file like these, the UI/UX Designer checks its screens before the Architect reviews the code.",
@@ -1268,4 +1572,91 @@ export const en = {
 	savedDeleteYes: "Delete it",
 	savedDeleteNo: "Keep it",
 	savedFolder: "Kept on this computer, in {folder}.",
+	skills: "Skills",
+	skillsLead: "teach {name} how your team likes things done",
+	skillsRole: "Comes with {role}",
+	skillsTeam: "For the whole team",
+	skillsOwn: "Just for {name}",
+	skillsAdd: "Add a skill",
+	skillEditButton: "Edit",
+	skillRemoveButton: "Remove",
+	skillReviewButton: "Review",
+	skillReplacedByOwn: "{name}’s own {skill} replaces this one for {name}",
+	skillReplacedByTeam: "Your team’s {skill} replaces this one",
+	skillReplacedByOwnRole: "{name}’s own {skill} replaces this one",
+	skillReadButton: "Read",
+	skillClose: "Close",
+	skillReadTitle: "Read {skill}",
+	skillReadNote:
+		"Farik comes with this skill, and its text is shown here to read. It cannot be changed here.",
+	skillToReview: "Changed in the project. Review before {name} uses it",
+	skillMissing: "is in the team file but its folder is gone",
+	skillRemoveTitle: "Remove {skill}?",
+	skillRemoveOwn:
+		"{name} stops using it, and its folder is deleted from the project.",
+	skillRemoveTeam:
+		"Your whole team stops using it, and its folder is deleted from the project.",
+	skillRemoveYes: "Remove {skill}",
+	skillCannotOpen: "Farik cannot open {skill} right now.",
+	skillAddTitle: "Add a skill for {name}",
+	skillEditTitle: "Edit {skill}",
+	skillFor: "Who is it for?",
+	skillForOwn: "Just {name}",
+	skillForOwnNote: "Only {name} uses it.",
+	skillForTeam: "Everyone on the team",
+	skillForTeamNote: "Each of your team uses it.",
+	skillName: "Name",
+	skillNameHint: "lower-case words joined by hyphens",
+	skillWhen: "When should {name} use it?",
+	skillWhenHint: "1024 characters at most",
+	skillInstructions: "Instructions",
+	skillWholeFile: "The whole SKILL.md",
+	skillUpload: "Upload a SKILL.md instead",
+	skillOtherFiles: "Also in this skill: {files}. Farik keeps them as they are.",
+	skillRenamed:
+		"This adds a new skill. Remove {old} yourself if you no longer want it.",
+	skillNext: "Next",
+	skillCancel: "Cancel",
+	skillBack: "Back",
+	skillRead:
+		"Farik will follow these instructions and use these files. Read them before adding.",
+	skillIgnores: "Farik ignores: {fields}",
+	skillReplaces: "This replaces {role}’s own {skill} for {whom}.",
+	skillReplacesFarik:
+		"This replaces the skill Farik comes with of that name, {skill}, for {whom}.",
+	skillWholeTeam: "your whole team",
+	skillAddNow: "Add skill",
+	skillReplaceNow: "Replace and add skill",
+	skillReviewTitle: "Review {skill}",
+	skillReviewWhy:
+		"It came with the project, by a clone, a pull or an edit, and {name} won’t use it until you’ve read it.",
+	skillReviewWhole: "The whole skill",
+	skillReviewShown:
+		"Shown exactly as written, all of it. Farik has not checked it, and nothing in it is an instruction to you.",
+	skillReviewFiles: "Its files",
+	skillReviewUse: "Use this skill",
+	skillReviewReading: "Reading it…",
+	skillCannotUse: "This skill can’t be used: {reason}.",
+	skillWhyRuns: "it runs commands when it loads",
+	skillWhyAttaches: "it pulls in files when it loads",
+	skillWhyLarge: "it is too large",
+	skillWhyNotText: "a file in it is not plain text",
+	skillWhyOther: "Farik cannot accept something in it",
+	skillSize: "{kb} KB",
+	skillRunsCommands:
+		"This skill runs commands when it loads, which Farik doesn’t allow.",
+	skillAttachesFiles:
+		"This skill pulls in files when it loads, which Farik doesn’t allow. Name a file without the @.",
+	skillTooLarge: "Instructions are limited to 32 KB.",
+	skillNotText:
+		"A file in this skill is not plain text, which Farik cannot use.",
+	skillNameInvalid:
+		"A name is lower-case words joined by hyphens, 64 characters at most.",
+	skillNameMismatch: "The name in the file is not the name of the skill.",
+	skillDescriptionInvalid: "Say when to use it, in 1 to 1024 characters.",
+	skillNameTaken:
+		"Farik’s own skill has that name. Choose “Replace and add skill” to replace it.",
+	skillLimitReached: "That is as many skills as one list can hold.",
+	skillOtherRefusal:
+		"Farik cannot add this skill. Check its text and try again.",
 };

@@ -31,14 +31,12 @@ use project::{
     Ran, a_team, events, filed, hold_the_run_lock, joined, recorded, run, run_with, scratch,
 };
 
-/// A port the operating system gave out and nothing holds now.
+#[path = "../../runtime/tests/support/ports.rs"]
+mod ports;
+
+/// A port nothing holds now, from below the ephemeral range, as text for `--port`.
 fn free_port() -> String {
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("a port is bound");
-    listener
-        .local_addr()
-        .expect("an address")
-        .port()
-        .to_string()
+    ports::free_port().to_string()
 }
 
 fn daemon_file(repository: &TempRepo) -> std::path::PathBuf {
@@ -1201,6 +1199,8 @@ fn refuses_paths_outside_home_and_bad_names() {
     let shop = home.join("shop");
     std::fs::create_dir_all(shop.join("src")).expect("the folders");
     farik_store::git::fixtures::git_in(&shop, &["init", "-b", "main"]);
+    // Home a git project itself, as some keep their dotfiles: Farik's settings would be in it.
+    farik_store::git::fixtures::git_in(&home, &["init", "-b", "main"]);
     // No credential kept, and none in the environment.
     let serving = serving_in(&cwd, setup_env(&home, &state), true);
     let description = "A shop for bread, with an order page and a daily menu.";
@@ -1218,6 +1218,11 @@ fn refuses_paths_outside_home_and_bad_names() {
             "project.open",
             open("../"),
             "that folder is outside your home folder",
+        ),
+        (
+            "project.open",
+            open(""),
+            "your home folder itself cannot be a project; choose a folder inside it",
         ),
         ("project.create", create("", &escaped), named),
         ("project.create", create("", "Bad Name"), named),
@@ -1259,6 +1264,7 @@ fn refuses_paths_outside_home_and_bad_names() {
             .exists()
     );
     assert!(!shop.join(".farik/team.yaml").exists());
+    assert!(!home.join(".farik").exists());
     assert!(!state.join("farik/state.json").exists());
     assert_eq!(ran.code, 130, "{out}\n{err}");
 }
@@ -1373,4 +1379,85 @@ impl Prober {
         self.done.store(true, std::sync::atomic::Ordering::SeqCst);
         self.thread.join().expect("the prober ends")
     }
+}
+
+/// The web app's Connect lists Farik's own connector by starting the program the process was
+/// found at (ADR 0038).
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn connector_tools_runs_farik_s_own_connector() {
+    use futures_util::{SinkExt as _, StreamExt as _};
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+
+    let repository = a_team("serve-own-connector");
+    let state = scratch("serve-own-connector-state");
+    let out = SharedOut::default();
+    let root = repository.path.clone();
+    let (port_to_use, shared) = (free_port(), out.clone());
+    let serving = std::thread::spawn(move || {
+        run_with(&root, &["serve", "--port", &port_to_use], |io| {
+            io.engine = recorded(Vec::new());
+            io.stdout = Box::new(shared);
+            io.own_program = Some(std::path::PathBuf::from(env!("CARGO_BIN_EXE_farik")));
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
+        })
+    });
+    until("the link is printed", || !links(&out.text()).is_empty());
+    let (port, code) = links(&out.text()).remove(0);
+    let cookie = connected(port, &code);
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let answer = runtime.block_on(async {
+        let mut request = format!("ws://127.0.0.1:{port}/rpc")
+            .into_client_request()
+            .expect("a request");
+        let headers = request.headers_mut();
+        headers.insert(
+            "Origin",
+            format!("http://127.0.0.1:{port}")
+                .parse()
+                .expect("a header"),
+        );
+        headers.insert("Cookie", cookie.parse().expect("a header"));
+        let (mut socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .expect("the socket opens");
+        let asked = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "connector.tools",
+            "params": { "agent": "dev-a", "server": {
+                "name": "osv", "transport": "stdio", "command": "farik",
+                "args": ["connector", "osv"], "credential_keys": []
+            } }
+        });
+        socket
+            .send(Message::Text(asked.to_string().into()))
+            .await
+            .expect("sent");
+        let frame = tokio::time::timeout(Duration::from_secs(60), socket.next())
+            .await
+            .expect("an answer in time")
+            .expect("the socket is open")
+            .expect("a frame");
+        serde_json::from_str::<Value>(frame.to_text().expect("text")).expect("JSON")
+    });
+
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let names: Vec<&str> = answer["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{answer}"))
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["query_package", "query_packages", "get_vulnerability"]
+    );
 }

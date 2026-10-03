@@ -2,6 +2,7 @@
 
 Date: 2026-09-22
 Status: accepted
+Amended 2026-10-02 by ADR 0034: the skills a user or a kit adds load on demand through a per-session plugin folder; a role's own skills stay in the prompt, as written here.
 
 ## Context
 

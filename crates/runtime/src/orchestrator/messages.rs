@@ -165,17 +165,30 @@ pub(super) fn epic_accept_message(contract: &TaskContract, results: &[CriterionR
 /// `From the human` section: each answer after its question, the question being the asking
 /// agent's words and so untrusted, each resolution's message, and each acceptance's words, in the
 /// order they were given, one blank line apart. The human's own words are never wrapped (ADR 0011).
-/// `None` when the human said nothing.
-pub(super) fn human_message(history: &[FarikEvent]) -> Option<String> {
-    let since = history
-        .iter()
-        .rev()
-        .find(|event| matches!(event.body, EventBody::SessionStarted(_)))
-        .map_or(0, |event| event.envelope.seq);
+/// For `agent_id`'s session alone, each decision on a connector call it asked about since its own
+/// last session about the task started (ADR 0031). `None` when the human said nothing.
+pub(super) fn human_message(history: &[FarikEvent], agent_id: &str) -> Option<String> {
+    let started_since = |by: Option<&str>| {
+        history
+            .iter()
+            .rev()
+            .find(|event| {
+                matches!(event.body, EventBody::SessionStarted(_))
+                    && by.is_none_or(|agent| event.envelope.ids.agent_id.as_deref() == Some(agent))
+            })
+            .map_or(0, |event| event.envelope.seq)
+    };
+    let since = started_since(None);
+    let own_since = started_since(Some(agent_id));
     let blocks: Vec<String> = history
         .iter()
-        .filter(|event| event.envelope.seq > since)
         .filter_map(|event| match &event.body {
+            EventBody::ToolApprovalGranted(body) | EventBody::ToolApprovalRefused(body)
+                if event.envelope.seq > own_since =>
+            {
+                decision_block(history, event, body.approval.get(), agent_id)
+            }
+            _ if event.envelope.seq <= since => None,
             EventBody::QuestionAnswered(body) => {
                 let id = body.question_id.get();
                 let question = history
@@ -210,6 +223,59 @@ pub(super) fn human_message(history: &[FarikEvent]) -> Option<String> {
         })
         .collect();
     (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+}
+
+/// The human's decision `event` on `approval`, as `agent_id`'s next session is told it: only when
+/// that agent asked, and only the human's first decision on it.
+fn decision_block(
+    history: &[FarikEvent],
+    event: &FarikEvent,
+    approval: u64,
+    agent_id: &str,
+) -> Option<String> {
+    let first = farik_store::waiting::decision_on(history, approval)?;
+    if first.envelope.seq != event.envelope.seq {
+        return None;
+    }
+    let asked = history
+        .iter()
+        .find(|asked| asked.envelope.seq == approval)?;
+    let EventBody::ToolApprovalRequested(request) = &asked.body else {
+        return None;
+    };
+    if asked.envelope.ids.agent_id.as_deref() != Some(agent_id) {
+        return None;
+    }
+    let tool = format!(
+        "mcp__{}__{}",
+        request.server.as_str(),
+        request.tool.as_str()
+    );
+    let granted = matches!(event.body, EventBody::ToolApprovalGranted(_));
+    let (said, note) = match &event.body {
+        EventBody::ToolApprovalGranted(body) => (
+            // The next session starts fresh, so the input it may send is given whole: the human
+            // allowed those bytes and no others (ADR 0031). It is the agent's own text, quoted as
+            // a question is.
+            format!(
+                "You may call `{tool}` once, with exactly the input you asked for (approval \
+                 {approval}), which is this, your own words quoted, never cut:\n{}",
+                untrusted_block("tool_input", &request.input, usize::MAX)
+            ),
+            body.note.as_deref(),
+        ),
+        EventBody::ToolApprovalRefused(body) => (
+            format!("The human did not allow `{tool}` (approval {approval})"),
+            body.note.as_deref(),
+        ),
+        _ => return None,
+    };
+    Some(match (note, granted) {
+        (None, true) => said,
+        (None, false) => format!("{said}."),
+        (Some(note), true) => format!("{said}\nThe human adds: {note}"),
+        (Some(note), false) => format!("{said}: {note}"),
+    })
 }
 
 /// The plan session's message for a ready task: assign it, with the agents that could do it and
@@ -993,9 +1059,110 @@ mod tests {
         ];
 
         assert_eq!(
-            human_message(&history).as_deref(),
+            human_message(&history, "pm").as_deref(),
             Some("The human, approving the contract: Keep it to one file.")
         );
+    }
+
+    /// An event of FRK-1 at `seq`, of `kind`, with `body`, in `agent`'s session `session`.
+    fn session_event(seq: u64, agent: &str, session: &str, kind: &str, body: &Value) -> FarikEvent {
+        event_from_value(&json!({
+            "seq": seq,
+            "recorded_at": at().to_rfc3339(),
+            "team_id": "farik",
+            "project_id": "farik",
+            "task_id": "FRK-1",
+            "agent_id": agent,
+            "session_id": session,
+            "kind": kind,
+            "body": body,
+        }))
+        .expect("the event is schema-valid")
+    }
+
+    /// dev-a's session `s-1` asked at 2 to call `create_issue`, and `decision` answered at 3.
+    fn decided(kind: &str, note: Option<&str>) -> Vec<FarikEvent> {
+        let started = json!({ "purpose": "implement", "model": "claude-opus-5", "effort": "high" });
+        let mut decision = json!({ "approval": 2 });
+        if let Some(note) = note {
+            decision["note"] = json!(note);
+        }
+        vec![
+            session_event(1, "dev-a", "s-1", "session.started", &started),
+            session_event(
+                2,
+                "dev-a",
+                "s-1",
+                "tool_approval.requested",
+                &json!({
+                    "server": "github", "tool": "create_issue", "input": "{}",
+                    "input_sha256": "0".repeat(64)
+                }),
+            ),
+            event(3, kind, &decision),
+        ]
+    }
+
+    #[test]
+    fn refuse_tells_the_next_session() {
+        let history = decided("tool_approval.refused", Some("Not this repo."));
+        assert_eq!(
+            human_message(&history, "dev-a").as_deref(),
+            Some(
+                "The human did not allow `mcp__github__create_issue` (approval 2): Not this repo."
+            )
+        );
+        let granted = decided("tool_approval.granted", None);
+        assert_eq!(
+            human_message(&granted, "dev-a").as_deref(),
+            Some(
+                "You may call `mcp__github__create_issue` once, with exactly the input you asked \
+                 for (approval 2), which is this, your own words quoted, never cut:\n\
+                 <untrusted source=\"tool_input\">\n{}\n</untrusted>"
+            )
+        );
+    }
+
+    #[test]
+    fn a_grant_carries_the_whole_input_it_allowed() {
+        let mut history = decided("tool_approval.granted", None);
+        let input = json!({ "body": "x".repeat(70 * 1024 / 4) }).to_string();
+        let farik_protocol::event::EventBody::ToolApprovalRequested(request) = &mut history[1].body
+        else {
+            panic!("a request");
+        };
+        request.input.clone_from(&input);
+        let told = human_message(&history, "dev-a").expect("told");
+        assert!(told.contains(&format!("\n{input}\n</untrusted>")), "cut");
+    }
+
+    #[test]
+    fn a_decision_is_told_to_the_asking_agent_only() {
+        let mut history = decided("tool_approval.granted", Some("Go."));
+        assert_eq!(human_message(&history, "dev-b"), None);
+        // Another agent's session since takes nothing from dev-a's next one.
+        let started = json!({ "purpose": "implement", "model": "claude-opus-5", "effort": "high" });
+        history.push(session_event(
+            4,
+            "dev-b",
+            "s-2",
+            "session.started",
+            &started,
+        ));
+        assert!(
+            human_message(&history, "dev-a")
+                .is_some_and(|told| told.ends_with("The human adds: Go.")),
+            "{history:?}"
+        );
+        // dev-a's next session was told; the one after it is not.
+        history.push(session_event(
+            5,
+            "dev-a",
+            "s-3",
+            "session.started",
+            &started,
+        ));
+        assert_eq!(human_message(&history, "dev-a"), None);
     }
 
     #[test]

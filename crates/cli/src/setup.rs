@@ -31,6 +31,9 @@ const BUSY: &str = "another farik is already running this project";
 const NO_ACCOUNT: &str = "connect your AI account first";
 /// What `open` refuses a folder outside home with.
 const OUTSIDE_HOME: &str = "that folder is outside your home folder";
+/// What `open` refuses home itself with: Farik's settings folder, `~/.config/farik`, would be in
+/// the project, where a commit could write it (re-review 2 m1).
+const HOME_ITSELF: &str = "your home folder itself cannot be a project; choose a folder inside it";
 
 /// The CLI's setup host.
 pub(crate) struct CliHost {
@@ -142,6 +145,9 @@ impl SetupHost for CliHost {
                 "that folder is inside a git project; choose {} instead",
                 root.display()
             )));
+        }
+        if std::fs::canonicalize(&self.home).is_ok_and(|home| home == root) {
+            return Err(refused(HOME_ITSELF));
         }
         // Checked before anything is changed; the lock is given back for the driver to take.
         match try_lock(&root).map_err(failed)? {

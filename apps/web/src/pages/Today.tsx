@@ -7,9 +7,12 @@ import { useQuery } from "../app/store.ts";
 import { codeOf } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
+import { type Allowances, useAllowances } from "./allowances.tsx";
 import { type Backlog, moreWaits } from "./Board.tsx";
 import { ChannelPreview } from "./Channel.tsx";
-import type { Agent, Team } from "./setup/TeamSetup.tsx";
+import { ToolApproval, type ToolAsk } from "./dialogs/ToolApproval.tsx";
+import { type Agent, roleName, type Team } from "./setup/TeamSetup.tsx";
+import type { RoleKit } from "./Team.tsx";
 import styles from "./Today.module.css";
 
 type Activity = { agentId: string; state: string; line: string };
@@ -24,11 +27,11 @@ type Kind =
 	| "designer_needs_browser";
 type Waiting = {
 	taskId: string;
-	kind: Kind;
+	kind: Kind | "tool_approval";
 	agentId: string | null;
 	title: string;
 	line: string;
-};
+} & Partial<ToolAsk>;
 type Moved = { at: string; line: string };
 type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
@@ -85,7 +88,12 @@ const DAY_MS = 86_400_000;
 
 /** The home page: the team, the request box, what waits on the human, and what moved. */
 export function Today() {
-	const { data: team } = useQuery<{ team: Team }>("team.get", {});
+	const { data: team } = useQuery<{ team: Team; kits?: RoleKit[] }>(
+		"team.get",
+		{},
+	);
+	// What agents made on other services, for a call that waits past its allowance.
+	const allowances = useAllowances();
 	const { data: activity } = useQuery<{ activity: Activity[] }>(
 		"team.activity",
 		{},
@@ -166,20 +174,30 @@ export function Today() {
 					) : (
 						<ul className={styles.rows} aria-label={t("waitingList")}>
 							{keyRefused && <KeyRefusedRow />}
-							{waiting.waiting.map((item) => (
-								<WaitingRow
-									key={`${item.kind}-${item.taskId}`}
-									item={item}
-									agent={agent(item.agentId)}
-									developer={
-										agents.find(
-											(a) =>
-												a.role === "software_developer" &&
-												a.status !== "retired",
-										)?.displayName ?? ""
-									}
-								/>
-							))}
+							{waiting.waiting.map((item) =>
+								item.kind === "tool_approval" ? (
+									<ToolApprovalRow
+										key={`${item.kind}-${item.approval}`}
+										item={item}
+										agent={agent(item.agentId)}
+										allowances={allowances}
+										kits={team?.kits ?? []}
+									/>
+								) : (
+									<WaitingRow
+										key={`${item.kind}-${item.taskId}`}
+										item={item}
+										agent={agent(item.agentId)}
+										developer={
+											agents.find(
+												(a) =>
+													a.role === "software_developer" &&
+													a.status !== "retired",
+											)?.displayName ?? ""
+										}
+									/>
+								),
+							)}
 						</ul>
 					)}
 				</section>
@@ -303,7 +321,7 @@ function WaitingRow({
 	agent: Agent | undefined;
 	developer: string;
 }) {
-	const kind = KINDS[item.kind];
+	const kind = KINDS[item.kind as Kind];
 	const name = agent?.displayName ?? item.agentId ?? "";
 	const titleId = `waiting-${item.kind}-${item.taskId}`;
 	return (
@@ -331,6 +349,88 @@ function WaitingRow({
 			>
 				{t(kind.word)}
 			</Link>
+		</li>
+	);
+}
+
+/** A connector call waiting to be allowed; "Review" opens its dialog. */
+function ToolApprovalRow({
+	item,
+	agent,
+	allowances,
+	kits,
+}: {
+	item: Waiting;
+	agent: Agent | undefined;
+	allowances: Allowances | undefined;
+	/** What Farik offers each role, to name the service by its kit's title. */
+	kits: RoleKit[];
+}) {
+	const [open, setOpen] = useState(false);
+	const name = agent?.displayName ?? item.agentId ?? "";
+	const titleId = `waiting-tool-${item.approval}`;
+	// The agent's own role's kit, since two roles' kits may share a service name.
+	const offered = kits.find((one) => one.role === agent?.role);
+	const service = offered?.connectors.find((one) => one.name === item.server);
+	const kit = offered &&
+		service && { title: service.title, role: roleName(offered.role) };
+	const ask: ToolAsk = {
+		approval: item.approval ?? 0,
+		server: item.server ?? "",
+		tool: item.tool ?? "",
+		input: item.input ?? "",
+	};
+	return (
+		<li className={styles.row}>
+			{agent?.avatar && (
+				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
+			)}
+			<div className={styles.rowText}>
+				<strong id={titleId}>
+					{t("waitingToolApproval", {
+						agent: name,
+						server: kit?.title ?? ask.server,
+					})}
+				</strong>
+				<span>
+					{t("waitingToolApprovalLine", {
+						tool: ask.tool.replaceAll("_", " "),
+						task: item.taskId,
+						title: item.title,
+						agent: name,
+					})}
+				</span>
+			</div>
+			<button
+				type="button"
+				className={styles.action}
+				aria-describedby={titleId}
+				onClick={() => setOpen(true)}
+			>
+				{t("waitingReview")}
+			</button>
+			{open && (
+				<ToolApproval
+					ask={ask}
+					agent={name}
+					agentId={item.agentId ?? ""}
+					allowance={
+						allowances && {
+							row: allowances.rows.find(
+								(row) =>
+									row.agent === item.agentId &&
+									row.server === ask.server &&
+									row.tool === ask.tool,
+							),
+							period: allowances.period,
+						}
+					}
+					kit={kit}
+					taskId={item.taskId}
+					title={item.title}
+					onClose={() => setOpen(false)}
+				/>
+			)}
 		</li>
 	);
 }

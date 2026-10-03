@@ -35,6 +35,7 @@ use serde_json::Value;
 
 use self::mcp::FarikMcp;
 
+use crate::connectors::{ConnectorSecrets, MemoryConnectorSecrets, SecretAt};
 use crate::exec::Executor;
 use crate::orchestrator::{CommandError, CommandReport, reply_of};
 use crate::preview::RunningPreview;
@@ -49,6 +50,7 @@ mod gates;
 mod hooks;
 mod mcp;
 mod setup;
+mod signed_in;
 mod team;
 mod templates;
 pub mod web;
@@ -56,11 +58,15 @@ pub mod web;
 #[cfg(test)]
 pub(crate) use mcp::listed_names;
 
+pub(crate) use hooks::APPROVAL_NEEDED;
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
 };
 pub use setup::{SetupError, SetupHost};
+pub(crate) use signed_in::{Fresh, refreshed_entry};
 pub use team::SETUP_PENDING;
+pub use team::{custom_entry, kit_entry, labelled, matches_kit};
+pub(crate) use team::{secret_at, with_server};
 
 /// What a daemon with no project answers what needs one.
 pub(crate) const NO_PROJECT: &str = "farik has no project yet";
@@ -123,6 +129,12 @@ pub struct SessionRegistration {
     pub connectors: Vec<SessionConnector>,
     /// The task's preview while the session runs, when it was given a connector.
     pub preview: Option<Arc<dyn RunningPreview>>,
+    /// The names of the skills it loads on demand: the hook allows a `Skill` call for
+    /// `farik:<name>` of one of these and no other (ADR 0034).
+    pub skills: Vec<String>,
+    /// The `skills/` folder of its plugin folder, when it has skills: `Read`, `Glob` and `Grep`
+    /// there are allowed at tier `read`, whatever its worktree.
+    pub skills_root: Option<PathBuf>,
 }
 
 /// A registration, the tool calls the hook has allowed it, and why it was told to stop, once it
@@ -155,6 +167,69 @@ pub struct DaemonState {
     /// Held by every write of `team.yaml` from its read to its write, so a change is checked
     /// against the team it replaces.
     team_writes: Mutex<()>,
+    /// Where each agent's connector keys are kept (ADR 0030), once it is set.
+    connector_secrets: OnceLock<Arc<dyn ConnectorSecrets>>,
+    /// What that store held for each account the last time it was read, so that `team.get` does
+    /// not ask a keychain each time.
+    connectors_kept: Arc<Mutex<BTreeMap<String, Kept>>>,
+    /// The user's state folder, where each stdio connector runs (ADR 0030), once it is set.
+    state_dir: OnceLock<std::path::PathBuf>,
+    /// Farik's own executable, which runs Farik's own connectors (ADR 0038), once it is set.
+    own_program: OnceLock<std::path::PathBuf>,
+    /// One lock per connector entry, by account: refresh, connect, disconnect and the deletes each
+    /// take it, so a token refreshed while the entry is removed is not kept (ADR 0033).
+    entry_locks: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// The sign-ins under way or finished and not yet used, by attempt, in memory only (ADR 0033).
+    sign_ins: Mutex<BTreeMap<String, signed_in::Attempt>>,
+    /// The calls made in the period connector allowances count in (ADR 0037). Whoever holds the
+    /// sessions lock takes it second, so a count and the call it allows are one step.
+    allowance_counts: Mutex<crate::allowances::AllowanceCounts>,
+}
+
+/// What a kept entry says of the agent's sign-in to the service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SignedIn {
+    /// The service ended the sign-in.
+    pub(crate) lapsed: bool,
+    /// The service has an endpoint to forget the grant at.
+    pub(crate) revokes: bool,
+}
+
+/// What the connector store held for one agent's server the last time Farik read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Kept {
+    /// An entry, connected as the definition this is the `spec_sha256` of, with these keys.
+    Entry {
+        /// The hash of the definition connected.
+        spec_sha256: String,
+        /// The names of the keys kept.
+        keys: std::collections::BTreeSet<String>,
+        /// Where they are kept.
+        stored_in: crate::connectors::SecretStore,
+        /// The sign-in, when the entry holds one.
+        signed_in: Option<SignedIn>,
+    },
+    /// No entry.
+    Nothing,
+    /// The store could not be read.
+    Unavailable,
+}
+
+impl Kept {
+    /// Whether `server` runs from what was kept: connected as the team file has it now, with
+    /// every key it names. Short of a key, its launcher or headers helper would be refused, and
+    /// Claude Code connects an http server without its headers then (finding I2).
+    pub(crate) fn runs(&self, server: &farik_core::team::CustomServer) -> bool {
+        let signs_in = matches!(
+            &server.transport,
+            farik_core::team::CustomTransport::Http { oauth: Some(_), .. }
+        );
+        matches!(self, Kept::Entry { spec_sha256, keys, signed_in, .. }
+            if *spec_sha256 == farik_core::team::spec_sha256(server)
+                && server.credential_keys.iter().all(|key| keys.contains(key))
+                // A server that signs in runs on a grant the service has not ended.
+                && (!signs_in || signed_in.is_some_and(|grant| !grant.lapsed)))
+    }
 }
 
 impl DaemonState {
@@ -170,6 +245,13 @@ impl DaemonState {
             commands: OnceLock::new(),
             web: OnceLock::new(),
             team_writes: Mutex::new(()),
+            connector_secrets: OnceLock::new(),
+            connectors_kept: Arc::default(),
+            state_dir: OnceLock::new(),
+            own_program: OnceLock::new(),
+            entry_locks: Mutex::new(BTreeMap::new()),
+            sign_ins: Mutex::new(BTreeMap::new()),
+            allowance_counts: Mutex::default(),
         }
     }
 
@@ -186,7 +268,188 @@ impl DaemonState {
             commands: OnceLock::new(),
             web: OnceLock::from(web),
             team_writes: Mutex::new(()),
+            connector_secrets: OnceLock::new(),
+            connectors_kept: Arc::default(),
+            state_dir: OnceLock::new(),
+            own_program: OnceLock::new(),
+            entry_locks: Mutex::new(BTreeMap::new()),
+            sign_ins: Mutex::new(BTreeMap::new()),
+            allowance_counts: Mutex::default(),
         }
+    }
+
+    /// Keeps the agents' connector keys in `secrets` from now on. Answers `true`, or `false` when
+    /// a store was already set, which is kept.
+    pub fn set_connector_secrets(&self, secrets: Arc<dyn ConnectorSecrets>) -> bool {
+        self.connector_secrets.set(secrets).is_ok()
+    }
+
+    /// Runs each stdio connector in a folder of `directory`, the user's state folder, from now on.
+    /// Answers `true`, or `false` when one was already set, which is kept.
+    pub fn set_state_dir(&self, directory: std::path::PathBuf) -> bool {
+        self.state_dir.set(directory).is_ok()
+    }
+
+    /// Sets Farik's own executable; answers whether it was not set before.
+    pub fn set_own_program(&self, program: std::path::PathBuf) -> bool {
+        self.own_program.set(program).is_ok()
+    }
+
+    pub(crate) fn own_program(&self) -> Option<&std::path::Path> {
+        self.own_program.get().map(std::path::PathBuf::as_path)
+    }
+
+    /// The user's state folder, or why there is none.
+    fn state_dir(&self) -> std::io::Result<&std::path::Path> {
+        self.state_dir
+            .get()
+            .map(std::path::PathBuf::as_path)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "there is no Farik state folder on this computer",
+                )
+            })
+    }
+
+    /// The folder this project's sessions' plugin folders are written in ([`skills_dir`]).
+    ///
+    /// # Errors
+    ///
+    /// No state folder was set, or no project is open, so no session is given a skill; or the
+    /// project's id could not be read or made.
+    ///
+    /// [`skills_dir`]: crate::skills::skills_dir
+    pub(crate) fn skills_dir(&self) -> std::io::Result<std::path::PathBuf> {
+        let deps = self.deps().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "no project is open")
+        })?;
+        let state = self.state_dir()?;
+        let id = crate::connectors::local_project_id(state, deps.files.root())?;
+        Ok(crate::skills::skills_dir(state, &id))
+    }
+
+    /// Removes every plugin folder a session of this project left, which only a daemon that was
+    /// killed leaves: no session of an earlier daemon is running now. A project with no state
+    /// folder has none.
+    fn wipe_skill_folders(&self) {
+        if let Ok(folder) = self.skills_dir() {
+            let _ = std::fs::remove_dir_all(folder);
+        }
+    }
+
+    /// Where `agent`'s keys for `server` are kept in the project at `root` ([`SecretAt::of`]).
+    ///
+    /// # Errors
+    ///
+    /// No state folder was set, so no connector is confirmed, or the project's id could not be
+    /// read or made.
+    pub(crate) fn secret_at(
+        &self,
+        root: &std::path::Path,
+        agent: &str,
+        server: &str,
+    ) -> std::io::Result<SecretAt> {
+        SecretAt::of(self.state_dir()?, root, agent, server)
+    }
+
+    /// The folder the stdio connector `at` runs in, made again empty ([`working_folder`]).
+    ///
+    /// # Errors
+    ///
+    /// No state folder was set, or no project is open, so no connector runs; the state folder is
+    /// inside the project; or the folder could not be made.
+    ///
+    /// [`working_folder`]: crate::connectors::working_folder
+    pub(crate) fn connector_folder(&self, at: &SecretAt) -> std::io::Result<std::path::PathBuf> {
+        let deps = self.deps().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "no project is open")
+        })?;
+        crate::connectors::working_folder(self.state_dir()?, deps.files.root(), at)
+    }
+
+    /// Where the agents' connector keys are kept: until a store is set, an empty one, so that no
+    /// custom connector is confirmed and none runs.
+    pub(crate) fn connector_secrets(&self) -> Arc<dyn ConnectorSecrets> {
+        self.connector_secrets.get().map_or_else(
+            || Arc::new(MemoryConnectorSecrets::default()) as _,
+            Arc::clone,
+        )
+    }
+
+    /// What the store holds for `at`, read now and remembered for `team.get`: when a server is
+    /// connected, and when a session is set up, so a store that fails then shows on the agent's
+    /// page rather than leaving the server out unsaid.
+    pub(crate) fn read_kept(&self, at: &SecretAt) -> Kept {
+        let kept = match self.connector_secrets().locate(at) {
+            Ok(Some((entry, stored_in))) => Kept::Entry {
+                signed_in: entry.oauth.as_ref().map(|grant| SignedIn {
+                    lapsed: grant.lapsed,
+                    revokes: grant.revocation_endpoint.is_some(),
+                }),
+                keys: entry.keys.into_keys().collect(),
+                spec_sha256: entry.spec_sha256,
+                stored_in,
+            },
+            Ok(None) => Kept::Nothing,
+            Err(_) => Kept::Unavailable,
+        };
+        crate::locked(&self.connectors_kept).insert(at.account(), kept.clone());
+        kept
+    }
+
+    /// The lock for `at`'s entry: whoever changes the entry, or reads it to change it after an
+    /// await, holds it.
+    pub(crate) fn entry_lock(&self, at: &SecretAt) -> Arc<tokio::sync::Mutex<()>> {
+        Arc::clone(
+            crate::locked(&self.entry_locks)
+                .entry(at.account())
+                .or_default(),
+        )
+    }
+
+    /// Deletes the entry at `at`, which will never run again, and asks the service to forget a
+    /// sign-in it held, from a caller that cannot wait: at once when no one else is changing the
+    /// entry, else on a task that waits its turn (ADR 0033). The request to the service is always
+    /// a task of its own.
+    pub(crate) fn forget_entry(&self, at: &SecretAt) {
+        let (secrets, lock, entry_at) = (self.connector_secrets(), self.entry_lock(at), at.clone());
+        match Arc::clone(&lock).try_lock_owned() {
+            Ok(held) => {
+                signed_in::delete_and_revoke(&secrets, &entry_at);
+                drop(held);
+            }
+            Err(_) => {
+                if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                    let remembered = Arc::clone(&self.connectors_kept);
+                    runtime.spawn(async move {
+                        let held = lock.lock_owned().await;
+                        let account = entry_at.account();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            signed_in::delete_and_revoke(&secrets, &entry_at);
+                            drop(held);
+                        })
+                        .await;
+                        // Whoever held the entry read it back as it saved; it is gone now.
+                        crate::locked(&remembered).remove(&account);
+                    });
+                }
+            }
+        }
+        self.forget_kept(at);
+    }
+
+    /// What the store held for `at` the last time it was read, read now the first time.
+    pub(crate) fn kept(&self, at: &SecretAt) -> Kept {
+        let remembered = crate::locked(&self.connectors_kept)
+            .get(&at.account())
+            .cloned();
+        remembered.unwrap_or_else(|| self.read_kept(at))
+    }
+
+    /// Forgets what the store held for `at`, whose server was taken away.
+    pub(crate) fn forget_kept(&self, at: &SecretAt) {
+        crate::locked(&self.connectors_kept).remove(&at.account());
     }
 
     /// The host answering the wizard, in setup mode.
@@ -346,6 +609,11 @@ impl DaemonState {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+
+    /// The allowance counts, locked. Taken after the sessions lock where both are held.
+    pub(crate) fn allowance_counts(&self) -> MutexGuard<'_, crate::allowances::AllowanceCounts> {
+        crate::locked(&self.allowance_counts)
+    }
 }
 
 /// Which port the daemon asks for.
@@ -492,6 +760,7 @@ async fn serve_on(
     daemon_file: Option<PathBuf>,
     state: Arc<DaemonState>,
 ) -> Result<DaemonHandle, DaemonError> {
+    state.wipe_skill_folders();
     let token = random_token()?;
     let port = listener
         .local_addr()
@@ -632,6 +901,7 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
         .route("/hook/pre-tool-use", post(pre_tool_use))
         .route("/hook/post-tool-use", post(post_tool_use))
         .route("/command", post(command))
+        .route("/connector/launch", post(connector_launch))
         .with_state(Arc::clone(&state))
         .merge(mcp)
         .layer(middleware::from_fn_with_state(state, require_project))
@@ -727,6 +997,278 @@ async fn handled(state: &DaemonState, command: Command) -> CommandReply {
     }
 }
 
+/// What `farik connector run` and `farik connector headers` ask: a server of a session.
+#[derive(Clone, serde::Deserialize)]
+struct LaunchAsk {
+    session: String,
+    server: String,
+}
+
+/// `POST /connector/launch` (ADR 0030): a custom connector's command and keys, or its filled
+/// headers, for a session the daemon registered and was given it, when it runs as it was connected
+/// on this machine. A signed-in server's grant is refreshed first when it is about to expire
+/// (ADR 0033). The answer holds keys, so it is never logged.
+async fn connector_launch(
+    State(state): State<Arc<DaemonState>>,
+    Json(asked): Json<LaunchAsk>,
+) -> Response {
+    let (session, server) = (asked.session.clone(), asked.server.clone());
+    match tokio::time::timeout(KEY_STORE_DEADLINE, launch(Arc::clone(&state), asked)).await {
+        Ok(Ok(answer)) => Json(answer).into_response(),
+        Ok(Err((status, reason))) => (status, reason).into_response(),
+        // A store answering later would find the helper gone, and Claude Code would connect an
+        // http server without its headers (re-review N1): refused, and taken away, first.
+        Err(_) => {
+            take_from_session(&state, &session, &server);
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!(
+                    "secret_store_unavailable: the key store did not answer for {server} within \
+                     {} seconds",
+                    KEY_STORE_DEADLINE.as_secs()
+                ),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// How long the launch route waits for the key store: less than the helper's eight seconds
+/// (`EXCHANGE_TIMEOUT`), so the route refuses before the helper gives up.
+const KEY_STORE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How long the launch route waits for a service to refresh a grant. The refresh goes on, and its
+/// result is kept, whether or not the route is still waiting.
+const LAUNCH_REFRESH_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// How much longer than a minute a token a helper is given must last.
+const LAUNCH_VALID_FOR: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Takes `server` from `session`'s registration, so the hook denies its calls
+/// `connector_not_in_session`.
+fn take_from_session(state: &DaemonState, session: &str, server: &str) {
+    if let Some(session) = state.sessions().get_mut(session) {
+        session
+            .registration
+            .connectors
+            .retain(|connector| connector.server != server);
+    }
+}
+
+/// A refusal of the launch route: its status, and the reason's kind, `: `, and what it says.
+type Refusal = (StatusCode, String);
+
+/// The launch route's answer, or its refusal. A server refused is taken from the session, so the
+/// hook denies its calls `connector_not_in_session`: Claude Code connects an http server without
+/// its headers when the helper fails, and would offer its tools (finding I2).
+async fn launch(state: Arc<DaemonState>, asked: LaunchAsk) -> Result<Value, Refusal> {
+    let answer = launch_answer(&state, &asked).await;
+    if answer.is_err() {
+        take_from_session(&state, &asked.session, &asked.server);
+    }
+    answer
+}
+
+/// `work` on a thread that may block, as a store does.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, Refusal> + Send + 'static,
+) -> Result<T, Refusal> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+}
+
+/// The refusal for a store that could not be read.
+fn store_refusal(error: &crate::credential::CredentialError) -> Refusal {
+    let detail = match error {
+        crate::credential::CredentialError::NoKeychain => {
+            "this computer has no keychain".to_string()
+        }
+        crate::credential::CredentialError::Failed(detail) => detail.clone(),
+    };
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        format!("secret_store_unavailable: {detail}"),
+    )
+}
+
+/// What the launch route answers when a signed-in server's entry could not be given.
+fn fresh_refusal(fresh: signed_in::Fresh, server: &str) -> Refusal {
+    match fresh {
+        signed_in::Fresh::NotConfirmed => (
+            StatusCode::FORBIDDEN,
+            format!(
+                "connector_not_confirmed: {server} is not as it was connected on this \
+                 computer; connect it again"
+            ),
+        ),
+        signed_in::Fresh::Lapsed => (
+            StatusCode::FORBIDDEN,
+            format!("sign_in_again: the service ended {server}'s sign-in; sign in again"),
+        ),
+        signed_in::Fresh::Failed(why) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("sign_in_failed: {why}"),
+        ),
+        signed_in::Fresh::Store(detail) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("secret_store_unavailable: {detail}"),
+        ),
+    }
+}
+
+/// What the launch route answers for `asked`. No refusal names a key's value.
+async fn launch_answer(state: &Arc<DaemonState>, asked: &LaunchAsk) -> Result<Value, Refusal> {
+    use crate::connectors::{ConnectorError, confirmed_entry, launch_headers, launch_spec};
+    use farik_core::team::CustomTransport;
+
+    let not_confirmed = {
+        let server = asked.server.clone();
+        move || {
+            (
+                StatusCode::FORBIDDEN,
+                format!(
+                    "connector_not_confirmed: {server} is not as it was connected on this \
+                     computer; connect it again"
+                ),
+            )
+        }
+    };
+    let (held, ask) = (Arc::clone(state), asked.clone());
+    let (server, at) = blocking(move || launched_server(&held, &ask)).await?;
+    let signs_in = matches!(
+        &server.transport,
+        CustomTransport::Http { oauth: Some(_), .. }
+    );
+    let entry = if signs_in {
+        match signed_in::refreshed_entry(
+            state,
+            &at,
+            &server,
+            LAUNCH_VALID_FOR,
+            LAUNCH_REFRESH_WAIT,
+            false,
+        )
+        .await
+        {
+            Ok(entry) => entry,
+            Err(fresh) => return Err(fresh_refusal(fresh, &asked.server)),
+        }
+    } else {
+        let (secrets, held, kept_at) = (state.connector_secrets(), server.clone(), at.clone());
+        blocking(move || {
+            confirmed_entry(secrets.as_ref(), &kept_at, &held)
+                .map_err(|error| store_refusal(&error))
+        })
+        .await?
+        .ok_or_else(not_confirmed)?
+    };
+    let (held, name) = (Arc::clone(state), asked.server.clone());
+    blocking(move || {
+        let failed = |detail: String| (StatusCode::INTERNAL_SERVER_ERROR, detail);
+        let refused = |error: ConnectorError| match error {
+            ConnectorError::KeyMissing(_) => (
+                StatusCode::FORBIDDEN,
+                format!(
+                    "connector_not_confirmed: {name} is not as it was connected on this \
+                     computer; connect it again"
+                ),
+            ),
+            other => failed(format!("{other:?}")),
+        };
+        let exposed =
+            |secrets: &BTreeMap<String, crate::claude::Secret>| -> serde_json::Map<String, Value> {
+                secrets
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.expose().into()))
+                    .collect()
+            };
+        Ok(match &server.transport {
+            CustomTransport::Stdio { .. } => {
+                let spec = launch_spec(&server, &entry).map_err(refused)?;
+                let folder = held
+                    .connector_folder(&at)
+                    .map_err(|error| failed(crate::connectors::folder_refusal(&error)))?;
+                serde_json::json!({
+                    "command": spec.command, "args": spec.args, "env": exposed(&spec.env),
+                    "cwd": folder.display().to_string()
+                })
+            }
+            CustomTransport::Http { .. } => {
+                let headers = launch_headers(&server, &entry).map_err(refused)?;
+                serde_json::json!({ "headers": exposed(&headers) })
+            }
+        })
+    })
+    .await
+}
+
+/// The custom server a launch asks for, as the team file has it now, and where its keys are
+/// kept: refused for a session the daemon did not register (404 `unknown_session`), and for a
+/// server that session was not given or that is no longer a custom server of its agent (403
+/// `connector_not_in_session`).
+fn launched_server(
+    state: &DaemonState,
+    asked: &LaunchAsk,
+) -> Result<(farik_core::team::CustomServer, crate::connectors::SecretAt), Refusal> {
+    let not_in_session = || {
+        (
+            StatusCode::FORBIDDEN,
+            format!(
+                "connector_not_in_session: the session {} was not given {}",
+                asked.session, asked.server
+            ),
+        )
+    };
+    let deps = state
+        .deps()
+        .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, NO_PROJECT.to_string()))?;
+    let agent_id = {
+        let sessions = state.sessions();
+        let session = sessions.get(&asked.session).ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!(
+                    "unknown_session: the daemon answers for no session {}",
+                    asked.session
+                ),
+            )
+        })?;
+        let registration = &session.registration;
+        if !registration
+            .connectors
+            .iter()
+            .any(|connector| connector.server == asked.server)
+        {
+            return Err(not_in_session());
+        }
+        registration.agent_id.clone()
+    };
+    // The team file as it is now, which the kept hash is checked against.
+    let team = deps
+        .files
+        .read_team()
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let server = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == agent_id)
+        .into_iter()
+        .flat_map(|agent| agent.mcp_servers.iter().flatten())
+        .filter_map(farik_core::team::custom_server)
+        .find(|server| server.name == asked.server)
+        .ok_or_else(not_in_session)?;
+    let at = state
+        .secret_at(deps.files.root(), &agent_id, &server.name)
+        .map_err(|error| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("secret_store_unavailable: this project's id could not be read: {error}"),
+            )
+        })?;
+    Ok((server, at))
+}
+
 async fn post_tool_use(
     State(state): State<Arc<DaemonState>>,
     Json(request): Json<HookRequest>,
@@ -780,7 +1322,12 @@ mod tests {
     async fn refuses_a_request_without_the_token() {
         let daemon = TestDaemon::new("daemon-token", |_| {});
         let body = daemon.recorded(PRE_READ);
-        for path in ["/hook/pre-tool-use", "/hook/post-tool-use", "/mcp"] {
+        for path in [
+            "/hook/pre-tool-use",
+            "/hook/post-tool-use",
+            "/mcp",
+            "/connector/launch",
+        ] {
             for token in [None, Some("another-token")] {
                 let answer = router(daemon.state.clone(), TOKEN, CancellationToken::new())
                     .oneshot(post(path, token, &body))
@@ -860,6 +1407,34 @@ mod tests {
         .await
         .expect("the daemon is up on another port");
         assert_ne!(handle.info.port, held);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_daemon_start_wipes_old_plugin_folders() {
+        let daemon = TestDaemon::new("daemon-wipe-skills", |_| {});
+        let state =
+            std::path::PathBuf::from(format!("{}-state", daemon.project.repo.path.display()));
+        let id = crate::connectors::local_project_id(&state, &daemon.project.repo.path)
+            .expect("the project's id");
+        let ours = crate::skills::skills_dir(&state, &id);
+        std::fs::create_dir_all(ours.join("old-session/skills/api-style")).expect("a leftover");
+        std::fs::write(ours.join("old-session/skills/api-style/SKILL.md"), "x").expect("a file");
+        // Another project's folders are not this daemon's to remove.
+        let others = crate::skills::skills_dir(&state, "another-project-id");
+        std::fs::create_dir_all(others.join("session")).expect("another project's folder");
+        let handle = serve(
+            DaemonConfig {
+                port: PortChoice::Any,
+                daemon_file: None,
+            },
+            daemon.state.clone(),
+        )
+        .await
+        .expect("the daemon is up");
+        assert!(!ours.exists(), "the leftover folder is gone");
+        assert!(others.join("session").exists());
         handle.shutdown().await.expect("the daemon stops");
     }
 
@@ -982,6 +1557,8 @@ mod tests {
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
         });
         let context = daemon
             .state
@@ -1203,6 +1780,8 @@ mod tests {
                 purpose: SessionPurpose::Implement,
                 in_reply_to: None,
                 thread: None,
+                skills: Vec::new(),
+                skills_root: None,
             });
         }
         assert_eq!(state.session_ids(), ["s-1", "s-2"]);
@@ -1302,5 +1881,671 @@ mod tests {
             .await
             .expect("the daemon stops with a stream open")
             .expect("the daemon stops");
+    }
+
+    /// `dev-a`'s custom servers: `github`, started on the host, and `linear`, at a web address.
+    fn custom_servers() -> Value {
+        json!([
+            {
+                "name": "github", "source": "custom", "transport": "stdio",
+                "command": "github-mcp", "args": ["stdio"],
+                "credential_keys": ["API_KEY"],
+                "tools": { "search_issues": "network", "delete_repo": "denied" }
+            },
+            {
+                "name": "linear", "source": "custom", "transport": "http",
+                "url": "https://mcp.linear.example/mcp",
+                "headers": { "Authorization": "Bearer {API_KEY}", "X-Team": "farik" },
+                "credential_keys": ["API_KEY"],
+                "tools": { "search": "network" }
+            }
+        ])
+    }
+
+    /// A store that fails every read and write.
+    struct FailingStore;
+
+    impl crate::connectors::ConnectorSecrets for FailingStore {
+        fn load(
+            &self,
+            _: &crate::connectors::SecretAt,
+        ) -> Result<Option<crate::connectors::ConnectorEntry>, crate::credential::CredentialError>
+        {
+            Err(crate::credential::CredentialError::Failed(
+                "the keychain is locked".to_string(),
+            ))
+        }
+
+        fn save(
+            &self,
+            _: &crate::connectors::SecretAt,
+            _: &crate::connectors::ConnectorEntry,
+        ) -> Result<crate::connectors::SecretStore, crate::credential::CredentialError> {
+            Err(crate::credential::CredentialError::Failed(
+                "the keychain is locked".to_string(),
+            ))
+        }
+
+        fn delete(
+            &self,
+            _: &crate::connectors::SecretAt,
+        ) -> Result<(), crate::credential::CredentialError> {
+            Err(crate::credential::CredentialError::Failed(
+                "the keychain is locked".to_string(),
+            ))
+        }
+    }
+
+    const KEY_VALUE: &str = "ghp-a-secret-value";
+
+    /// A daemon whose team gives `dev-a` the custom servers, with `session-custom` registered
+    /// with both, and their entries kept as they are now in `store` (`None`: a failing store).
+    fn launching(name: &str, connected: bool, failing: bool) -> TestDaemon {
+        launching_through(name, connected, |store| {
+            if failing {
+                Arc::new(FailingStore)
+            } else {
+                store
+            }
+        })
+    }
+
+    /// [`launching`], its entries kept in a store in memory that `through` wraps.
+    fn launching_through(
+        name: &str,
+        connected: bool,
+        through: impl FnOnce(
+            Arc<dyn crate::connectors::ConnectorSecrets>,
+        ) -> Arc<dyn crate::connectors::ConnectorSecrets>,
+    ) -> TestDaemon {
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
+        use farik_core::governor::permissions::SessionConnector;
+
+        let daemon = TestDaemon::new(name, |_| {});
+        let team = crate::tools::fixtures::a_team_of_three(|wire| {
+            wire["agents"][1]["mcp_servers"] = custom_servers();
+        });
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&team)
+            .expect("the team is written");
+        let servers: Vec<farik_core::team::CustomServer> = team.agents[1]
+            .mcp_servers
+            .iter()
+            .flatten()
+            .filter_map(farik_core::team::custom_server)
+            .collect();
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        if connected {
+            for server in &servers {
+                let at = daemon
+                    .state
+                    .secret_at(daemon.project.deps.files.root(), "dev-a", &server.name)
+                    .expect("an address");
+                let entry = ConnectorEntry {
+                    spec_sha256: farik_core::team::spec_sha256(server),
+                    keys: [(
+                        "API_KEY".to_string(),
+                        crate::claude::Secret::new(KEY_VALUE.to_string()),
+                    )]
+                    .into(),
+                    oauth: None,
+                };
+                store.save(&at, &entry).expect("kept");
+            }
+        }
+        daemon.state.set_connector_secrets(through(store));
+        daemon.state.register_session(SessionRegistration {
+            session_id: "session-custom".to_string(),
+            agent_id: "dev-a".to_string(),
+            task_id: None,
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            skills: Vec::new(),
+            skills_root: None,
+            cwd: daemon.worktree.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: Vec::new(),
+            connectors: servers
+                .into_iter()
+                .map(|server| SessionConnector {
+                    server: server.name,
+                    origin: None,
+                    tools: server.tools,
+                    allowances: std::collections::BTreeMap::new(),
+                })
+                .collect(),
+            preview: None,
+        });
+        daemon
+    }
+
+    /// The launch route's status and body for `session` and `server`.
+    async fn launch(daemon: &TestDaemon, session: &str, server: &str) -> (StatusCode, String) {
+        let answer = router(daemon.state.clone(), TOKEN, CancellationToken::new())
+            .oneshot(post(
+                "/connector/launch",
+                Some(TOKEN),
+                &json!({ "session": session, "server": server }),
+            ))
+            .await
+            .expect("the router answers");
+        let status = answer.status();
+        let body = to_bytes(answer.into_body(), usize::MAX)
+            .await
+            .expect("a body");
+        (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn launch_answers_a_confirmed_servers_command_keys_and_headers() {
+        let daemon = launching("launch-confirmed", true, false);
+        let (status, body) = launch(&daemon, "session-custom", "github").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let answer: Value = serde_json::from_str(&body).expect("JSON");
+        // It runs in a folder Farik keeps for it in the user's state folder, never the session's
+        // worktree, nor anywhere in the repository (finding C1).
+        let root = daemon.project.deps.files.root();
+        let at = daemon
+            .state
+            .secret_at(root, "dev-a", "github")
+            .expect("an address");
+        let folder =
+            std::path::PathBuf::from(format!("{}-state", daemon.project.repo.path.display()))
+                .join("connectors")
+                .join(&at.project_id)
+                .join("dev-a/github");
+        assert_eq!(
+            answer,
+            json!({
+                "command": "github-mcp", "args": ["stdio"], "env": { "API_KEY": KEY_VALUE },
+                "cwd": folder.display().to_string()
+            })
+        );
+        assert!(folder.is_dir(), "{}", folder.display());
+        let (status, body) = launch(&daemon, "session-custom", "linear").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let answer: Value = serde_json::from_str(&body).expect("JSON");
+        assert_eq!(
+            answer,
+            json!({ "headers": { "Authorization": format!("Bearer {KEY_VALUE}"), "X-Team": "farik" } })
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn launch_refuses_an_unregistered_session_or_server() {
+        let daemon = launching("launch-unregistered", true, false);
+        let (status, body) = launch(&daemon, "session-nobody", "github").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        assert!(body.starts_with("unknown_session:"), "{body}");
+        // dev-a's own session, which was given no connector, and a server no one has.
+        for (session, server) in [
+            (super::fixtures::DEV_SESSION, "github"),
+            ("session-custom", "jira"),
+        ] {
+            let (status, body) = launch(&daemon, session, server).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{session} {server}: {body}");
+            assert!(body.starts_with("connector_not_in_session:"), "{body}");
+            assert!(!body.contains(KEY_VALUE), "{body}");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn launch_refuses_a_server_changed_since_connect() {
+        for (field, value) in [
+            ("url", json!("https://attacker.example/mcp")),
+            ("command", json!("sh")),
+        ] {
+            let daemon = launching(&format!("launch-changed-{field}"), true, false);
+            let index = usize::from(field == "url");
+            let server = if field == "url" { "linear" } else { "github" };
+            let team = crate::tools::fixtures::a_team_of_three(|wire| {
+                wire["agents"][1]["mcp_servers"] = custom_servers();
+                wire["agents"][1]["mcp_servers"][index][field] = value.clone();
+            });
+            daemon
+                .project
+                .deps
+                .files
+                .write_team(&team)
+                .expect("the team is changed");
+            let (status, body) = launch(&daemon, "session-custom", server).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{field}: {body}");
+            assert!(body.starts_with("connector_not_confirmed:"), "{body}");
+            assert!(!body.contains(KEY_VALUE), "{body}");
+        }
+        // Never connected on this machine is the same refusal.
+        let daemon = launching("launch-never-connected", false, false);
+        let (status, body) = launch(&daemon, "session-custom", "github").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(body.starts_with("connector_not_confirmed:"), "{body}");
+        // So is an entry as connected but without a key the server names: nothing is launched
+        // short of its keys.
+        let daemon = launching("launch-key-missing", false, false);
+        let team = daemon.project.deps.files.read_team().expect("the team");
+        for server in team.agents[1]
+            .mcp_servers
+            .iter()
+            .flatten()
+            .filter_map(farik_core::team::custom_server)
+        {
+            let at = daemon
+                .state
+                .secret_at(daemon.project.deps.files.root(), "dev-a", &server.name)
+                .expect("an address");
+            let entry = crate::connectors::ConnectorEntry {
+                spec_sha256: farik_core::team::spec_sha256(&server),
+                keys: std::collections::BTreeMap::new(),
+                oauth: None,
+            };
+            daemon
+                .state
+                .connector_secrets()
+                .save(&at, &entry)
+                .expect("kept");
+        }
+        for server in ["github", "linear"] {
+            let (status, body) = launch(&daemon, "session-custom", server).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{server}: {body}");
+            assert!(body.starts_with("connector_not_confirmed:"), "{body}");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn launch_answers_503_when_the_store_fails() {
+        let daemon = launching("launch-store-fails", true, true);
+        let (status, body) = launch(&daemon, "session-custom", "linear").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert!(body.starts_with("secret_store_unavailable:"), "{body}");
+        // Claude Code connects an http server without its headers when the helper fails (finding
+        // I2): the server refused is taken from the session, so the hook denies its calls.
+        assert_eq!(given(&daemon, "session-custom"), ["github"]);
+        let decision = super::hooks::decide_pre_tool_use(
+            &daemon.call("session-custom", "mcp__linear__search", &json!({})),
+            &daemon.state,
+        );
+        assert!(
+            decision.reason.starts_with("connector_not_in_session:"),
+            "{decision:?}"
+        );
+    }
+
+    /// A store whose reads wait until `release` is dropped: a keychain asking to be unlocked.
+    struct SlowStore {
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+        inner: Arc<dyn crate::connectors::ConnectorSecrets>,
+    }
+
+    impl crate::connectors::ConnectorSecrets for SlowStore {
+        fn load(
+            &self,
+            at: &crate::connectors::SecretAt,
+        ) -> Result<Option<crate::connectors::ConnectorEntry>, crate::credential::CredentialError>
+        {
+            let _ = crate::locked(&self.release).recv();
+            self.inner.load(at)
+        }
+
+        fn save(
+            &self,
+            at: &crate::connectors::SecretAt,
+            entry: &crate::connectors::ConnectorEntry,
+        ) -> Result<crate::connectors::SecretStore, crate::credential::CredentialError> {
+            self.inner.save(at, entry)
+        }
+
+        fn delete(
+            &self,
+            at: &crate::connectors::SecretAt,
+        ) -> Result<(), crate::credential::CredentialError> {
+            self.inner.delete(at)
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_store_slower_than_the_helper_takes_the_server_from_the_session() {
+        // The helper gives up after eight seconds and Claude Code connects the http server
+        // without its headers; a store that answered after that left it in the session
+        // (re-review N1). The route gives up first, and takes it away.
+        let (release, wait) = std::sync::mpsc::channel();
+        let daemon = launching_through("launch-slow-store", true, |inner| {
+            Arc::new(SlowStore {
+                release: std::sync::Mutex::new(wait),
+                inner,
+            })
+        });
+        // `farik connector headers` gives up after eight seconds (`EXCHANGE_TIMEOUT`).
+        let (status, body) = tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            launch(&daemon, "session-custom", "linear"),
+        )
+        .await
+        .expect("the route answers before the helper gives up");
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert!(body.starts_with("secret_store_unavailable:"), "{body}");
+        assert_eq!(given(&daemon, "session-custom"), ["github"]);
+        drop(release);
+    }
+
+    /// A daemon whose `dev-a` has the one custom server `notion`, signed in to `fixture`, its grant
+    /// expiring `expires_in` from now, registered in `session-signed`. The grant is the other
+    /// answer.
+    fn launching_signed_in(
+        name: &str,
+        fixture: &crate::oauth_fixture::Fixture,
+        expires_in: chrono::Duration,
+    ) -> (TestDaemon, crate::sign_in::OAuthGrant) {
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
+        use farik_core::governor::permissions::SessionConnector;
+
+        let daemon = TestDaemon::new(name, |_| {});
+        let team = crate::tools::fixtures::a_team_of_three(|wire| {
+            wire["agents"][1]["mcp_servers"] = json!([{
+                "name": "notion", "source": "custom", "transport": "http",
+                "url": fixture.mcp_url, "oauth": {},
+                "tools": { "whoami": "network" }
+            }]);
+        });
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&team)
+            .expect("the team is written");
+        let server = team.agents[1]
+            .mcp_servers
+            .iter()
+            .flatten()
+            .find_map(farik_core::team::custom_server)
+            .expect("notion");
+        let now = chrono::Utc::now();
+        let (access, refresh) = fixture.mint();
+        let grant = crate::sign_in::OAuthGrant {
+            issuer: fixture.origin.clone(),
+            resource: fixture.mcp_url.clone(),
+            client_id: "client-kept".to_string(),
+            token_endpoint: format!("{}/token", fixture.origin),
+            revocation_endpoint: Some(format!("{}/revoke", fixture.origin)),
+            access_token: crate::claude::Secret::new(access),
+            refresh_token: Some(crate::claude::Secret::new(refresh)),
+            issued_at: now,
+            expires_at: Some(now + expires_in),
+            scopes: Vec::new(),
+            lapsed: false,
+        };
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        let at = daemon
+            .state
+            .secret_at(daemon.project.deps.files.root(), "dev-a", "notion")
+            .expect("an address");
+        store
+            .save(
+                &at,
+                &ConnectorEntry {
+                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    keys: std::collections::BTreeMap::new(),
+                    oauth: Some(grant.clone()),
+                },
+            )
+            .expect("kept");
+        daemon.state.set_connector_secrets(store);
+        daemon.state.register_session(SessionRegistration {
+            session_id: "session-signed".to_string(),
+            agent_id: "dev-a".to_string(),
+            task_id: None,
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            skills: Vec::new(),
+            skills_root: None,
+            cwd: daemon.worktree.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: Vec::new(),
+            connectors: vec![SessionConnector {
+                server: server.name,
+                origin: None,
+                tools: server.tools,
+                allowances: std::collections::BTreeMap::new(),
+            }],
+            preview: None,
+        });
+        (daemon, grant)
+    }
+
+    /// The grant kept for `notion` now.
+    fn kept_grant(daemon: &TestDaemon) -> crate::sign_in::OAuthGrant {
+        let at = daemon
+            .state
+            .secret_at(daemon.project.deps.files.root(), "dev-a", "notion")
+            .expect("an address");
+        daemon
+            .state
+            .connector_secrets()
+            .load(&at)
+            .expect("readable")
+            .expect("kept")
+            .oauth
+            .expect("a grant")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn launch_refreshes_an_expired_token() {
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        let (daemon, old) =
+            launching_signed_in("launch-refresh", &fixture, chrono::Duration::minutes(-1));
+        let (status, body) = launch(&daemon, "session-signed", "notion").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let kept = kept_grant(&daemon);
+        assert_ne!(kept.access_token.expose(), old.access_token.expose());
+        assert_ne!(
+            kept.refresh_token
+                .as_ref()
+                .map(crate::claude::Secret::expose),
+            old.refresh_token
+                .as_ref()
+                .map(crate::claude::Secret::expose),
+            "the rotated refresh token is kept"
+        );
+        let answer: Value = serde_json::from_str(&body).expect("JSON");
+        assert_eq!(
+            answer,
+            json!({ "headers": { "Authorization": format!("Bearer {}", kept.access_token.expose()) } })
+        );
+        assert_eq!(fixture.count("/token"), 1);
+        assert_eq!(given(&daemon, "session-signed"), ["notion"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn launch_refuses_a_lapsed_sign_in() {
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        fixture.set(|flags| flags.refresh_error = Some((400, "invalid_grant".to_string())));
+        let (daemon, _) =
+            launching_signed_in("launch-lapsed", &fixture, chrono::Duration::minutes(-1));
+        let (status, body) = launch(&daemon, "session-signed", "notion").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(body.starts_with("sign_in_again:"), "{body}");
+        assert!(given(&daemon, "session-signed").is_empty());
+        assert!(kept_grant(&daemon).lapsed, "the lapse is kept");
+        // And a lapsed grant is refused without asking the service again.
+        let (status, body) = launch(&daemon, "session-signed", "notion").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert_eq!(fixture.count("/token"), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn launch_says_when_a_refresh_does_not_finish() {
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        let (daemon, old) = launching_signed_in(
+            "launch-slow-refresh",
+            &fixture,
+            chrono::Duration::minutes(-1),
+        );
+        fixture.hold("token");
+        let started = std::time::Instant::now();
+        let (status, body) = launch(&daemon, "session-signed", "notion").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert!(body.starts_with("sign_in_failed:"), "{body}");
+        assert!(
+            started.elapsed() < super::KEY_STORE_DEADLINE,
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(given(&daemon, "session-signed").is_empty());
+        // The refresh goes on, and what the service rotated is kept.
+        fixture.release("token");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while kept_grant(&daemon)
+            .refresh_token
+            .as_ref()
+            .map(crate::claude::Secret::expose)
+            == old
+                .refresh_token
+                .as_ref()
+                .map(crate::claude::Secret::expose)
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the rotated token was not kept"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn two_launches_refresh_once() {
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        let (daemon, _) =
+            launching_signed_in("launch-twice", &fixture, chrono::Duration::minutes(-1));
+        let (first, second) = tokio::join!(
+            launch(&daemon, "session-signed", "notion"),
+            launch(&daemon, "session-signed", "notion")
+        );
+        assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+        assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+        assert_eq!(first.1, second.1, "both send the one new token");
+        assert_eq!(fixture.count("/token"), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn launch_refuses_a_signed_in_server_kept_without_a_grant() {
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        let (daemon, _) =
+            launching_signed_in("launch-no-grant", &fixture, chrono::Duration::minutes(30));
+        let at = daemon
+            .state
+            .secret_at(daemon.project.deps.files.root(), "dev-a", "notion")
+            .expect("an address");
+        let secrets = daemon.state.connector_secrets();
+        let mut entry = secrets.load(&at).expect("readable").expect("kept");
+        entry.oauth = None;
+        secrets.save(&at, &entry).expect("kept again");
+        let (status, body) = launch(&daemon, "session-signed", "notion").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(body.starts_with("connector_not_confirmed:"), "{body}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_delete_from_outside_during_a_refresh_keeps_nothing() {
+        // The command line changes the store without the daemon's lock (ADR 0033).
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        let (daemon, old) = launching_signed_in(
+            "launch-outside-delete",
+            &fixture,
+            chrono::Duration::minutes(-1),
+        );
+        let at = daemon
+            .state
+            .secret_at(daemon.project.deps.files.root(), "dev-a", "notion")
+            .expect("an address");
+        fixture.hold("token");
+        let launching = launch(&daemon, "session-signed", "notion");
+        let deleting = async {
+            while fixture.count("/token") == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            daemon
+                .state
+                .connector_secrets()
+                .delete(&at)
+                .expect("deleted");
+            fixture.release("token");
+        };
+        let ((status, body), ()) = tokio::join!(launching, deleting);
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(
+            daemon
+                .state
+                .connector_secrets()
+                .load(&at)
+                .expect("readable")
+                .is_none(),
+            "the refreshed grant is not put back"
+        );
+        // The service is asked to forget the token it just rotated, not the old one.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while fixture.count("/revoke") == 0 {
+            assert!(std::time::Instant::now() < deadline, "no revoke was sent");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let revoked = &fixture.requests("/revoke")[0].form["token"];
+        assert!(revoked.starts_with("rt-"), "{revoked}");
+        assert_ne!(
+            Some(revoked.as_str()),
+            old.refresh_token
+                .as_ref()
+                .map(crate::claude::Secret::expose)
+        );
+    }
+
+    /// The servers `session` is given now.
+    fn given(daemon: &TestDaemon, session: &str) -> Vec<String> {
+        daemon.state.sessions()[session]
+            .registration
+            .connectors
+            .iter()
+            .map(|connector| connector.server.clone())
+            .collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_refused_launch_takes_the_server_from_the_session() {
+        // Changed since connect: refused, and taken away.
+        let daemon = launching("launch-takes-away", true, false);
+        let team = crate::tools::fixtures::a_team_of_three(|wire| {
+            wire["agents"][1]["mcp_servers"] = custom_servers();
+            wire["agents"][1]["mcp_servers"][1]["url"] = json!("https://attacker.example/mcp");
+        });
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&team)
+            .expect("the team is changed");
+        let (status, _) = launch(&daemon, "session-custom", "linear").await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(given(&daemon, "session-custom"), ["github"]);
+        // A launch that works leaves the session as it was.
+        let (status, body) = launch(&daemon, "session-custom", "github").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(given(&daemon, "session-custom"), ["github"]);
     }
 }

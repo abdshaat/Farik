@@ -1,0 +1,48 @@
+# The UI/UX Designer's kit. Its one connector is the built-in Playwright browser (docs/SPEC.md 5.6,
+# step 12's plan), a `container` connector: Farik runs it in Docker itself, confined to the preview.
+# The image is pinned by digest at its newest release on 2026-09-30, @playwright/mcp 0.0.82; the tag
+# is kept beside the digest to say which release it is, and docker resolves the digest alone.
+# `module_root` is where the image keeps Playwright, which Farik's page check imports.
+# `args` follow the image's entrypoint (`node /app/cli.js --headless --browser chromium
+# --no-sandbox`); the confinement flags are Farik's own, added per session.
+# Every tool the image lists has a tag here: `network` tools reach only the preview, every other is
+# `denied`, and a tool a new pin adds goes in as `denied` in the same commit (the drift test).
+role: ui_ux_designer
+skills: []
+connectors:
+  - name: playwright
+    transport: container
+    image: mcr.microsoft.com/playwright/mcp:v0.0.82@sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734
+    module_root: /app/node_modules
+    args:
+      - --isolated
+    tools:
+      browser_navigate: network
+      browser_navigate_back: network
+      browser_snapshot: network
+      browser_click: network
+      browser_hover: network
+      browser_drag: network
+      browser_type: network
+      browser_fill_form: network
+      browser_select_option: network
+      browser_press_key: network
+      browser_handle_dialog: network
+      browser_resize: network
+      browser_wait_for: network
+      browser_take_screenshot: network
+      browser_console_messages: network
+      browser_tabs: network
+      browser_close: network
+      browser_evaluate: denied
+      browser_run_code: denied
+      browser_file_upload: denied
+      browser_install: denied
+      browser_pdf_save: denied
+      browser_network_requests: denied
+      # Listed by 0.0.82 and not by the plan's table: denied until a plan tags them.
+      browser_drop: denied
+      browser_emulate_media: denied
+      browser_find: denied
+      browser_network_request: denied
+      browser_run_code_unsafe: denied

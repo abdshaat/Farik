@@ -223,6 +223,15 @@ impl Transitions {
         let _ = self.previews.set(previews);
     }
 
+    /// Whether sessions run in Docker's sandbox: what runs previews is there and can run one.
+    /// False in no-sandbox mode, where an agent's command runs on the host as the user.
+    #[must_use]
+    pub fn sandboxed(&self) -> bool {
+        self.previews
+            .get()
+            .is_some_and(|previews| previews.available())
+    }
+
     /// Whether the team's Designer can have its browser. Until the driver has said what runs
     /// previews, as for a command handled in its own process, nothing does: it fails closed.
     #[must_use]

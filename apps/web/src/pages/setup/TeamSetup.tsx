@@ -23,7 +23,21 @@ export type Agent = {
 	status: string;
 	model?: unknown;
 	/** The connectors its sessions get (spec 5.6). */
-	mcpServers?: { name: string; source: string }[];
+	mcpServers?: McpServer[];
+};
+/** An agent's connector as `team.yaml` holds it: a built-in by name, or the user's own (ADR 0030). */
+export type McpServer = {
+	name: string;
+	source: string;
+	transport?: "stdio" | "http";
+	command?: string;
+	args?: string[];
+	url?: string;
+	headers?: Record<string, string>;
+	credentialKeys?: string[];
+	/** Present when the user signs in to the service instead of giving a key (ADR 0033). */
+	oauth?: { clientId?: string; callbackPort?: number; scopes?: string[] };
+	tools?: Record<string, "network" | "external_effect" | "denied">;
 };
 export type Judgment = {
 	required?: "always" | "never";

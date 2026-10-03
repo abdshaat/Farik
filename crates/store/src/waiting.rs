@@ -1,5 +1,5 @@
 //! What waits on the human (`docs/SPEC.md` 5.7 and 5.16): the questions nobody answered, the
-//! plans awaiting approval, the escalations, the results waiting on the human's acceptance, and
+//! connector calls waiting to be allowed, the plans awaiting approval, the escalations, the results waiting on the human's acceptance, and
 //! the tasks waiting to be integrated by hand. One list, which the command line and the browser
 //! both read.
 
@@ -7,6 +7,7 @@ use std::str::FromStr;
 
 use farik_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use farik_core::governor::done::result_awaits_human;
+use farik_core::governor::permissions::ApprovalKey;
 use farik_core::team::{Integration, Team};
 use farik_protocol::event::{EventBody, EventKind, FarikEvent, TaskStatusWire};
 
@@ -26,6 +27,8 @@ pub enum WaitingKind {
     Help,
     /// An accepted task to add to the project by hand.
     Integration,
+    /// A connector's call to allow or refuse (ADR 0031).
+    ToolApproval,
 }
 
 impl WaitingKind {
@@ -38,6 +41,7 @@ impl WaitingKind {
             Self::Question => "question",
             Self::Help => "help",
             Self::Integration => "integration",
+            Self::ToolApproval => "tool_approval",
         }
     }
 }
@@ -59,10 +63,115 @@ pub struct Waiting {
     pub question_id: Option<u64>,
     /// An escalation's reason, as the log words it.
     pub reason: Option<String>,
+    /// A connector call's ask.
+    pub approval: Option<ToolAsk>,
 }
 
-/// Everything that waits on the human, in groups (questions, approvals, other escalations,
-/// acceptances, integrations), each by task id.
+/// A connector call that waits for the human, as its `tool_approval.requested` recorded it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolAsk {
+    /// The event's seq, the approval's id.
+    pub approval: u64,
+    /// The connector's server.
+    pub server: String,
+    /// The bare tool name.
+    pub tool: String,
+    /// The call's whole input, as compact JSON.
+    pub input: String,
+}
+
+/// A grant of the human's that one call may still use (ADR 0031): `tool_approval.granted` was the
+/// first decision on the approval, no `tool.called` used it, and no session of the asking agent
+/// about the task that started after the grant has ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenGrant {
+    /// The seq of the `tool_approval.requested`.
+    pub approval: u64,
+    /// The seq of its `tool_approval.granted`: only a session started after it may use it.
+    pub granted_at: u64,
+    /// What the call must match.
+    pub key: ApprovalKey,
+}
+
+/// The grants still open among one task's events, which must hold its `tool_approval.` events,
+/// its `tool.called`, and its `session.started` and `session.ended`. A decision recorded with an
+/// agent or a session on its envelope was not the human's, and decides nothing.
+#[must_use]
+pub fn open_grants(events: &[FarikEvent]) -> Vec<OpenGrant> {
+    events
+        .iter()
+        .filter_map(|asked| {
+            let EventBody::ToolApprovalRequested(body) = &asked.body else {
+                return None;
+            };
+            let approval = asked.envelope.seq;
+            let ids = &asked.envelope.ids;
+            let granted = decision_on(events, approval)?;
+            let EventBody::ToolApprovalGranted(_) = granted.body else {
+                return None;
+            };
+            let granted_at = granted.envelope.seq;
+            let agent_id = ids.agent_id.clone()?;
+            let task_id = ids.task_id.clone()?;
+            let used = events.iter().any(|event| {
+                matches!(&event.body, EventBody::ToolCalled(called)
+                    if called.approval.map(std::num::NonZeroU64::get) == Some(approval))
+            });
+            // A session of the asking agent that started after the grant, and has ended since.
+            let lapsed = events.iter().any(|started| {
+                started.envelope.seq > granted_at
+                    && matches!(started.body, EventBody::SessionStarted(_))
+                    && started.envelope.ids.agent_id.as_deref() == Some(agent_id.as_str())
+                    && events.iter().any(|ended| {
+                        ended.envelope.seq > started.envelope.seq
+                            && matches!(ended.body, EventBody::SessionEnded(_))
+                            && ended.envelope.ids.session_id.is_some()
+                            && ended.envelope.ids.session_id == started.envelope.ids.session_id
+                    })
+            });
+            (!used && !lapsed).then(|| OpenGrant {
+                approval,
+                granted_at,
+                key: ApprovalKey {
+                    agent_id,
+                    task_id,
+                    server: body.server.to_string(),
+                    tool: body.tool.to_string(),
+                    input_sha256: body.input_sha256.to_string(),
+                },
+            })
+        })
+        .collect()
+}
+
+/// The first decision the human recorded on `approval`, granted or refused.
+#[must_use]
+pub fn decision_on(events: &[FarikEvent], approval: u64) -> Option<&FarikEvent> {
+    events.iter().find(|event| {
+        let ids = &event.envelope.ids;
+        ids.agent_id.is_none()
+            && ids.session_id.is_none()
+            && match &event.body {
+                EventBody::ToolApprovalGranted(body) | EventBody::ToolApprovalRefused(body) => {
+                    body.approval.get() == approval
+                }
+                _ => false,
+            }
+    })
+}
+
+/// The kinds that say what an agent asked the human, and what the human answered.
+const ASKED: [EventKind; 6] = [
+    EventKind::QuestionAsked,
+    EventKind::QuestionAnswered,
+    EventKind::EscalationRaised,
+    EventKind::ToolApprovalRequested,
+    EventKind::ToolApprovalGranted,
+    EventKind::ToolApprovalRefused,
+];
+
+/// Everything that waits on the human, in groups (questions, connector calls, approvals, other
+/// escalations, acceptances, integrations), each by task id.
 ///
 /// # Errors
 ///
@@ -76,11 +185,7 @@ pub fn waiting(
     projections.catch_up()?;
     let board = projections.board()?;
     let history = log.read(&EventQuery {
-        kinds: vec![
-            EventKind::QuestionAsked,
-            EventKind::QuestionAnswered,
-            EventKind::EscalationRaised,
-        ],
+        kinds: ASKED.to_vec(),
         ..EventQuery::default()
     })?;
     let item = |row: &TaskProjection, kind, agent_id: Option<&str>, line: String| Waiting {
@@ -91,8 +196,10 @@ pub fn waiting(
         line,
         question_id: None,
         reason: None,
+        approval: None,
     };
     let mut waiting = unanswered(&board, &history, &item);
+    waiting.extend(undecided(&board, &history, team, &item));
     let product_manager = team
         .active_agents()
         .find(|agent| Role::from(agent.role) == Role::ProductManager)
@@ -241,6 +348,45 @@ fn unanswered(
                     Some(&body.asked_by),
                     body.question.clone(),
                 )
+            });
+        }
+    }
+    waiting
+}
+
+/// Every connector call nobody allowed or refused, by task (ADR 0031).
+fn undecided(
+    board: &[TaskProjection],
+    history: &[FarikEvent],
+    team: &Team,
+    item: &impl Fn(&TaskProjection, WaitingKind, Option<&str>, String) -> Waiting,
+) -> Vec<Waiting> {
+    let mut waiting = Vec::new();
+    for row in board {
+        for asked in history {
+            let EventBody::ToolApprovalRequested(body) = &asked.body else {
+                continue;
+            };
+            let approval = asked.envelope.seq;
+            if asked.envelope.ids.task_id.as_ref() != Some(&row.task_id)
+                || decision_on(history, approval).is_some()
+            {
+                continue;
+            }
+            let agent = asked.envelope.ids.agent_id.as_deref();
+            let line = format!(
+                "{} wants to use {}",
+                name_of(team, agent.unwrap_or("an agent")),
+                body.server.as_str()
+            );
+            waiting.push(Waiting {
+                approval: Some(ToolAsk {
+                    approval,
+                    server: body.server.to_string(),
+                    tool: body.tool.to_string(),
+                    input: body.input.clone(),
+                }),
+                ..item(row, WaitingKind::ToolApproval, agent, line)
             });
         }
     }

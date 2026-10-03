@@ -15,6 +15,7 @@ use farik_core::governor::permissions::{
 use farik_core::team::{Agent, AgentStatus, Team};
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{EventBody, EventIds, FarikEvent, Thread, new_event};
+use farik_roles::{Kit, KitError};
 use farik_store::files::ProjectFiles;
 use farik_store::{EventLog, Git, Projections, TaskProjection};
 use schemars::JsonSchema;
@@ -77,6 +78,10 @@ impl fmt::Display for ToolError {
 
 impl std::error::Error for ToolError {}
 
+/// Where a role's kit comes from: `farik_roles::load_kit` everywhere but in a test, which swaps in
+/// a fixture kit whose server is its own (ADR 0036).
+pub type KitSource = Arc<dyn Fn(Role) -> Result<Kit, KitError> + Send + Sync>;
+
 /// What every tool call of one project works with.
 pub struct ToolDeps {
     /// The log every tool appends to.
@@ -93,6 +98,8 @@ pub struct ToolDeps {
     pub clock: Arc<dyn Clock + Send + Sync>,
     /// The team and project every event belongs to; the other ids are the call's own.
     pub ids: EventIds,
+    /// Each role's kit.
+    pub kits: KitSource,
 }
 
 /// The session a call comes from.
