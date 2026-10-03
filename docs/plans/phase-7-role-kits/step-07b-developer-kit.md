@@ -1,6 +1,6 @@
 # Phase 7, step 07b: Architect and Developer kits (the Developer)
 
-Status: draft
+Status: executed 2026-10-02; the landing review and the founder's live pin run (Verification) wait, and the step is not done until the run passes.
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.4, 6.7; F9
 Depends on: step 07 of this phase (its Context7 entry and its copy rules), and the steps it rests on; phase 6 (merged in #19), whose step 12 built the browser this plan reuses
@@ -86,7 +86,7 @@ Files: `daemon/team.rs` tests; `orchestrator/session.rs` tests. `a_team_of_three
 
 `docs/SPEC.md`: 6.4 names the Developer's kit skills, Context7, and its browser as the built-in Playwright, off unless the user turns it on; it adds: "The Developer has no `network` tier; Context7 is its one outbound call, its `query` and `libraryName` are words the agent writes, sent to Context7 (Upstash), each call recorded as `tool.called`, and they are not tagged `external_effect`, so no documentation lookup waits for approval."; a Revision 0.48 sentence. `docs/design/role-kits.md`: the Developer row says what shipped, and that the development database and deploy status are not in it, with why (O2). `docs/plans/project-plan.md`: row 07b with what was executed, and row 07's Developer half corrected to match.
 
-- [ ] `docs(spec): record the Developer's kit`
+- [x] `docs(spec): record the Developer's kit`
 
 ## Verification
 
@@ -100,3 +100,8 @@ FARIK_LIVE_TESTS=1 cargo test -p farik-runtime --test live_kit_pins
 Then, in the web app, by the founder: connect Context7 to a Developer and read its setup; turn the browser on for that Developer on a project with a preview; run one task in which the Developer reads a library's documentation and checks its change in the preview's browser. The Execution notes record how long the preview's start took. The step is not done until this live run passes, or its drift is folded in under the mechanical rule, and the Execution notes record the result, the scopes the bearer carried, and whether a refresh token was given; Status stays "executed …; the live pin run waits" until then.
 
 ## Execution notes
+
+- **Live pins not run.** Context7's account is the founder's credential and no agent holds or sets it. The Developer's entry is the Architect's, so the same bearer and run (`FARIK_KIT_CONTEXT7_BEARER`) cover it, and the founder records here the scopes the bearer carried, whether a refresh token was given, how long the preview's start took with the browser on, and any fallback taken (step 07's keyless fallback, in its own commit, which edits both kits).
+- **Existing tests changed as the kit ships skills:** the tests that listed a Developer's skills now expect the kit's six after the role's, taken from `load_kit` through the helper `with_kit` (`session.rs`, five tests that assert the skills a session loads, and the one asserting a removed skill leaves only the kit's), `skills_list_answers_the_rows_of_one_agent` (`daemon/team.rs`, whose row index for the agent's skill is now 8) and `farik_skill_list_shows_levels_and_states` (`crates/cli/tests/skill.rs`). None was loosened: each asserts the same rows, with the kit's added.
+- **The browser guard** asserts the whole built-in definition, as planned; no kit test was added for a `playwright` entry, which the loader already refuses.
+
