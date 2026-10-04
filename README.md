@@ -20,7 +20,7 @@ Farik is a production-grade harness system for multi-agent systems: it runs its 
 ## Status
 
 > [!NOTE]
-> **Farik is pre-release.** The governance harness, the agent runtime, and a five-role team with sprints, spending limits and a team channel are built, tested and driven from the command line today. A web app for people who never open a terminal is being designed now. There is no installable release and no stable API yet. Star the repository to hear when there is.
+> **Farik is pre-release.** The governance harness, agent runtime, team and browser app are built. You can set up a project, choose your team, ask for work and review its results in your browser. There is no installable release and no stable API yet. Star the repository to hear when there is.
 
 ## Why Farik
 
@@ -79,55 +79,62 @@ The governor alone moves a task between the states it owns, and every refusal co
 
 ## Quick start
 
-There is no release yet. To build from source you need:
-- [`rustup`](https://rustup.rs), which reads `rust-toolchain.toml` and installs the pinned toolchain on first use;
-- [Claude Code](https://docs.claude.com/en/docs/claude-code) with an API key or a subscription, to run agents;
-- Docker, for the sandbox.
+Farik runs on your computer and opens in your web browser. After the first setup, you ask for work and review the team's results there.
 
-```console
-$ git clone https://github.com/abdshaat/Farik.git
-$ cd Farik
-$ cargo build --release
+There is no downloadable installer yet. This early version needs a one-time setup in Terminal, the app where you paste commands. If you have never installed developer tools, ask someone who has to help with this part.
+
+### 1. Prepare your computer
+
+Install these tools before continuing:
+
+- **Git**, to download Farik. Use version 2.31 or newer.
+- **Node.js 24.14.0 and pnpm 12.3.4**, to prepare the browser app. The repository pins these versions in `.node-version` and `package.json`.
+- **[Rust through rustup](https://rustup.rs)**, to build Farik. The repository's `rust-toolchain.toml` selects the required version automatically.
+- **[Claude Code](https://docs.claude.com/en/docs/claude-code)**, to run the AI team. You will connect a Claude subscription or an API key during setup in the browser.
+- **Docker**, to give the agents a separate workspace for running their tools. Start Docker before opening Farik.
+
+The browser setup checks your computer and explains anything missing.
+
+### 2. Download and prepare Farik
+
+Open Terminal. Copy each line below, paste it into Terminal, and press Enter. Wait for each command to finish before running the next. The first build may take several minutes.
+
+```bash
+git clone https://github.com/abdshaat/Farik.git
+cd Farik
+pnpm install --frozen-lockfile
+pnpm -r --if-present generate
+pnpm --filter @farik/web build
+cargo build --release
 ```
 
-The binary lands at `target/release/farik`. Point it at any git repository:
+If you already downloaded Farik, open Terminal in its `Farik` folder and run `git pull --ff-only origin main` instead of the first two lines. Then run the remaining commands to prepare the updated version.
 
-```console
-$ farik init
-last commit today
-wrote .farik/team.yaml: product-manager, developer
-no criteria: nothing in this repository says how it is tested
+### 3. Open Farik
+
+From the same Terminal window, run:
+
+```bash
+./target/release/farik serve
 ```
 
-Farik scans the repository, writes `.farik/`, and seeds a library of exit criteria from whatever the project says about how it is tested. File a request, and every contract can be read back with everything that happened to it:
+Farik opens your browser. If it does not, copy the full connection link printed in Terminal into your browser's address bar. It usually starts with `http://127.0.0.1:7420/connect#`. Use the full link, including everything after `#`, to connect that browser.
 
-```console
-$ farik task create request.yaml
-FRK-1 filed as a draft request: Show the board without a database client
-farik triage says whether it is large or small; nothing starts before that (5.16)
+On your first visit, follow the setup screens to:
 
-$ farik triage FRK-1 small --reason "One command, one file."
-FRK-1 is small: task. One command, one file.
+1. Check your computer and fix any missing tools.
+2. Connect your Claude account. For a subscription, the screen explains how to get a token with `claude setup-token`; for an API key, paste the key into the form.
+3. Choose an existing project folder or create a new project.
+4. Choose your team and review its permissions and checks.
+5. Finish setup and describe the work you want in the browser.
 
-$ farik task show FRK-1
-FRK-1 Show the board without a database client
-draft task, low risk
+Farik remembers your project. To use it again, open Terminal in the `Farik` folder and run the same `serve` command. Keep that Terminal window open while using Farik. To stop it, return to Terminal and press **Ctrl+C**.
 
-intent: A person can read the board without opening a database.
+### Command-line reference
 
-requirements
-  R1 The board prints one line per task.
-exit criteria
-  C1 Every test in the workspace passes. [test]
+The browser is the main way to use Farik. The commands below are also available for people who prefer Terminal. Examples use `farik` as shorthand for the executable built above; run project commands from the folder of the project you want the team to work on.
 
-events
-     4 2026-09-21T18:05:51Z task.created
-     5 2026-09-21T18:05:51Z request.triaged
-```
-
-Then `farik run` drives the team until nothing needs doing. Add `--json` to any command to pipe its output somewhere.
-
-### Commands
+#### Commands
 
 | | Command | What it does |
 |---|---|---|
@@ -138,6 +145,7 @@ Then `farik run` drives the team until nothing needs doing. Add `--json` to any 
 | | `farik contract new` | File a request from a brief or an issue, and write its contract with the Product Manager |
 | | `farik triage <id> <large\|small>` | Record how big a request is, or overrule the triage |
 | | `farik contract lock <id>` / `unlock <id>` | Take a contract from the team, or give it back |
+| **Open** | `farik serve` | Open the browser app and keep the team available until stopped |
 | **Run** | `farik run` | Drive the team until nothing needs doing, a stop, or Ctrl-C |
 | | `farik plan` | Triage, contract, break down and assign, without starting any work |
 | | `farik sprint start` / `end` / `show` | Start, end, or show a sprint, with an optional budget |
@@ -164,7 +172,7 @@ Then `farik run` drives the team until nothing needs doing. Add `--json` to any 
 | Runtime | Agent sessions in a sandbox, with review in a fresh session | Done |
 | The team | Five roles, sprints, spending limits, the team channel and its ceremonies, and memory | Done |
 | Brand | The identity, the design tokens, and every page of the web app designed | In progress |
-| Web app | The whole working loop in the browser, built for people who never open a terminal | Next |
+| Web app | Setup and the whole working loop in the browser | Built; pre-release |
 | Ecosystem | Per-agent MCP servers and skills, the Finance Specialist, one-on-one conversations, the audit viewer, notifications | Planned |
 | Role kits | Every role equipped for its job: its skills, and connectors such as Higgsfield for the Marketing Specialist, connected by signing in | Planned |
 | Web launch | The website and the first public release, in the browser | Planned |
