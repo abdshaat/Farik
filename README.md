@@ -11,7 +11,7 @@
 [![rust](https://img.shields.io/badge/rust-1.98.1-D8896A.svg)](rust-toolchain.toml)
 [![status](https://img.shields.io/badge/status-pre--release-44607F.svg)](#status)
 
-[Why Farik](#why-farik) &nbsp;|&nbsp; [How it works](#how-it-works) &nbsp;|&nbsp; [The team](#meet-the-team) &nbsp;|&nbsp; [Quick start](#quick-start) &nbsp;|&nbsp; [Roadmap](#roadmap) &nbsp;|&nbsp; [Contributing](#contributing)
+[Why Farik](#why-farik) &nbsp;|&nbsp; [How it works](#how-it-works) &nbsp;|&nbsp; [The team](#meet-the-team) &nbsp;|&nbsp; [Quick start](#quick-start) &nbsp;|&nbsp; [Contributing](#contributing)
 
 </div>
 
@@ -46,11 +46,7 @@ The usual fix is a longer system prompt. But a prompt that says *never push to `
 <img src="docs/brand/readme/team.png" alt="The five Farik characters, each seated at a laptop: the Product Manager, the Scrum Master, the Architect, the Developer and the Marketing Specialist" width="100%">
 </p>
 
-A team has two to seven agents. Each has its own name, avatar, persona, model settings, tools, MCP servers and skills, and one of five roles, with a sixth, the Finance Specialist, planned. Two developers is a common choice. Farik ships ten characters, and any agent can wear any of them:
-
-<p align="center">
-<img src="docs/brand/readme/avatars.png" alt="The ten Farik avatars, each a pixel-art person at a laptop" width="100%">
-</p>
+A team has two to seven agents. Each has its own name, avatar, persona, model settings, tools, MCP servers and skills, and one of five roles, with a sixth, the Finance Specialist, planned. Two developers is a common choice. Farik ships ten characters, and any agent can wear any of them.
 
 | Role | What it does | What it may not do |
 |---|---|---|
@@ -163,21 +159,6 @@ The browser is the main way to use Farik. The commands below are also available 
 | | `farik log` | The event log, filtered by `--task`, `--kind` or `--limit` |
 | | `farik metrics` | The harness metrics for the project or one sprint |
 | | `farik doctor` | Every way the files and the log disagree |
-
-## Roadmap
-
-| Stage | What it delivers | Status |
-|---|---|---|
-| Harness and command line | The contract, the governor, the event log, and the commands | Done |
-| Runtime | Agent sessions in a sandbox, with review in a fresh session | Done |
-| The team | Five roles, sprints, spending limits, the team channel and its ceremonies, and memory | Done |
-| Brand | The identity, the design tokens, and every page of the web app designed | In progress |
-| Web app | Setup and the whole working loop in the browser | Built; pre-release |
-| Ecosystem | Per-agent MCP servers and skills, the Finance Specialist, one-on-one conversations, the audit viewer, notifications | Planned |
-| Role kits | Every role equipped for its job: its skills, and connectors such as Higgsfield for the Marketing Specialist, connected by signing in | Planned |
-| Web launch | The website and the first public release, in the browser | Planned |
-| Desktop app | The same app with nothing to start, plus the pixel-art office you can watch the team work in | After the web release is tested |
-| Phone apps | Native iOS and Android apps | After the desktop app |
 
 ## Open source
 
