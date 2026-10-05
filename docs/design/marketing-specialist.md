@@ -75,6 +75,7 @@ The kit's skills after step 08 and 08b, gaining in 08c and 08f:
 
 | Skill | Step | What it teaches |
 |---|---|---|
+| `posting-and-email` | 08b | what Buffer and Kit are for, posts waiting for the human until 08d, email drafts sent from Kit, never a subscriber's data |
 | `keeping-the-brand-kit` | 08c | what the kit holds, how to build it from the business's existing material, keeping every asset with its source |
 | `writing-the-brand-persona` | 08c | the persona's parts, sample replies, per-network differences, what it never says |
 | `researching-the-market` | 08c | audience, competitors, search words, channel costs, each fact sourced and dated |
@@ -90,7 +91,7 @@ The kit's skills after step 08 and 08b, gaining in 08c and 08f:
 
 | Step | What |
 |---|---|
-| 08b | Buffer and Kit in the kit (posts and emails asking per call until 08d); the role's "never publishes" lines reworded |
+| 08b | Buffer and Kit in the kit (posts asking per call until 08d; Kit's broadcasts drafted inside an allowance, sent by the human from Kit); the role's "never publishes" lines reworded |
 | 08c | The brand and the marketing plan: the role's mandate, four skills, `farik_save_media`, `farik_propose_marketing_plan`, the plan's events, page and Today gate (mocked up first), `farik marketing plan`, `marketing_paths_owned` |
 | 08d | Posting through the plan: Farik calling a service itself, `farik_schedule_post`, the hold and Stop, `social_post.*`, Today's "Going out" (mocked up first), Buffer's writes `denied` to the agent, the skill `running-social-channels` |
 | 08e | Google's sign-in, pulled forward: route 2 for Google, the founder's Google Cloud project, the `adwords` scope, verification as a launch dependency |
