@@ -5,6 +5,7 @@ Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 5.3, 5.7, 6.5, 6.7, 6.8, 8.5; F3, F9
 Depends on: step 08b of this phase (the kit's nine skills, Buffer and Kit, the reworded publishing lines and their test `the_marketing_specialist_publishes_only_when_allowed`); step 08 (Higgsfield and Recraft); phase 6 (merged in #19). ADR 0042 and `docs/design/marketing-specialist.md` are the design input.
 Readiness confirmed by: a fresh Opus session, 2026-10-05 (one round, against `docs/standards/workflow.md` stage 2): one Blocking, folded below with its Should items
+Mockups approved by: the founder, 2026-10-05, as drawn (Task 0's boards on the canvas's "Marketing plan and posts" page)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 

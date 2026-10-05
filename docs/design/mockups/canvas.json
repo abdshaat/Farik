@@ -547,6 +547,51 @@
       "title": "Allowances on the board, on Costs and when asking, on a phone",
       "page": "team",
       "is_interactive": true
+    },
+    "TodayMarketingPlan.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 2078,
+      "title": "Today: a marketing plan to approve (step 08c)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "MarketingPlan.dc.html": {
+      "x": 1480,
+      "y": 0,
+      "w": 1280,
+      "h": 9988,
+      "title": "The marketing plan: waiting, sent back, running, ended (step 08c)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneMarketingPlan.dc.html": {
+      "x": 2960,
+      "y": 0,
+      "w": 390,
+      "h": 9110,
+      "title": "Phone: the marketing plan (step 08c)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "TodayGoingOut.dc.html": {
+      "x": 3550,
+      "y": 0,
+      "w": 1280,
+      "h": 6828,
+      "title": "Today: posts going out, Stop, missed and failed (step 08d)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneGoingOut.dc.html": {
+      "x": 5030,
+      "y": 0,
+      "w": 390,
+      "h": 5533,
+      "title": "Phone: posts going out (step 08d)",
+      "page": "marketing",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -729,7 +774,12 @@
     "SkillReview.dc.html",
     "ConnectorAllowance.dc.html",
     "PhoneKit.dc.html",
-    "PhoneAllowances.dc.html"
+    "PhoneAllowances.dc.html",
+    "TodayMarketingPlan.dc.html",
+    "MarketingPlan.dc.html",
+    "PhoneMarketingPlan.dc.html",
+    "TodayGoingOut.dc.html",
+    "PhoneGoingOut.dc.html"
   ],
   "pages": [
     {
@@ -779,6 +829,10 @@
     {
       "id": "signin-skills",
       "name": "Sign-in and skills"
+    },
+    {
+      "id": "marketing",
+      "name": "Marketing plan and posts"
     }
   ],
   "title": "Farik web UI mockup"

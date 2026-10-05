@@ -5,6 +5,7 @@ Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 5.6, 5.7, 6.5, 6.7, 8.5, 8.6; F3, F9
 Depends on: step 08c of this phase (the active plan, its post slots, `marketing_plans`, `active_plan`, `record_plan_end`, `media_hosts`, the media fetch of `farik_save_media`); step 08b (Buffer in the kit); steps 03 and 05 (signed-in kit entries, `refreshed_entry`, `matches_kit`); phase 6 (merged in #19)
 Readiness confirmed by: not yet run
+Mockups approved by: the founder, 2026-10-05, as drawn (Task 0's boards on the canvas's "Marketing plan and posts" page)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
