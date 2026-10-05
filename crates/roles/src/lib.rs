@@ -616,6 +616,25 @@ mod tests {
             texts.len() > 1,
             "the check saw the role's and the kit's skills"
         );
+        // The reworded lines that name the human's allowance, one count per skill (a line may wrap).
+        for (name, lines) in [
+            ("marketing-what-ships", 1),
+            ("planning-a-launch", 2),
+            ("keeping-a-content-calendar", 1),
+            ("making-images-and-video", 1),
+        ] {
+            let joined = texts
+                .iter()
+                .filter(|(skill, _)| *skill == name)
+                .map(|(_, text)| text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let flat = joined.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                flat.matches("allows that call").count() >= lines,
+                "{name} lost its \"allows that call\" line"
+            );
+        }
         for (name, text) in texts {
             let lower = text.to_lowercase();
             for phrase in ["never publish", "do not publish", "don't publish"] {
