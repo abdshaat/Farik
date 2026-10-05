@@ -66,7 +66,7 @@ Files: the skill, `kit.yaml` `skills`, `embedded_skills`' arm, and the six rewor
 - `denied` (8): `delete_post`, `create_idea`, `create_post_template`, `update_post_template`, `delete_post_template`, `introspect_schema`, `execute_query`, `execute_mutation`.
 - `buffer_posts_only_when_asked`: `http` at that URL, `oauth.scopes` exactly the six; the two `external_effect` with no allowance, read from `marketing_service("buffer")`'s allowances map; the 10 `network` exactly; the 8 `denied`; 20 in all. RED.
 
-- [ ] `feat(roles): give the Marketing Specialist Buffer`
+- [x] `feat(roles): give the Marketing Specialist Buffer`
 
 ### Task 3: Kit
 

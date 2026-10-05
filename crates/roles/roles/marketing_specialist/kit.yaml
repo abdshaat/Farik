@@ -215,3 +215,41 @@ connectors:
       creative_upscale: external_effect
       create_style: external_effect
       get_user: network
+  - name: buffer
+    transport: http
+    url: https://mcp.buffer.com/mcp
+    oauth: { scopes: [offline_access, posts:read, posts:write, account:read, insights:read, ideas:read] }
+    title: Buffer
+    about: "Buffer schedules posts to your social channels: Instagram, Facebook, X, LinkedIn, Pinterest, YouTube, TikTok, Threads, Bluesky and more."
+    why: "So the Marketing Specialist can prepare and schedule posts, and read how earlier ones did. Every post waits for your yes first."
+    setup: "Sign in with your Buffer account and allow Farik to read and schedule posts. Farik can reach every channel your Buffer account has, and it asks you before each post. To remove Farik completely, also remove it in Buffer's settings."
+    labels:
+      create_post: "schedule or publish a post"
+      edit_post: "change a post"
+      get_account: "read the account"
+      list_channels: "list channels"
+      get_channel: "read a channel"
+      list_posts: "list posts"
+      get_post: "read a post"
+      get_aggregated_post_metrics: "read post results"
+    tools:
+      create_post: external_effect
+      edit_post: external_effect
+      get_account: network
+      list_channels: network
+      get_channel: network
+      list_posts: network
+      get_post: network
+      get_aggregated_post_metrics: network
+      list_ideas: network
+      list_idea_groups: network
+      list_post_templates: network
+      get_post_template: network
+      delete_post: denied
+      create_idea: denied
+      create_post_template: denied
+      update_post_template: denied
+      delete_post_template: denied
+      introspect_schema: denied
+      execute_query: denied
+      execute_mutation: denied

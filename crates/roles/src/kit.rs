@@ -982,8 +982,7 @@ mod tests {
                 kit.connectors.len(),
                 match role {
                     Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
-                    Role::MarketingSpecialist => 2,
-                    Role::ProductManager | Role::Architect => 3,
+                    Role::ProductManager | Role::Architect | Role::MarketingSpecialist => 3,
                     _ => 0,
                 },
                 "{role}"
@@ -1722,11 +1721,87 @@ mod tests {
         assert_eq!(server.tools.len(), 9);
     }
 
+    /// Buffer's tools that only read.
+    const BUFFER_READS: [&str; 10] = [
+        "get_account",
+        "list_channels",
+        "get_channel",
+        "list_posts",
+        "get_post",
+        "get_aggregated_post_metrics",
+        "list_ideas",
+        "list_idea_groups",
+        "list_post_templates",
+        "get_post_template",
+    ];
+
+    /// Buffer's tools a Farik session is never offered: a deletion cannot be taken back, ideas and
+    /// templates are the account's library, and the three generic tools reach the whole API.
+    const BUFFER_NEVER: [&str; 8] = [
+        "delete_post",
+        "create_idea",
+        "create_post_template",
+        "update_post_template",
+        "delete_post_template",
+        "introspect_schema",
+        "execute_query",
+        "execute_mutation",
+    ];
+
     #[test]
-    fn the_marketing_kit_is_higgsfield_then_recraft() {
+    fn buffer_posts_only_when_asked() {
+        let (server, copy, allowances) = marketing_service("buffer");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("buffer is http");
+        };
+        assert_eq!(url, "https://mcp.buffer.com/mcp");
+        assert_eq!(
+            oauth.as_ref().map(|settings| settings.scopes.as_slice()),
+            Some(
+                &[
+                    "offline_access".to_string(),
+                    "posts:read".to_string(),
+                    "posts:write".to_string(),
+                    "account:read".to_string(),
+                    "insights:read".to_string(),
+                    "ideas:read".to_string(),
+                ][..]
+            )
+        );
+        assert!(headers.is_empty());
+        assert!(server.credential_keys.is_empty());
+        assert!(copy.key_page.is_none());
+        assert_eq!(copy.title, "Buffer");
+
+        // Every post asks: no allowance covers a tool that changes what the public sees.
+        for tool in ["create_post", "edit_post"] {
+            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
+            assert!(!allowances.contains_key(tool), "{tool} has no allowance");
+        }
+        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 2);
+        assert!(allowances.is_empty());
+
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Network),
+            sorted(&BUFFER_READS)
+        );
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Denied),
+            sorted(&BUFFER_NEVER)
+        );
+        assert_eq!(server.tools.len(), 20);
+    }
+
+    #[test]
+    fn the_marketing_kits_services_in_order() {
         let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
         let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
-        assert_eq!(names, ["higgsfield", "recraft"]);
+        assert_eq!(names, ["higgsfield", "recraft", "buffer"]);
         for connector in &kit.connectors {
             let KitConnector::Server { entry, .. } = connector else {
                 panic!("{} is a server", connector.name());
