@@ -2541,7 +2541,7 @@ pub(super) mod tests {
                     "marketing-specialist",
                     "claude-sonnet-5-5",
                     "medium",
-                    "Tells people about what you made",
+                    "Owns your brand and how you reach people",
                     "active"
                 ]),
             ]

@@ -130,7 +130,7 @@ Files: the Marketing Specialist's `role.yaml`, `system.md` and `marketing-what-s
 - `the_planners_keep_other_tasks_off_the_marketing_folder` (`lib.rs`): the Product Manager's `writing-task-contracts` and the Scrum Master's `keeping-work-flowing` each hold the sentence of Decisions word for word. RED.
 - `ships_the_mockup_persona_per_role` (`lib.rs:398-415`) and `proposes_the_suggested_six` (`daemon/team.rs:2544`) expect the Marketing Specialist's "Owns your brand and how you reach people"; each fails until `role.yaml` changes. RED.
 
-- [ ] `feat(roles): make the Marketing Specialist the owner of the brand and the plan`
+- [x] `feat(roles): make the Marketing Specialist the owner of the brand and the plan`
 
 ### Task 2: Four skills
 
@@ -244,4 +244,4 @@ Then, in the web app, by the founder: a marketing task that writes the brand kit
 
 ## Execution notes
 
-None yet.
+- Task 1: `the_marketing_specialist_owns_the_brand_and_the_plan` keeps the old test's four `allows that call` counts (the four skills still say it) and the "never publish" scan, and adds that the prompt holds every `forbidden` line (as the Finance test does), the three paths of the design, the sentence about what a service or a competitor's page returns, and "a returned plan's reason is the owner's own words"; it also asserts `marketing-what-ships` names the four paths, `docs/marketing/research/` among them, and `produces` holds "the brand kit", "the brand persona" and "a marketing plan". RED, as named: `forbidden` was the old two lines; the Designer's skill lacked the path; the planners' skills lacked the sentence; the persona was the old line in `ships_the_mockup_persona_per_role` (`roles`) and, shown RED with `role.yaml`'s persona put back for one run, in `proposes_the_suggested_six` (`daemon/team.rs`, an ignored test, run with `--include-ignored`). In the Product Manager's skill the sentence is a bullet of its own after "Only the Developer and the UI/UX Designer change code", opening "Keep other roles off the marketing folder:"; in the Scrum Master's it follows the same paragraph.

@@ -52,6 +52,9 @@ The team's rules and the criterion library are in this prompt; call `farik_read_
 - **Only the Developer and the UI/UX Designer change code**: a task for any other role keeps every
   `allowed_paths` entry inside the team's `document_paths` (`farik_read_rules`), and a Developer's
   or a Designer's task says `change: fix` when it repairs a defect.
+- **Keep other roles off the marketing folder**: While the team has a Marketing Specialist,
+  another role's task names no path that could reach docs/marketing/ (not docs/** or docs); name
+  the folder it needs, such as docs/adr/**.
 - **Exit criteria**: see below.
 - **Assignee role and reviewer role**: a Developer's task is reviewed by an active Architect when
   the team has one, else by another active Developer, which needs two active Developers; a
