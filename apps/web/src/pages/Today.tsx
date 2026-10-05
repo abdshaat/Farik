@@ -304,7 +304,8 @@ function RequestBox({ pmName }: { pmName: string }) {
 				</p>
 			)}
 			<div>
-				<Button kind="primary" type="submit" busy={busy}>
+				{/* Without a connection the request cannot be filed: the button waits for one. */}
+				<Button kind="primary" type="submit" busy={busy} disabled={!client}>
 					{t("requestSend")}
 				</Button>
 			</div>

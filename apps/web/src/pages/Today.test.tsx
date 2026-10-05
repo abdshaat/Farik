@@ -3,19 +3,23 @@ import {
 	act,
 	cleanup,
 	fireEvent,
+	render,
 	screen,
 	waitFor,
 	within,
 } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ConnectionProvider } from "../app/connection.tsx";
 import { en } from "../strings/en.ts";
-import type { FakeSocket } from "../test/fake-socket.ts";
+import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
 import {
 	answerQuery,
 	answerStatus,
 	eventArrives,
 	renderApp,
 } from "../test/render-app.tsx";
+import { Today } from "./Today.tsx";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
 	id,
@@ -163,6 +167,52 @@ describe("today", () => {
 					.params,
 			).toEqual({ task_id: "FRK-3" }),
 		);
+	});
+
+	it("waits_for_the_connection_before_a_request_can_be_sent", async () => {
+		// Today, drawn alone: the app's shell shows nothing until Farik has answered, so the page
+		// is rendered here while the session check is still unanswered and there is no connection.
+		let answerSession: (status: number) => void = () => {};
+		const session = new Promise<Response>((resolve) => {
+			answerSession = (status) => resolve(new Response(null, { status }));
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: string) =>
+				url === "/session" ? session : new Response(null, { status: 404 }),
+			),
+		);
+		const { factory, sockets } = socketsMade();
+		render(
+			<ConnectionProvider socketFactory={factory}>
+				<MemoryRouter initialEntries={["/"]}>
+					<Today />
+				</MemoryRouter>
+			</ConnectionProvider>,
+		);
+		const box = await screen.findByRole("textbox", { name: en.requestLabel });
+		fireEvent.change(box, { target: { value: "Add gift cards to checkout" } });
+		const send = screen.getByRole("button", {
+			name: en.requestSend,
+		}) as HTMLButtonElement;
+		expect(send.disabled).toBe(true);
+
+		// Farik answers: the page connects, and the button works.
+		await act(async () => answerSession(204));
+		const socket = await waitFor(() => {
+			const s = sockets[0];
+			if (!s) throw new Error("no socket was opened");
+			return s;
+		});
+		act(() => socket.emit("open", {}));
+		await waitFor(() => expect(send.disabled).toBe(false));
+		fireEvent.click(send);
+		const filed = await waitFor(() => {
+			const f = socket.calls("request.file")[0];
+			if (!f) throw new Error("no request.file was sent");
+			return f;
+		});
+		expect(filed.params).toEqual({ text: "Add gift cards to checkout" });
 	});
 
 	it("lists_what_waits_on_you", async () => {
