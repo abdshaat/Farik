@@ -9,6 +9,7 @@ const tone: Record<Role, string> = {
 	software_developer: styles.developer as string,
 	marketing_specialist: styles.marketingSpecialist as string,
 	ui_ux_designer: styles.uiUxDesigner as string,
+	finance_specialist: styles.financeSpecialist as string,
 };
 
 export function RoleTag({ role }: { role: Role }) {

@@ -69,7 +69,7 @@ One commit, since the generated enum makes every exhaustive match (`default_tier
 - `role_tag_names_finance` (`RoleTag.test.tsx`): "FIN" with its colour class. RED.
 - The exact lists in `assets.test.ts` (`:17-29`, the length 11 at `:39`) and `contrast.test.ts` (`:63-71`, `:125-130`) gain it. RED with the rest.
 
-- [ ] `feat(ui): give the Finance Specialist its picture, tag and colour`
+- [x] `feat(ui): give the Finance Specialist its picture, tag and colour`
 
 ### Task 3: The role in the web app
 
@@ -100,3 +100,4 @@ Then, in the web app, by the founder: add a Finance Specialist from the Team pag
 
 - Task 1: `the_finance_specialist_says_its_numbers_are_not_a_filing_or_advice` (`crates/roles/src/lib.rs`) is beyond the plan: it asserts that the system prompt and the skill each say "management accounting" and "not a tax filing, statutory accounts or financial advice" (whitespace flattened), since ADR 0019 requires the role to say so. It was proved RED with the role files absent (the crate did not compile) and passes on the shipped wording.
 - Task 1, a deviation decided by the controller: the plan said to show `kit_skills_name_only_tools_farik_lists` catching a role skill that names an unlisted tool "with a scratch line" in a skill. No scratch or fake tool name was written into any shipped `SKILL.md`, `system.md` or role file, not even temporarily. Instead a synthetic text, `("synthetic", "call farik_nope here")`, was pushed onto the test's own list of texts inside the test function; run alone it failed with `product_manager/synthetic: farik_nope`; the line was then removed.
+- Task 2: the `Role` union in `packages/ui/src/role.ts` gains `finance_specialist` here, so `apps/web`'s typecheck (`SetupTeam.tsx` `JOBS`, `TeamSetup.tsx` `roleName`) is red on this commit alone, until Task 3 gives each its entry; `pnpm --filter @farik/brand test` (33) and `@farik/ui` test (46) pass, and brand, ui and protocol-client typecheck. The plan orders the tasks so; the phase branch's tip is the commit that must be green. `finance_has_a_role_colour` is written once per theme, and also pins the ratio at 10.3 against `role-ink`; `role_tag_names_finance` also checks the tag colour classes stay distinct and that `.financeSpecialist` draws `--farik-color-role-finance-specialist`. The Gallery's role list gains the role (the Designer was never in it, and was left out).

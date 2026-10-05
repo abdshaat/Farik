@@ -4,6 +4,7 @@ export const AVATAR_KEYS = [
 	"architect",
 	"developer",
 	"marketing-specialist",
+	"finance-specialist",
 	"extra-1",
 	"extra-2",
 	"extra-3",
