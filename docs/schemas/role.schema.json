@@ -23,7 +23,8 @@
         "architect",
         "software_developer",
         "marketing_specialist",
-        "ui_ux_designer"
+        "ui_ux_designer",
+        "finance_specialist"
       ],
       "description": "The role, equal to its directory's name. `human` is a role a contract may name as a reviewer, never one an agent is instantiated from."
     },

@@ -321,13 +321,14 @@ pub fn declared_name_and_description(
 }
 
 /// Every agent role Farik ships.
-pub const SHIPPED_ROLES: [Role; 6] = [
+pub const SHIPPED_ROLES: [Role; 7] = [
     Role::ProductManager,
     Role::ScrumMaster,
     Role::Architect,
     Role::SoftwareDeveloper,
     Role::MarketingSpecialist,
     Role::UiUxDesigner,
+    Role::FinanceSpecialist,
 ];
 
 static CORE_SKILL_NAMES: LazyLock<BTreeSet<&'static str>> = LazyLock::new(|| {
@@ -682,6 +683,16 @@ mod tests {
             declared_name_and_description(&skill(&[("other.md", "x")])),
             None
         );
+    }
+
+    #[test]
+    fn keeping_the_books_passes_the_skill_checks() {
+        let folder = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("roles/finance_specialist/skills/keeping-the-books");
+        let checked = check_skill("keeping-the-books", &read_folder(&folder))
+            .expect("the Finance Specialist's skill passes");
+        assert_eq!(checked.name, "keeping-the-books");
+        assert!(!checked.description.trim().is_empty());
     }
 
     #[test]

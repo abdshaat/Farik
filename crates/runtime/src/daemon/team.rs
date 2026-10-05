@@ -4037,7 +4037,7 @@ pub(super) mod tests {
         }
     }
 
-    /// A guard: every `farik_*` tool a kit skill names is one Farik lists.
+    /// A guard: every `farik_*` tool a role's skill or a kit's skill names is one Farik lists.
     #[test]
     fn kit_skills_name_only_tools_farik_lists() {
         let listed: Vec<&str> = crate::tools::tool_descriptors()
@@ -4046,13 +4046,22 @@ pub(super) mod tests {
             .collect();
         let mut named = 0;
         for role in farik_roles::SHIPPED_ROLES {
+            let mut texts: Vec<(String, String)> = farik_roles::load_role(role)
+                .expect("a role")
+                .skills
+                .into_iter()
+                .map(|skill| (skill.name, skill.text))
+                .collect();
             for skill in farik_roles::load_kit(role).expect("a kit").skills {
                 for text in skill.session_files.values() {
-                    for word in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
-                        if word.starts_with("farik_") {
-                            assert!(listed.contains(&word), "{}: {word}", skill.name);
-                            named += 1;
-                        }
+                    texts.push((skill.name.clone(), text.clone()));
+                }
+            }
+            for (name, text) in &texts {
+                for word in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+                    if word.starts_with("farik_") {
+                        assert!(listed.contains(&word), "{role}/{name}: {word}");
+                        named += 1;
                     }
                 }
             }

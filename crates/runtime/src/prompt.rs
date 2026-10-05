@@ -898,6 +898,7 @@ mod tests {
             Role::ScrumMaster,
             Role::Architect,
             Role::MarketingSpecialist,
+            Role::FinanceSpecialist,
             Role::Human,
         ];
         let shipped: Vec<RoleDefinition> = roles

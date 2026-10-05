@@ -5,8 +5,9 @@ use farik_core::team::Team;
 
 /// The roles that review a task, in order of preference, by its assignee's role: a Developer's
 /// work to the Architect, then another Developer; a UI/UX Designer's to the Architect, then a
-/// Developer; an Architect's and a Marketing Specialist's to the Product Manager. The Product Manager's and the Scrum Master's own tasks have no row until
-/// phase 4 decides them.
+/// Developer; an Architect's, a Marketing Specialist's and a Finance Specialist's to the Product
+/// Manager. The Product Manager's and the Scrum Master's own tasks have no row until phase 4
+/// decides them.
 pub const REVIEWER_ROLE_FOR: &[(Role, &[Role])] = &[
     (
         Role::SoftwareDeveloper,
@@ -18,6 +19,7 @@ pub const REVIEWER_ROLE_FOR: &[(Role, &[Role])] = &[
     ),
     (Role::Architect, &[Role::ProductManager]),
     (Role::MarketingSpecialist, &[Role::ProductManager]),
+    (Role::FinanceSpecialist, &[Role::ProductManager]),
 ];
 
 /// The `reviewer_role` the contract's writer fills in for a task whose assignee will hold
@@ -163,6 +165,19 @@ mod tests {
     }
 
     #[test]
+    fn the_product_manager_reviews_finance() {
+        let team = a_team(&[
+            ("arch", "architect", "active"),
+            ("dev-a", "software_developer", "active"),
+            ("fin", "finance_specialist", "active"),
+        ]);
+        assert_eq!(
+            default_reviewer_role(&team, TaskKind::Task, Role::FinanceSpecialist),
+            Some(Role::ProductManager)
+        );
+    }
+
+    #[test]
     fn sends_a_designers_task_to_the_architect_then_a_developer() {
         let with_an_architect = a_team(&[
             ("dev-a", "software_developer", "active"),
@@ -200,6 +215,7 @@ mod tests {
             Role::Architect,
             Role::SoftwareDeveloper,
             Role::MarketingSpecialist,
+            Role::FinanceSpecialist,
         ];
         let mut answered = 0;
         for team in &teams {
@@ -284,6 +300,7 @@ mod tests {
             Role::Architect,
             Role::SoftwareDeveloper,
             Role::MarketingSpecialist,
+            Role::FinanceSpecialist,
         ] {
             assert_eq!(
                 default_reviewer_role(&two_developers_and_an_architect(), TaskKind::Epic, assignee),

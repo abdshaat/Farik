@@ -89,6 +89,7 @@ pub fn plain_role(role: Role) -> &'static str {
         Role::SoftwareDeveloper => "Software Developer",
         Role::MarketingSpecialist => "Marketing Specialist",
         Role::UiUxDesigner => "UI/UX Designer",
+        Role::FinanceSpecialist => "Finance Specialist",
         Role::Human => "human",
     }
 }
@@ -1125,6 +1126,7 @@ impl From<RoleWire> for Role {
             RoleWire::SoftwareDeveloper => Self::SoftwareDeveloper,
             RoleWire::MarketingSpecialist => Self::MarketingSpecialist,
             RoleWire::UiUxDesigner => Self::UiUxDesigner,
+            RoleWire::FinanceSpecialist => Self::FinanceSpecialist,
         }
     }
 }
@@ -1153,7 +1155,7 @@ mod tests {
         AgentStatus, HumanAcceptsContracts, Integration, JudgeChoice, JudgmentPolicy,
         JudgmentRequired, PermissionTier, PermissionTierWire, Preview, Role, RoleWire,
         SMALL_ENOUGH_QUESTION, Team, TeamPermissions, TeamPolicy, changes_code, defaults,
-        validate_team,
+        plain_role, validate_team,
     };
     use super::{CustomServer, CustomTransport, canonical_json, custom_server, spec_sha256};
     use crate::governor::permissions::ConnectorTag;
@@ -2088,6 +2090,7 @@ mod tests {
                 RoleWire::SoftwareDeveloper,
                 RoleWire::MarketingSpecialist,
                 RoleWire::UiUxDesigner,
+                RoleWire::FinanceSpecialist,
             ]
             .map(Role::from),
             [
@@ -2097,8 +2100,19 @@ mod tests {
                 Role::SoftwareDeveloper,
                 Role::MarketingSpecialist,
                 Role::UiUxDesigner,
+                Role::FinanceSpecialist,
             ]
         );
+    }
+
+    #[test]
+    fn plain_role_names_finance() {
+        assert_eq!(plain_role(Role::FinanceSpecialist), "Finance Specialist");
+    }
+
+    #[test]
+    fn finance_does_not_change_code() {
+        assert!(!changes_code(Role::FinanceSpecialist));
     }
 
     #[test]

@@ -132,6 +132,7 @@ pub fn load_kit(role: Role) -> Result<Kit, KitError> {
         Role::Architect => include_str!("../roles/architect/kit.yaml"),
         Role::MarketingSpecialist => include_str!("../roles/marketing_specialist/kit.yaml"),
         Role::UiUxDesigner => include_str!("../roles/ui_ux_designer/kit.yaml"),
+        Role::FinanceSpecialist => include_str!("../roles/finance_specialist/kit.yaml"),
         Role::Human => {
             return Err(KitError::NotFound {
                 role_id: role.to_string(),
@@ -914,13 +915,14 @@ mod tests {
     use crate::{builtin_connector, core_skill_names, load_role};
     use farik_core::team::{CustomServer, CustomTransport, custom_server};
 
-    const SHIPPED: [Role; 6] = [
+    const SHIPPED: [Role; 7] = [
         Role::ProductManager,
         Role::ScrumMaster,
         Role::Architect,
         Role::SoftwareDeveloper,
         Role::MarketingSpecialist,
         Role::UiUxDesigner,
+        Role::FinanceSpecialist,
     ];
 
     /// A valid kit of the Product Manager with one http service.
@@ -993,6 +995,14 @@ mod tests {
             load_kit(Role::Human),
             Err(KitError::NotFound { .. })
         ));
+    }
+
+    #[test]
+    fn its_kit_is_empty_until_step_10() {
+        let kit = load_kit(Role::FinanceSpecialist).expect("the Finance Specialist's kit");
+        assert_eq!(kit.role, Role::FinanceSpecialist);
+        assert!(kit.skills.is_empty(), "{:?}", kit.skills);
+        assert!(kit.connectors.is_empty(), "{:?}", kit.connectors);
     }
 
     #[test]

@@ -60,7 +60,7 @@ One commit, since the generated enum makes every exhaustive match (`default_tier
 - `keeping_the_books_passes_the_skill_checks` (`farik-roles`): the shipped skill passes `check_skill`. RED.
 - `kit_skills_name_only_tools_farik_lists` (`daemon/team.rs:4026`, since `farik-roles` cannot reach `tool_descriptors`): it iterates `load_role(role).skills` as well as each kit's, for every shipped role, so `keeping-the-books` names only `farik_*` tools Farik lists (none before 09b). RED: a role skill naming `farik_nope` passes today; the executor shows it with a scratch line, then removes it.
 
-- [ ] `feat(roles): add the Finance Specialist`
+- [x] `feat(roles): add the Finance Specialist`
 
 ### Task 2: Its picture and colour
 
@@ -98,4 +98,5 @@ Then, in the web app, by the founder: add a Finance Specialist from the Team pag
 
 ## Execution notes
 
-None yet.
+- Task 1: `the_finance_specialist_says_its_numbers_are_not_a_filing_or_advice` (`crates/roles/src/lib.rs`) is beyond the plan: it asserts that the system prompt and the skill each say "management accounting" and "not a tax filing, statutory accounts or financial advice" (whitespace flattened), since ADR 0019 requires the role to say so. It was proved RED with the role files absent (the crate did not compile) and passes on the shipped wording.
+- Task 1, a deviation decided by the controller: the plan said to show `kit_skills_name_only_tools_farik_lists` catching a role skill that names an unlisted tool "with a scratch line" in a skill. No scratch or fake tool name was written into any shipped `SKILL.md`, `system.md` or role file, not even temporarily. Instead a synthetic text, `("synthetic", "call farik_nope here")`, was pushed onto the test's own list of texts inside the test function; run alone it failed with `product_manager/synthetic: farik_nope`; the line was then removed.

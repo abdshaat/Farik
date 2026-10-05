@@ -19,7 +19,8 @@
         "architect",
         "software_developer",
         "marketing_specialist",
-        "ui_ux_designer"
+        "ui_ux_designer",
+        "finance_specialist"
       ],
       "description": "The role, equal to its folder's name."
     },

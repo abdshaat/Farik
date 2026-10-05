@@ -213,6 +213,15 @@ pub fn load_role(role: Role) -> Result<RoleDefinition, RoleError> {
                 ),
             ],
         ),
+        Role::FinanceSpecialist => parse_role(
+            role,
+            include_str!("../roles/finance_specialist/role.yaml"),
+            include_str!("../roles/finance_specialist/system.md"),
+            &[(
+                "keeping-the-books",
+                include_str!("../roles/finance_specialist/skills/keeping-the-books/SKILL.md"),
+            )],
+        ),
         Role::Human => Err(RoleError::NotFound {
             role_id: role.to_string(),
         }),
@@ -409,6 +418,7 @@ mod tests {
                 Role::MarketingSpecialist,
                 "Tells people about what you made",
             ),
+            (Role::FinanceSpecialist, "Keeps your numbers straight"),
         ] {
             assert_eq!(loaded(role).persona, line, "{role}");
         }
@@ -457,6 +467,7 @@ mod tests {
             Role::SoftwareDeveloper,
             Role::MarketingSpecialist,
             Role::UiUxDesigner,
+            Role::FinanceSpecialist,
         ] {
             let definition = loaded(role);
             let texts = std::iter::once(&definition.system_prompt)
@@ -574,6 +585,54 @@ mod tests {
         assert!(definition.system_prompt.contains("untrusted"));
     }
 
+    #[test]
+    fn loads_the_finance_specialist() {
+        let definition = loaded(Role::FinanceSpecialist);
+        assert_eq!(definition.id, Role::FinanceSpecialist);
+        assert_eq!(definition.persona, "Keeps your numbers straight");
+        assert_eq!(definition.model, "claude-sonnet-5-5");
+        assert_eq!(definition.effort, Effort::Medium);
+        assert_eq!(
+            definition.default_tiers,
+            default_tiers(Role::FinanceSpecialist)
+        );
+        assert_eq!(definition.skills.len(), 1);
+        assert_eq!(definition.skills[0].name, "keeping-the-books");
+        assert!(!definition.skills[0].description.trim().is_empty());
+        assert!(!definition.skills[0].body.trim().is_empty());
+        assert_eq!(
+            definition.forbidden,
+            [
+                "pay, refund, or move money",
+                "change Farik's budgets or anything in Stripe or a mailbox",
+                "send, delete, move, or mark any email",
+                "publish anywhere",
+                "write application code",
+                "write anything outside your finance folder",
+            ]
+        );
+        assert!(definition.system_prompt.contains("untrusted"));
+    }
+
+    /// ADR 0019: its numbers are management accounting, and the role says so wherever it is
+    /// told what it is: the prompt and its skill.
+    #[test]
+    fn the_finance_specialist_says_its_numbers_are_not_a_filing_or_advice() {
+        let definition = loaded(Role::FinanceSpecialist);
+        let skill = &definition.skills[0].body;
+        for (what, text) in [
+            ("the prompt", &definition.system_prompt),
+            ("the skill", skill),
+        ] {
+            let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(flat.contains("management accounting"), "{what}: {flat}");
+            assert!(
+                flat.contains("not a tax filing, statutory accounts or financial advice"),
+                "{what}: {flat}"
+            );
+        }
+    }
+
     /// ADR 0042: the Marketing Specialist publishes through a connected service, one call at a
     /// time, after the human allows it; nothing it is told forbids publishing outright.
     #[test]
@@ -650,6 +709,7 @@ mod tests {
             Role::ScrumMaster,
             Role::Architect,
             Role::MarketingSpecialist,
+            Role::FinanceSpecialist,
         ] {
             let definition = loaded(role);
             assert!(
@@ -686,6 +746,7 @@ mod tests {
             directories,
             [
                 "architect",
+                "finance_specialist",
                 "marketing_specialist",
                 "product_manager",
                 "scrum_master",

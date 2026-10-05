@@ -1,0 +1,5 @@
+# The Finance Specialist's kit is empty until phase 7 step 10 adds its skills and its Stripe
+# connection (ADR 0019).
+role: finance_specialist
+skills: []
+connectors: []
