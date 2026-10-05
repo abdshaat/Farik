@@ -13,6 +13,8 @@ function logOf(project: string, task: string): string[] {
 
 async function send(page: Page, request: string, task: string) {
 	await page.getByRole("link", { name: "Today" }).first().click();
+	await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
+	await expect(page.getByText("Mira").first()).toBeVisible();
 	await page.getByLabel("What should the team do next?").fill(request);
 	await page.getByRole("button", { name: "Send to the team" }).click();
 	await expect(page).toHaveURL(new RegExp(`/requests/${task}$`));

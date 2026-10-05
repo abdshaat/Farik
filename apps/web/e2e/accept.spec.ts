@@ -30,6 +30,8 @@ test("a high-risk plan is approved, its work sent back once, then accepted", asy
 	});
 	try {
 		await page.goto(serve.url);
+		await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
+		await expect(page.getByText("Mira").first()).toBeVisible();
 		await page
 			.getByLabel("What should the team do next?")
 			.fill("Add a done.txt at the root, so a run can be checked for it");
