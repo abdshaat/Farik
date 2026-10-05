@@ -1,6 +1,6 @@
 # Phase 7, step 08: Marketing Specialist kit (Higgsfield and Recraft)
 
-Status: done (executed and landing-reviewed 2026-10-05; the founder's live pin run in Verification is still to run)
+Status: executed 2026-10-05; reviewed 2026-10-05 (one landing review, one fix report); the founder's live pin run (Verification) waits, and the step is not done until it passes.
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.5, 6.7; F9
 Depends on: steps 05 and 05b (the kit format, connect by name, allowances; committed on this branch), steps 06 to 07b (the kit pattern, `embedded_skills`, the live pin test; at 383a626); phase 6 (merged in #19)
