@@ -111,7 +111,7 @@ Files: `fx.rs`, `lib.rs`, `connector_run.rs`, cli `lib.rs` (`ConnectorCommands::
 
 ### Task 3: Exa, SerpApi, Brex and AWS Pricing
 
-Files: `kit.yaml` `connectors` after `fx`, in this order: `exa`, `serpapi`, `brex`, `aws_pricing`; `kit.rs` tests (`loads_every_shipped_kit`: the Procurement Specialist has 5).
+Files: `kit.yaml` `connectors` after `fx`, in this order: `exa`, `serpapi`, `brex`, `aws-pricing`; `kit.rs` tests (`loads_every_shipped_kit`: the Procurement Specialist has 5).
 
 **`exa`**, `transport: http`, `url: https://mcp.exa.ai/mcp`, no keys, no headers. Title "Exa web search". About "Exa searches the web and reads pages, built for assistants that research." Why "So the Procurement Specialist can find makers, sellers and their price pages for anything you need to buy. It only reads." Setup "Nothing to set up: Exa answers a few searches a day with no account. What your agent searches for goes to Exa as written."
 - `network`, with labels: `web_search_exa` "search the web", `web_fetch_exa` "read a page".
@@ -120,7 +120,7 @@ Files: `kit.yaml` `connectors` after `fx`, in this order: `exa`, `serpapi`, `bre
 - `external_effect`, with its label and allowance: `search` "search shops".
 - `denied`: `search_table`, `search_dashboard` (2).
 
-**`aws_pricing`**, `transport: stdio`, `command: uvx`, `args: ["awslabs.aws-pricing-mcp-server==1.1.1"]`, `credential_keys: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]`, `key_page: https://console.aws.amazon.com/iam/home#/users`. Title "AWS prices". About "AWS publishes the price of every one of its services, by region and by plan." Why "So the Procurement Specialist can price an AWS option exactly before anyone buys it. It only reads public prices." Setup "This needs the free program uv on your computer (docs.astral.sh/uv). In your AWS account, make a user that may only read prices: give it a policy allowing pricing:GetProducts, pricing:DescribeServices, pricing:GetAttributeValues, pricing:ListPriceLists and pricing:GetPriceListFileUrl, and nothing else. Make a key for it, then paste the ‘Access key’ and the ‘Secret access key’ here. Reading prices costs nothing."
+**`aws-pricing`**, `transport: stdio`, `command: uvx`, `args: ["awslabs.aws-pricing-mcp-server==1.1.1"]`, `credential_keys: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]`, `key_page: https://console.aws.amazon.com/iam/home#/users`. Title "AWS prices". About "AWS publishes the price of every one of its services, by region and by plan." Why "So the Procurement Specialist can price an AWS option exactly before anyone buys it. It only reads public prices." Setup "This needs the free program uv on your computer (docs.astral.sh/uv). In your AWS account, make a user that may only read prices: give it a policy allowing pricing:GetProducts, pricing:DescribeServices, pricing:GetAttributeValues, pricing:ListPriceLists and pricing:GetPriceListFileUrl, and nothing else. Make a key for it, then paste the ‘Access key’ and the ‘Secret access key’ here. Reading prices costs nothing."
 - `network`, with labels: `get_pricing` "read a service's prices", `get_pricing_service_codes` "list AWS services", `get_pricing_service_attributes` "list what a price depends on", `get_pricing_attribute_values` "list the options for a price", `get_price_list_urls` "find a full price list", `get_bedrock_patterns` "read AI service pricing patterns".
 - `denied`: `analyze_cdk_project`, `analyze_terraform_project`, `generate_cost_report` (3).
 
@@ -133,7 +133,7 @@ Tests (`kit.rs`):
 - `brex_reads_spend_and_never_writes`: `http` at that URL, `oauth.scopes` exactly the four, no keys or headers; the 11 `network` names exactly; `update_expense_memo`, `list_users`, `get_card_by_id` and `list_banking_transactions` `denied`; 32 `denied`. RED.
 - `exa_searches_without_a_key`: `http` at that URL, no keys, no headers; both tools `network`. RED.
 - `serpapi_counts_each_search`: `http` at that URL, the one header with its placeholder, the one key and the key page; `search` `external_effect` with `allowances.search` `{ calls: 50, what: "shopping searches" }`; the other two `denied`. RED.
-- `the_procurement_kit_never_buys`: connectors exactly `fx`, `exa`, `serpapi`, `brex`, `aws_pricing`, in that order; the only `external_effect` tool is SerpApi's `search`; every `network` tool labelled. RED.
+- `the_procurement_kit_never_buys`: connectors exactly `fx`, `exa`, `serpapi`, `brex`, `aws-pricing`, in that order; the only `external_effect` tool is SerpApi's `search`; every `network` tool labelled. RED.
 
 - [ ] `feat(roles): give the Procurement Specialist search, shopping prices, Brex and AWS prices`
 

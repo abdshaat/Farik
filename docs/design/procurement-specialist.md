@@ -140,7 +140,7 @@ Each chosen by ADR 0020's order and ADR 0035's routes, researched 2026-10-05. On
 | `exa` | finding makers, sellers and price pages | official, `https://mcp.exa.ai/mcp` | none (about 150 calls a day) | `web_search_exa`, `web_fetch_exa` `network` | 10d |
 | `serpapi` | Google Shopping, Amazon, eBay and Walmart prices | official, `https://mcp.serpapi.com/mcp` | key, as a bearer header | `search` `external_effect`, allowance 50 a sprint; 2 `denied` | 10d |
 | `brex` | what the company already spends with a seller | official, `https://api.brex.com/mcp` | 1, read-only scopes | 11 `network`, 32 `denied` | 10d |
-| `aws_pricing` | AWS list prices, for a software team | official, `uvx awslabs.aws-pricing-mcp-server==1.1.1` | key, pricing reads only; needs `uv` | 6 `network`, 3 `denied` | 10d |
+| `aws-pricing` | AWS list prices, for a software team | official, `uvx awslabs.aws-pricing-mcp-server==1.1.1` | key, pricing reads only; needs `uv` | 6 `network`, 3 `denied` | 10d |
 | `recalls` | US product recalls; a vehicle's recalls, complaints, ratings; VIN decoding | Farik's own over CPSC, NHTSA and vPIC | none | 5 `network` | 10g |
 | `ebay` | live eBay listings and asking prices | Farik's own over eBay's Browse API | key (App ID and Cert ID), 5,000 searches a day | 2 `network` | 10g |
 
