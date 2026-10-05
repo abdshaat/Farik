@@ -2,6 +2,7 @@
 
 Date: 2026-10-05
 Status: accepted. The founder asked for the role on 2026-10-05 ("Add and plan a procurement agent and plan all its tools and connectors as well as skills"), set its research focus and the data pipeline request the same day, and answered the design's O1 to O6 ("the agent never directly buy[s], he just compiles list of sellers, look for price, contact manufacturer or sellers. Get prices. And set up a purchase order but the final decision is the founder['s]"; "all the data are and spreadsheets are to stay local"; "any product whether technical or non technical"; "after the finance specialist and before devops"; "the PM must escalate any process that cost money").
+Amended 2026-10-05 by ADR 0041: a team the user runs on auto sends the agent's messages to sellers as drafted, within the daily cap, and approves escalated data pipelines; purchase orders still wait for the founder. Phase numbers after the web launch moved up by one (ADR 0040).
 
 ## Context
 
@@ -52,7 +53,7 @@ Easier:
 
 Harder:
 - The founder still places or approves every order and sends every message. That is the design.
-- Step 10f brings the first mailbox into Farik (IMAP, SMTP and three new crates), before the receipts intake of phase 12, which then reuses it.
+- Step 10f brings the first mailbox into Farik (IMAP, SMTP and three new crates), before the receipts intake of phase 13, which then reuses it.
 - A team of the six suggested agents and one optional role is the cap of seven.
 - The role leans on step 09's private-folder rules, which must be built for more than one role.
 - SerpApi spends the user's searches; its allowance asks the founder past 50 a sprint.
