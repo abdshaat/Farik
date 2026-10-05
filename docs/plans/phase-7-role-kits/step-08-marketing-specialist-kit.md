@@ -1,6 +1,6 @@
 # Phase 7, step 08: Marketing Specialist kit (Higgsfield and Recraft)
 
-Status: ready
+Status: done (executed and landing-reviewed 2026-10-05; the founder's live pin run in Verification is still to run)
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.5, 6.7; F9
 Depends on: steps 05 and 05b (the kit format, connect by name, allowances; committed on this branch), steps 06 to 07b (the kit pattern, `embedded_skills`, the live pin test; at 383a626); phase 6 (merged in #19)
@@ -108,7 +108,7 @@ Files: `daemon/team.rs` test; `daemon/hooks.rs` test; `live_kit_pins.rs` header 
 
 `docs/SPEC.md` 6.5: the kit's skills and services; 6.7: the allowance sentence amended ("…has no allowance and always asks, as does one a kit judges too costly to pre-approve: a 3D model, a video edit priced by its length, an analysis, or a change to the account's library"), and "The Marketing Specialist's kit" paragraph, as 6.7's kit paragraphs are (the two servers, route 1, the allowances and what each counts, what is `denied` and why, Recraft's possible re-sign-in, the pin from Recraft's package names); the revision line, "Revision 0.51". `docs/design/role-kits.md`: the Marketing row gives what shipped and what moved to 08b, and design files' block; the Signing-in table gains Higgsfield and Recraft, route 1; the Steps table's row 08 says what shipped and a new row 08b. `docs/plans/project-plan.md` row 08 (executed) and a new row 08b (Buffer, Kit and Semrush, each pinned from a live listing first).
 
-- [ ] `docs(spec): record the Marketing Specialist's kit`
+- [x] `docs(spec): record the Marketing Specialist's kit`
 
 ## Verification
 
@@ -125,3 +125,5 @@ The live run reads `FARIK_KIT_HIGGSFIELD_BEARER` and `FARIK_KIT_RECRAFT_BEARER`,
 
 - Task 4: the plan's `super::team::kit_entry` is `crate::daemon::team::kit_entry` from the hook tests, where `super` is `hooks`, not `daemon`; the guard in `daemon/team.rs` uses `super::kit_entry`. The hook test also asserts the session's `stop_reason` is `None` after the refused `sandbox_exec` and set after the twenty-first image, which the plan's order relies on. Run alone, both landing mutations fail it: `generate_image`'s `calls` at 21 (`ran_inside` reads `Some(21)`) and `sandbox_exec` tagged `network` (the call is allowed).
 - Landing review (Opus, 2026-10-05): Tasks 1 to 4 ready; 32 mutations caught, five wording mutations survived by design (no step asserts copy wording). Its fix report: three wording fixes in `making-images-and-video` (one price check per brief, not per clip; an ask ends the session and the next one may make that call once; projects, folders, reference elements, voices and websites are never offered), and the planner's decision above on `generate_audio`, applied test-first in a fix commit.
+- Task 5: the spec's revision line stood at 0.50, so "Revision 0.51" was free and is used. The allowance sentence's opening clause, "generating images, video or audio, carries an allowance", now reads "generating or editing one image or one video clip", since a voice-over no longer carries one; it was not in the plan's quoted amendment and would have contradicted it. The Marketing paragraph sits after the built-in connector's, the last of 6.7's kit-specific paragraphs. The project plan's row 08 says the live pin run is still to come, as steps 06 and 07 do, though this plan's Status says "done" as the controller instructed.
+- Fix commits, after the landing review: `fix(roles): make every Higgsfield voice-over ask` (test-first: `higgsfield_spends_only_what_it_is_allowed` failed `left: 6, right: 5` on the allowance count and `connects_each_marketing_service_by_name` failed on Higgsfield's allowances still holding `generate_audio: 10`, each before `kit.yaml` changed) and `fix(roles): correct the Marketing Specialist's image and video skill`.
