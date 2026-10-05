@@ -4,7 +4,10 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::paths::{GlobError, PathRefusal, check_allowed_paths, reaches_the_farik_directory};
+use super::paths::{
+    GlobError, PathRefusal, check_allowed_paths, reaches_the_farik_directory,
+    reaches_the_marketing_directory,
+};
 use super::team_rules::TeamRules;
 use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
@@ -48,6 +51,9 @@ pub enum ReadinessRule {
     /// A task not assigned to the Software Developer keeps every allowed path within the team's
     /// document paths: only the Developer changes code.
     DocumentPathsOnly,
+    /// While the team has an active Marketing Specialist, no other role's task names a path that
+    /// could reach `docs/marketing/`, which the Marketing Specialist owns.
+    MarketingPathsOwned,
     /// No allowed path reaches under `.farik/`, whose files change only through Farik's tools.
     NoFarikPaths,
     /// A task's budget does not exceed the team's cap on a task; an epic is bounded by the
@@ -133,7 +139,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 19] = [
+const CHECKS: [Check; 20] = [
     intent_present,
     summary_present,
     criteria_present,
@@ -147,6 +153,7 @@ const CHECKS: [Check; 19] = [
     new_tests_required_by_rule,
     allowed_paths_within_ceiling,
     document_paths_only,
+    marketing_paths_owned,
     no_farik_paths,
     budget_within_team_max,
     no_parent_for_epic,
@@ -593,6 +600,41 @@ fn document_paths_only(
             "allowed paths {} reach outside the team's document paths {}",
             outside.join(", "),
             context.rules.document_paths.join(", ")
+        ),
+    ))
+}
+
+/// While the team has an active Marketing Specialist, another role's task may not name a path that
+/// could reach `docs/marketing/` (5.3, ADR 0042): the brand kit and the marketing plans are the
+/// Marketing Specialist's, and everyone else reads them. An epic names a ceiling and is not held.
+fn marketing_paths_owned(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    if contract.kind != Kind::Task
+        || contract.assignee_role == Role::MarketingSpecialist
+        || context
+            .active_agents_by_role
+            .get(&Role::MarketingSpecialist)
+            .is_none_or(|count| *count == 0)
+    {
+        return None;
+    }
+    let reaching: Vec<&str> = contract
+        .allowed_paths
+        .iter()
+        .map(String::as_str)
+        .filter(|path| reaches_the_marketing_directory(path))
+        .collect();
+    if reaching.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::MarketingPathsOwned,
+        format!(
+            "allowed paths {} could reach docs/marketing/, which the Marketing Specialist owns; \
+             name narrower paths or give the task to the Marketing Specialist",
+            reaching.join(", ")
         ),
     ))
 }
@@ -1100,20 +1142,23 @@ mod tests {
             for role in [Role::SoftwareDeveloper, Role::Architect] {
                 let mut task = a_task_for(role, &["docs/x.md", path]);
                 assert!(
-                    failed_rules(&task, &a_ready_context()).contains(&R::NoFarikPaths),
+                    failed_rules(&task, &a_context_without_marketing()).contains(&R::NoFarikPaths),
                     "{path} for {role:?}"
                 );
                 task.kind = Kind::Epic;
                 assert!(
-                    failed_rules(&task, &a_ready_context()).contains(&R::NoFarikPaths),
+                    failed_rules(&task, &a_context_without_marketing()).contains(&R::NoFarikPaths),
                     "{path} for an epic"
                 );
             }
         }
         let task = a_task_for(Role::Architect, &["**/*.md"]);
-        assert_eq!(failed_rules(&task, &a_ready_context()), [R::NoFarikPaths]);
+        assert_eq!(
+            failed_rules(&task, &a_context_without_marketing()),
+            [R::NoFarikPaths]
+        );
         assert!(
-            message_of(&task, &a_ready_context(), R::NoFarikPaths).contains("**/*.md"),
+            message_of(&task, &a_context_without_marketing(), R::NoFarikPaths).contains("**/*.md"),
             "the message names the path"
         );
         for path in [
@@ -1127,7 +1172,7 @@ mod tests {
         ] {
             let task = a_task_for(Role::SoftwareDeveloper, &[path]);
             assert_eq!(
-                evaluate_readiness(&task, &a_ready_context()),
+                evaluate_readiness(&task, &a_context_without_marketing()),
                 Ok(()),
                 "{path}"
             );
@@ -1138,7 +1183,7 @@ mod tests {
     fn keeps_a_ceiling_with_a_file_filter_exact() {
         let mut contract = a_contract();
         contract.allowed_paths = vec!["docs/**".to_string()];
-        let mut context = a_ready_context();
+        let mut context = a_context_without_marketing();
         context.rules.allowed_paths_ceiling = vec!["docs/**/*.md".to_string()];
         assert_eq!(
             failed_rules(&contract, &context),
@@ -1154,7 +1199,7 @@ mod tests {
         for path in ["docs*/**", "docs?/x", "docs{,rc}/**", "docs[x]/**"] {
             let mut contract = a_contract();
             contract.allowed_paths = vec![path.to_string()];
-            let mut context = a_ready_context();
+            let mut context = a_context_without_marketing();
             context.rules.allowed_paths_ceiling = vec!["docs/**".to_string()];
             assert_eq!(
                 failed_rules(&contract, &context),
@@ -1163,7 +1208,7 @@ mod tests {
             );
             let task = a_task_for(Role::Architect, &[path]);
             assert_eq!(
-                failed_rules(&task, &a_ready_context()),
+                failed_rules(&task, &a_context_without_marketing()),
                 [R::DocumentPathsOnly],
                 "{path} against the document paths"
             );
@@ -1171,11 +1216,82 @@ mod tests {
         for path in ["docs", "docs/**", "docs/*.md"] {
             let task = a_task_for(Role::Architect, &[path]);
             assert_eq!(
-                evaluate_readiness(&task, &a_ready_context()),
+                evaluate_readiness(&task, &a_context_without_marketing()),
                 Ok(()),
                 "{path}"
             );
         }
+    }
+
+    /// The ready context with no Marketing Specialist, for the tests of the rules about paths
+    /// that name `docs/` or everything: `marketing_paths_owned` would hold those paths too.
+    fn a_context_without_marketing() -> ReadinessContext {
+        let mut context = a_ready_context();
+        context
+            .active_agents_by_role
+            .remove(&Role::MarketingSpecialist);
+        context
+    }
+
+    #[test]
+    fn another_role_may_not_name_the_marketing_folder() {
+        let failed = |task: &TaskContract, context: &ReadinessContext| -> Vec<R> {
+            match evaluate_readiness(task, context) {
+                Ok(()) => Vec::new(),
+                Err(failures) => failures.iter().map(|failure| failure.rule).collect(),
+            }
+        };
+        // `a_ready_context()` has one active Marketing Specialist.
+        let mut with_marketing = a_task_for(Role::ProductManager, &["docs/adr/**", "docs/**"]);
+        with_marketing.reviewer_role = Role::Architect;
+        assert_eq!(
+            failed(&with_marketing, &a_ready_context()),
+            [R::MarketingPathsOwned]
+        );
+        let message = message_of(&with_marketing, &a_ready_context(), R::MarketingPathsOwned);
+        assert_eq!(
+            message,
+            "allowed paths docs/** could reach docs/marketing/, which the Marketing Specialist \
+             owns; name narrower paths or give the task to the Marketing Specialist"
+        );
+        // The same task passes once nobody on the team is a Marketing Specialist, or one is paused.
+        for count in [None, Some(0)] {
+            let mut context = a_ready_context();
+            context
+                .active_agents_by_role
+                .remove(&Role::MarketingSpecialist);
+            if let Some(count) = count {
+                context
+                    .active_agents_by_role
+                    .insert(Role::MarketingSpecialist, count);
+            }
+            assert_eq!(
+                evaluate_readiness(&with_marketing, &context),
+                Ok(()),
+                "{count:?}"
+            );
+        }
+        // Any other role is held, and a narrower path passes.
+        for role in [Role::Architect, Role::SoftwareDeveloper] {
+            let task = a_task_for(role, &["docs/**"]);
+            assert_eq!(
+                failed(&task, &a_ready_context()),
+                [R::MarketingPathsOwned],
+                "{role:?}"
+            );
+            let task = a_task_for(role, &["docs/adr/**"]);
+            assert_eq!(failed(&task, &a_ready_context()), [], "{role:?}");
+        }
+        // The Marketing Specialist's own task may name its folder.
+        let own = a_task_for(
+            Role::MarketingSpecialist,
+            &["docs/marketing/**", "CHANGELOG.md"],
+        );
+        assert_eq!(evaluate_readiness(&own, &a_ready_context()), Ok(()));
+        // An epic is not held: it names the ceiling its tasks fall within.
+        let mut epic = a_task_for(Role::Architect, &["docs/**"]);
+        epic.kind = Kind::Epic;
+        assert!(!failed(&epic, &a_ready_context()).contains(&R::MarketingPathsOwned));
     }
 
     /// A task for `role`, reviewed by the Product Manager so that any role may be the assignee,

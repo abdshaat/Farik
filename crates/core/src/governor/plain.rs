@@ -37,6 +37,9 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::DocumentPathsOnly => {
             "Only the developer changes code, and this plan lets someone else change it."
         }
+        ReadinessRule::MarketingPathsOwned => {
+            "Only the Marketing Specialist changes the brand kit and the marketing plans, and this plan lets someone else."
+        }
         ReadinessRule::NoFarikPaths => "The plan reaches into Farik's own files.",
         ReadinessRule::BudgetWithinTeamMax => {
             "The plan costs more than your team allows for one task."
@@ -61,7 +64,7 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 21] = [
+    const EVERY_RULE: [ReadinessRule; 22] = [
         IntentPresent,
         SummaryPresent,
         CriteriaPresent,
@@ -75,6 +78,7 @@ mod tests {
         NewTestsRequiredByRule,
         AllowedPathsWithinCeiling,
         DocumentPathsOnly,
+        MarketingPathsOwned,
         NoFarikPaths,
         BudgetWithinTeamMax,
         NoParentForEpic,
@@ -101,6 +105,7 @@ mod tests {
             | NewTestsRequiredByRule
             | AllowedPathsWithinCeiling
             | DocumentPathsOnly
+            | MarketingPathsOwned
             | NoFarikPaths
             | BudgetWithinTeamMax
             | NoParentForEpic

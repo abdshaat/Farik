@@ -1291,7 +1291,7 @@ pub(super) mod tests {
             &json!({ "task_id": "FRK-1", "contract": draft }),
             "contractCheckResult",
         );
-        assert_eq!(checked["total"], 20, "{checked}");
+        assert_eq!(checked["total"], 21, "{checked}");
         let failures = checked["failures"].as_array().expect("failures");
         assert_eq!(failures.len(), 1, "{checked}");
         assert_eq!(failures[0]["rule"], "reviewer_available");
@@ -1823,7 +1823,7 @@ pub(super) mod tests {
             &json!({ "task_id": "FRK-3", "contract": contract }),
             "contractCheckResult",
         );
-        assert_eq!(checked, json!({ "failures": [], "total": 22 }));
+        assert_eq!(checked, json!({ "failures": [], "total": 23 }));
 
         // The activity and what moved answer in their shapes.
         query(

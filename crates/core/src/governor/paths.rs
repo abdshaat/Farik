@@ -129,6 +129,58 @@ pub fn reaches_the_farik_directory(glob: &str) -> bool {
     })
 }
 
+/// The directory the Marketing Specialist owns while the team has one (`docs/SPEC.md` section 5.3,
+/// ADR 0042): the brand kit, the persona, the marketing plans and their research.
+const MARKETING_DIRECTORY: [&str; 2] = ["docs", "marketing"];
+
+/// Whether a glob of paths could match something under `docs/marketing/`: after `.` segments are
+/// dropped and each `{a,b}` is expanded, its first segment holds `**`, or matches `docs` regardless
+/// of letter case and either ends the glob as a literal, or its second segment holds `**`, or
+/// matches `marketing` and the glob goes on or is a literal there. A segment that does not compile
+/// cannot be read, so the glob is taken to reach: the check fails closed as
+/// `reaches_the_farik_directory` does.
+#[must_use]
+pub fn reaches_the_marketing_directory(glob: &str) -> bool {
+    expand_braces(&glob.replace('\\', "/")).iter().any(|glob| {
+        let mut segments = glob
+            .split('/')
+            .filter(|segment| !segment.is_empty() && *segment != ".");
+        let [docs, marketing] = MARKETING_DIRECTORY;
+        let Some(first) = segments.next() else {
+            return false;
+        };
+        if first.contains("**") || !compiles(first) {
+            return true;
+        }
+        if !names(first, docs) {
+            return false;
+        }
+        let Some(second) = segments.next() else {
+            return !is_a_wildcard(first);
+        };
+        if second.contains("**") || !compiles(second) {
+            return true;
+        }
+        names(second, marketing) && (segments.next().is_some() || !is_a_wildcard(second))
+    })
+}
+
+fn compiles(segment: &str) -> bool {
+    GlobBuilder::new(segment).build().is_ok()
+}
+
+/// Whether a segment that compiles names `directory`, ignoring letter case.
+fn names(segment: &str, directory: &str) -> bool {
+    GlobBuilder::new(segment)
+        .case_insensitive(true)
+        .build()
+        .is_ok_and(|compiled| compiled.compile_matcher().is_match(directory))
+}
+
+fn is_a_wildcard(segment: &str) -> bool {
+    segment.contains(['*', '?', '['])
+}
+
 /// A glob with each `{a,b}` group expanded into its alternatives, as the glob engine reads them
 /// (it nests none). An unclosed `{` is left as written.
 fn expand_braces(glob: &str) -> Vec<String> {
@@ -186,6 +238,7 @@ fn refuse<'a>(violations: impl Iterator<Item = &'a String>) -> Result<(), PathRe
 mod tests {
     use super::{
         GlobError, PathRefusal, PathViolation, check_allowed_paths, check_protected_paths,
+        reaches_the_marketing_directory,
     };
 
     fn strings(items: &[&str]) -> Vec<String> {
@@ -201,6 +254,39 @@ mod tests {
                 })
                 .collect(),
         )
+    }
+
+    #[test]
+    fn reaches_the_marketing_directory_as_the_rule_says() {
+        // Each names a path under `docs/marketing/` or could match one.
+        for glob in [
+            "docs/**",
+            "**/*.md",
+            "Docs/Marketing/x.md",
+            "docs/{marketing,adr}/**",
+            "./docs/marketing",
+            "docs",
+            "docs[/]marketing/x",
+            "**",
+            "d*/m*/x",
+            "docs/marketing/**",
+            "DOCS\\MARKETING\\x.md",
+        ] {
+            assert!(reaches_the_marketing_directory(glob), "{glob}");
+        }
+        for glob in [
+            "docs/adr/**",
+            "src/**",
+            "*.md",
+            "docs/*.md",
+            "*",
+            "docs/marketing*",
+            "docsx/marketing/x",
+            "docs/marketingx/**",
+            "",
+        ] {
+            assert!(!reaches_the_marketing_directory(glob), "{glob}");
+        }
     }
 
     #[test]
