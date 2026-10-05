@@ -24,6 +24,7 @@ const ROLES: Agent["role"][] = [
 	"architect",
 	"ui_ux_designer",
 	"marketing_specialist",
+	"finance_specialist",
 ];
 
 export type Model = { id: string; label: string };

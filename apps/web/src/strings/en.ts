@@ -208,6 +208,8 @@ export const en = {
 	jobMarketing: "Writes posts, pages and a plan for getting the word out.",
 	jobDesigner:
 		"Looks at your app the way a customer does, plans changes to its screens, and makes them once {pm} agrees. Checks every screen {developer} builds.",
+	jobFinance:
+		"Keeps the books and forecasts your spending, starting with the team's AI costs.",
 	teamName: "Name for the {role}",
 	teamAdd: "Add someone",
 	teamContinueSix: "Continue with these six",
@@ -218,6 +220,7 @@ export const en = {
 	roleDeveloper: "Developer",
 	roleMarketing: "Marketing Specialist",
 	roleDesigner: "UI/UX Designer",
+	roleFinance: "Finance Specialist",
 	mayTitle: "What may your team do on its own?",
 	mayLead:
 		"Two things can cause real harm, so Farik asks you about them directly. Nothing runs until you answer both.",

@@ -18,7 +18,7 @@ import {
 	renderApp,
 } from "../../test/render-app.tsx";
 import type { Template } from "../SavedTeams.tsx";
-import { draftOf, type Proposed } from "./TeamSetup.tsx";
+import { type Agent, draftOf, type Proposed, someone } from "./TeamSetup.tsx";
 
 const BUDGET = "Does the task fit its budget?";
 const NOTICE =
@@ -360,6 +360,95 @@ describe("team setup", () => {
 			"theo",
 			"kai",
 		]);
+	});
+
+	it("setup_does_not_suggest_finance", async () => {
+		const { socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(
+			s,
+			"team.propose",
+			proposed((team) => {
+				team.agents = [...FIVE.slice(0, 4), IRIS, ...FIVE.slice(4)];
+			}),
+		);
+		const list = await screen.findByRole("list", { name: en.teamMembers });
+		expect(within(list).getAllByRole("listitem")).toHaveLength(6);
+		expect(
+			screen.queryByRole("checkbox", {
+				name: "Include the Finance Specialist",
+			}),
+		).toBeNull();
+		fireEvent.click(
+			screen.getByRole("button", { name: "Continue with these six" }),
+		);
+		const validate = await asked(s, "team.validate");
+		const team = (validate.params.params as { team: { agents: never[] } }).team;
+		expect(team.agents.map((a: { role: string }) => a.role).sort()).toEqual(
+			[
+				"architect",
+				"marketing_specialist",
+				"product_manager",
+				"scrum_master",
+				"software_developer",
+				"ui_ux_designer",
+			].sort(),
+		);
+	});
+
+	it("someone_gives_finance_its_picture", () => {
+		const like = (role: Agent["role"]): Agent => ({
+			id: "",
+			displayName: "",
+			role,
+			status: "active",
+		});
+		const team = FIVE.map(
+			(a): Agent => ({
+				id: a.id,
+				displayName: a.display_name,
+				role: a.role as Agent["role"],
+				avatar: a.avatar,
+				status: "active",
+			}),
+		);
+		const finance = someone(team, like("finance_specialist"));
+		expect(finance.avatar).toBe("finance-specialist");
+		expect(finance.displayName).toBe("Noor");
+		// Another Finance Specialist still takes its own picture, and the next spare name.
+		const second = someone([...team, finance], like("finance_specialist"));
+		expect(second.avatar).toBe("finance-specialist");
+		expect(second.displayName).toBe("Ivo");
+		// Every other role keeps the extras, never Iris's or the Finance Specialist's.
+		const developer = someone([...team, finance], like("software_developer"));
+		expect(["extra-2", "extra-3", "extra-5"]).toContain(developer.avatar);
+	});
+
+	it("says_what_the_finance_specialist_does_in_its_row", async () => {
+		const { socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(
+			s,
+			"team.propose",
+			proposed((team) => {
+				team.agents = [
+					...FIVE,
+					agent("noor", "Noor", "finance_specialist", "finance-specialist"),
+				];
+			}),
+		);
+		const list = await screen.findByRole("list", { name: en.teamMembers });
+		const row = within(list)
+			.getByRole("checkbox", { name: "Include the Finance Specialist" })
+			.closest("li") as HTMLElement;
+		expect(
+			within(row).getByText(
+				"Keeps the books and forecasts your spending, starting with the team's AI costs.",
+			),
+		).toBeTruthy();
+		expect(row.querySelector("img")?.getAttribute("src")).toBe(
+			AVATAR_URLS["finance-specialist"],
+		);
 	});
 
 	it("asks_how_to_open_the_app_when_the_designer_is_on", async () => {

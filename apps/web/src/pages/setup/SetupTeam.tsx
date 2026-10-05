@@ -28,6 +28,7 @@ const JOBS = {
 	software_developer: "jobDeveloper",
 	marketing_specialist: "jobMarketing",
 	ui_ux_designer: "jobDesigner",
+	finance_specialist: "jobFinance",
 } as const;
 
 /** Setup's fifth step: where the team starts from, then its agents, named, and anyone added. */

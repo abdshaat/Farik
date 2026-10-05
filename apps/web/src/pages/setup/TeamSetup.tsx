@@ -139,10 +139,13 @@ export function someone(agents: Agent[], like: Agent): Agent {
 		...like,
 		id: slug(name),
 		displayName: name,
-		// Once all three are taken, they are shared again (the team holds seven at most).
+		// The Finance Specialist has its own picture. Once all three extras are taken, they are
+		// shared again (the team holds seven at most).
 		avatar:
-			EXTRAS.find((key) => !agents.some((a) => a.avatar === key)) ??
-			`extra-${[2, 3, 5][agents.length % 3]}`,
+			like.role === "finance_specialist"
+				? "finance-specialist"
+				: (EXTRAS.find((key) => !agents.some((a) => a.avatar === key)) ??
+					`extra-${[2, 3, 5][agents.length % 3]}`),
 	};
 }
 
@@ -316,6 +319,7 @@ export function roleName(role: Role): string {
 				software_developer: "roleDeveloper",
 				marketing_specialist: "roleMarketing",
 				ui_ux_designer: "roleDesigner",
+				finance_specialist: "roleFinance",
 			} as const
 		)[role],
 	);

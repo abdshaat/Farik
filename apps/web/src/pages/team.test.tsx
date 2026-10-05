@@ -301,6 +301,36 @@ describe("team page", () => {
 		});
 	});
 
+	it("the_team_page_adds_finance", async () => {
+		const { s } = await opened("/team");
+		const select = (await screen.findByLabelText(
+			en.teamAddRole,
+		)) as HTMLSelectElement;
+		// The Finance Specialist is offered after the Marketing Specialist, and is not suggested.
+		expect(
+			within(select)
+				.getAllByRole("option")
+				.map((option) => option.textContent),
+		).toEqual([
+			en.roleDeveloper,
+			en.roleProductManager,
+			en.roleScrumMaster,
+			en.roleArchitect,
+			en.roleDesigner,
+			en.roleMarketing,
+			"Finance Specialist",
+		]);
+		fireEvent.change(select, { target: { value: "finance_specialist" } });
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		const team = await saved(s);
+		expect(team.agents.at(-1)).toMatchObject({
+			display_name: "Noor",
+			role: "finance_specialist",
+			avatar: "finance-specialist",
+			status: "active",
+		});
+	});
+
 	it("adds_someone_to_the_team", async () => {
 		const { s } = await opened("/team");
 		fireEvent.change(await screen.findByLabelText(en.teamAddRole), {
