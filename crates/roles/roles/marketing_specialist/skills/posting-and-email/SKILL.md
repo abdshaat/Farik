@@ -50,8 +50,9 @@ contract says so. Make one change per request, whole, so the user can read what 
 
 ## 6. Keep each request small
 
-Each request's input must stay under 64 KiB, or Farik refuses it (`tool_input_too_large`). Write a
-long email or page in parts: create it with the first part, then add the rest with an update.
+Each request's input must stay under 64 KiB, or Farik refuses it (`tool_input_too_large`). Kit's
+updates replace the whole body, so keep each email or page under 64 KiB: a longer one becomes two
+shorter emails in a series, or a shorter page.
 
 ## 7. Never use a person's data
 
