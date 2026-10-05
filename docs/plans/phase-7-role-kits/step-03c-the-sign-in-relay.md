@@ -1,6 +1,6 @@
 # Phase 7, step 03c: The sign-in relay
 
-Status: deferred by the founder, 2026-10-02: Slack is a later step ("Connecting slack is a later step keep it simple for now"; "Write the slack integeration plan in the last phase"). Reviewed and folded; lands as phase 14 step 02, in its Slack integration (project plan revisions 30 to 32), where it is reviewed for readiness again, moved and renumbered. Where it says phase 11 or phase 12 for Slack's listing, read phase 14 step 04; the website (phase 11 step 01) is live by then.
+Status: deferred by the founder, 2026-10-02: Slack is a later step ("Connecting slack is a later step keep it simple for now"; "Write the slack integeration plan in the last phase"). Reviewed and folded; lands as phase 15 step 02, in its Slack integration (project plan revisions 30 to 32), where it is reviewed for readiness again, moved and renumbered. Where it says phase 11 or phase 13 for Slack's listing, read phase 15 step 04; the website (phase 11 step 01) is live by then.
 Branch: `phase/14-premium` when taken up (written on `phase/7-role-kits`)
 Spec: `docs/SPEC.md` 8.6, 9
 Depends on: none in code (the relay is a new package, `infra`); step 03d, which signs in through it, depends on this step
