@@ -119,7 +119,7 @@ The commit compiles across the workspace: `effect_wire` (`transitions.rs:1026-10
 
 ### Task 8: The prompt
 
-- `keeping_the_books_says_where_to_work`: the role's prompt holds the folder line and names `workbooks`. RED.
+- `keeping_the_books_says_where_to_work`: the role's prompt holds the folder line and names `workbooks`, and its "How a session ends" item that asks for `verifying` is replaced, not joined, by the one naming `workbooks` (step 09's landing review). RED.
 
 - [ ] `feat(roles): tell the Finance Specialist to work in its private folder`
 
