@@ -28,25 +28,28 @@ A request that asks for several pictures at once still counts as one request aga
 allowance, so asking for four hides the cost. Make a second request on purpose when you want a
 second picture.
 
-## 3. Check the price before a video
+## 3. Check the price once per brief
 
-Call `generate_video` once with `get_cost` set to true before any video, to see its price. That
-check counts as one video request. Say the price in your completion note. Do not make a video
-whose price you did not check.
+Before the first video of a brief, call `generate_video` once with `get_cost` set to true and the
+settings you will use, to see what one clip costs. That check counts as one video request, so make
+one check per brief, not one per clip. Say the price in your completion note.
 
 ## 4. Stay inside the allowance
 
-Each request inside the allowance runs. The first request beyond it waits for the user to say
-yes, and your session stops until they answer. Plan the number of pictures, clips and voice-overs
-you need so that the work fits. Reuse a result you already have instead of generating it again,
-and use `remove_background`, `upscale_image` or `outpaint_image` on a good picture instead of
-starting over when that is all it needs.
+Each request inside the allowance runs. The first request beyond it is not made: your session ends
+and the user is asked. If they say yes, your next session is told so and may make that same
+request once, with exactly the same input. Plan the number of pictures and clips you need so that
+the work fits. Reuse a result you already have instead of generating it again, and use
+`remove_background`, `upscale_image` or `outpaint_image` on a good picture instead of starting
+over when that is all it needs.
 
 ## 5. Some things always wait for the user
 
-A batch, a preset, an ad set, a 3D model, an edit priced by a video's length and anything that
-changes the account's library always waits for the user, whatever the allowance says. Use them
-only when the task cannot be done another way, and say why in your note.
+A voice-over always waits for the user, like a batch, a preset or an ad set. So does a 3D model,
+an edit priced by a video's length and anything that changes the account's library, whatever the
+allowance says. Making projects, folders, reference elements, voices or websites is never offered
+at all. Make a request that waits only when the task cannot be done another way, and say why in
+your note.
 
 ## 6. People, honesty and rights
 
