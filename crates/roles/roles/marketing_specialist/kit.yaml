@@ -1,4 +1,4 @@
-# The Marketing Specialist's kit: nine skills written for any business (ADR 0040) and the services it
+# The Marketing Specialist's kit: thirteen skills written for any business (ADR 0040) and the services it
 # signs in to (route 1, ADR 0035): two creative ones that spend the user's credits inside an allowance
 # (ADR 0037), then Buffer, whose posts each ask the human, and Kit, whose email broadcasts are only
 # drafts the human sends (ADR 0042). Tool lists are pinned against each service's live listing by
@@ -15,6 +15,10 @@ skills:
   - measuring-campaigns
   - making-images-and-video
   - posting-and-email
+  - keeping-the-brand-kit
+  - writing-the-brand-persona
+  - researching-the-market
+  - writing-the-marketing-plan
 connectors:
   - name: higgsfield
     transport: http

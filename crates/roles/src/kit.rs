@@ -224,6 +224,10 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "measuring-campaigns",
             "making-images-and-video",
             "posting-and-email",
+            "keeping-the-brand-kit",
+            "writing-the-brand-persona",
+            "researching-the-market",
+            "writing-the-marketing-plan",
         ),
         _ => Vec::new(),
     }
@@ -1096,8 +1100,10 @@ mod tests {
         }
     }
 
+    /// The kit's skills are the nine of steps 08 and 08b, then the four of step 08c: the brand kit,
+    /// the brand persona, the market and the marketing plan, each written for any business.
     #[test]
-    fn marketing_kit_carries_posting_and_email() {
+    fn marketing_kit_carries_the_brand_and_plan_skills() {
         let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
         let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
         assert_eq!(
@@ -1112,6 +1118,10 @@ mod tests {
                 "measuring-campaigns",
                 "making-images-and-video",
                 "posting-and-email",
+                "keeping-the-brand-kit",
+                "writing-the-brand-persona",
+                "researching-the-market",
+                "writing-the-marketing-plan",
             ]
         );
         for skill in &kit.skills {
@@ -1120,6 +1130,41 @@ mod tests {
                 "{}",
                 skill.name
             );
+        }
+        // The four new skills: when each applies, numbered sections, under 6 KB, and the skill it
+        // sits beside named where the design says it does.
+        for (name, description, beside) in [
+            (
+                "keeping-the-brand-kit",
+                "Use when the task touches the business's name, logo, colours, type, pictures or voice",
+                "docs/marketing/brand/brand-kit.md",
+            ),
+            (
+                "writing-the-brand-persona",
+                "Use when deciding how the brand speaks on social channels",
+                "writing-in-the-brands-voice",
+            ),
+            (
+                "researching-the-market",
+                "Use before writing a marketing plan, or when the task asks who the customers are, what they search for or what a channel costs",
+                "researching-competitors",
+            ),
+            (
+                "writing-the-marketing-plan",
+                "Use when the task asks for a marketing plan",
+                "researching-the-market",
+            ),
+        ] {
+            let skill = kit
+                .skills
+                .iter()
+                .find(|skill| skill.name == name)
+                .expect("a new skill");
+            assert!(skill.description.starts_with(description), "{name}");
+            let text = &skill.session_files["SKILL.md"];
+            assert!(text.len() < 6 * 1024, "{name} is {} bytes", text.len());
+            assert!(text.contains("\n## 1. "), "{name} has numbered sections");
+            assert!(text.contains(beside), "{name} does not name {beside}");
         }
     }
 
