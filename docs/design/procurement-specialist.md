@@ -1,6 +1,6 @@
 # The Procurement Specialist
 
-Status: proposed by the planner on 2026-10-05, on the founder's request of that day ("Add and plan a procurement agent and plan all its tools and connectors as well as skills"). ADR 0039 records the decision and is accepted when the founder answers O1 to O5 below. Spec 0.49 (section 6.10) carries the rules. It is the design input to phase 7 steps 10b, 10c and 10d, and to the eighth task of step 13.
+Status: proposed by the planner on 2026-10-05, on the founder's request of that day ("Add and plan a procurement agent and plan all its tools and connectors as well as skills"). ADR 0039 records the decision and is accepted when the founder answers O1 to O6 below. Spec 0.49 (section 6.10) carries the rules. It is the design input to phase 7 steps 10b, 10c, 10d and 10e, and to the eighth task of step 13.
 
 ## Why
 
@@ -11,6 +11,7 @@ The founder asked for an agent that does, with its tools, connectors and skills.
 - It is optional, like the Finance Specialist and the DevOps Engineer: offered, not suggested (O2).
 - Its work is private, in `.farik/local/procurement/`, because prices, quotes and contracts are confidential and the repository may be public (O3).
 - Renewals are watched by a tick with no model (O1).
+- Its first job is research: prices and providers. When a price or a provider can only be read through a source it has no connector for, it asks the Product Manager for a data pipeline; the Product Manager decides whether it is needed, or escalates it to the owner (the founder's words, 2026-10-05; O6).
 - Its kit reads only: prices, exchange rates, and what the company already spends (O4).
 
 ## The role
@@ -88,6 +89,9 @@ Today lists each open renewal: "<vendor> renews on <date>. Decide by <date>." wi
 | `farik_write_evaluation` | `read` | Procurement Specialist | Writes `evaluations/<name>.md`, `<name>` lower-case letters, digits and single hyphens, 1 to 64; UTF-8 text up to 64 KiB; keeps the previous version in `.history/` | 10b |
 | `farik_request_purchase` | `read` | Procurement Specialist | Records `purchase.requested` (above) | 10c |
 | `farik_read_purchases` | `read` | Procurement Specialist | Every request and its outcome | 10c |
+| `farik_request_data_pipeline` | `read` | Procurement Specialist | Records `data_pipeline.requested` (below) | 10e |
+| `farik_read_data_pipelines` | `read` | Procurement Specialist | Every pipeline request, its state, who decided and why | 10e |
+| `farik_decide_data_pipeline` | `read` | Product Manager, in its decision session alone | Approves, declines or escalates one request; `approve` refused `pipeline_needs_owner` for one that costs, needs an account or sends data | 10e |
 
 ## The kit (step 10d)
 
@@ -137,6 +141,56 @@ Rejected, each with its reason:
 - **Cloudflare**: two tools, `search` and `execute`, over 2,500 endpoints; `execute` cannot be tagged finer.
 - **Vantage**: it reads cloud spend the company already has, which is the DevOps Engineer's and the Finance Specialist's ground, not list prices before buying.
 
+## Data pipeline requests (step 10e)
+
+The founder's words of 2026-10-05: the agent "is supposed to research prices and different providers. He may request a data pipeline from the pm who can decide whether the data pipeline is necessary or whether this decision must be escalated to the owner."
+
+A data pipeline is any source of prices or provider data the agent does not have: a connector from the candidates below, a kit connector not yet connected, a public price list a small script could read, or a paid data feed. The agent cannot connect, build or pay for one; it asks.
+
+- **The ask.** `farik_request_data_pipeline { name, what, source_url, why, cost, needs_account, sends_project_data }`, Procurement Specialist only, in a session about a procurement task: `name` and `what` (what data, how often) in plain words; `source_url` the provider's `https` page; `why` 20 to 600 characters, the decision it would change; `cost` `free`, `paid` or `unknown`; `needs_account` and `sends_project_data` true or false. It records `data_pipeline.requested`. The task goes on: the agent works from public pages meanwhile and says in its evaluation what the pipeline would have added.
+- **The Product Manager decides.** With a request open, Farik starts the active Product Manager's `verify` session about the task, as it does for a Designer's plan (spec 6.8); its one Farik tool is `farik_decide_data_pipeline { decision, reason }`, `decision` `approve`, `decline` or `escalate`, `reason` 20 to 600 characters. Whether a pipeline is necessary is the Product Manager's judgement. Whether it may approve one is the governor's: `approve` is refused `pipeline_needs_owner` when `cost` is not `free`, when `needs_account` or `sends_project_data` is true, so a pipeline that spends money, needs an account, or sends the project's data out always reaches the owner. `decline` is always allowed. The session that ends without a decision is started again, counting toward the contract's sessions allowance.
+- **The owner decides an escalated one.** `data_pipeline.escalated` puts it on Today beside purchases ("<agent> asks for <name>: <what>. <Product Manager> asks you because it costs money"), with the request's fields and the Product Manager's reason, and two answers, "Approve" and "Decline", with an optional note (`data_pipeline_decide`, the human's alone, as `purchase_decide` is).
+- **What approval does.** `data_pipeline.approved { by: product_manager | human }` files an ordinary request (spec 5.16), "Set up <name> for the Procurement Specialist: <what>. Source: <source_url>.", which the team triages as any other: connecting a kit connector or a custom server is the human's (spec 6.7), building a script is a Developer's task. Approval never connects, signs in, pays or builds anything by itself.
+- **What the agent reads.** `farik_read_data_pipelines {}` gives each request, its state (`open`, `escalated`, `approved`, `declined`), who decided and why, the reasons quoted as untrusted text.
+- **Events:** `data_pipeline.requested`, `data_pipeline.escalated`, `data_pipeline.approved`, `data_pipeline.declined`.
+- **Skills:** the Procurement Specialist's kit gains `requesting-a-data-pipeline` (ask only when a source would change the recommendation; the fields filled honestly, since they decide who decides; carry on without it); the Product Manager's kit gains `deciding-data-pipelines` (approve only what changes a decision soon; prefer a free public source; escalate whatever costs, needs an account or sends data; a decline says what to use instead).
+
+## Potential connectors and skills
+
+What the kit could grow into, marked by where each stands. "Shipped" is step 10d. "Candidate" is a source the agent may ask for through a data pipeline request; each was probed or read on 2026-10-05, and each becomes a kit connector only through a later step plan with its pin and tags. "Rejected" is in "Connectors" above with its reason. The gate column is who may approve a request for it under step 10e's rule.
+
+| Source | What for | Server | Route | Tags | Gate | Stands |
+|---|---|---|---|---|---|---|
+| Frankfurter (`fx`) | one currency | Farik's own | none | all `network` | — | Shipped |
+| AWS Pricing | AWS list prices | official, `uvx awslabs.aws-pricing-mcp-server@1.1.1` | key, pricing reads only | 6 `network`, 3 `denied` | — | Shipped |
+| Brex | spend with a vendor | official, `https://api.brex.com/mcp` | 1 | 11 `network`, 32 `denied` | — | Shipped |
+| Exa | web search and page reading for pricing pages | official, `https://mcp.exa.ai/mcp` (answered without a key: `web_search_exa`, `web_fetch_exa`; a key raises its limit) | none, or key | both `network` | Product Manager (free, no account) | Candidate |
+| Tavily | web search | official, `https://mcp.tavily.com/mcp` (signs in; scopes `openid`, `offline_access`) | 1 if it registers clients | search `network` | owner (account) | Candidate |
+| Brave Search | web search | official, `npx @brave/brave-search-mcp-server@2.1.4` | key | search `network` | owner (account) | Candidate |
+| Firecrawl | reading pricing pages as clean text | official, `https://mcp.firecrawl.dev/mcp` (`firecrawl_scrape`, `firecrawl_search`, `firecrawl_parse`) | key | `external_effect` with an allowance, since each call spends credits | owner (paid) | Candidate |
+| Bright Data | pages behind bot checks | official, `https://mcp.brightdata.com/mcp` (signs in) | 1 if it registers clients | `external_effect` with an allowance | owner (paid) | Candidate |
+| Apify | a scraper per site | official, `https://mcp.apify.com` | key | `denied` but chosen tools: its actors run arbitrary code and spend credits | owner (paid) | Candidate, last resort |
+| Azure retail prices | Azure list prices | none; a thin server of Farik's over `https://prices.azure.com/api/retail/prices` (keyless, answered 2026-10-05) | none | `network` | Product Manager | Candidate, Farik's own |
+| AI model prices | the price per million tokens of each model and provider | none; a thin server of Farik's over OpenRouter's public model list (`https://openrouter.ai/api/v1/models`, keyless, answered 2026-10-05) | none | `network` | Product Manager | Candidate, Farik's own |
+| Google Cloud prices | Google Cloud list prices | Cloud Billing Catalog API, no official server | key | `network` | owner (account) | Candidate, unverified |
+| Domain availability | is a name free | a thin server of Farik's over RDAP (keyless) | none | `network` | Product Manager | Candidate, Farik's own |
+| Ramp | spend with a vendor | official, `https://mcp.ramp.com/mcp` | 1 | when its list is fixed | owner (account) | Waits (O4) |
+| DocuSign | contract terms and dates | official, `https://mcp.docusign.com/mcp` | none today | agreement reads `network`, all else `denied` | owner (account) | Waits for registration |
+| Drata, Vanta | a vendor-risk register the company already keeps | official, admin only | 1 | reads `network` | owner (account) | Candidate for teams that have one |
+| Crunchbase | how long a vendor has run, who backs it | API, no official server found | key, paid | `network` | owner (paid) | Candidate, unverified |
+| Gmail drafts | a quote request drafted for the human to send | official preview, drafts only | Google's route, after the launch | read and draft only, no send exists | owner (account, sends data) | After the launch |
+
+Potential skills, beyond the eight of step 10d and the one of step 10e, each a later plan's to write:
+
+| Skill | Use when | Holds |
+|---|---|---|
+| `estimating-usage-costs` | a price is per use (emails, requests, tokens, gigabytes) | the volume today and in 12 and 36 months from the Product Manager's numbers; tiers and overage; the month the cost jumps |
+| `choosing-ai-model-providers` | the product calls an AI model | price per million tokens in and out, context, rate limits, data use and retention, the cheapest model that passes the task's own test |
+| `build-buy-or-self-host` | an open-source option exists | hosting, upkeep hours at a stated rate, the risk of running it, against the paid plan's total |
+| `preparing-a-negotiation` | a renewal or a large plan | what the human can ask for (yearly discount, startup programme, seat true-up, price lock), the walk-away option, the date to ask by |
+| `comparing-cloud-providers` | AWS, Azure and Google could all host it | one workload priced on each, the same region and size, egress included |
+| `checking-a-vendors-viability` | the service will hold the product's data for years | age, funding, size, recent layoffs or acquisition in public news, the export path if it closes |
+
 ## Not planned
 
 - **Buying through Farik**, by any connector or card, with or without approval (O1).
@@ -170,6 +224,12 @@ Step 10d:
 - AWS's three local-file tools and every Brex write, people, card, bank and travel tool are `denied`.
 - Each connects by name; the live pin test lists AWS's and Brex's tools.
 
+Step 10e:
+- `farik_request_data_pipeline` refuses another role, a session about no procurement task, and each malformed field.
+- An open request starts the Product Manager's decision session, whose one tool is `farik_decide_data_pipeline`.
+- `approve` is refused for a paid, unknown-cost, account-needing or data-sending request; `escalate` puts it on Today; only the human decides an escalated one.
+- Approval files an ordinary request and changes no connector.
+
 Step 13: the eighth task, below.
 
 ## The kit check's eighth task
@@ -182,4 +242,5 @@ A Procurement Specialist sources a service for a real need in a test project: "w
 - **O2.** The avatar `extra-5`, the tag "PROC", and a role colour the brand adds; the persona "Finds the right tools at the right price".
 - **O3.** The private folder `.farik/local/procurement/`, under step 09's folder rules keyed by role, and the Finance Specialist reading the register. (The alternative: evaluations in the repository under `document_paths`.)
 - **O4.** The kit: Farik's own `fx`, AWS Pricing and Brex; Ramp waits for a fixed tool list.
-- **O5.** The place: steps 10b, 10c and 10d, after the Finance Specialist's kit and before the DevOps Engineer; step 13 gains an eighth task.
+- **O5.** The place: steps 10b, 10c, 10d and 10e, after the Finance Specialist's kit and before the DevOps Engineer; step 13 gains an eighth task.
+- **O6.** Data pipeline requests (step 10e): the Product Manager decides whether a pipeline is necessary; the governor makes it escalate to the owner whatever costs money, needs an account, or sends the project's data out; approval files an ordinary request and never connects, pays or builds by itself.
