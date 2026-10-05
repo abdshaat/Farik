@@ -13,6 +13,8 @@ pub mod criteria;
 pub mod generated;
 /// The governor: every rule of `docs/SPEC.md` section 5 as pure functions.
 pub mod governor;
+/// The marketing plan the owner approves: its checks and which approved plan is active.
+pub mod marketing;
 /// The price table and the cost of model usage.
 pub mod pricing;
 /// A skill's hash.
