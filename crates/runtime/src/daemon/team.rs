@@ -3969,6 +3969,58 @@ pub(super) mod tests {
         assert!(refused[0].message.starts_with("connector_not_in_kit: "));
     }
 
+    /// A guard: each of the Marketing Specialist's two services connects by name, carrying the kit's
+    /// allowances, and is no other role's.
+    #[test]
+    fn connects_each_marketing_service_by_name() {
+        use farik_core::contract::Role;
+        let team = crate::tools::fixtures::a_team_of_three(|wire| {
+            wire["agents"].as_array_mut().expect("agents").push(
+                farik_core::team::fixtures::an_agent_wire("kai", "marketing_specialist"),
+            );
+        });
+        let marketing = farik_roles::load_kit(Role::MarketingSpecialist)
+            .expect("the Marketing Specialist's kit");
+        for (name, allowed) in [
+            (
+                "higgsfield",
+                BTreeMap::from([
+                    ("generate_image".to_string(), 20),
+                    ("generate_video".to_string(), 6),
+                    ("generate_audio".to_string(), 10),
+                    ("upscale_image".to_string(), 10),
+                    ("remove_background".to_string(), 10),
+                    ("outpaint_image".to_string(), 10),
+                ]),
+            ),
+            (
+                "recraft",
+                BTreeMap::from([
+                    ("generate_image".to_string(), 20),
+                    ("image_to_image".to_string(), 10),
+                    ("vectorize_image".to_string(), 10),
+                    ("remove_background".to_string(), 10),
+                    ("replace_background".to_string(), 10),
+                    ("crisp_upscale".to_string(), 10),
+                ]),
+            ),
+        ] {
+            let (_, server) = super::kit_entry(&marketing, &team, "kai", name, &BTreeMap::new())
+                .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
+            assert!(super::matches_kit(&marketing, &server), "{name}");
+            assert_eq!(server.allowances, allowed, "{name}");
+        }
+        // Neither is the Developer's: not by its role, and not by its kit.
+        let refused = super::kit_entry(&marketing, &team, "dev-a", "higgsfield", &BTreeMap::new())
+            .expect_err("the Developer is not the Marketing Specialist");
+        assert!(refused[0].message.starts_with("connector_not_in_kit: "));
+        let developer =
+            farik_roles::load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
+        let refused = super::kit_entry(&developer, &team, "dev-a", "higgsfield", &BTreeMap::new())
+            .expect_err("the Developer's kit has no Higgsfield");
+        assert!(refused[0].message.starts_with("connector_not_in_kit: "));
+    }
+
     /// A guard: every `farik_*` tool a kit skill names is one Farik lists.
     #[test]
     fn kit_skills_name_only_tools_farik_lists() {

@@ -2088,6 +2088,133 @@ mod tests {
         );
     }
 
+    /// `session`, of `kai` on FRK-1, given `server` as the kit wrote it for the agent, and its
+    /// `session.started` recorded.
+    fn kai_session(daemon: &TestDaemon, session: &str, server: &farik_core::team::CustomServer) {
+        use farik_core::governor::permissions::{PermissionTier, SessionConnector};
+
+        use crate::daemon::SessionRegistration;
+        use crate::session::SessionPurpose;
+
+        daemon.state.register_session(SessionRegistration {
+            session_id: session.to_string(),
+            agent_id: "kai".to_string(),
+            task_id: Some("FRK-1".parse().expect("a task id")),
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            skills: Vec::new(),
+            skills_root: None,
+            cwd: daemon.worktree.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: vec![PermissionTier::Read],
+            connectors: vec![SessionConnector {
+                server: server.name.clone(),
+                origin: None,
+                tools: server.tools.clone(),
+                allowances: server.allowances.clone(),
+            }],
+            preview: None,
+        });
+        task_event(
+            daemon,
+            "FRK-1",
+            session,
+            "kai",
+            "session.started",
+            &json!({ "purpose": "implement", "model": "claude-sonnet-5-5", "effort": "medium" }),
+        );
+    }
+
+    /// A guard, not RED: the shipped entry is committed before this test. Proves, on the entry the
+    /// kit writes, that a tool the kit never offers is refused, that twenty images run unasked,
+    /// that the twenty-first and a batch ask. An ask stops the session, so the order is the plan's.
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn higgsfields_images_run_inside_their_allowance_then_ask() {
+        use std::collections::BTreeMap;
+
+        use farik_core::contract::Role;
+        use farik_core::team::fixtures::an_agent_wire;
+        use farik_protocol::event::ConnectorTagWire;
+
+        let daemon = TestDaemon::new("hook-higgsfield-allowance", |_| {});
+        let team = a_team_of_three(|wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(an_agent_wire("kai", "marketing_specialist"));
+        });
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&team)
+            .expect("the team is written");
+        let kit = farik_roles::load_kit(Role::MarketingSpecialist)
+            .expect("the Marketing Specialist's kit");
+        let (_, server) =
+            crate::daemon::team::kit_entry(&kit, &team, "kai", "higgsfield", &BTreeMap::new())
+                .expect("the kit's entry for kai");
+        kai_session(&daemon, "session-kai", &server);
+        let hook = |session: &str, tool: &str, input: &Value| {
+            decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
+        };
+
+        // A shell on Higgsfield's machine is never offered.
+        let refused = hook("session-kai", "mcp__higgsfield__sandbox_exec", &json!({}));
+        denied_for(&refused, "tool_denied");
+        let denied = daemon.events(EventKind::ToolDenied);
+        assert_eq!(denied.len(), 1);
+        let EventBody::ToolDenied(body) = &denied[0].body else {
+            panic!("a tool.denied body");
+        };
+        assert_eq!(
+            body.server.as_deref().map(String::as_str),
+            Some("higgsfield")
+        );
+        assert_eq!(body.tag, Some(ConnectorTagWire::Denied));
+        assert!(daemon.events(EventKind::ToolCalled).is_empty());
+        assert_eq!(daemon.state.stop_reason("session-kai"), None);
+
+        // Twenty images run inside the allowance, each with an input of its own.
+        for n in 1..=20 {
+            let allowed = hook(
+                "session-kai",
+                "mcp__higgsfield__generate_image",
+                &json!({ "prompt": format!("a banner, take {n}"), "count": 1 }),
+            );
+            assert!(allowed.allow, "{n}: {allowed:?}");
+            assert_eq!(ran_inside(&daemon), Some(20), "{n}");
+        }
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+
+        // The twenty-first asks, and the ask stops the session.
+        let asked = hook(
+            "session-kai",
+            "mcp__higgsfield__generate_image",
+            &json!({ "prompt": "a banner, take 21", "count": 1 }),
+        );
+        denied_for(&asked, "approval_needed");
+        assert_eq!(daemon.events(EventKind::ToolApprovalRequested).len(), 1);
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 20);
+        assert!(daemon.state.stop_reason("session-kai").is_some());
+
+        // A batch asks whatever the count: it has no allowance. A second session, since the first
+        // one stopped.
+        kai_session(&daemon, "session-kai-next", &server);
+        let batch = hook(
+            "session-kai-next",
+            "mcp__higgsfield__generate_image_batch",
+            &json!({ "prompts": ["a banner"] }),
+        );
+        denied_for(&batch, "approval_needed");
+        assert_eq!(daemon.events(EventKind::ToolApprovalRequested).len(), 2);
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 20);
+    }
+
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn runs_a_call_inside_its_allowance_without_asking() {
