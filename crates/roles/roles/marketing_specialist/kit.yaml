@@ -1,7 +1,7 @@
-# The Marketing Specialist's kit: eight skills written for any business (ADR 0040) and, from the
-# next tasks of step 08, two creative services it signs in to (route 1, ADR 0035). Tool lists are
-# pinned against each service's live listing by `live_kit_pins`; a tool a service lists that is not
-# here is never offered (`tool_not_tagged`) until a pin update tags it.
+# The Marketing Specialist's kit: eight skills written for any business (ADR 0040) and the creative
+# services it signs in to (route 1, ADR 0035), each spending the user's credits inside an allowance
+# (ADR 0037). Tool lists are pinned against each service's live listing by `live_kit_pins`; a tool a
+# service lists that is not here is never offered (`tool_not_tagged`) until a pin update tags it.
 role: marketing_specialist
 skills:
   - positioning-and-messaging
@@ -12,4 +12,171 @@ skills:
   - researching-competitors
   - measuring-campaigns
   - making-images-and-video
-connectors: []
+connectors:
+  - name: higgsfield
+    transport: http
+    url: https://mcp.higgsfield.ai/mcp
+    oauth: { scopes: [openid, email, offline_access] }
+    title: Higgsfield
+    about: "Higgsfield makes images, short videos and voice-overs from a description, with many AI models in one account."
+    why: "So the Marketing Specialist can make the pictures and clips a launch or a listing needs. Each one uses your Higgsfield credits, so Farik counts them and asks you before going past the number you allow."
+    setup: "Higgsfield needs a paid plan for this. Sign in with your Higgsfield account and allow Farik to use it. Every picture or clip your agent makes uses your Higgsfield credits; you choose how many it may make without asking. Farik counts each request, a price check included, and one request can hold up to four pictures."
+    labels:
+      generate_image: "make an image"
+      generate_video: "make a video or check its price"
+      generate_audio: "make a voice-over"
+      upscale_image: "sharpen an image"
+      remove_background: "remove a background"
+      outpaint_image: "extend an image"
+      generate_image_batch: "make several images"
+      generate_video_batch: "make several videos"
+      generate_audio_batch: "make several voice-overs"
+      generate_3d: "make a 3D model"
+      upscale_video: "sharpen a video"
+      reframe: "change a video's shape"
+      motion_control: "animate a picture from a clip"
+      dubbing: "dub a video"
+      voice_change: "change a video's voice"
+      ads_studio_generate: "make a set of ads"
+      ads_studio_create_brand: "research a brand for ads"
+      ads_studio_add_product: "add a product for ads"
+      ads_studio_update_product: "change a product for ads"
+      ads_studio_cancel_run: "stop an ad set"
+      ai_influencer_generate: "make a character sheet"
+      execute_preset: "run a preset"
+      media_import_url: "bring in a picture from the web"
+      resolve_explainer_preset: "pick an explainer style"
+      shorts_studio_create: "restyle a video into shorts"
+      shorts_studio_create_preset: "save a shorts style"
+      video_analysis_create: "analyse a video"
+      virality_predictor: "predict a video's reach"
+      models_explore: "find a model"
+      balance: "check credits"
+      transactions: "read credit use"
+      get_presets: "browse presets"
+      show_generations: "read past generations"
+      show_generation_by_ids: "read generations"
+      job_display: "read a generation"
+      jobs_wait: "wait for generations"
+    allowances:
+      generate_image: { calls: 20, what: "images" }
+      generate_video: { calls: 6, what: "video requests" }
+      generate_audio: { calls: 10, what: "voice clips" }
+      upscale_image: { calls: 10, what: "image upscales" }
+      remove_background: { calls: 10, what: "background removals" }
+      outpaint_image: { calls: 10, what: "image extensions" }
+    tools:
+      generate_image: external_effect
+      generate_video: external_effect
+      generate_audio: external_effect
+      upscale_image: external_effect
+      remove_background: external_effect
+      outpaint_image: external_effect
+      generate_image_batch: external_effect
+      generate_video_batch: external_effect
+      generate_audio_batch: external_effect
+      generate_3d: external_effect
+      upscale_video: external_effect
+      reframe: external_effect
+      motion_control: external_effect
+      dubbing: external_effect
+      voice_change: external_effect
+      ads_studio_generate: external_effect
+      ads_studio_create_brand: external_effect
+      ads_studio_add_product: external_effect
+      ads_studio_update_product: external_effect
+      ads_studio_cancel_run: external_effect
+      ai_influencer_generate: external_effect
+      execute_preset: external_effect
+      media_import_url: external_effect
+      resolve_explainer_preset: external_effect
+      shorts_studio_create: external_effect
+      shorts_studio_create_preset: external_effect
+      video_analysis_create: external_effect
+      virality_predictor: external_effect
+      models_explore: network
+      balance: network
+      transactions: network
+      get_presets: network
+      show_generations: network
+      show_generation_by_ids: network
+      job_display: network
+      jobs_wait: network
+      ads_studio_quote: network
+      ads_studio_list_brands: network
+      ads_studio_get_brand: network
+      ads_studio_get_product: network
+      ads_studio_get_run: network
+      ads_studio_list_products: network
+      ads_studio_list_runs: network
+      ai_influencer_prepare: network
+      ai_influencer_read: network
+      get_preset_instructions: network
+      get_workflow_instructions: network
+      get_workflow_bundle_file: network
+      list_voices: network
+      animation_actions: network
+      get_explainer_presets: network
+      show_medias: network
+      show_marketing_studio_generations: network
+      list_projects: network
+      list_folders: network
+      list_project_assets: network
+      list_workspaces: network
+      get_preferences: network
+      shorts_studio_list_presets: network
+      shorts_studio_list_sessions: network
+      shorts_studio_status: network
+      video_analysis_jobs: network
+      video_analysis_status: network
+      build_ai_influencer: denied
+      show_characters: denied
+      show_reference_elements: denied
+      manage_reference_elements: denied
+      show_plans_and_credits: denied
+      show_credit_reset: denied
+      show_marketing_studio_v2: denied
+      update_preferences: denied
+      select_workspace: denied
+      cancel_trial_auto_renewal: denied
+      create_project: denied
+      create_folder: denied
+      media_upload: denied
+      media_confirm: denied
+      media_upload_widget: denied
+      create_voice: denied
+      create_voice_from_confirmed_audio: denied
+      create_website: denied
+      deploy_website: denied
+      publish_website: denied
+      rename_website: denied
+      website_db: denied
+      website_repo_access: denied
+      website_secrets: denied
+      website_status: denied
+      list_websites: denied
+      list_website_categories: denied
+      sandbox_exec: denied
+      participate_in_contest: denied
+      tiktok_accounts: denied
+      tiktok_connect: denied
+      tiktok_reconnect: denied
+      tiktok_prepare_publish: denied
+      tiktok_music_trending: denied
+      tiktok_music_tune: denied
+      tiktok_publish_status: denied
+      apps_search: denied
+      apps_describe: denied
+      apps_invoke: denied
+      scene_builder_3d_create_project: denied
+      scene_builder_3d_get_artifact: denied
+      scene_builder_3d_get_blend: denied
+      scene_builder_3d_get_glb: denied
+      scene_builder_3d_get_operation: denied
+      scene_builder_3d_get_project: denied
+      scene_builder_3d_import_asset: denied
+      scene_builder_3d_list_projects: denied
+      scene_builder_3d_query_python: denied
+      scene_builder_3d_run_python: denied
+      scene_builder_3d_search_assets: denied
+      scene_builder_3d_show_scene: denied

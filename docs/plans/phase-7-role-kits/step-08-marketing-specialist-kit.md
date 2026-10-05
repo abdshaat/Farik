@@ -77,7 +77,7 @@ Files: `kit.yaml` `connectors` (first `higgsfield`); `kit.rs` tests (`loads_ever
 - `higgsfield_spends_only_what_it_is_allowed`: the entry is `http` at that URL with `oauth.scopes` exactly the three and no keys or headers; the six allowance tools are `external_effect` with exactly those `{ calls, what }` (`generate_video` `{ 6, "video requests" }`); the 22 are `external_effect` with no allowance; the 35 `network` names exactly; 51 `denied`, among them `sandbox_exec`, `deploy_website`, `apps_search`, `apps_invoke`, `tiktok_prepare_publish`, `create_voice_from_confirmed_audio`, `select_workspace` and `scene_builder_3d_run_python`; 114 in all. RED: no such connector.
 - `every_spending_tool_of_the_marketing_kit_has_a_label`: each `external_effect` tool of every marketing connector has a `labels` entry (a guard; vacuous before the connectors exist).
 
-- [ ] `feat(roles): give the Marketing Specialist Higgsfield`
+- [x] `feat(roles): give the Marketing Specialist Higgsfield`
 
 ### Task 3: Recraft
 

@@ -907,7 +907,7 @@ mod tests {
 
     use super::SetupCopy;
     use super::{
-        Kit, KitConnector, KitError, load_kit, parse_kit, pin_drift, quoted_labels,
+        Kit, KitAllowance, KitConnector, KitError, load_kit, parse_kit, pin_drift, quoted_labels,
         shipped_skill_names,
     };
     use crate::{builtin_connector, core_skill_names, load_role};
@@ -980,7 +980,7 @@ mod tests {
             assert_eq!(
                 kit.connectors.len(),
                 match role {
-                    Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
+                    Role::UiUxDesigner | Role::SoftwareDeveloper | Role::MarketingSpecialist => 1,
                     Role::ProductManager | Role::Architect => 3,
                     _ => 0,
                 },
@@ -1419,6 +1419,260 @@ mod tests {
             let server = custom_server(&entry).expect("a custom server");
             for (tool, tag) in &server.tools {
                 if *tag == ConnectorTag::Network {
+                    assert!(copy.labels.contains_key(tool), "{}: {tool}", server.name);
+                }
+            }
+        }
+    }
+
+    /// A Marketing Specialist's service: its server, its copy and its allowances, by name.
+    fn marketing_service(name: &str) -> (CustomServer, SetupCopy, BTreeMap<String, KitAllowance>) {
+        let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
+        for connector in kit.connectors {
+            if let KitConnector::Server {
+                entry,
+                copy,
+                allowances,
+            } = connector
+            {
+                let server = custom_server(&entry).expect("a custom server");
+                if server.name == name {
+                    return (server, copy, allowances);
+                }
+            }
+        }
+        panic!("the Marketing Specialist's kit has no {name}");
+    }
+
+    /// The tools of `server` with `tag`, sorted by name.
+    fn names_tagged(server: &CustomServer, tag: ConnectorTag) -> Vec<&str> {
+        server
+            .tools
+            .iter()
+            .filter(|(_, found)| **found == tag)
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+
+    fn sorted<'a>(names: &[&'a str]) -> Vec<&'a str> {
+        let mut names = names.to_vec();
+        names.sort_unstable();
+        names
+    }
+
+    /// Higgsfield's tools that spend credits and always ask: no allowance covers them.
+    const HIGGSFIELD_ASKS: [&str; 22] = [
+        "generate_image_batch",
+        "generate_video_batch",
+        "generate_audio_batch",
+        "generate_3d",
+        "upscale_video",
+        "reframe",
+        "motion_control",
+        "dubbing",
+        "voice_change",
+        "ads_studio_generate",
+        "ads_studio_create_brand",
+        "ads_studio_add_product",
+        "ads_studio_update_product",
+        "ads_studio_cancel_run",
+        "ai_influencer_generate",
+        "execute_preset",
+        "media_import_url",
+        "resolve_explainer_preset",
+        "shorts_studio_create",
+        "shorts_studio_create_preset",
+        "video_analysis_create",
+        "virality_predictor",
+    ];
+
+    /// Higgsfield's tools that only read.
+    const HIGGSFIELD_READS: [&str; 35] = [
+        "models_explore",
+        "balance",
+        "transactions",
+        "get_presets",
+        "show_generations",
+        "show_generation_by_ids",
+        "job_display",
+        "jobs_wait",
+        "ads_studio_quote",
+        "ads_studio_list_brands",
+        "ads_studio_get_brand",
+        "ads_studio_get_product",
+        "ads_studio_get_run",
+        "ads_studio_list_products",
+        "ads_studio_list_runs",
+        "ai_influencer_prepare",
+        "ai_influencer_read",
+        "get_preset_instructions",
+        "get_workflow_instructions",
+        "get_workflow_bundle_file",
+        "list_voices",
+        "animation_actions",
+        "get_explainer_presets",
+        "show_medias",
+        "show_marketing_studio_generations",
+        "list_projects",
+        "list_folders",
+        "list_project_assets",
+        "list_workspaces",
+        "get_preferences",
+        "shorts_studio_list_presets",
+        "shorts_studio_list_sessions",
+        "shorts_studio_status",
+        "video_analysis_jobs",
+        "video_analysis_status",
+    ];
+
+    /// Higgsfield's tools a Farik session is never offered.
+    const HIGGSFIELD_NEVER: [&str; 51] = [
+        "build_ai_influencer",
+        "show_characters",
+        "show_reference_elements",
+        "manage_reference_elements",
+        "show_plans_and_credits",
+        "show_credit_reset",
+        "show_marketing_studio_v2",
+        "update_preferences",
+        "select_workspace",
+        "cancel_trial_auto_renewal",
+        "create_project",
+        "create_folder",
+        "media_upload",
+        "media_confirm",
+        "media_upload_widget",
+        "create_voice",
+        "create_voice_from_confirmed_audio",
+        "create_website",
+        "deploy_website",
+        "publish_website",
+        "rename_website",
+        "website_db",
+        "website_repo_access",
+        "website_secrets",
+        "website_status",
+        "list_websites",
+        "list_website_categories",
+        "sandbox_exec",
+        "participate_in_contest",
+        "tiktok_accounts",
+        "tiktok_connect",
+        "tiktok_reconnect",
+        "tiktok_prepare_publish",
+        "tiktok_music_trending",
+        "tiktok_music_tune",
+        "tiktok_publish_status",
+        "apps_search",
+        "apps_describe",
+        "apps_invoke",
+        "scene_builder_3d_create_project",
+        "scene_builder_3d_get_artifact",
+        "scene_builder_3d_get_blend",
+        "scene_builder_3d_get_glb",
+        "scene_builder_3d_get_operation",
+        "scene_builder_3d_get_project",
+        "scene_builder_3d_import_asset",
+        "scene_builder_3d_list_projects",
+        "scene_builder_3d_query_python",
+        "scene_builder_3d_run_python",
+        "scene_builder_3d_search_assets",
+        "scene_builder_3d_show_scene",
+    ];
+
+    #[test]
+    fn higgsfield_spends_only_what_it_is_allowed() {
+        let (server, copy, allowances) = marketing_service("higgsfield");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("higgsfield is http");
+        };
+        assert_eq!(url, "https://mcp.higgsfield.ai/mcp");
+        assert_eq!(
+            oauth.as_ref().map(|settings| settings.scopes.as_slice()),
+            Some(
+                &[
+                    "openid".to_string(),
+                    "email".to_string(),
+                    "offline_access".to_string()
+                ][..]
+            )
+        );
+        assert!(headers.is_empty());
+        assert!(server.credential_keys.is_empty());
+        assert!(copy.key_page.is_none());
+        assert_eq!(copy.title, "Higgsfield");
+
+        let allowed = [
+            ("generate_image", 20, "images"),
+            ("generate_video", 6, "video requests"),
+            ("generate_audio", 10, "voice clips"),
+            ("upscale_image", 10, "image upscales"),
+            ("remove_background", 10, "background removals"),
+            ("outpaint_image", 10, "image extensions"),
+        ];
+        assert_eq!(allowances.len(), allowed.len());
+        for (tool, calls, what) in allowed {
+            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
+            assert_eq!(
+                allowances[tool],
+                KitAllowance {
+                    calls,
+                    what: what.to_string()
+                },
+                "{tool}"
+            );
+        }
+
+        for tool in HIGGSFIELD_ASKS {
+            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
+            assert!(!allowances.contains_key(tool), "{tool} has no allowance");
+        }
+        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 28);
+
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Network),
+            sorted(&HIGGSFIELD_READS)
+        );
+
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Denied),
+            sorted(&HIGGSFIELD_NEVER)
+        );
+        assert_eq!(server.tools.len(), 114);
+        for tool in [
+            "sandbox_exec",
+            "deploy_website",
+            "apps_search",
+            "apps_invoke",
+            "tiktok_prepare_publish",
+            "create_voice_from_confirmed_audio",
+            "select_workspace",
+            "scene_builder_3d_run_python",
+        ] {
+            assert_eq!(server.tools[tool], ConnectorTag::Denied, "{tool}");
+        }
+        assert_eq!(
+            copy.labels["generate_video"],
+            "make a video or check its price"
+        );
+    }
+
+    /// A guard: it passes with no marketing connector at all.
+    #[test]
+    fn every_spending_tool_of_the_marketing_kit_has_a_label() {
+        let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
+        for connector in kit.connectors {
+            let KitConnector::Server { entry, copy, .. } = connector else {
+                continue;
+            };
+            let server = custom_server(&entry).expect("a custom server");
+            for (tool, tag) in &server.tools {
+                if *tag == ConnectorTag::ExternalEffect {
                     assert!(copy.labels.contains_key(tool), "{}: {tool}", server.name);
                 }
             }
