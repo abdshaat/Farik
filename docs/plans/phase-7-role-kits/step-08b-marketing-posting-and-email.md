@@ -88,7 +88,7 @@ Files: the skill, `kit.yaml` `skills`, `embedded_skills`' arm, and the six rewor
 
 ### Task 5: Spec and plan
 
-`docs/SPEC.md` 6.5: the Cannot line reworded as above; 6.7's Marketing paragraph: the two services, route 1, posts asking until 08d, broadcasts as drafts with an allowance, what is `denied` and why; the revision line, the next after step 08's (0.52 if step 08's is 0.51). `docs/design/role-kits.md` (Marketing row, Signing-in rows, Steps row 08b). Project plan row 08b (Buffer and Kit; Semrush a later candidate, not 08b).
+`docs/SPEC.md` 6.5: the Cannot line reworded as above; 6.7's Marketing paragraph: the two services, route 1, posts asking until 08d, broadcasts as drafts with an allowance, what is `denied` and why; the revision line, the next one then (0.53, since 0.52 records ADR 0042). `docs/design/role-kits.md` (Marketing row, Signing-in rows, Steps row 08b). Project plan row 08b (Buffer and Kit; Semrush a later candidate, not 08b).
 
 - [ ] `docs(spec): record the Marketing Specialist's posting and email services`
 
