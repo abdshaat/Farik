@@ -2,6 +2,7 @@
 
 Date: 2026-10-05
 Status: accepted (the founder, 2026-10-05: "The marketing agent will own the brand kit, the marketing plan, the brand persona, and the social media presence. He will be able to conduct marketing research to determine the best marketing plan. He may be assigned a marketing budget to spend according to a pre determined plan that is approved by the owner. Please ensure that the marketing agent will be able to have social media write access for instagram, x, and google ads"; and the same day, four answers: posts in an approved plan go out without asking, shown ahead on Today with a Stop; Farik's own Google Ads connection, with Google's sign-in pulled forward; Instagram and X through Buffer; a hard stop at the budget). Amends spec 6.5 ("Cannot … publish anywhere") and 6.7 (a tool that posts always asks), ADR 0035 (Google deferred until after the launch), and ADR 0041 (what auto changes).
+Amended 2026-10-05 by the founder: Google's verification of the `adwords` scope waits for the web launch's website (phase 11), with its homepage and privacy policy; until then Google Ads is signed in to by named test users, who sign in again every 7 days.
 
 ## Context
 
