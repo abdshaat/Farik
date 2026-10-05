@@ -91,7 +91,7 @@ pub(crate) async fn ads_call(state: &Arc<DaemonState>, ticket: &str, tool: &str,
 
 ### Task 1: The plan mark
 
-One commit: every construction of `SessionConnector` (`session.rs:215`, `session.rs:294`, the hook's and tools' fixtures) and of `KitConnector::Server` (and each pattern naming its fields, as in 08c's Task 3) takes an empty set, and the hook's call (`hooks.rs:509`) passes `active_plan: false`, until Task 2.
+One commit: every construction of `SessionConnector` (`session.rs:215`, `session.rs:294`, the hook's and tools' fixtures) and of `KitConnector::Server` (and each pattern naming its fields, as in 08c's Task 10) takes an empty set, and the hook's call (`hooks.rs:509`) passes `active_plan: false`, until Task 2.
 
 - `a_plan_marked_call_runs_only_inside_a_plan` (`permissions.rs`): with `active_plan` true it passes with `plan_approved` and no approval or allowance; false is `NoActivePlan`, even with a grant; a call over 64 KiB is still `InputTooLarge` first; an unmarked `external_effect` call is unchanged. RED.
 - `the_mark_is_farik_s_own_and_external_only` (`kit.rs`): `plan_approved` on an `http` connector or on `npx x@1.0.0` is `plan_mark_not_farik`; naming a `network` tool `plan_mark_not_external`; a tool with an allowance `plan_mark_with_allowance`; a fixture kit's `farik connector osv` with one marked `external_effect` tool loads. RED.
