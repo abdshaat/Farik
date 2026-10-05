@@ -982,7 +982,8 @@ mod tests {
                 kit.connectors.len(),
                 match role {
                     Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
-                    Role::ProductManager | Role::Architect | Role::MarketingSpecialist => 3,
+                    Role::ProductManager | Role::Architect => 3,
+                    Role::MarketingSpecialist => 4,
                     _ => 0,
                 },
                 "{role}"
@@ -1797,11 +1798,181 @@ mod tests {
         assert_eq!(server.tools.len(), 20);
     }
 
+    /// Kit's drafts, series and pages that change what a subscriber or the public sees, and its
+    /// two reads that Kit marks as writes: each asks, and none has an allowance.
+    const KIT_ASKS: [&str; 10] = [
+        "create_sequence",
+        "update_sequence",
+        "create_sequence_email",
+        "update_sequence_email",
+        "create_landing_page",
+        "update_landing_page",
+        "create_snippet",
+        "update_snippet",
+        "list_forms",
+        "get_landing_page",
+    ];
+
+    /// Kit's tools that only read the campaigns, never a person.
+    const KIT_READS: [&str; 31] = [
+        "get_broadcast",
+        "get_broadcast_schema",
+        "get_creator_profile",
+        "get_current_account",
+        "get_email_stats",
+        "get_email_template",
+        "get_growth_stats",
+        "get_landing_page_schema",
+        "get_link_clicks_for_a_broadcast",
+        "get_post",
+        "get_sequence",
+        "get_sequence_email",
+        "get_sequence_email_schema",
+        "get_snippet",
+        "get_stats_for_a_broadcast",
+        "get_stats_for_a_list_of_broadcasts",
+        "list_broadcasts",
+        "list_colors",
+        "list_custom_fields",
+        "list_domains",
+        "list_email_templates",
+        "list_landing_pages",
+        "list_posts",
+        "list_prompt_suggestions",
+        "list_segments",
+        "list_sequence_emails",
+        "list_sequences",
+        "list_snippets",
+        "list_tags",
+        "list_products",
+        "get_product",
+    ];
+
+    /// Kit's tools a Farik session is never offered: every deletion, every write to subscribers,
+    /// tags, fields, products, colours and webhooks, every bulk tool, and every read of a person.
+    const KIT_NEVER: [&str; 40] = [
+        "add_subscriber_to_form",
+        "add_subscriber_to_sequence",
+        "bulk_add_subscribers_to_forms",
+        "bulk_create_custom_fields",
+        "bulk_create_subscribers",
+        "bulk_create_tags",
+        "bulk_delete_tags",
+        "bulk_remove_tags_from_subscribers",
+        "bulk_tag_subscribers",
+        "bulk_update_subscriber_custom_field_values",
+        "create_custom_field",
+        "create_product",
+        "create_subscriber",
+        "create_tag",
+        "create_webhook",
+        "delete_broadcast",
+        "delete_custom_field",
+        "delete_sequence",
+        "delete_sequence_email",
+        "delete_webhook",
+        "filter_subscribers",
+        "get_purchase",
+        "get_subscriber",
+        "list_purchases",
+        "list_stats_for_a_subscriber",
+        "list_subscribers",
+        "list_subscribers_for_form",
+        "list_subscribers_for_sequence",
+        "list_subscribers_for_tag",
+        "list_tags_for_a_subscriber",
+        "list_tax_codes",
+        "list_webhooks",
+        "remove_tag_from_subscriber",
+        "tag_subscriber",
+        "unsubscribe",
+        "update_colors",
+        "update_custom_field",
+        "update_product",
+        "update_subscriber",
+        "update_tag_name",
+    ];
+
+    #[test]
+    fn kit_drafts_emails_and_never_reads_subscribers() {
+        let (server, copy, allowances) = marketing_service("kit");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("kit is http");
+        };
+        assert_eq!(url, "https://app.kit.com/mcp");
+        assert_eq!(
+            oauth.as_ref().map(|settings| settings.scopes.as_slice()),
+            Some(&["public".to_string()][..])
+        );
+        assert!(headers.is_empty());
+        assert!(server.credential_keys.is_empty());
+        assert!(copy.key_page.is_none());
+        assert_eq!(copy.title, "Kit");
+
+        // A broadcast is only a draft: the human schedules and sends it from Kit.
+        assert_eq!(allowances.len(), 2);
+        for tool in ["create_broadcast", "update_broadcast"] {
+            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
+            assert_eq!(
+                allowances[tool],
+                KitAllowance {
+                    calls: 10,
+                    what: "email drafts".to_string()
+                },
+                "{tool}"
+            );
+        }
+        for tool in KIT_ASKS {
+            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
+            assert!(!allowances.contains_key(tool), "{tool} has no allowance");
+        }
+        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 12);
+        assert_eq!(copy.labels["list_forms"], "list forms and sign-up pages");
+        assert_eq!(copy.labels["get_landing_page"], "read a landing page");
+
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Network),
+            sorted(&KIT_READS)
+        );
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Denied),
+            sorted(&KIT_NEVER)
+        );
+        for tool in [
+            "list_subscribers",
+            "get_subscriber",
+            "unsubscribe",
+            "delete_broadcast",
+        ] {
+            assert_eq!(server.tools[tool], ConnectorTag::Denied, "{tool}");
+        }
+        assert_eq!(server.tools.len(), 83);
+    }
+
+    /// A guard (spec 6.7): a post changes what the public sees, so no tool of Buffer carries an
+    /// allowance, whatever the kit's own map says.
+    #[test]
+    fn buffers_posts_have_no_allowance() {
+        let (server, _, allowances) = marketing_service("buffer");
+        for tool in server.tools.keys() {
+            assert!(
+                !allowances.contains_key(tool),
+                "{tool} has an allowance in the kit's own map"
+            );
+        }
+        assert!(allowances.is_empty(), "{allowances:?}");
+    }
+
     #[test]
     fn the_marketing_kits_services_in_order() {
         let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
         let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
-        assert_eq!(names, ["higgsfield", "recraft", "buffer"]);
+        assert_eq!(names, ["higgsfield", "recraft", "buffer", "kit"]);
         for connector in &kit.connectors {
             let KitConnector::Server { entry, .. } = connector else {
                 panic!("{} is a server", connector.name());

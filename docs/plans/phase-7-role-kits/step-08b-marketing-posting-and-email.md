@@ -78,7 +78,7 @@ Files: the skill, `kit.yaml` `skills`, `embedded_skills`' arm, and the six rewor
 - `kit_drafts_emails_and_never_reads_subscribers`: `http` at that URL, `oauth.scopes` `["public"]`; the two broadcast tools with exactly `{ 10, "email drafts" }` and the other 10 `external_effect` with none, read from `marketing_service("kit")`'s allowances map; the 31 `network` exactly; every name in `denied` above, among them `list_subscribers`, `get_subscriber`, `unsubscribe` and `delete_broadcast`; 83 in all. RED.
 - `buffers_posts_have_no_allowance`: no tool of `buffer` has an allowance, read from the kit's own map (spec 6.7). Guard.
 
-- [ ] `feat(roles): give the Marketing Specialist Kit`
+- [x] `feat(roles): give the Marketing Specialist Kit`
 
 ### Task 4: Connected by name
 
@@ -105,4 +105,5 @@ The live run reads `FARIK_KIT_BUFFER_BEARER` (a Buffer API key from Settings →
 
 ## Execution notes
 
-None yet.
+- Task 1: `the_marketing_specialist_publishes_only_when_allowed` also asserts that every `forbidden` line which mentions "publish" says "allowing that call", that the system prompt says "after the human allows that call" (the `system.md` rewording), and that no Marketing skill, the role's `marketing-what-ships` and the kit's nine, contains "never publish", "do not publish" or "don't publish" in any case. Both RED tests failed for the reasons the plan names: the forbidden list was `["write application code", "publish anywhere"]`, and the kit's eight skills lacked the ninth. The kit file's header comment now says nine skills and, after Task 3, names Buffer and Kit.
+- Task 3: the guard `buffers_posts_have_no_allowance` was proved by a temporary mutation, an `allowances: create_post: { calls: 5, what: "posts" }` block on Buffer in `kit.yaml`: run alone, it failed with "create_post has an allowance in the kit's own map"; reverted. The RED test `kit_drafts_emails_and_never_reads_subscribers` also failed under three further mutations, each reverted: `list_subscribers` tagged `network` (the `network` list differed), `create_broadcast`'s allowance at 11 (`left: 11, right: 10`) and `update_sequence` tagged `network` (`left: Network, right: ExternalEffect`). The four tool lists in the tests were checked against this plan's lists by a script (Buffer 10 and 8, Kit 10, 31 and 40; the Kit counts, 2 + 10 + 31 + 40, are the 83 the plan states).

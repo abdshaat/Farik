@@ -1,7 +1,9 @@
-# The Marketing Specialist's kit: nine skills written for any business (ADR 0040) and the creative
-# services it signs in to (route 1, ADR 0035), each spending the user's credits inside an allowance
-# (ADR 0037). Tool lists are pinned against each service's live listing by `live_kit_pins`; a tool a
-# service lists that is not here is never offered (`tool_not_tagged`) until a pin update tags it.
+# The Marketing Specialist's kit: nine skills written for any business (ADR 0040) and the services it
+# signs in to (route 1, ADR 0035): two creative ones that spend the user's credits inside an allowance
+# (ADR 0037), then Buffer, whose posts each ask the human, and Kit, whose email broadcasts are only
+# drafts the human sends (ADR 0042). Tool lists are pinned against each service's live listing by
+# `live_kit_pins`; a tool a service lists that is not here is never offered (`tool_not_tagged`)
+# until a pin update tags it.
 role: marketing_specialist
 skills:
   - positioning-and-messaging
@@ -253,3 +255,116 @@ connectors:
       introspect_schema: denied
       execute_query: denied
       execute_mutation: denied
+  - name: kit
+    transport: http
+    url: https://app.kit.com/mcp
+    oauth: { scopes: [public] }
+    title: Kit
+    about: "Kit sends your email newsletters and sequences, and hosts landing pages that collect sign-ups."
+    why: "So the Marketing Specialist can draft campaigns and landing pages, and read how earlier emails did. You send every email yourself from Kit."
+    setup: "Kit needs a paid plan for this. Sign in with your Kit account and allow Farik to use it. Farik drafts emails for you to send from Kit, asks you before changing a page or an email series, and never reads your subscribers' own details."
+    labels:
+      create_broadcast: "draft an email"
+      update_broadcast: "change a draft email"
+      create_sequence: "start an email series"
+      update_sequence: "change an email series"
+      create_sequence_email: "add an email to a series"
+      update_sequence_email: "change an email in a series"
+      create_landing_page: "make a landing page"
+      update_landing_page: "change a landing page"
+      create_snippet: "save a reusable block"
+      update_snippet: "change a reusable block"
+      list_forms: "list forms and sign-up pages"
+      get_landing_page: "read a landing page"
+      get_email_stats: "read email results"
+      get_growth_stats: "read growth"
+      get_link_clicks_for_a_broadcast: "read link clicks"
+      get_stats_for_a_broadcast: "read an email's results"
+      list_broadcasts: "list emails"
+    allowances:
+      create_broadcast: { calls: 10, what: "email drafts" }
+      update_broadcast: { calls: 10, what: "email drafts" }
+    tools:
+      create_broadcast: external_effect
+      update_broadcast: external_effect
+      create_sequence: external_effect
+      update_sequence: external_effect
+      create_sequence_email: external_effect
+      update_sequence_email: external_effect
+      create_landing_page: external_effect
+      update_landing_page: external_effect
+      create_snippet: external_effect
+      update_snippet: external_effect
+      list_forms: external_effect
+      get_landing_page: external_effect
+      get_broadcast: network
+      get_broadcast_schema: network
+      get_creator_profile: network
+      get_current_account: network
+      get_email_stats: network
+      get_email_template: network
+      get_growth_stats: network
+      get_landing_page_schema: network
+      get_link_clicks_for_a_broadcast: network
+      get_post: network
+      get_sequence: network
+      get_sequence_email: network
+      get_sequence_email_schema: network
+      get_snippet: network
+      get_stats_for_a_broadcast: network
+      get_stats_for_a_list_of_broadcasts: network
+      list_broadcasts: network
+      list_colors: network
+      list_custom_fields: network
+      list_domains: network
+      list_email_templates: network
+      list_landing_pages: network
+      list_posts: network
+      list_prompt_suggestions: network
+      list_segments: network
+      list_sequence_emails: network
+      list_sequences: network
+      list_snippets: network
+      list_tags: network
+      list_products: network
+      get_product: network
+      add_subscriber_to_form: denied
+      add_subscriber_to_sequence: denied
+      bulk_add_subscribers_to_forms: denied
+      bulk_create_custom_fields: denied
+      bulk_create_subscribers: denied
+      bulk_create_tags: denied
+      bulk_delete_tags: denied
+      bulk_remove_tags_from_subscribers: denied
+      bulk_tag_subscribers: denied
+      bulk_update_subscriber_custom_field_values: denied
+      create_custom_field: denied
+      create_product: denied
+      create_subscriber: denied
+      create_tag: denied
+      create_webhook: denied
+      delete_broadcast: denied
+      delete_custom_field: denied
+      delete_sequence: denied
+      delete_sequence_email: denied
+      delete_webhook: denied
+      filter_subscribers: denied
+      get_purchase: denied
+      get_subscriber: denied
+      list_purchases: denied
+      list_stats_for_a_subscriber: denied
+      list_subscribers: denied
+      list_subscribers_for_form: denied
+      list_subscribers_for_sequence: denied
+      list_subscribers_for_tag: denied
+      list_tags_for_a_subscriber: denied
+      list_tax_codes: denied
+      list_webhooks: denied
+      remove_tag_from_subscriber: denied
+      tag_subscriber: denied
+      unsubscribe: denied
+      update_colors: denied
+      update_custom_field: denied
+      update_product: denied
+      update_subscriber: denied
+      update_tag_name: denied
