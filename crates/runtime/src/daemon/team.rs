@@ -3969,8 +3969,8 @@ pub(super) mod tests {
         assert!(refused[0].message.starts_with("connector_not_in_kit: "));
     }
 
-    /// A guard: each of the Marketing Specialist's two services connects by name, carrying the kit's
-    /// allowances, and is no other role's.
+    /// A guard: each of the Marketing Specialist's four services connects by name, carrying the
+    /// kit's allowances (Buffer none, Kit its two broadcast tools), and is no other role's.
     #[test]
     fn connects_each_marketing_service_by_name() {
         use farik_core::contract::Role;
@@ -4001,6 +4001,15 @@ pub(super) mod tests {
                     ("remove_background".to_string(), 10),
                     ("replace_background".to_string(), 10),
                     ("crisp_upscale".to_string(), 10),
+                ]),
+            ),
+            // Every post asks: `kit_entry` adds no `allowances` when the map is empty.
+            ("buffer", BTreeMap::new()),
+            (
+                "kit",
+                BTreeMap::from([
+                    ("create_broadcast".to_string(), 10),
+                    ("update_broadcast".to_string(), 10),
                 ]),
             ),
         ] {

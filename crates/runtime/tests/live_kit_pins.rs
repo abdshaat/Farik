@@ -9,7 +9,8 @@
 //! The Product Manager's three signed-in services are the shipped ones since step 06; the
 //! Architect's Context7 (signed in: `FARIK_KIT_CONTEXT7_BEARER`) and Grep (no key) join them, and
 //! the Marketing Specialist's Higgsfield (`FARIK_KIT_HIGGSFIELD_BEARER`) and Recraft
-//! (`FARIK_KIT_RECRAFT_BEARER`) since step 08. Recraft's nine names are those of its own package,
+//! (`FARIK_KIT_RECRAFT_BEARER`) since step 08, and its Buffer (`FARIK_KIT_BUFFER_BEARER`) and Kit
+//! (`FARIK_KIT_KIT_BEARER`) since step 08b. Recraft's nine names are those of its own package,
 //! whose remote server publishes none, so this run is where they are first checked. A
 //! connector Farik runs itself (`command: farik`, the Architect's OSV) is skipped, with a line
 //! saying so: its pin is the offline test `osv_server_lists_the_kits_tools`, since its tools are
