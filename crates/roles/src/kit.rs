@@ -213,6 +213,16 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "answering-a-review",
             "using-docs-and-the-browser",
         ),
+        Role::MarketingSpecialist => embedded!("marketing_specialist":
+            "positioning-and-messaging",
+            "planning-a-launch",
+            "writing-for-search",
+            "writing-in-the-brands-voice",
+            "keeping-a-content-calendar",
+            "researching-competitors",
+            "measuring-campaigns",
+            "making-images-and-video",
+        ),
         _ => Vec::new(),
     }
 }
@@ -1063,6 +1073,32 @@ mod tests {
                 "security-review",
                 "setting-performance-budgets",
                 "using-architecture-sources",
+            ]
+        );
+        for skill in &kit.skills {
+            assert!(
+                skill.session_files.contains_key("SKILL.md"),
+                "{}",
+                skill.name
+            );
+        }
+    }
+
+    #[test]
+    fn marketing_kit_carries_its_skills() {
+        let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
+        let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "positioning-and-messaging",
+                "planning-a-launch",
+                "writing-for-search",
+                "writing-in-the-brands-voice",
+                "keeping-a-content-calendar",
+                "researching-competitors",
+                "measuring-campaigns",
+                "making-images-and-video",
             ]
         );
         for skill in &kit.skills {

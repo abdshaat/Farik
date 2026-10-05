@@ -1,3 +1,15 @@
+# The Marketing Specialist's kit: eight skills written for any business (ADR 0040) and, from the
+# next tasks of step 08, two creative services it signs in to (route 1, ADR 0035). Tool lists are
+# pinned against each service's live listing by `live_kit_pins`; a tool a service lists that is not
+# here is never offered (`tool_not_tagged`) until a pin update tags it.
 role: marketing_specialist
-skills: []
+skills:
+  - positioning-and-messaging
+  - planning-a-launch
+  - writing-for-search
+  - writing-in-the-brands-voice
+  - keeping-a-content-calendar
+  - researching-competitors
+  - measuring-campaigns
+  - making-images-and-video
 connectors: []

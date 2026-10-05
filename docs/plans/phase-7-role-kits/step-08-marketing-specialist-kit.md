@@ -62,7 +62,7 @@ Files: `marketing_specialist/skills/{positioning-and-messaging,planning-a-launch
 
 - `marketing_kit_carries_its_skills`: `load_kit(MarketingSpecialist)`'s skills are those eight in that order, each with its `SKILL.md`. RED: the kit has none.
 
-- [ ] `feat(roles): give the Marketing Specialist's kit its skills`
+- [x] `feat(roles): give the Marketing Specialist's kit its skills`
 
 ### Task 2: Higgsfield
 
