@@ -4,7 +4,7 @@ Status: draft. Its readiness review runs once step 10c has landed and the founde
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.7, 6.10; F9
 Depends on: steps 10b and 10c of this phase (the role, its folder, `farik_write_evaluation`, `farik_request_purchase`, `farik_read_purchases`); step 07 (Farik's own connectors, `FARIK_CONNECTORS`, `farik_runtime::osv` as the pattern; committed at 383a626); steps 05 and 05b (the kit format, connect by name, the live pin test); phase 6 (merged in #19)
-Readiness confirmed by: not yet run
+Readiness confirmed by: not yet. A fresh-session Opus reviewer read the four plans on 2026-10-05 before their dependencies landed: 3 Blocking (step 10d: `fx` had no copy, `uv` and its first run were undecided; step 10c: `renewal.due` broke the event-naming rule), all folded with the Should items the same day. The readiness review proper runs when the step's dependencies have landed, as its Status says (ADR 0032: one round).
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -17,14 +17,16 @@ The Procurement Specialist ships a real kit: eight skills, loaded on demand, and
 - **No mockups.** Step 05's screens (the kit list on `AgentEdit`, `ConnectorAdd` from a kit with a key form and a sign-in form, `KitConnect`) show all three kinds of service this step adds.
 - **How each server was chosen**, by ADR 0020's order and ADR 0035's routes, researched 2026-10-05 (metadata read that day from each server's `/.well-known/oauth-protected-resource` and its authorization server's `/.well-known/oauth-authorization-server`):
   - **Exchange rates: `fx`, Farik's own, `stdio`, `command: farik`, `args: [connector, fx]`.** Frankfurter publishes central-bank reference rates with no key and no quota (frankfurter.dev); `GET https://api.frankfurter.dev/v2/rates?base=USD&quotes=EUR,GBP` answered 200 that day with `[{date, base, quote, rate}, …]`, and `/v2/currencies` with `[{iso_code, iso_numeric, name, symbol, start_date, end_date}, …]`. No official server exists; `frankfurtermcp` (PyPI 0.5.0, 2026-09-15) is one maintainer's and floats its dependencies. ADR 0038 already lets a kit start Farik's own server by `farik connector <name>`; `FARIK_CONNECTORS` becomes `["osv", "fx"]`, so `is_farik_connector` accepts exactly `[connector, fx]` too.
-  - **Cloud list prices: AWS Pricing, official, `stdio`, `command: uvx`, `args: ["awslabs.aws-pricing-mcp-server@1.1.1"]`, two pasted keys.** AWS Labs' server (PyPI 1.1.1, 2026-09-08; github.com/awslabs/mcp, `src/aws-pricing-mcp-server`) reads the free AWS Price List API. `credential_keys: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]`, `key_page: https://console.aws.amazon.com/iam/home#/users`. Its region defaults to `us-east-1`, the Price List API's own, so no region is set. Its own dependencies are on ranges, which an exact pin of the top package does not hold; accepted as step 07 accepted it for Context7's alternatives, and recorded here. Rejected: Vantage (`https://mcp.vantage.sh/mcp`), which reads spend already made, not list prices; Infracost, community only.
+  - **Cloud list prices: AWS Pricing, official, `stdio`, `command: uvx`, `args: ["awslabs.aws-pricing-mcp-server==1.1.1"]`, two pasted keys.** AWS Labs' server (PyPI 1.1.1, 2026-09-08; github.com/awslabs/mcp, `src/aws-pricing-mcp-server`) reads the free AWS Price List API. `credential_keys: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]`, `key_page: https://console.aws.amazon.com/iam/home#/users`. Its region defaults to `us-east-1`, the Price List API's own, so no region is set. Its own dependencies are on ranges, which an exact pin of the top package does not hold; accepted as step 07 accepted it for Context7's alternatives, and recorded here. Rejected: Vantage (`https://mcp.vantage.sh/mcp`), which reads spend already made, not list prices; Infracost, community only.
   - **What the company already spends: Brex, official, `http`, `https://api.brex.com/mcp`, signed in (route 1).** Its resource (`https://api.brex.com`) names `https://api.brex.com` first as its authorization server, whose metadata has `registration_endpoint` `https://api.brex.com/v3/clients`, S256, `token_endpoint_auth_methods_supported` with `none`, and a revocation endpoint; `rmcp` uses the first. `oauth: { scopes: [offline_access, vendors.readonly, expenses.card.readonly, departments.readonly] }`, all four in its `scopes_supported`, so a write is not granted. The tool names are from developer.brex.com/docs/mcp, read 2026-10-05. Rejected: Ramp's hosted server, whose tool list is generated at run time and includes card checkout (O4).
 - **What each tag is.** Nothing here is `external_effect` and nothing has an allowance; nothing spends credits. `fx`'s three tools are `network`. AWS: the five price reads and `get_bedrock_patterns` are `network`; `analyze_cdk_project` and `analyze_terraform_project` are `denied` because they read any path the agent names on the user's computer, where a host server runs (spec 6.7), and `generate_cost_report` is `denied` because it writes a file there. Brex: 11 `network` (vendors, bills, merchants and categories, expense analytics, expenses, departments); 32 `denied`: every write, the people tools, the card, limit, bank and reward tools, travel, accounting and set-up, and the three Brex marks as writes though they look like reads. The people tools are `denied` although the Product Manager's kit keeps member lists `network` (step 06, P3): a buying decision needs a vendor, not a colleague's name, and Brex's user records carry card holders and limits. `list_expenses` and `get_expense_by_id` stay `network`: they hold a colleague's name on a card charge, which a recurring-charge search needs; `using-procurement-sources` says to report vendors and amounts, never people.
 - **The `fx` server** is `farik_runtime::fx`, a hand-written `rmcp` `ServerHandler` over stdio, as `farik_runtime::osv` is (same features, no new crate), `serverInfo.name` `"farik-fx"`. Its address is the constant `FX_API = "https://api.frankfurter.dev/v2"`, never an argument, environment value or tool input; tests pass a fixture's address to the function, not the command. One `reqwest::Client` with `redirect::Policy::none()`, `no_proxy()`, no cookies, a 15-second timeout, reading at most 1 MiB in chunks; a larger answer is a tool error, "Frankfurter's answer is too large", sent nowhere. Inputs are checked before any request: a currency code `^[A-Z]{3}$`; `quotes` 1 to 30 distinct codes, none equal to `base`; a `date` an ISO date from `1999-01-04` to today in UTC. Tools, each answering plain JSON:
-  - `latest_rates { base, quotes }` → `GET /rates?base=<base>&quotes=<a,b>` → `{ date, base, rates: { <quote>: <rate> } }`, the date Frankfurter gave;
-  - `rate_on { base, quote, date }` → `GET /rates?base=<base>&quotes=<quote>&date=<date>` → `{ date, base, quote, rate }`, `date` the one Frankfurter answered for (a weekend's is the last working day's), so the agent never claims a rate for a day that had none;
+  - `latest_rates { base, quotes }` → `GET /rates?base=<base>&quotes=<a,b>` → `{ base, rates: { <quote>: { rate, date } } }`, each quote with the date Frankfurter gave for it, since its rows carry a date each and the central banks it reads publish on different days;
+  - `rate_on { base, quote, date }` → `GET /rates?base=<base>&quotes=<quote>&date=<date>` → `{ date, base, quote, rate }`, `date` the one Frankfurter answered for, which may differ from the day asked, so the agent never claims a rate for a day that had none;
   - `list_currencies {}` → `GET /currencies` → `[{ code, name }]` from `iso_code` and `name` only, at most 400 entries.
-  A non-2xx answer is "Frankfurter could not answer that; check the codes and the date", without its body. The query is built with `Url::query_pairs_mut`, never by formatting strings.
+  A non-2xx answer is "Frankfurter could not answer that; check the codes and the date", without its body. The query is built with `Url::query_pairs_mut`, never by formatting strings. Verified against the live API on 2026-10-05 by the readiness fold: `date=2026-10-03` answered rows dated `2026-10-03`, and `quotes=EUR%2CGBP` (the encoded comma `query_pairs_mut` writes) was accepted.
+- **`fx`'s copy.** Title "Exchange rates". About "Frankfurter publishes the reference exchange rates of central banks, free and with no account." Why "So the Procurement Specialist compares prices in one currency, with the rate and its date beside each. It only reads." Setup "Nothing to set up: Farik looks rates up in Frankfurter itself, with no account. Farik sends Frankfurter only currency codes and a date."
+- **AWS Pricing needs `uv`** (B2), the first third-party `stdio` package in a shipped kit. Its setup's first sentence is "This needs the free program uv on your computer (docs.astral.sh/uv)." The first `uvx` run downloads Python and the package, which may outlast the 30-second listing limit (spec 6.7); the user connects again, and the second run is served from uv's cache. The live pin run records the first-run and second-run listing times in the Execution notes; if the second is over 30 seconds the run stops and the planner decides. The setup check of `farik doctor` is not changed in this step.
 - **The copy**, in full in Task 3; none says "MCP", "OAuth" or "token", and AWS's quotes AWS's own labels ("Access key", "Secret access key") between ‘ and ’, as step 05's exception allows in `setup`.
 - **Kit skills are embedded** as step 06 did: `embedded_skills(Role::ProcurementSpecialist)` returns the eight `(name, &[("SKILL.md", include_str!(…))])` pairs. `sourcing-a-service` stays in `role.yaml` (step 10b); no kit skill repeats its loop or its never-buy rules, and each names only `farik_*` tools that exist (`kit_skills_name_only_tools_farik_lists`).
 - **Pins against the live service**, by step 06's mechanical rule, unchanged: a tool the service lists and this plan lacks goes in `denied` with no label; a named tool the service no longer lists is removed only if its documentation fetched that day no longer names it either; counts and lists in this plan's tests follow in the same commit, recorded in the Execution notes. `fx`'s pin is an offline test, as OSV's is.
@@ -42,8 +44,9 @@ crates/roles/src/kit.rs                                      modifies: embedded_
 crates/runtime/src/fx.rs                                     creates: Farik's own exchange-rate server (Task 2)
 crates/runtime/src/lib.rs                                    modifies: pub mod fx (Task 2)
 crates/cli/src/connector_run.rs, crates/cli/src/lib.rs       modifies: `farik connector fx` (Task 2)
+crates/cli/tests/fx_server.rs                                tests: the built binary lists the kit's tools (Task 2)
 crates/runtime/src/daemon/team.rs                            tests: each service connects by name (Task 4)
-crates/runtime/tests/live_kit_pins.rs                        modifies: header comment (Task 4)
+crates/runtime/tests/live_kit_pins.rs                        modifies: header comment, and the skip line names crates/cli/tests/{name}_server.rs (Task 4)
 docs/SPEC.md, docs/design/role-kits.md, docs/design/procurement-specialist.md, docs/plans/project-plan.md   modifies (Task 5)
 ```
 
@@ -56,8 +59,10 @@ Produces:
 ```rust
 pub const FX_API: &str = "https://api.frankfurter.dev/v2";            // farik_runtime::fx
 pub fn tool_names() -> Vec<&'static str>;                               // ["latest_rates", "rate_on", "list_currencies"]
+pub struct Fx;                                                          // as osv.rs's Osv
+impl Fx { pub fn new(api: &str) -> Result<Self, FxError>; pub async fn call(&self, tool: &str, input: &Value) -> Result<Value, String>; }
 pub async fn serve_stdio(api: &str) -> Result<(), FxError>;
-pub enum FxError { Io(std::io::Error), Serve(String) }
+pub enum FxError { Client, Serving(String) }                            // as OsvError
 pub fn fx(io: &mut CliIo<'_>) -> i32;                                   // farik_cli::connector_run
 // ConnectorCommands::Fx; FARIK_CONNECTORS = ["osv", "fx"]
 ```
@@ -86,15 +91,15 @@ Files: `procurement_specialist/skills/{defining-the-need,comparing-vendors,readi
 Files: `fx.rs`, `lib.rs`, `connector_run.rs`, cli `lib.rs` (`ConnectorCommands::Fx`), `kit.rs` (`FARIK_CONNECTORS`), `kit.yaml` (the `fx` entry). Tests in `fx.rs` against a local fixture server, as `osv.rs`'s are.
 
 - `lists_exactly_three_tools`: `tools/list` gives `latest_rates`, `rate_on`, `list_currencies`, each with an input schema, and `serverInfo.name` `farik-fx`. RED.
-- `latest_rates_asks_once_and_shapes_the_answer`: the fixture sees one `GET /rates` with `base=USD&quotes=EUR%2CGBP` and nothing else; the answer is `{ date, base, rates: { EUR, GBP } }`. RED.
-- `rate_on_says_the_day_answered`: asked for a Saturday, the fixture answers Friday's; the tool's `date` is Friday's. RED.
+- `latest_rates_asks_once_and_shapes_the_answer`: the fixture sees one `GET /rates` with `base=USD&quotes=EUR%2CGBP` and nothing else; the answer is `{ base, rates: { EUR: { rate, date }, GBP: { rate, date } } }`, a different date per quote kept as given. RED.
+- `rate_on_says_the_day_answered`: asked for 2026-10-03, the fixture answers a row dated 2026-10-02; the tool's `date` is 2026-10-02. RED.
 - `list_currencies_keeps_code_and_name`: no `symbol`, `iso_numeric` or dates in the answer. RED.
 - `refuses_bad_input_before_sending`: `usd`, `US`, `quotes` empty, 31 codes, a duplicate, `quote == base`, `1998-12-31`, tomorrow, `2026-02-30`: each a tool error, and the fixture sees no request. RED.
 - `follows_no_redirect_and_no_proxy`: a 302 from the fixture is an error; with `HTTPS_PROXY` set to a listener, the listener sees nothing. RED.
 - `cuts_an_oversized_answer`: a 1 MiB + 1 byte body is "Frankfurter's answer is too large". RED.
-- `the_address_is_fixed`: `FX_API` is `https://api.frankfurter.dev/v2`, and `farik connector fx` passes it (`connector_run`'s test). RED.
-- `the_kit_starts_fx_by_its_bare_name` (`kit.rs`): the `fx` entry is `stdio`, `command: farik`, `args: [connector, fx]`, no keys, its three tools `network` with labels "latest exchange rates", "an exchange rate on a day", "list currencies"; `is_farik_connector` holds for `[connector, fx]` and not `[connector, fx, x]`. RED.
-- `fx_pin_matches_the_kit` (offline pin, as OSV's): `fx::tool_names()` equals the kit's tool list. RED.
+- `fx_api_is_frankfurters_v2`: `FX_API` is exactly `https://api.frankfurter.dev/v2`. RED.
+- `the_kit_starts_fx_by_its_bare_name_with_its_copy_and_labels` (`kit.rs`): the `fx` entry is `stdio`, `command: farik`, `args: [connector, fx]`, no keys, the four copy fields exactly as Decisions gives them, its three tools `network` with labels "latest exchange rates", "an exchange rate on a day", "list currencies"; `is_farik_connector` holds for `[connector, fx]` and not `[connector, fx, x]`. RED.
+- `fx_server_lists_the_kits_tools` (`crates/cli/tests/fx_server.rs`, mirroring `osv_server.rs`'s `osv_server_lists_the_kits_tools`): the built `farik connector fx`, listed through `list_tools`, gives exactly the kit's three tools. RED.
 
 - [ ] `feat(runtime): serve exchange rates through Farik's own server`
 
@@ -102,7 +107,7 @@ Files: `fx.rs`, `lib.rs`, `connector_run.rs`, cli `lib.rs` (`ConnectorCommands::
 
 Files: `kit.yaml` `connectors` after `fx`, in this order; `kit.rs` tests (`loads_every_shipped_kit`: the Procurement Specialist has 3).
 
-**`aws_pricing`**, `transport: stdio`, `command: uvx`, `args: ["awslabs.aws-pricing-mcp-server@1.1.1"]`, `credential_keys: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]`, `key_page: https://console.aws.amazon.com/iam/home#/users`. Title "AWS prices". About "AWS publishes the price of every one of its services, by region and by plan." Why "So the Procurement Specialist can price an AWS option exactly before anyone buys it. It only reads public prices." Setup "In your AWS account, make a user that may only read prices: give it a policy allowing pricing:GetProducts, pricing:DescribeServices, pricing:GetAttributeValues, pricing:ListPriceLists and pricing:GetPriceListFileUrl, and nothing else. Make a key for it, then paste the ‘Access key’ and the ‘Secret access key’ here. Reading prices costs nothing."
+**`aws_pricing`**, `transport: stdio`, `command: uvx`, `args: ["awslabs.aws-pricing-mcp-server==1.1.1"]`, `credential_keys: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]`, `key_page: https://console.aws.amazon.com/iam/home#/users`. Title "AWS prices". About "AWS publishes the price of every one of its services, by region and by plan." Why "So the Procurement Specialist can price an AWS option exactly before anyone buys it. It only reads public prices." Setup "This needs the free program uv on your computer (docs.astral.sh/uv). In your AWS account, make a user that may only read prices: give it a policy allowing pricing:GetProducts, pricing:DescribeServices, pricing:GetAttributeValues, pricing:ListPriceLists and pricing:GetPriceListFileUrl, and nothing else. Make a key for it, then paste the ‘Access key’ and the ‘Secret access key’ here. Reading prices costs nothing."
 - `network`, with labels: `get_pricing` "read a service's prices", `get_pricing_service_codes` "list AWS services", `get_pricing_service_attributes` "list what a price depends on", `get_pricing_attribute_values` "list the options for a price", `get_price_list_urls` "find a full price list", `get_bedrock_patterns` "read AI service pricing patterns".
 - `denied`: `analyze_cdk_project`, `analyze_terraform_project`, `generate_cost_report` (3).
 
@@ -119,7 +124,7 @@ Tests (`kit.rs`):
 
 ### Task 4: Each service connects by name
 
-Files: `daemon/team.rs` test; `live_kit_pins.rs`'s header names AWS Pricing and Brex among the pinned services (no code change: it lists every shipped `stdio` and `http` connector; `fx` is excluded as OSV is, by its offline pin).
+Files: `daemon/team.rs` test; `live_kit_pins.rs`: its header names AWS Pricing and Brex among the pinned services, and its skip line for a Farik connector (today hard-coded to `osv_server_lists_the_kits_tools`, `live_kit_pins.rs:60`) says "pinned offline by crates/cli/tests/{name}_server.rs", so `fx` is skipped with a true line.
 
 - `connects_each_procurement_service_by_name` (a guard): for a team with a Procurement Specialist and a Finance Specialist, `kit_entry` is `Ok` and `matches_kit` true for `fx`, `aws_pricing` and `brex` on the Procurement Specialist; `kit_entry` of `brex` on the Finance Specialist is `connector_not_in_kit`.
 
@@ -140,7 +145,7 @@ FARIK_LIVE_TESTS=1 cargo test -p farik-runtime --test live_kit_pins
 # expected: ok, AWS Pricing and Brex listed with no drift
 ```
 
-The live run reads `FARIK_KIT_AWS_PRICING_AWS_ACCESS_KEY_ID`, `FARIK_KIT_AWS_PRICING_AWS_SECRET_ACCESS_KEY` and `FARIK_KIT_BREX_BEARER` (a Brex API token from Settings → Developer, made by an admin, works as the bearer). Then, in the web app, by the founder: connect all three to a Procurement Specialist, reading each setup copy as a user would, and run step 13's eighth task.
+The live run reads `FARIK_KIT_AWS_PRICING_AWS_ACCESS_KEY_ID`, `FARIK_KIT_AWS_PRICING_AWS_SECRET_ACCESS_KEY` and `FARIK_KIT_BREX_BEARER` (a Brex API token from Settings → Developer, made by an admin; if Brex's server refuses an API token as a bearer, the bearer is taken from a Farik sign-in through `farik connect`, and the Execution notes record which was used). Then, in the web app, by the founder: connect all three to a Procurement Specialist, reading each setup copy as a user would, and run step 13's eighth task.
 
 ## Execution notes
 
