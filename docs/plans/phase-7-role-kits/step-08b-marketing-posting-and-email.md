@@ -56,7 +56,7 @@ Files: the skill, `kit.yaml` `skills`, `embedded_skills`' arm, and the six rewor
 - `marketing_kit_carries_posting_and_email` replaces `marketing_kit_carries_its_skills` (`kit.rs:1089-1104`): the kit's skills are step 08's eight then `posting-and-email`, each with its `SKILL.md`. RED.
 - `the_marketing_specialist_publishes_only_when_allowed` (`lib.rs`): `load_role(MarketingSpecialist)`'s `forbidden` holds "publish or send without the human allowing that call" and no line forbids publishing outright; no shipped Marketing skill says "never publish". RED.
 
-- [ ] `feat(roles): teach the Marketing Specialist to post and email through its services`
+- [x] `feat(roles): teach the Marketing Specialist to post and email through its services`
 
 ### Task 2: Buffer
 

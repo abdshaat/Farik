@@ -17,7 +17,8 @@ A calendar shows what is planned, why, and whose turn it is. Keep it as one tabl
 - **Channel**: where it goes: the mailing list, a social account, the shop window, the website.
 - **Topic**: what it is about, in a few words.
 - **The piece**: where the finished words are, as a path to a file.
-- **Who publishes**: always the human. You write the piece; you never send it.
+- **Who publishes**: the human, or a connected service after the human allows that call. You write
+  the piece and send it only that way.
 - **Status**: one of idea, drafted, ready for the human, published.
 
 ## 2. Tie every row to a goal

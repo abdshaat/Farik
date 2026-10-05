@@ -222,6 +222,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "researching-competitors",
             "measuring-campaigns",
             "making-images-and-video",
+            "posting-and-email",
         ),
         _ => Vec::new(),
     }
@@ -1086,7 +1087,7 @@ mod tests {
     }
 
     #[test]
-    fn marketing_kit_carries_its_skills() {
+    fn marketing_kit_carries_posting_and_email() {
         let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
         let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
         assert_eq!(
@@ -1100,6 +1101,7 @@ mod tests {
                 "researching-competitors",
                 "measuring-campaigns",
                 "making-images-and-video",
+                "posting-and-email",
             ]
         );
         for skill in &kit.skills {

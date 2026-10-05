@@ -347,7 +347,9 @@ mod tests {
     use farik_core::team::Effort;
     use serde_json::Value;
 
-    use super::{RoleDefinition, RoleError, SCHEMA_JSON, load_role, parse_role, yaml_options};
+    use super::{
+        RoleDefinition, RoleError, SCHEMA_JSON, load_kit, load_role, parse_role, yaml_options,
+    };
 
     const PM_YAML: &str = include_str!("../roles/product_manager/role.yaml");
     const PM_SYSTEM: &str = include_str!("../roles/product_manager/system.md");
@@ -570,6 +572,56 @@ mod tests {
         assert!(!definition.skills[0].description.trim().is_empty());
         assert!(!definition.skills[0].body.trim().is_empty());
         assert!(definition.system_prompt.contains("untrusted"));
+    }
+
+    /// ADR 0042: the Marketing Specialist publishes through a connected service, one call at a
+    /// time, after the human allows it; nothing it is told forbids publishing outright.
+    #[test]
+    fn the_marketing_specialist_publishes_only_when_allowed() {
+        let definition = loaded(Role::MarketingSpecialist);
+        assert!(
+            definition
+                .forbidden
+                .iter()
+                .any(|item| item == "publish or send without the human allowing that call"),
+            "{:?}",
+            definition.forbidden
+        );
+        for item in &definition.forbidden {
+            assert!(
+                !item.contains("publish") || item.contains("allowing that call"),
+                "a line forbids publishing outright: {item}"
+            );
+        }
+        assert!(
+            definition
+                .system_prompt
+                .contains("after the human allows that call"),
+            "{}",
+            definition.system_prompt
+        );
+
+        let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
+        let mut texts: Vec<(&str, String)> = definition
+            .skills
+            .iter()
+            .map(|skill| (skill.name.as_str(), skill.text.clone()))
+            .collect();
+        for skill in &kit.skills {
+            for text in skill.session_files.values() {
+                texts.push((skill.name.as_str(), text.clone()));
+            }
+        }
+        assert!(
+            texts.len() > 1,
+            "the check saw the role's and the kit's skills"
+        );
+        for (name, text) in texts {
+            let lower = text.to_lowercase();
+            for phrase in ["never publish", "do not publish", "don't publish"] {
+                assert!(!lower.contains(phrase), "{name} says \"{phrase}\"");
+            }
+        }
     }
 
     #[test]

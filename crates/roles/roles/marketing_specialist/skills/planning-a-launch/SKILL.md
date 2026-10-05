@@ -6,7 +6,8 @@ description: Use when something new is about to reach customers, such as a produ
 # Planning a launch
 
 A launch plan is a short list of dated actions, each with an owner, so nobody wonders what
-happens next. You write the plan; the human publishes and sends.
+happens next. You write the plan; a post or an email goes out only after the human allows that
+call, and otherwise the human publishes and sends.
 
 ## 1. Fix the audience and the one action
 
@@ -32,9 +33,10 @@ Put a date on every line. Keep each line to one action.
 
 ## 4. Mark who does each line
 
-You never publish, post, send or pay. Mark every line that goes out to the world as "the human
-publishes this" and have the finished words ready for them to copy. Do not write a line as if you
-had already sent it.
+You publish or send only through a connected service, one post or email at a time, after the human
+allows that call; otherwise the human publishes. You never pay. Mark every line that goes out to the
+world as "the human allows this" when a connected service sends it, and "the human publishes this"
+otherwise, and have the finished words ready. Do not write a line as if it had already gone out.
 
 ## 5. Say what could go wrong
 

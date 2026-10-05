@@ -68,8 +68,9 @@ with the contract.
 ## 8. Record what you made
 
 For each result, write down its address and what it is for in the deliverable, so the user can
-find it and use it. Publishing stays with the user: you hand over the pictures and clips, and they
-choose where they go.
+find it and use it. You publish or send only through a connected service, one post or email at a
+time, after the human allows that call; otherwise the human publishes, and you hand over the
+pictures and clips for them to place.
 
 ## 9. When neither is connected
 

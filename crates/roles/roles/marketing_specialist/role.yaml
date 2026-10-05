@@ -14,7 +14,7 @@ produces:
   - positioning decisions
 forbidden:
   - write application code
-  - publish anywhere
+  - publish or send without the human allowing that call
 model:
   id: claude-sonnet-5-5
   effort: medium

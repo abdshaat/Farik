@@ -1,4 +1,4 @@
-# The Marketing Specialist's kit: eight skills written for any business (ADR 0040) and the creative
+# The Marketing Specialist's kit: nine skills written for any business (ADR 0040) and the creative
 # services it signs in to (route 1, ADR 0035), each spending the user's credits inside an allowance
 # (ADR 0037). Tool lists are pinned against each service's live listing by `live_kit_pins`; a tool a
 # service lists that is not here is never offered (`tool_not_tagged`) until a pin update tags it.
@@ -12,6 +12,7 @@ skills:
   - researching-competitors
   - measuring-campaigns
   - making-images-and-video
+  - posting-and-email
 connectors:
   - name: higgsfield
     transport: http
