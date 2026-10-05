@@ -259,6 +259,7 @@ mod tests {
             Role::Architect,
             Role::SoftwareDeveloper,
             Role::MarketingSpecialist,
+            Role::FinanceSpecialist,
             Role::Human,
         ] {
             assert_eq!(
