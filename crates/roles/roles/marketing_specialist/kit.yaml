@@ -61,7 +61,6 @@ connectors:
     allowances:
       generate_image: { calls: 20, what: "images" }
       generate_video: { calls: 6, what: "video requests" }
-      generate_audio: { calls: 10, what: "voice clips" }
       upscale_image: { calls: 10, what: "image upscales" }
       remove_background: { calls: 10, what: "background removals" }
       outpaint_image: { calls: 10, what: "image extensions" }

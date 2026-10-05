@@ -1462,7 +1462,9 @@ mod tests {
     }
 
     /// Higgsfield's tools that spend credits and always ask: no allowance covers them.
-    const HIGGSFIELD_ASKS: [&str; 22] = [
+    const HIGGSFIELD_ASKS: [&str; 23] = [
+        // A voice-over can copy a voice from a sample, and a kit cannot refuse one argument.
+        "generate_audio",
         "generate_image_batch",
         "generate_video_batch",
         "generate_audio_batch",
@@ -1611,7 +1613,6 @@ mod tests {
         let allowed = [
             ("generate_image", 20, "images"),
             ("generate_video", 6, "video requests"),
-            ("generate_audio", 10, "voice clips"),
             ("upscale_image", 10, "image upscales"),
             ("remove_background", 10, "background removals"),
             ("outpaint_image", 10, "image extensions"),

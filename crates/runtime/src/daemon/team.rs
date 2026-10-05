@@ -3987,7 +3987,6 @@ pub(super) mod tests {
                 BTreeMap::from([
                     ("generate_image".to_string(), 20),
                     ("generate_video".to_string(), 6),
-                    ("generate_audio".to_string(), 10),
                     ("upscale_image".to_string(), 10),
                     ("remove_background".to_string(), 10),
                     ("outpaint_image".to_string(), 10),
