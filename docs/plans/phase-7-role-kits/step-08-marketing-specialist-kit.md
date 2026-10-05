@@ -91,7 +91,7 @@ Files: `kit.yaml` (second, `recraft`); `kit.rs` tests (`loads_every_shipped_kit`
 - `recraft_spends_only_what_it_is_allowed`: `http` at that URL, `oauth.scopes` exactly the three; the six with their allowances, the two with none, `get_user` `network`; 9 in all. RED.
 - `the_marketing_kit_is_higgsfield_then_recraft`: connectors exactly `higgsfield`, `recraft`, in that order, each with `oauth` and no `credential_keys`. RED.
 
-- [ ] `feat(roles): give the Marketing Specialist Recraft`
+- [x] `feat(roles): give the Marketing Specialist Recraft`
 
 ### Task 4: Connected by name, and the allowance on the shipped entry
 

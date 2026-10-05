@@ -180,3 +180,38 @@ connectors:
       scene_builder_3d_run_python: denied
       scene_builder_3d_search_assets: denied
       scene_builder_3d_show_scene: denied
+  - name: recraft
+    transport: http
+    url: https://mcp.recraft.ai/mcp
+    oauth: { scopes: [openid, email, profile] }
+    title: Recraft
+    about: "Recraft makes images, logos and vector graphics in a consistent brand style."
+    why: "So the Marketing Specialist can make on-brand graphics, icons and vector art. Each one uses your Recraft credits, so Farik counts them and asks you before going past the number you allow."
+    setup: "Sign in with your Recraft account and allow Farik to use it. Every graphic your agent makes uses your Recraft credits; you choose how many it may make without asking. Farik counts each request, and one request can hold up to six pictures. Recraft may ask you to sign in again from time to time."
+    labels:
+      generate_image: "make an image"
+      image_to_image: "change an image"
+      vectorize_image: "turn an image into vector art"
+      remove_background: "remove a background"
+      replace_background: "swap a background"
+      crisp_upscale: "sharpen an image"
+      creative_upscale: "upscale and redraw an image"
+      create_style: "save a brand style"
+      get_user: "check credits"
+    allowances:
+      generate_image: { calls: 20, what: "images" }
+      image_to_image: { calls: 10, what: "image edits" }
+      vectorize_image: { calls: 10, what: "vector conversions" }
+      remove_background: { calls: 10, what: "background removals" }
+      replace_background: { calls: 10, what: "background swaps" }
+      crisp_upscale: { calls: 10, what: "image upscales" }
+    tools:
+      generate_image: external_effect
+      image_to_image: external_effect
+      vectorize_image: external_effect
+      remove_background: external_effect
+      replace_background: external_effect
+      crisp_upscale: external_effect
+      creative_upscale: external_effect
+      create_style: external_effect
+      get_user: network

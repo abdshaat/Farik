@@ -980,7 +980,8 @@ mod tests {
             assert_eq!(
                 kit.connectors.len(),
                 match role {
-                    Role::UiUxDesigner | Role::SoftwareDeveloper | Role::MarketingSpecialist => 1,
+                    Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
+                    Role::MarketingSpecialist => 2,
                     Role::ProductManager | Role::Architect => 3,
                     _ => 0,
                 },
@@ -1660,6 +1661,80 @@ mod tests {
             copy.labels["generate_video"],
             "make a video or check its price"
         );
+    }
+
+    #[test]
+    fn recraft_spends_only_what_it_is_allowed() {
+        let (server, copy, allowances) = marketing_service("recraft");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("recraft is http");
+        };
+        assert_eq!(url, "https://mcp.recraft.ai/mcp");
+        assert_eq!(
+            oauth.as_ref().map(|settings| settings.scopes.as_slice()),
+            Some(
+                &[
+                    "openid".to_string(),
+                    "email".to_string(),
+                    "profile".to_string()
+                ][..]
+            )
+        );
+        assert!(headers.is_empty());
+        assert!(server.credential_keys.is_empty());
+        assert_eq!(copy.title, "Recraft");
+
+        let allowed = [
+            ("generate_image", 20, "images"),
+            ("image_to_image", 10, "image edits"),
+            ("vectorize_image", 10, "vector conversions"),
+            ("remove_background", 10, "background removals"),
+            ("replace_background", 10, "background swaps"),
+            ("crisp_upscale", 10, "image upscales"),
+        ];
+        assert_eq!(allowances.len(), allowed.len());
+        for (tool, calls, what) in allowed {
+            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
+            assert_eq!(
+                allowances[tool],
+                KitAllowance {
+                    calls,
+                    what: what.to_string()
+                },
+                "{tool}"
+            );
+        }
+        for tool in ["creative_upscale", "create_style"] {
+            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
+            assert!(!allowances.contains_key(tool), "{tool} has no allowance");
+        }
+        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 8);
+        assert_eq!(names_tagged(&server, ConnectorTag::Network), ["get_user"]);
+        assert_eq!(tagged(&server, ConnectorTag::Denied), 0);
+        assert_eq!(server.tools.len(), 9);
+    }
+
+    #[test]
+    fn the_marketing_kit_is_higgsfield_then_recraft() {
+        let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
+        let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
+        assert_eq!(names, ["higgsfield", "recraft"]);
+        for connector in &kit.connectors {
+            let KitConnector::Server { entry, .. } = connector else {
+                panic!("{} is a server", connector.name());
+            };
+            let server = custom_server(entry).expect("a custom server");
+            let CustomTransport::Http { oauth, .. } = &server.transport else {
+                panic!("{} is http", server.name);
+            };
+            assert!(oauth.is_some(), "{} signs in", server.name);
+            assert!(server.credential_keys.is_empty(), "{}", server.name);
+        }
     }
 
     /// A guard: it passes with no marketing connector at all.
