@@ -633,6 +633,42 @@ mod tests {
         }
     }
 
+    /// What the role is told it may not do is what the agent reads, so the prompt carries every
+    /// line of `forbidden` (the two lists cannot drift), its source rule, and the skill repeats
+    /// that every number names its source and that the role never writes to a service.
+    #[test]
+    fn the_finance_specialist_is_told_what_it_may_not_do() {
+        let definition = loaded(Role::FinanceSpecialist);
+        let flatten = |text: &str| {
+            text.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        };
+        let prompt = flatten(&definition.system_prompt);
+        let skill = flatten(&definition.skills[0].body);
+        assert!(
+            !definition.forbidden.is_empty(),
+            "the check saw the forbidden lines"
+        );
+        for line in &definition.forbidden {
+            assert!(
+                prompt.contains(&flatten(line)),
+                "the prompt lost the forbidden line \"{line}\": {prompt}"
+            );
+        }
+        assert!(
+            prompt.contains("names where it came from"),
+            "the prompt lost its source rule: {prompt}"
+        );
+        for phrase in ["every number names its source", "never write to a service"] {
+            assert!(
+                skill.contains(phrase),
+                "the skill lost \"{phrase}\": {skill}"
+            );
+        }
+    }
+
     /// ADR 0042: the Marketing Specialist publishes through a connected service, one call at a
     /// time, after the human allows it; nothing it is told forbids publishing outright.
     #[test]
