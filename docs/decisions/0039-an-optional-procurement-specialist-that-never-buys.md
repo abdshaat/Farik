@@ -1,61 +1,60 @@
 # 0039. An optional Procurement Specialist that never buys
 
 Date: 2026-10-05
-Status: proposed. The founder asked for the role on 2026-10-05 ("Add and plan a procurement agent and plan all its tools and connectors as well as skills"), and the same day set its research focus and the data pipeline request ("He may request a data pipeline from the pm who can decide whether the data pipeline is necessary or whether this decision must be escalated to the owner"); the rest of the shape below is the planner's, and the ADR is accepted when the founder answers O1 to O6 at the end of `docs/design/procurement-specialist.md`.
+Status: accepted. The founder asked for the role on 2026-10-05 ("Add and plan a procurement agent and plan all its tools and connectors as well as skills"), set its research focus and the data pipeline request the same day, and answered the design's O1 to O6 ("the agent never directly buy[s], he just compiles list of sellers, look for price, contact manufacturer or sellers. Get prices. And set up a purchase order but the final decision is the founder['s]"; "all the data are and spreadsheets are to stay local"; "any product whether technical or non technical"; "after the finance specialist and before devops"; "the PM must escalate any process that cost money").
 
 ## Context
 
-On 2026-10-05 the founder asked for a procurement agent in phase 7, with its tools, connectors and skills planned like every other role's kit.
-
-A team that builds a software product buys things all the time, and nobody on it owns the buying. It buys an email-sending service, a database host, an error tracker, a domain, a design tool, a higher plan of the AI account itself. Today the Architect reviews open-source dependencies and their licences (spec 6.3), and the Finance Specialist records what was spent once it was spent (spec 6.6). Nobody compares the paid options before the money goes, reads their terms, or notices that a yearly plan renews next week.
+A team buys things, and nobody on a Farik team owns buying. The Architect reviews open-source dependencies (spec 6.3); the Finance Specialist records money after it is spent (spec 6.6). Nobody finds sellers, compares prices, asks for a quote, or prepares an order. The founder wants an agent that does, for any product: a software subscription, stock to resell, a used car, a baby car mirror. The same day the founder set the direction of ADR 0040 (proposed), Farik for businesses that do not ship software, for which buying is daily work.
 
 Four facts constrained the design:
-- A purchase moves the user's money. A vendor's page is untrusted content (spec 8.6), and a page can be written to steer an agent towards one product, one plan, or one "accept" button.
-- Farik holds no card, and should not. A payment connector would put a card where a prompt can reach it, and a non-technical user approving a stream of purchase prompts is the approval fatigue spec 5.6 avoids.
-- Prices, quotes and contracts are confidential, and the repository may be public (ADR 0019 found this one is).
-- A team holds at most seven agents (D18), and the team builder suggests six.
+- A purchase moves the user's money. A seller's page or reply is untrusted content (spec 8.6), and can be written to steer an agent towards one product, one seller or one "accept" button.
+- Farik holds no card and should not. A payment connector would put a card where a prompt can reach it.
+- Writing to a seller is an act in the world: a message cannot be unsent, and a careless one commits the business or spams a stranger. Spec 6.7 already says a tool that sends always asks.
+- Prices, quotes, orders and correspondence are confidential, and the repository may be public.
 
-The options for what the agent may do at the point of buying were these:
-- **Buy through a payment or procurement platform, each purchase approved.** Ramp's hosted server has a checkout, Porkbun's buys domains. Every call would ask (a tool that pays has no allowance, spec 6.7), but the agent would still choose the vendor, the plan and the amount, and the approval would be a click on its choice.
-- **Never buy; ask the human to buy.** The agent researches, compares, recommends and files a purchase request with the price, the plan, the link and the evaluation behind it; the human buys at the vendor and says so in Farik, with what was paid. This is the chosen way.
+The options at the point of buying were these:
+- **Buy through a platform, each purchase approved.** The agent would still choose the seller and the amount, and the approval would be a click on its choice.
+- **Never buy; prepare a purchase order the founder decides.** The agent finds sellers, gets prices and quotes, and drafts an order; the founder approves or rejects it and places it, or has Farik send it to the seller. This is the chosen way.
 
-The options for where its work lives were these:
-- **In the repository, under the team's `document_paths`, as the Marketing Specialist's does.** Simple, but a public repository would publish negotiated prices and contract terms.
-- **A private folder, `.farik/local/procurement/`, under the same rules as the Finance Specialist's folder.** Never committed; its session runs in the folder; its register is a workbook through the Finance Specialist's sheet tools. This is the chosen place.
+The options for contacting sellers were these:
+- **A mail connector in the kit, its send tool `external_effect`.** The agent would choose when to call it and the approval would arrive mid-session, about text the founder had not seen in context.
+- **The founder's mail program, drafts only.** Gmail's official server drafts but cannot send; it needs a Google client of the user's own, and Google's route waits until after the launch.
+- **A procurement mailbox Farik sends from, each message sent by the founder's press.** The agent drafts; the founder reads, may edit, and sends from Today; Farik reads only the replies. This is the chosen way.
 
-The options for renewals were these:
-- **A session that checks the register every day.** It spends the model's tokens to read a date.
-- **A tick with no model.** Farik reads the register's dates once a day, as the receipts sweep and the DevOps watch do, and tells the human when a renewal's decision date nears. This is the chosen way.
+The options for where its work lives were the repository under `document_paths`, or a private folder under the Finance Specialist's rules; the founder chose local.
 
 ## Decision
 
-Add a ninth role, the Procurement Specialist (`procurement_specialist`). It is optional: the team builder offers it and does not suggest it. It has the `read` and `network` tiers, the Product Manager is its reviewer, and its default model is the Marketing Specialist's.
+Add a ninth role, the Procurement Specialist (`procurement_specialist`), optional, not suggested, with the `read` and `network` tiers, the Product Manager as its reviewer, and the Marketing Specialist's default model. It researches any product or service: it lists sellers and makers, finds their prices, asks them for quotes, checks the sellers and the products (recalls, safety standards, a used car's VIN), compares offers in one currency with landed cost, keeps the register of sellers and subscriptions, and reviews renewals.
 
-It finds, compares and recommends the paid services the product needs, checks their terms and their security, keeps the register of what the team pays for, and reviews each renewal before its decision date. It never pays, signs up, starts a trial that takes a card, accepts terms, signs, cancels, or writes to a vendor. It files a purchase request (`farik_request_purchase`), which waits on Today until the human marks it bought, with what was paid, or not bought.
+It never pays, bids, checks out, signs up, accepts terms or signs. It sets up a purchase order (`farik_draft_purchase_order`, a workbook in its folder) that the founder approves, rejecting it or placing it themselves, or having Farik send it to the seller; later the founder marks it received with what was paid.
 
-Its work lives in `.farik/local/procurement/`, never committed: `vendors.xlsx`, the register, written through `farik_write_sheet`, and `evaluations/<name>.md`, written through `farik_write_evaluation`. Its tasks follow the Finance Specialist's folder rules (spec 6.6): the session runs in the folder, there is no branch and nothing to integrate, and one piece of procurement work touches the folder at a time. Phase 7 step 09 builds those rules keyed by role, so this role adds a second folder rather than a second set of exceptions. The Finance Specialist may read the register; nothing else outside the role may.
+It writes to sellers and makers only through drafts (`farik_draft_seller_message`) that the founder reads, may edit, and sends from Today, from a procurement mailbox of the user's own, at most 50 a day, each signed with an AI-assistance line by default. Farik reads only replies to what it sent, without marking them read, and hands them to the agent as untrusted content.
 
-Its first job is research, prices and providers. When a source it lacks would change a recommendation, it asks the Product Manager for a data pipeline (`farik_request_data_pipeline`). The Product Manager decides whether it is needed, approving, declining or escalating it to the owner; the governor refuses the Product Manager's approval of one that costs money, needs an account, or sends the project's data out, so those always reach the owner. An approved pipeline files an ordinary request for the team; approval itself connects, pays for and builds nothing.
+Everything it keeps is in `.farik/local/procurement/`, never committed, under the folder rules step 09 builds for the Finance Specialist, keyed by role. The Finance Specialist may read the register.
 
-Once a day, while a process drives the project, a renewal tick with no model reads the register's renewal and notice dates and records `renewal.flagged` when a renewal's decision date is 14 days off or nearer. Today shows it, with "Ask for a review", which files an ordinary request, and "Dismiss".
+When a source it lacks would change a recommendation, it asks the Product Manager for a data pipeline. The Product Manager decides whether it is needed; the governor refuses the Product Manager's approval of any pipeline that costs money, which goes to the owner. Approval files an ordinary request; it connects, pays for and builds nothing.
 
-Its kit ships eight skills and three connectors, each read only: Farik's own currency-rate server over Frankfurter (`farik connector fx`, ADR 0038's pattern, no account), AWS's official pricing server (a key limited to the pricing read actions), and Brex's official server (signed in by route 1, read-only scopes, its people, card and bank tools `denied`). Ramp, Porkbun, DocuSign, Vercel's domains, Zylo, Vanta, Drata, SafeBase, G2, Cloudflare, Vantage and a mail connector are rejected for now; the design says why for each.
+A renewal tick with no model reads the register once a day and puts each renewal whose decision date is 14 days off or nearer on Today.
 
-The role is phase 7 steps 10b and 10c, after the Finance Specialist's kit (step 10), whose folder rules and sheet tools it reuses; its kit is step 10d; data pipeline requests are step 10e, with a candidate list of sources the design keeps. Step 13, the kit check, gains an eighth task.
+Its kit ships fourteen skills and seven connectors, all read-only but one: Farik's own `fx` (exchange rates), `recalls` (US product and vehicle safety) and `ebay` (eBay listings), and the official Exa (web search), SerpApi (shopping prices, its search counted against an allowance), Brex (spend with a seller, read-only) and AWS Pricing (for software teams). Amazon's buyer API, eBay's official server, supplier directories, Ramp, Porkbun, DocuSign and the rest are rejected for now; the design says why for each and keeps a list of candidates a data pipeline may bring.
+
+It is phase 7 steps 10b (the role and its folder), 10c (purchase orders and renewals), 10d (the kit), 10e (data pipeline requests), 10f (contacting sellers) and 10g (Farik's `recalls` and `ebay` servers), after the Finance Specialist's kit and before the DevOps Engineer. Step 13, the kit check, gains an eighth task.
 
 ## Consequences
 
 Easier:
-- Someone on the team compares the paid options before the money goes, in one currency, over 12 and 36 months, and says what the terms and the exit cost.
-- No prompt, page or vendor can spend the user's money through Farik: there is no tool that can.
+- Someone on the team finds the sellers, gets real quotes and compares them before money goes, for any product.
+- No prompt, page or reply can spend the user's money or send a message through Farik: there is no tool that can, and every send is the founder's press.
+- A recalled product or a car with an open recall is seen before it is bought.
 - A renewal is seen before its notice period ends, at no model cost.
-- The Finance Specialist forecasts from a register someone keeps, and a purchase the human marks bought is the record of it.
 
 Harder:
-- The human still does every purchase by hand. A step Farik could have automated stays a step, by design.
-- The register is a workbook the user may edit by hand, and the renewal tick reads its dates. A date it cannot read is skipped and said once on Today, not guessed.
-- A ninth role; a team of the six suggested agents and one optional role is the cap of seven, so adding this role beside the Finance Specialist or the DevOps Engineer means unticking a suggested one.
-- The role leans on step 09's private-folder rules. Step 09 must build them for more than one role, which its plan now has to say.
-- AWS's pricing server asks a non-technical user for an access key. The setup copy has to make a key limited to reading prices possible to create, and the connector stays optional.
-- A data pipeline request is one more thing that can wait on the Product Manager and the owner, and one more decision session that costs model time.
-- Brex's tool list "is subject to change"; the live pin test catches it, and a pin update re-reviews every tag.
+- The founder still places or approves every order and sends every message. That is the design.
+- Step 10f brings the first mailbox into Farik (IMAP, SMTP and three new crates), before the receipts intake of phase 12, which then reuses it.
+- A team of the six suggested agents and one optional role is the cap of seven.
+- The role leans on step 09's private-folder rules, which must be built for more than one role.
+- SerpApi spends the user's searches; its allowance asks the founder past 50 a sprint.
+- AWS Pricing needs the program `uv` and a narrow AWS key; Brex's and Exa's tool lists may change, which the live pin test catches.
+- `recalls` covers the United States only until a pipeline brings the EU's or Canada's lists.
