@@ -5,6 +5,7 @@ Status: accepted (the founder, in conversation, 2026-10-02; the relay's shape ru
 Amended 2026-10-02 by the readiness reviews of steps 03b and 03c and the founder's decisions of that day: Google is deferred until after the launch, with its decided design recorded below; Slack's app stays private to the founder's workspace until the Slack Marketplace lists it, a launch dependency; the relay binds a code to its ticket; a homepage and a privacy policy move forward to step 03e. The section "Amendment of 2026-10-02" holds the details; the text above it is corrected to match.
 Amended again 2026-10-02, later the same day, by the founder: route 3, the relay, is deferred with Slack. See "Second amendment of 2026-10-02"; the text above it is left as decided.
 Amended a fourth time 2026-10-02 by the founder: every part of Slack, the pasted-key bridge included, moves to the last phase, phase 14's Slack integration (project plan revision 32). See the last paragraph.
+Amended 2026-10-05 by ADR 0040: a phase, Business workspaces, follows the web launch as phase 12, so the phases after it moved up by one (Desktop 13, Native mobile 14, Premium 15); the numbers below are the old ones.
 
 Resolves step 03's O2 (`docs/plans/phase-7-role-kits/step-03-signing-in-to-a-service.md`). ADR 0033, written in step 03's Task 2, keeps its registration order; this ADR adds two routes before its refusal.
 

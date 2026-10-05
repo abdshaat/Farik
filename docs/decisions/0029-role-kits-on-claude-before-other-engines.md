@@ -2,6 +2,7 @@
 
 Date: 2026-10-01
 Status: accepted (the founder, in conversation, 2026-10-01)
+Amended 2026-10-05 by ADR 0040: a phase, Business workspaces, follows the web launch as phase 12, so the phases after it moved up by one (Desktop 13, Native mobile 14, Premium 15); the numbers below are the old ones.
 
 ## Context
 

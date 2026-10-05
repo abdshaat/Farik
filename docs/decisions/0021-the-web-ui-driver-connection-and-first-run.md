@@ -5,6 +5,7 @@ Status: accepted
 Amended 2026-09-29 by ADR 0023: phase numbers after 6 moved up by one.
 Amended 2026-09-29: the first-run order is computer, AI account, project (the founder); the credential falls back to a private file (ADR 0022).
 Amended 2026-09-30 by ADR 0025: phase numbers after 9 moved up by one.
+Amended 2026-10-05 by ADR 0040: a phase, Business workspaces, follows the web launch as phase 12, so the phases after it moved up by one (Desktop 13, Native mobile 14, Premium 15); the numbers below are the old ones.
 
 ## Context
 

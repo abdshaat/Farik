@@ -4,6 +4,7 @@ Date: 2026-09-26
 Status: accepted; its phase numbers are shifted by 0018 and 0020 (the launch is phase 9, the hosted tier phase 12)
 Amended 2026-09-29 by ADR 0023: phase numbers after 6 moved up by one.
 Amended 2026-09-30 by ADR 0025: phase numbers after 9 moved up by one.
+Amended 2026-10-05 by ADR 0040: a phase, Business workspaces, follows the web launch as phase 12, so the phases after it moved up by one (Desktop 13, Native mobile 14, Premium 15); the numbers below are the old ones.
 
 ## Context
 
