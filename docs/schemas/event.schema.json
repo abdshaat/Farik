@@ -121,7 +121,13 @@
         "marketing_plan.proposed",
         "marketing_plan.approved",
         "marketing_plan.returned",
-        "marketing_plan.ended"
+        "marketing_plan.ended",
+        "social_post.scheduled",
+        "social_post.requested",
+        "social_post.sent",
+        "social_post.stopped",
+        "social_post.missed",
+        "social_post.failed"
       ]
     },
     "eventBodyWire": {
@@ -186,7 +192,13 @@
         { "$ref": "#/$defs/marketingPlanProposedBody" },
         { "$ref": "#/$defs/marketingPlanApprovedBody" },
         { "$ref": "#/$defs/marketingPlanReturnedBody" },
-        { "$ref": "#/$defs/marketingPlanEndedBody" }
+        { "$ref": "#/$defs/marketingPlanEndedBody" },
+        { "$ref": "#/$defs/socialPostScheduledBody" },
+        { "$ref": "#/$defs/socialPostRequestedBody" },
+        { "$ref": "#/$defs/socialPostSentBody" },
+        { "$ref": "#/$defs/socialPostStoppedBody" },
+        { "$ref": "#/$defs/socialPostMissedBody" },
+        { "$ref": "#/$defs/socialPostFailedBody" }
       ]
     },
     "contractSummary": {
@@ -1046,6 +1058,140 @@
         "why": { "type": "string", "enum": ["replaced", "by_owner", "expired"] },
         "replaced_by": { "$ref": "#/$defs/marketingPlanId" },
         "note": { "type": "string" }
+      }
+    },
+    "socialPostChannel": {
+      "type": "string",
+      "enum": ["instagram", "x", "facebook", "linkedin", "threads", "bluesky", "tiktok", "pinterest", "youtube", "google_business", "mastodon"],
+      "description": "The network a post is for: one of the eleven of Buffer's that a marketing plan's post slots name."
+    },
+    "socialPostNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "A post's number: the sequence number of the event that made it, social_post.scheduled when the agent scheduled it in the plan, else social_post.requested."
+    },
+    "socialPostTime": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$",
+      "description": "When a post goes out, RFC 3339 with the offset the agent wrote it in, which is kept: the slot's day is the date in that offset."
+    },
+    "socialPostMedia": {
+      "title": "Social Post Media",
+      "description": "One picture or clip of a post: the https address Buffer fetches it from, and whether it is an image or a video, as the agent says and Farik checks against what the address answers.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "kind"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "kind": { "type": "string", "enum": ["image", "video"] }
+      }
+    },
+    "socialPostDetails": {
+      "title": "Social Post Details",
+      "description": "What a post on YouTube or Pinterest needs besides its text: a YouTube video's title and category (one of Buffer's fifteen), or the Pinterest board's id in Buffer.",
+      "oneOf": [
+        {
+          "title": "Social Post Youtube Details",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["title", "category_id"],
+          "properties": {
+            "title": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "category_id": {
+              "type": "string",
+              "enum": ["1", "2", "10", "15", "17", "19", "20", "22", "23", "24", "25", "26", "27", "28", "29"]
+            }
+          }
+        },
+        {
+          "title": "Social Post Pinterest Details",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["board"],
+          "properties": {
+            "board": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" }
+          }
+        }
+      ]
+    },
+    "socialPostScheduledBody": {
+      "title": "Social Post Scheduled Body",
+      "description": "A post is going out (docs/SPEC.md 6.5; ADR 0042). approved_by plan: the Marketing Specialist scheduled it with farik_schedule_post into the slot slot of the active plan plan, at least three hours ahead; the envelope names its task, agent and session, and the event's sequence number is the post's number. approved_by owner: the owner allowed a post that was requested; post is the request's number, and the envelope names the request's task and no agent and no session. channel is the network and buffer_channel Buffer's id for the channel; text is the post's words; media is up to four pictures or clips in order; at is when it goes out, with its offset; details is present on YouTube and Pinterest only. Farik hands it to Buffer an hour before at, or at once when the owner allowed it later than that.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "buffer_channel", "text", "media", "at", "approved_by"],
+      "properties": {
+        "post": { "$ref": "#/$defs/socialPostNumber" },
+        "channel": { "$ref": "#/$defs/socialPostChannel" },
+        "buffer_channel": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "text": { "type": "string", "minLength": 1 },
+        "media": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/socialPostMedia" } },
+        "at": { "$ref": "#/$defs/socialPostTime" },
+        "details": { "$ref": "#/$defs/socialPostDetails" },
+        "approved_by": { "type": "string", "enum": ["plan", "owner"] },
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "slot": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 }
+      }
+    },
+    "socialPostRequestedBody": {
+      "title": "Social Post Requested Body",
+      "description": "The Marketing Specialist wrote a post that is not in the active plan, with farik_schedule_post and no slot (docs/SPEC.md 6.5; ADR 0042). It waits for the owner, who allows it (social_post.scheduled with approved_by owner and post) or does not (social_post.stopped by declined). The event's sequence number is the post's number; the envelope names its task, agent and session, and the task does not wait. The fields are those of social_post.scheduled.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "buffer_channel", "text", "media", "at"],
+      "properties": {
+        "channel": { "$ref": "#/$defs/socialPostChannel" },
+        "buffer_channel": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "text": { "type": "string", "minLength": 1 },
+        "media": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/socialPostMedia" } },
+        "at": { "$ref": "#/$defs/socialPostTime" },
+        "details": { "$ref": "#/$defs/socialPostDetails" }
+      }
+    },
+    "socialPostSentBody": {
+      "title": "Social Post Sent Body",
+      "description": "Farik handed a scheduled post to Buffer with its own create_post call (docs/SPEC.md 6.5; ADR 0042), an hour before it goes out: buffer_post is Buffer's id for it. About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post", "buffer_post"],
+      "properties": {
+        "post": { "$ref": "#/$defs/socialPostNumber" },
+        "buffer_post": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "socialPostStoppedBody": {
+      "title": "Social Post Stopped Body",
+      "description": "A post will not go out (docs/SPEC.md 6.5; ADR 0042). by owner: the owner stopped a scheduled post, with taken_back true when Farik had given it to Buffer and took it back with delete_post; by declined: the owner did not allow a requested post, with note when they said why; by plan_ended: the plan it was in ended and it had not reached Buffer. note is the owner's own words. About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post", "by"],
+      "properties": {
+        "post": { "$ref": "#/$defs/socialPostNumber" },
+        "by": { "type": "string", "enum": ["owner", "declined", "plan_ended"] },
+        "taken_back": { "type": "boolean" },
+        "note": { "type": "string" }
+      }
+    },
+    "socialPostMissedBody": {
+      "title": "Social Post Missed Body",
+      "description": "A post did not go out because its hand-over time passed with the post less than five minutes from its time (docs/SPEC.md 6.5; ADR 0042): why is not_running (Farik was not running), paused (the owner had paused the team) or undecided (a requested post the owner had not decided by its time). About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post", "why"],
+      "properties": {
+        "post": { "$ref": "#/$defs/socialPostNumber" },
+        "why": { "type": "string", "enum": ["not_running", "paused", "undecided"] }
+      }
+    },
+    "socialPostFailedBody": {
+      "title": "Social Post Failed Body",
+      "description": "Farik could not give a post to Buffer (docs/SPEC.md 6.5; ADR 0042): reason is Farik's sentence, then Buffer's own words, cut, which are untrusted text. It is not tried again. About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post", "reason"],
+      "properties": {
+        "post": { "$ref": "#/$defs/socialPostNumber" },
+        "reason": { "type": "string", "minLength": 1 }
       }
     },
     "connectorTag": {

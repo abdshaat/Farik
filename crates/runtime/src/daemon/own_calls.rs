@@ -63,10 +63,6 @@ const REFRESH_WAIT: Duration = Duration::from_secs(10);
 /// [`OwnCallError`]: the pair is not listed, the agent's connection is not there or the service
 /// ended its sign-in, the call could not be made, the service did not answer within thirty
 /// seconds, or it answered that the call failed.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "step 08d task 4 makes the first call")
-)]
 pub(crate) async fn call_as(
     state: &Arc<DaemonState>,
     agent: &str,

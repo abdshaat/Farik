@@ -4467,8 +4467,9 @@ mod tests {
         let spec = &adapter.started()[0];
         let tiers = default_tiers(Role::ProductManager);
         // The Designer's page check and design review are offered in its own sessions alone, a
-        // chat's reply in a chat alone, and the books' tools to the Finance Specialist and, to read
-        // a workbook, a verify session about a finance task.
+        // chat's reply in a chat alone, the books' tools to the Finance Specialist and, to read
+        // a workbook, a verify session about a finance task, and a post to the Marketing
+        // Specialist in an implement session.
         let expected: Vec<String> = tool_descriptors()
             .iter()
             .filter(|tool| tiers.contains(&tool.tier))
@@ -4480,6 +4481,7 @@ mod tests {
                     "farik_read_costs",
                     "farik_write_sheet",
                     "farik_read_sheet",
+                    "farik_schedule_post",
                 ]
                 .contains(&tool.name)
             })

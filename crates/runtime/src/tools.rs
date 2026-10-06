@@ -37,7 +37,9 @@ mod exec;
 pub(crate) mod fixtures;
 mod git;
 mod marketing;
+mod media;
 mod memory;
+mod posts;
 mod reading;
 pub(crate) mod refusal;
 mod retro;
@@ -131,6 +133,11 @@ pub struct ToolContext {
     pub preview: Option<Arc<dyn RunningPreview>>,
     /// The project's store, files, and repository.
     pub deps: Arc<ToolDeps>,
+    /// The daemon the session is registered with, which a tool that calls a service as Farik
+    /// reaches the agent's connections through (`call_as`). Weak, since the daemon holds the
+    /// sessions that hold a context: a strong reference would be a cycle. A tool that finds it
+    /// gone answers that the service cannot be reached.
+    pub daemon: std::sync::Weak<crate::daemon::DaemonState>,
 }
 
 /// One tool as an agent is shown it.
@@ -345,6 +352,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             WriteWorkspace,
             "End your session with a marketing plan for the owner to approve: its dates, budget by channel and campaign, post slots and measures. Farik checks it, writes its text to docs/marketing/plans/ and the owner decides; end your turn after proposing.",
         ),
+        tool::<posts::SchedulePostInput>(
+            "farik_schedule_post",
+            Read,
+            "Write a social post for one channel. With a slot of the active marketing plan it goes out without asking, shown to the owner with a Stop button and handed to Buffer an hour before its time; without a slot it waits for the owner's yes. Read the channel's id with Buffer's list_channels first.",
+        ),
     ]
 });
 
@@ -444,6 +456,7 @@ pub async fn call_tool(
         "farik_git_commit" => git::commit(&call, &parse(input)?),
         "farik_git_push" => nothing_in(input).and_then(|()| git::push(&call)),
         "farik_propose_marketing_plan" => marketing::propose_plan(&call, &parse(input)?),
+        "farik_schedule_post" => posts::schedule_post(&call, parse(input)?).await,
         _ => Err(ToolError::Failed {
             detail: format!("{name} is listed and has no handler"),
         }),
@@ -663,6 +676,7 @@ mod tests {
             "farik_git_commit",
             "farik_git_push",
             "farik_propose_marketing_plan",
+            "farik_schedule_post",
         ];
         assert_eq!(names, expected);
         let tier = |name: &str| {

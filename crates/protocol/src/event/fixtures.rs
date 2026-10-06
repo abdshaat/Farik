@@ -161,6 +161,40 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::MarketingPlanApproved
         | EventKind::MarketingPlanReturned
         | EventKind::MarketingPlanEnded => a_marketing_plan_body_wire(kind),
+        EventKind::SocialPostScheduled
+        | EventKind::SocialPostRequested
+        | EventKind::SocialPostSent
+        | EventKind::SocialPostStopped
+        | EventKind::SocialPostMissed
+        | EventKind::SocialPostFailed => a_social_post_body_wire(kind),
+    }
+}
+
+/// A `social_post.` body: Kai's Instagram post for slot `post-1` of MP-1, scheduled in the plan,
+/// or what happens to a post.
+fn a_social_post_body_wire(kind: EventKind) -> Value {
+    let post = || {
+        json!({
+            "channel": "instagram",
+            "buffer_channel": "chan-1",
+            "text": "We open on Wednesday.",
+            "media": [{ "url": "https://cdn.example.com/open.png", "kind": "image" }],
+            "at": "2026-11-04T09:00:00-05:00",
+        })
+    };
+    match kind {
+        EventKind::SocialPostScheduled => {
+            let mut body = post();
+            body["approved_by"] = json!("plan");
+            body["plan"] = json!("MP-1");
+            body["slot"] = json!("post-1");
+            body
+        }
+        EventKind::SocialPostRequested => post(),
+        EventKind::SocialPostSent => json!({ "post": 7, "buffer_post": "buf-1" }),
+        EventKind::SocialPostStopped => json!({ "post": 7, "by": "owner" }),
+        EventKind::SocialPostMissed => json!({ "post": 7, "why": "not_running" }),
+        _ => json!({ "post": 7, "reason": "Buffer did not take it: \u{201c}no\u{201d}" }),
     }
 }
 

@@ -48,6 +48,13 @@ pub use crate::generated::event::{
 };
 /// The channel's vocabularies, named for what they are rather than for the body they sit in.
 pub use crate::generated::event::{MessagePostedBodyKind as MessageKind, Thread};
+/// The bodies of the six `social_post.` kinds, with the vocabularies they repeat.
+pub use crate::generated::event::{
+    SocialPostChannel, SocialPostDetails, SocialPostFailedBody, SocialPostMedia,
+    SocialPostMediaKind, SocialPostMissedBody, SocialPostMissedBodyWhy, SocialPostRequestedBody,
+    SocialPostScheduledBody, SocialPostScheduledBodyApprovedBy, SocialPostSentBody,
+    SocialPostStoppedBody, SocialPostStoppedBodyBy,
+};
 
 use crate::generated::event::FarikEvent as EventWire;
 
@@ -169,6 +176,12 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::MarketingPlanApproved => "marketingPlanApprovedBody",
         EventKind::MarketingPlanReturned => "marketingPlanReturnedBody",
         EventKind::MarketingPlanEnded => "marketingPlanEndedBody",
+        EventKind::SocialPostScheduled => "socialPostScheduledBody",
+        EventKind::SocialPostRequested => "socialPostRequestedBody",
+        EventKind::SocialPostSent => "socialPostSentBody",
+        EventKind::SocialPostStopped => "socialPostStoppedBody",
+        EventKind::SocialPostMissed => "socialPostMissedBody",
+        EventKind::SocialPostFailed => "socialPostFailedBody",
     }
 }
 
@@ -212,6 +225,8 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::MarketingPlanProposed
             | EventKind::MarketingPlanApproved
             | EventKind::MarketingPlanReturned
+            | EventKind::SocialPostScheduled
+            | EventKind::SocialPostRequested
     )
 }
 
@@ -231,7 +246,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// `connector.` kinds: only the human connects a server, and `agent` names whose it is, not who
 /// acted. `marketing_plan.proposed` names the Marketing Specialist in `proposed_by`; the other
 /// three `marketing_plan.` kinds name no one in the body: the owner decided or ended a plan, or
-/// Farik ended one by its dates, and their envelope names no agent and no session.
+/// Farik ended one by its dates, and their envelope names no agent and no session. The six
+/// `social_post.` kinds name no one in the body either: the agent that wrote a post is on the
+/// envelope of `scheduled` and `requested`, and the other four are the owner's or Farik's.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -298,13 +315,19 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::SkillConfirmed(_)
         | EventBody::MarketingPlanApproved(_)
         | EventBody::MarketingPlanReturned(_)
-        | EventBody::MarketingPlanEnded(_) => None,
+        | EventBody::MarketingPlanEnded(_)
+        | EventBody::SocialPostScheduled(_)
+        | EventBody::SocialPostRequested(_)
+        | EventBody::SocialPostSent(_)
+        | EventBody::SocialPostStopped(_)
+        | EventBody::SocialPostMissed(_)
+        | EventBody::SocialPostFailed(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 65] = [
+pub const EVERY_KIND: [EventKind; 71] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -370,6 +393,12 @@ pub const EVERY_KIND: [EventKind; 65] = [
     EventKind::MarketingPlanApproved,
     EventKind::MarketingPlanReturned,
     EventKind::MarketingPlanEnded,
+    EventKind::SocialPostScheduled,
+    EventKind::SocialPostRequested,
+    EventKind::SocialPostSent,
+    EventKind::SocialPostStopped,
+    EventKind::SocialPostMissed,
+    EventKind::SocialPostFailed,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -604,6 +633,25 @@ pub enum EventBody {
     /// An approved marketing plan ended.
     #[serde(rename = "marketing_plan.ended")]
     MarketingPlanEnded(MarketingPlanEndedBody),
+    /// A post is going out: the Marketing Specialist scheduled it in the active plan, or the
+    /// owner allowed one that was requested.
+    #[serde(rename = "social_post.scheduled")]
+    SocialPostScheduled(SocialPostScheduledBody),
+    /// The Marketing Specialist wrote a post outside the plan, which waits for the owner.
+    #[serde(rename = "social_post.requested")]
+    SocialPostRequested(SocialPostRequestedBody),
+    /// Farik handed a post to Buffer.
+    #[serde(rename = "social_post.sent")]
+    SocialPostSent(SocialPostSentBody),
+    /// A post will not go out: the owner stopped or did not allow it, or its plan ended.
+    #[serde(rename = "social_post.stopped")]
+    SocialPostStopped(SocialPostStoppedBody),
+    /// A post was not handed over in time.
+    #[serde(rename = "social_post.missed")]
+    SocialPostMissed(SocialPostMissedBody),
+    /// Buffer did not take a post.
+    #[serde(rename = "social_post.failed")]
+    SocialPostFailed(SocialPostFailedBody),
 }
 
 impl EventBody {
@@ -676,6 +724,12 @@ impl EventBody {
             Self::MarketingPlanApproved(_) => EventKind::MarketingPlanApproved,
             Self::MarketingPlanReturned(_) => EventKind::MarketingPlanReturned,
             Self::MarketingPlanEnded(_) => EventKind::MarketingPlanEnded,
+            Self::SocialPostScheduled(_) => EventKind::SocialPostScheduled,
+            Self::SocialPostRequested(_) => EventKind::SocialPostRequested,
+            Self::SocialPostSent(_) => EventKind::SocialPostSent,
+            Self::SocialPostStopped(_) => EventKind::SocialPostStopped,
+            Self::SocialPostMissed(_) => EventKind::SocialPostMissed,
+            Self::SocialPostFailed(_) => EventKind::SocialPostFailed,
         }
     }
 }
@@ -1590,7 +1644,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 65);
+        assert_eq!(EVERY_KIND.len(), 71);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);
@@ -1696,5 +1750,158 @@ mod tests {
                 field: "updated_by".to_string()
             }
         );
+    }
+
+    /// `kind`'s fixture event with `change` applied to its body.
+    fn post_event(
+        kind: EventKind,
+        change: impl FnOnce(&mut serde_json::Value),
+    ) -> serde_json::Value {
+        let mut input = an_event_wire(kind);
+        change(&mut input["body"]);
+        input
+    }
+
+    #[test]
+    fn reads_the_social_post_bodies_with_their_optional_fields() {
+        // The owner's own allowance of a request: `post`, no plan and no slot.
+        let allowed = post_event(EventKind::SocialPostScheduled, |body| {
+            body["approved_by"] = json!("owner");
+            body["post"] = json!(42);
+            body.as_object_mut().expect("an object").remove("plan");
+            body.as_object_mut().expect("an object").remove("slot");
+        });
+        // A YouTube and a Pinterest post, with the details each needs.
+        let youtube = post_event(EventKind::SocialPostRequested, |body| {
+            body["channel"] = json!("youtube");
+            body["details"] = json!({ "title": "Opening day", "category_id": "22" });
+        });
+        let pinterest = post_event(EventKind::SocialPostRequested, |body| {
+            body["channel"] = json!("pinterest");
+            body["details"] = json!({ "board": "board-1" });
+        });
+        let taken_back = post_event(EventKind::SocialPostStopped, |body| {
+            body["taken_back"] = json!(true);
+        });
+        let declined = post_event(EventKind::SocialPostStopped, |body| {
+            body["by"] = json!("declined");
+            body["note"] = json!("Not this week");
+        });
+        for input in [allowed, youtube, pinterest, taken_back, declined] {
+            let event = event_from_value(&input).expect("valid");
+            assert_eq!(event_to_value(&event), input);
+        }
+        // A time keeps its offset: the slot's day is the date in it.
+        let event =
+            event_from_value(&an_event_wire(EventKind::SocialPostScheduled)).expect("valid");
+        let EventBody::SocialPostScheduled(body) = &event.body else {
+            panic!("a scheduled post");
+        };
+        assert_eq!(body.at.as_str(), "2026-11-04T09:00:00-05:00");
+    }
+
+    #[test]
+    fn refuses_a_social_post_body_that_breaks_a_rule_of_its_kind() {
+        let bad = |kind, change: &dyn Fn(&mut serde_json::Value)| {
+            let input = post_event(kind, |body| change(body));
+            let errors = refusal(&input);
+            assert_eq!(errors.len(), 1, "{input}: {errors:?}");
+            assert!(errors[0].path.starts_with("/body"), "{}", errors[0].path);
+        };
+        let scheduled = EventKind::SocialPostScheduled;
+        let requested = EventKind::SocialPostRequested;
+        // Who approved a post: the plan or the owner, and nothing else yet (step 10h adds auto).
+        bad(scheduled, &|body| {
+            body["approved_by"] = json!("auto");
+        });
+        // At most four pictures or clips, each an image or a video.
+        let media = |count: usize| -> serde_json::Value {
+            json!((0..count)
+                .map(|n| json!({ "url": format!("https://cdn.example.com/{n}.png"), "kind": "image" }))
+                .collect::<Vec<_>>())
+        };
+        bad(scheduled, &|body| {
+            body["media"] = media(5);
+        });
+        bad(scheduled, &|body| {
+            body["media"][0]["kind"] = json!("audio");
+        });
+        assert!(event_from_value(&post_event(scheduled, |body| body["media"] = media(4))).is_ok());
+        // A time with its offset, and Buffer's id of the channel and nothing it could be confused
+        // with.
+        bad(scheduled, &|body| {
+            body["at"] = json!("2026-11-04T09:00:00");
+        });
+        bad(scheduled, &|body| {
+            body["at"] = json!("tomorrow at nine");
+        });
+        bad(requested, &|body| {
+            body["buffer_channel"] = json!("chan 1");
+        });
+        bad(requested, &|body| {
+            body["text"] = json!("");
+        });
+        bad(requested, &|body| {
+            body["channel"] = json!("myspace");
+        });
+        // The post's number counts from one.
+        bad(scheduled, &|body| {
+            body["post"] = json!(0);
+        });
+        // A request carries no approval.
+        bad(requested, &|body| {
+            body["approved_by"] = json!("owner");
+        });
+        // The details of YouTube: a title of at most 100 characters and one of Buffer's categories.
+        let youtube =
+            |title: String, category: &str| json!({ "title": title, "category_id": category });
+        bad(requested, &|body| {
+            body["details"] = youtube("t".repeat(101), "22");
+        });
+        bad(requested, &|body| {
+            body["details"] = youtube("Title".to_string(), "3");
+        });
+        bad(requested, &|body| {
+            body["details"] = json!({ "board": "b", "title": "t" });
+        });
+        bad(requested, &|body| {
+            body["details"] = json!({ "board": "no spaces" });
+        });
+        // What happens to a post is one of the words of its kind.
+        bad(EventKind::SocialPostStopped, &|body| {
+            body["by"] = json!("robot");
+        });
+        bad(EventKind::SocialPostMissed, &|body| {
+            body["why"] = json!("forgot");
+        });
+        bad(EventKind::SocialPostSent, &|body| {
+            body["buffer_post"] = json!("");
+        });
+        bad(EventKind::SocialPostFailed, &|body| {
+            body["reason"] = json!("");
+        });
+    }
+
+    #[test]
+    fn a_social_post_that_is_written_or_requested_names_its_task() {
+        for kind in [
+            EventKind::SocialPostScheduled,
+            EventKind::SocialPostRequested,
+        ] {
+            assert!(super::is_about_one_contract(kind), "{kind:?}");
+            let mut input = an_event_wire(kind);
+            input.as_object_mut().expect("an object").remove("task_id");
+            let errors = refusal(&input);
+            assert_eq!(errors.len(), 1, "{kind:?}: {errors:?}");
+        }
+        for kind in [
+            EventKind::SocialPostSent,
+            EventKind::SocialPostStopped,
+            EventKind::SocialPostMissed,
+            EventKind::SocialPostFailed,
+        ] {
+            assert!(!super::is_about_one_contract(kind), "{kind:?}");
+            event_from_value(&an_event_wire(kind)).expect("about no one contract");
+        }
     }
 }

@@ -568,7 +568,7 @@ impl DaemonState {
     /// session, and executor as they stand now, and the project's tools; `None` for a session the
     /// daemon does not answer for. The MCP server and a replayed session both take this path.
     #[must_use]
-    pub fn tool_context(&self, session_id: &str) -> Option<ToolContext> {
+    pub fn tool_context(self: &Arc<Self>, session_id: &str) -> Option<ToolContext> {
         let deps = self.deps.as_ref()?;
         self.sessions().get(session_id).map(|session| ToolContext {
             agent_id: session.registration.agent_id.clone(),
@@ -582,6 +582,7 @@ impl DaemonState {
             connectors: session.registration.connectors.clone(),
             preview: session.registration.preview.clone(),
             deps: Arc::clone(deps),
+            daemon: Arc::downgrade(self),
         })
     }
 

@@ -704,7 +704,15 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::SkillChanged(_)
         | EventBody::SkillRemoved(_)
         | EventBody::SkillConfirmed(_)
-        | EventBody::MarketingPlanEnded(_) => Ok(()),
+        | EventBody::MarketingPlanEnded(_)
+        // A post is folded from the log when it is asked for, like a marketing plan, and holds no
+        // task: a requested post waits on the owner while its task goes on.
+        | EventBody::SocialPostScheduled(_)
+        | EventBody::SocialPostRequested(_)
+        | EventBody::SocialPostSent(_)
+        | EventBody::SocialPostStopped(_)
+        | EventBody::SocialPostMissed(_)
+        | EventBody::SocialPostFailed(_) => Ok(()),
     }
 }
 

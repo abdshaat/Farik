@@ -220,6 +220,7 @@ impl TestProject {
             connectors: Vec::new(),
             preview: None,
             deps: Arc::clone(&self.deps),
+            daemon: std::sync::Weak::new(),
         }
     }
 
