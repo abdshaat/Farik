@@ -136,7 +136,7 @@ Files: `connectors.rs`; `fixture_mcp.rs` (step 01's: the `sh` server of `fixture
 - `an_http_server_gets_the_bearer`: the HTTP tool answers `Bearer <the bearer given>`. RED.
 - `a_call_gives_up_after_thirty_seconds`: on the paused clock, the sleeping tool is `ConnectorError::Timeout` once the 30-second constant passes (`gives_up_after_thirty_seconds`, `fixture_mcp.rs:264`, is the listing's). RED.
 
-- [ ] `feat(runtime): let Farik call a connector's tool itself`
+- [x] `feat(runtime): let Farik call a connector's tool itself`
 
 ### Task 2: Farik's own calls, through an agent's connection
 
@@ -266,3 +266,5 @@ Then, by the founder, with Buffer connected again and a test Instagram or X chan
 ## Execution notes
 
 Task 0: the boards landed in 47781e1 with 08c's; the founder approved them as drawn on 2026-10-05.
+
+Task 1: RED was a compile failure of the five new tests (`call_tool` and `ConnectorError::ToolError` did not exist). Guards, each mutation reverted: preferring the text over structured content, not wrapping plain text, not cutting a tool error, reading an error result as an answer (each fails its test), keeping the environment (`env_clear` removed), not sending the bearer, and no time limit on a call, each fail the test named for it. `list_tools` and `call_tool` now share one private `connect`. A result with no text and no structured content answers `{ "text": "" }`. `ConnectorError::ToolError` is not one a listing meets, so the two listing matches (`daemon/team.rs`, `cli/src/connector.rs`) say only "its tools could not be listed". The in-process HTTP fixture turns the SSE keep-alive off: on a paused clock each ping is due at once and the stream answers in a loop, so the clock only moved after 15 real seconds.

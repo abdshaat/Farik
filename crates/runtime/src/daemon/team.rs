@@ -769,6 +769,9 @@ fn not_listed(error: ConnectorError) -> Failure {
             }
             ConnectorError::KeyMissing(name) => format!("the key {name} has no value"),
             ConnectorError::Failed(why) => format!("its tools could not be listed: {why}"),
+            // A listing calls no tool, so this is not one it can meet; it says no more than the
+            // service did not list.
+            ConnectorError::ToolError { .. } => "its tools could not be listed".to_string(),
         },
     )
 }

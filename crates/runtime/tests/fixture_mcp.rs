@@ -10,10 +10,11 @@ use axum::http::request::Parts;
 use farik_core::governor::permissions::ConnectorTag;
 use farik_core::team::{CustomServer, CustomTransport};
 use farik_runtime::claude::Secret;
-use farik_runtime::connectors::{ConnectorError, ListedTool, list_tools};
+use farik_runtime::connectors::{ConnectorError, ListedTool, call_tool, list_tools};
 use rmcp::model::{
-    Implementation, InitializeResult, JsonObject, ListToolsResult, PaginatedRequestParams,
-    ServerCapabilities, Tool,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+    InitializeResult, JsonObject, ListToolsResult, PaginatedRequestParams, ServerCapabilities,
+    Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -152,10 +153,37 @@ async fn the_server_sees_its_keys_and_not_the_model_key() {
     );
 }
 
-/// An HTTP MCP server with one tool, whose description is the `Authorization` header it was
-/// listed with.
+/// An HTTP MCP server. Its tool `whoami` lists with the `Authorization` header it was listed with
+/// as its description; the tools below answer when called: `structured` structured content that
+/// differs from its text, `json_text` the text `{"b":2}`, `plain_text` the text `hello`,
+/// `long_error` an error result of 2,000 characters, `rpc_error` a JSON-RPC error of 2,000
+/// characters, `authorization` the `Authorization` header it was called with, and `sleeps` a call
+/// that does not answer within the minute, after setting `sleeping`.
 #[derive(Clone)]
-struct HttpFixture;
+struct HttpFixture {
+    sleeping: Arc<std::sync::atomic::AtomicBool>,
+}
+
+const FIXTURE_TOOLS: [&str; 8] = [
+    "whoami",
+    "structured",
+    "json_text",
+    "plain_text",
+    "long_error",
+    "rpc_error",
+    "authorization",
+    "sleeps",
+];
+
+fn authorization_of(context: &RequestContext<RoleServer>) -> String {
+    context
+        .extensions
+        .get::<Parts>()
+        .and_then(|parts| parts.headers.get("authorization"))
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("none")
+        .to_string()
+}
 
 impl ServerHandler for HttpFixture {
     fn get_info(&self) -> InitializeResult {
@@ -169,27 +197,75 @@ impl ServerHandler for HttpFixture {
         _request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        let seen = context
-            .extensions
-            .get::<Parts>()
-            .and_then(|parts| parts.headers.get("authorization"))
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("none")
-            .to_string();
-        std::future::ready(Ok(ListToolsResult::with_all_items(vec![Tool::new(
-            "whoami",
-            seen,
-            Arc::new(JsonObject::new()),
-        )])))
+        let seen = authorization_of(&context);
+        std::future::ready(Ok(ListToolsResult::with_all_items(
+            FIXTURE_TOOLS
+                .iter()
+                .map(|name| {
+                    let description = if *name == "whoami" {
+                        seen.clone()
+                    } else {
+                        format!("The fixture's {name}.")
+                    };
+                    Tool::new(*name, description, Arc::new(JsonObject::new()))
+                })
+                .collect(),
+        )))
+    }
+
+    fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<CallToolResponse, ErrorData>> + Send + '_ {
+        let seen = authorization_of(&context);
+        let text = |text: &str| vec![ContentBlock::text(text)];
+        async move {
+            Ok(match request.name.as_ref() {
+                "structured" => {
+                    let mut result = CallToolResult::success(text("not this"));
+                    result.structured_content = Some(serde_json::json!({ "a": 1 }));
+                    result
+                }
+                "json_text" => CallToolResult::success(text(r#"{"b":2}"#)),
+                "plain_text" => CallToolResult::success(text("hello")),
+                "long_error" => CallToolResult::error(text(&"e".repeat(2_000))),
+                "rpc_error" => {
+                    return Err(ErrorData::invalid_params("r".repeat(2_000), None));
+                }
+                "authorization" => CallToolResult::success(text(&seen)),
+                "sleeps" => {
+                    self.sleeping
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    CallToolResult::success(text("too late"))
+                }
+                other => return Err(ErrorData::invalid_params(format!("no tool {other}"), None)),
+            }
+            .into())
+        }
     }
 }
 
 /// Serves `HttpFixture` on a free local port, and answers its `/mcp` address.
 async fn http_server() -> String {
+    http_server_watched(Arc::default()).await
+}
+
+/// `http_server`, whose tool `sleeps` sets `sleeping` when a call reaches it.
+async fn http_server_watched(sleeping: Arc<std::sync::atomic::AtomicBool>) -> String {
+    // No keep-alive pings: on a paused clock each one is due at once, and the stream answers
+    // them in a loop that holds the runtime busy, so the clock only moves after 15 real seconds.
+    let mut config = StreamableHttpServerConfig::default();
+    config.sse_keep_alive = None;
     let service = StreamableHttpService::new(
-        || Ok(HttpFixture),
+        move || {
+            Ok(HttpFixture {
+                sleeping: Arc::clone(&sleeping),
+            })
+        },
         Arc::new(LocalSessionManager::default()),
-        StreamableHttpServerConfig::default(),
+        config,
     );
     let router = axum::Router::new().route_service("/mcp", service);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -198,6 +274,22 @@ async fn http_server() -> String {
     let address = listener.local_addr().expect("its address");
     tokio::spawn(async move { axum::serve(listener, router).await });
     format!("http://{address}/mcp")
+}
+
+/// The fixture server at `url`, with no header, key or sign-in of its own.
+fn http_fixture_at(url: String) -> CustomServer {
+    CustomServer {
+        name: "fixture".to_string(),
+        transport: CustomTransport::Http {
+            url,
+            headers: BTreeMap::new(),
+            oauth: None,
+        },
+        credential_keys: Vec::new(),
+        tools: BTreeMap::new(),
+        kit: false,
+        allowances: BTreeMap::new(),
+    }
 }
 
 #[tokio::test]
@@ -345,6 +437,164 @@ async fn a_servers_own_error_text_is_not_repeated() {
     );
     assert!(!said.contains("k-secret-value"), "{said}");
     assert!(!said.contains("bad key"), "{said}");
+}
+
+/// No arguments for a tool that takes none.
+fn no_arguments() -> serde_json::Map<String, serde_json::Value> {
+    serde_json::Map::new()
+}
+
+#[tokio::test]
+async fn calls_a_tool_and_reads_its_answer() {
+    let server = http_fixture_at(http_server().await);
+    let called = |tool: &'static str| {
+        let server = server.clone();
+        async move {
+            call_tool(
+                &server,
+                &BTreeMap::new(),
+                None,
+                &own_folder(),
+                std::path::Path::new("farik"),
+                tool,
+                no_arguments(),
+            )
+            .await
+        }
+    };
+    // Structured content is the answer, whatever the text says.
+    assert_eq!(
+        called("structured").await,
+        Ok(serde_json::json!({ "a": 1 }))
+    );
+    // Else the first text block, read as JSON when it is.
+    assert_eq!(called("json_text").await, Ok(serde_json::json!({ "b": 2 })));
+    assert_eq!(
+        called("plain_text").await,
+        Ok(serde_json::json!({ "text": "hello" }))
+    );
+}
+
+#[tokio::test]
+async fn a_tool_error_keeps_its_words_cut() {
+    let server = http_fixture_at(http_server().await);
+    for (tool, kept) in [("long_error", "e"), ("rpc_error", "r")] {
+        let called = call_tool(
+            &server,
+            &BTreeMap::new(),
+            None,
+            &own_folder(),
+            std::path::Path::new("farik"),
+            tool,
+            no_arguments(),
+        )
+        .await;
+        assert_eq!(
+            called,
+            Err(ConnectorError::ToolError {
+                text: kept.repeat(500)
+            }),
+            "{tool}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_stdio_server_gets_only_its_keys() {
+    // The model keys must be in this process's own environment, which a test cannot set
+    // (`unsafe_code` is forbidden): without them, the test runs itself as a child that has them.
+    let model_keys = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"];
+    if model_keys.iter().any(|key| std::env::var_os(key).is_none()) {
+        let status = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+            .args([
+                "--exact",
+                "a_stdio_server_gets_only_its_keys",
+                "--nocapture",
+            ])
+            .envs(model_keys.map(|key| (key, "model-secret")))
+            .status()
+            .expect("the test runs itself");
+        assert!(status.success(), "the child run failed");
+        return;
+    }
+    let server = stdio_server("call-env", STDIO_SERVER, &["API_KEY"]);
+    let folder = scratch("call-env-folder");
+    let answer = call_tool(
+        &server,
+        &keys(&[("API_KEY", "k")]),
+        None,
+        &folder,
+        std::path::Path::new("farik"),
+        "env",
+        no_arguments(),
+    )
+    .await
+    .expect("the tool answers");
+    assert_eq!(
+        answer["text"],
+        format!(
+            "PWD={} HOME=set API_KEY=k ANTHROPIC_API_KEY= CLAUDE_CODE_OAUTH_TOKEN=",
+            folder.display()
+        )
+    );
+}
+
+#[tokio::test]
+async fn an_http_server_gets_the_bearer() {
+    let server = http_fixture_at(http_server().await);
+    let answer = call_tool(
+        &server,
+        &BTreeMap::new(),
+        Some(&Secret::new("tok-given".to_string())),
+        &own_folder(),
+        std::path::Path::new("farik"),
+        "authorization",
+        no_arguments(),
+    )
+    .await;
+    assert_eq!(
+        answer,
+        Ok(serde_json::json!({ "text": "Bearer tok-given" }))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_call_gives_up_after_thirty_seconds() {
+    let sleeping = Arc::<std::sync::atomic::AtomicBool>::default();
+    let server = http_fixture_at(http_server_watched(Arc::clone(&sleeping)).await);
+    let started = tokio::time::Instant::now();
+    // Paused time does not move while a blocking task runs: this one holds it until the call has
+    // reached the tool, so the thirty seconds are the call's and not the connecting's.
+    let watched = Arc::clone(&sleeping);
+    let (no_keys, folder) = (BTreeMap::new(), own_folder());
+    let (called, reached) = tokio::join!(
+        call_tool(
+            &server,
+            &no_keys,
+            None,
+            &folder,
+            std::path::Path::new("farik"),
+            "sleeps",
+            no_arguments(),
+        ),
+        tokio::task::spawn_blocking(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !watched.load(std::sync::atomic::Ordering::SeqCst) {
+                if std::time::Instant::now() > deadline {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            true
+        })
+    );
+    assert!(reached.expect("the watch ends"), "the call never arrived");
+    assert_eq!(called, Err(ConnectorError::Timeout));
+    let waited = started.elapsed();
+    assert!(
+        waited >= Duration::from_secs(30) && waited < Duration::from_secs(31),
+        "{waited:?}"
+    );
 }
 
 /// The Developer's kit with the stdio fixture server as its one service, `fixture`, tagging

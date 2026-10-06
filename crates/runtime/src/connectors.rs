@@ -502,6 +502,13 @@ pub enum ConnectorError {
     KeyMissing(String),
     /// Anything else, said in a sentence.
     Failed(String),
+    /// A tool Farik called itself ([`call_tool`]) answered that it failed: a result marked as an
+    /// error, or a JSON-RPC error. The service's own words, cut at 500 characters, which Farik
+    /// passes on only as untrusted text.
+    ToolError {
+        /// What the service said.
+        text: String,
+    },
 }
 
 /// A tool a server listed.
@@ -808,50 +815,11 @@ pub async fn list_tools(
     folder: &std::path::Path,
     farik: &std::path::Path,
 ) -> Result<Vec<ListedTool>, ConnectorError> {
-    use rmcp::ServiceExt as _;
-
-    let failed = |what: &str, error: &dyn fmt::Display| {
-        ConnectorError::Failed(format!("{} {what}: {error}", server.name))
-    };
     // What failed, without the server's own words: an MCP error may quote what it was sent, keys
     // among it, and this reaches the person and the RPC reply (carry M12).
     let plain = |what: &str| ConnectorError::Failed(format!("{} {what}", server.name));
     let listing = async {
-        let client = match &server.transport {
-            CustomTransport::Stdio { command, args } => {
-                let mut process = tokio::process::Command::new(program(command, args, farik));
-                // rmcp kills the server when the transport is dropped, as on the timeout below;
-                // this is the same promise again, should rmcp stop keeping it.
-                process
-                    .args(args)
-                    .current_dir(folder)
-                    .env_clear()
-                    .kill_on_drop(true);
-                for name in KEPT_ENV {
-                    if let Some(value) = std::env::var_os(name) {
-                        process.env(name, value);
-                    }
-                }
-                for (name, value) in named_keys(server, keys)? {
-                    process.env(name, value.expose());
-                }
-                let transport = rmcp::transport::TokioChildProcess::builder(process)
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
-                    .map_err(|error| failed("could not be started", &error))?
-                    .0;
-                ().serve(transport).await
-            }
-            CustomTransport::Http { url, headers, .. } => {
-                let mut config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str())
-                    .custom_headers(filled_headers(headers, keys)?);
-                if let Some(bearer) = bearer {
-                    config = config.auth_header(bearer.expose());
-                }
-                ().serve(rmcp::transport::StreamableHttpClientTransport::from_config(config)).await
-            }
-        }
-        .map_err(|_| plain("did not answer as an MCP server"))?;
+        let client = connect(server, keys, bearer, folder, farik).await?;
         let tools = client
             .list_all_tools()
             .await
@@ -872,6 +840,129 @@ pub async fn list_tools(
     tokio::time::timeout(LISTING_TIMEOUT, listing)
         .await
         .unwrap_or(Err(ConnectorError::Timeout))
+}
+
+/// The most characters of a service's own words a [`ConnectorError::ToolError`] keeps.
+const TOOL_ERROR_CHARACTERS: usize = 500;
+
+/// Calls `tool` of `server` with `arguments`, as Farik itself, not as an agent: started or reached
+/// as [`list_tools`] does it (a stdio server in `folder` with only [`KEPT_ENV`] and its keys, an
+/// http one with its headers filled from `keys` and `bearer` as its `Authorization`), one MCP
+/// session for the call, opened, called and cancelled, all within thirty seconds. `farik` is the
+/// program Farik's own connector runs ([`program`]).
+///
+/// The answer is the result's structured content when it has some, else its first text block read
+/// as JSON, else `{ "text": <that text> }`. The arguments are Farik's own and hold no key.
+///
+/// # Errors
+///
+/// As [`list_tools`] for starting, reaching and the thirty seconds; [`ConnectorError::ToolError`]
+/// when the result is marked as an error or the service answers with a JSON-RPC error.
+pub async fn call_tool(
+    server: &CustomServer,
+    keys: &BTreeMap<String, Secret>,
+    bearer: Option<&Secret>,
+    folder: &std::path::Path,
+    farik: &std::path::Path,
+    tool: &str,
+    arguments: serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Value, ConnectorError> {
+    let call = async {
+        let client = connect(server, keys, bearer, folder, farik).await?;
+        let answered = client
+            .call_tool(
+                rmcp::model::CallToolRequestParams::new(tool.to_string()).with_arguments(arguments),
+            )
+            .await;
+        let _ = client.cancel().await;
+        match answered {
+            Ok(result) => read_result(&result),
+            Err(rmcp::service::ServiceError::McpError(error)) => Err(tool_error(&error.message)),
+            Err(_) => Err(ConnectorError::Failed(format!(
+                "{} did not answer the call",
+                server.name
+            ))),
+        }
+    };
+    tokio::time::timeout(LISTING_TIMEOUT, call)
+        .await
+        .unwrap_or(Err(ConnectorError::Timeout))
+}
+
+/// A [`ConnectorError::ToolError`] of the service's own `words`, cut.
+fn tool_error(words: &str) -> ConnectorError {
+    ConnectorError::ToolError {
+        text: words.chars().take(TOOL_ERROR_CHARACTERS).collect(),
+    }
+}
+
+/// What a tool's result says, as [`call_tool`] answers it.
+fn read_result(result: &rmcp::model::CallToolResult) -> Result<serde_json::Value, ConnectorError> {
+    let text = result
+        .content
+        .iter()
+        .find_map(|block| block.as_text())
+        .map(|block| block.text.as_str());
+    if result.is_error == Some(true) {
+        return Err(tool_error(text.unwrap_or_default()));
+    }
+    if let Some(structured) = &result.structured_content {
+        return Ok(structured.clone());
+    }
+    let text = text.unwrap_or_default();
+    Ok(serde_json::from_str(text).unwrap_or_else(|_| serde_json::json!({ "text": text })))
+}
+
+/// Starts or reaches `server` as [`list_tools`] and [`call_tool`] do, and opens an MCP session
+/// with it. Not bounded in time: the callers bound it.
+async fn connect(
+    server: &CustomServer,
+    keys: &BTreeMap<String, Secret>,
+    bearer: Option<&Secret>,
+    folder: &std::path::Path,
+    farik: &std::path::Path,
+) -> Result<rmcp::service::RunningService<rmcp::RoleClient, ()>, ConnectorError> {
+    use rmcp::ServiceExt as _;
+
+    let failed = |what: &str, error: &dyn fmt::Display| {
+        ConnectorError::Failed(format!("{} {what}: {error}", server.name))
+    };
+    let plain = |what: &str| ConnectorError::Failed(format!("{} {what}", server.name));
+    match &server.transport {
+        CustomTransport::Stdio { command, args } => {
+            let mut process = tokio::process::Command::new(program(command, args, farik));
+            // rmcp kills the server when the transport is dropped, as on the timeout of its
+            // callers; this is the same promise again, should rmcp stop keeping it.
+            process
+                .args(args)
+                .current_dir(folder)
+                .env_clear()
+                .kill_on_drop(true);
+            for name in KEPT_ENV {
+                if let Some(value) = std::env::var_os(name) {
+                    process.env(name, value);
+                }
+            }
+            for (name, value) in named_keys(server, keys)? {
+                process.env(name, value.expose());
+            }
+            let transport = rmcp::transport::TokioChildProcess::builder(process)
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|error| failed("could not be started", &error))?
+                .0;
+            ().serve(transport).await
+        }
+        CustomTransport::Http { url, headers, .. } => {
+            let mut config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str())
+                .custom_headers(filled_headers(headers, keys)?);
+            if let Some(bearer) = bearer {
+                config = config.auth_header(bearer.expose());
+            }
+            ().serve(rmcp::transport::StreamableHttpClientTransport::from_config(config)).await
+        }
+    }
+    .map_err(|_| plain("did not answer as an MCP server"))
 }
 
 #[cfg(test)]

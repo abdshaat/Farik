@@ -664,6 +664,8 @@ fn not_listed(error: &ConnectorError) -> String {
         ConnectorError::Timeout => "the server did not answer within thirty seconds".to_string(),
         ConnectorError::KeyMissing(name) => format!("the key {name} has no value"),
         ConnectorError::Failed(why) => format!("its tools could not be listed: {why}"),
+        // A listing calls no tool, so this is not one it can meet.
+        ConnectorError::ToolError { .. } => "its tools could not be listed".to_string(),
     }
 }
 
