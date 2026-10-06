@@ -31,13 +31,14 @@ Write each in a few lines, in plain words:
 7. **Picture style**: what a picture shows and how it is lit and cropped, with a do and a don't.
 8. **Voice**: three words, each with one thing the voice does and one thing it never does.
 
-## 3. Every asset has a source
+## 3. The logo and the pictures are the business's own
 
-Put each logo and picture under `docs/marketing/brand/assets/`, and next to its name in the kit
-write a line saying where it came from and when: the owner's own file, a picture you took from the
-business's site, or one made with a service. A picture made at Higgsfield or Recraft is copied in
-with the tool Farik gives you for it. If Farik refuses an address, give it to the owner in your
-completion note and ask them to add the file; never fetch it another way.
+The logo and the pictures belong to the business, not to you. The user puts them in
+`docs/marketing/brand/assets/`. In the kit, name each file and describe it: what it shows, where
+it is used, and where it came from and when (the owner's own file, or a picture from the
+business's site). When a logo or a picture the kit needs is missing, ask the user for it with
+`farik_ask_human` and end your turn. Never make a logo, and never put a generated picture in place
+of the brand's own.
 
 ## 4. Never another business's mark
 

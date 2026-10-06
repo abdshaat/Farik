@@ -1187,6 +1187,48 @@ mod tests {
         );
     }
 
+    /// The brand's logo and pictures are the business's own (ADR 0042, amended 2026-10-06): the
+    /// user puts them in the kit's assets folder, the kit names and describes each file, and a
+    /// missing one is asked of the user with `farik_ask_human`. The skill never has a picture a
+    /// creative service made copied into the kit, and never has a logo made.
+    #[test]
+    fn the_brand_kit_skill_leaves_the_logo_and_pictures_to_the_user() {
+        let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
+        let skill = kit
+            .skills
+            .iter()
+            .find(|skill| skill.name == "keeping-the-brand-kit")
+            .expect("the brand kit skill");
+        let text = &skill.session_files["SKILL.md"];
+        let section = text
+            .split("\n## ")
+            .find(|section| section.starts_with("3. "))
+            .expect("the skill's third section");
+        for phrase in [
+            "the business's own",
+            "docs/marketing/brand/assets/",
+            "farik_ask_human",
+            "never make a logo",
+            "generated picture",
+        ] {
+            assert!(
+                section.to_lowercase().contains(&phrase.to_lowercase()),
+                "section 3 lacks \"{phrase}\":\n{section}"
+            );
+        }
+        let lowered = text.to_lowercase();
+        for gone in [
+            "higgsfield",
+            "recraft",
+            "copied in",
+            "the tool farik gives you",
+        ] {
+            assert!(!lowered.contains(gone), "the skill still says \"{gone}\"");
+        }
+        assert!(text.len() < 6 * 1024, "{} bytes", text.len());
+        assert!(!text.contains(" @"), "no @ after a space");
+    }
+
     /// A role's service's server, its copy and its tags, by name.
     fn service(role: Role, name: &str) -> (CustomServer, SetupCopy) {
         let kit = load_kit(role).expect("a shipped kit");
