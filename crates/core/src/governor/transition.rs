@@ -760,6 +760,7 @@ mod tests {
             plan_in_sprints: false,
             dependencies: Vec::new(),
             designer_browser: DesignerBrowser::Ready,
+            private_folder_busy: false,
         }
     }
 

@@ -13,11 +13,12 @@ use farik_core::governor::task_status::is_terminal;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::marketing::plans_to_end;
-use farik_core::team::{Agent, AgentStatus, Team};
+use farik_core::team::{Agent, AgentStatus, Team, task_private_folder};
 use farik_protocol::event::{
     EscalationAgedBody, EventBody, EventIds, EventKind, FarikEvent, SessionStartedBodyPurpose,
     Thread, new_event,
 };
+use farik_store::baseline::copy_baseline;
 use farik_store::marketing::{marketing_plans, social_posts};
 use farik_store::{CostScope, EventQuery, Git, TaskProjection};
 
@@ -1302,9 +1303,11 @@ fn posts_heard_by(
 }
 
 /// Rule 7: a task `assigned` gets its worktree on its branch (5.14) from the integration branch,
-/// reused when it is already there, and is moved to `in_progress` as its assignee asks. No session
-/// starts: the next tick's rule 6 starts it. A task whose assignee is not active is passed over, as
-/// is one whose start the governor refused, now or since it was assigned.
+/// reused when it is already there, and is moved to `in_progress` as its assignee asks. A task in
+/// a private folder (6.6) has no worktree: it gets a copy of the folder under
+/// `.history/<task-id>/`, once, which its reviewer reads its changes against. No session starts:
+/// the next tick's rule 6 starts it. A task whose assignee is not active is passed over, as is one
+/// whose start the governor refused, now or since it was assigned.
 fn assigned(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -1324,12 +1327,19 @@ fn assigned(
     )? {
         return Ok(None);
     }
-    let worktree = worktree(deps, &row.task_id);
-    let branch = task_branch(&deps.tools.files.read_contract(&row.task_id)?);
-    if !worktree.is_dir() {
-        let git = &deps.tools.git;
-        git.create_worktree(&worktree, &branch, &integration_branch(team, git)?)?;
-    }
+    let contract = deps.tools.files.read_contract(&row.task_id)?;
+    let place = if let Some(folder) = task_private_folder(&contract) {
+        copy_baseline(&deps.tools.files.root().join(folder), &row.task_id)?;
+        format!("in its private folder {folder}")
+    } else {
+        let worktree = worktree(deps, &row.task_id);
+        let branch = task_branch(&contract);
+        if !worktree.is_dir() {
+            let git = &deps.tools.git;
+            git.create_worktree(&worktree, &branch, &integration_branch(team, git)?)?;
+        }
+        format!("in its worktree on {branch}")
+    };
     let outcome = deps.tools.transitions.request(
         &TransitionRequest {
             task_id: row.task_id.clone(),
@@ -1343,10 +1353,7 @@ fn assigned(
     match outcome {
         TransitionOutcome::Moved(_) => Ok(Some(TickReport::Acted {
             task_id: row.task_id.clone(),
-            what: format!(
-                "started it for {} in its worktree on {branch}",
-                assignee.id.as_str()
-            ),
+            what: format!("started it for {} {place}", assignee.id.as_str()),
         })),
         TransitionOutcome::Refused(_) => Ok(None),
     }
@@ -1454,8 +1461,9 @@ pub(super) fn has_room(
 
 /// Whether the governor would let `candidate` be assigned the task on the rules the orchestrator
 /// checks before asking, read from the governor's own context for the assignment: the open sprint's
-/// membership and budget, by the gate's own predicates, and every dependency accepted and
-/// integrated. A task that fails them is passed over, so that it is not asked about on every tick.
+/// membership and budget, by the gate's own predicates, that no other task holds the assignee's
+/// private folder, and every dependency accepted and integrated. A task that fails them is passed
+/// over, so that it is not asked about on every tick.
 fn assignable(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -1487,6 +1495,7 @@ fn assignable(
     };
     let states = &assignment.dependencies;
     Ok(fits_the_open_sprint(contract, &assignment)
+        && !assignment.private_folder_busy
         && states.len() == contract.dependencies.len()
         && states
             .iter()
@@ -1872,6 +1881,128 @@ mod tests {
             }
         );
         assert!(adapter.started().is_empty());
+    }
+
+    /// A harness whose team also has two Finance Specialists, `fin` and `fin-2`, each of whom may
+    /// hold two tasks.
+    fn a_finance_harness(name: &str) -> Harness {
+        Harness::new(name, |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+            crate::tools::fixtures::with_the_finance_specialist(wire);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(farik_core::team::fixtures::an_agent_wire(
+                    "fin-2",
+                    "finance_specialist",
+                ));
+        })
+    }
+
+    /// Files `task` `ready` as a Finance Specialist's task in its folder, ended by its books,
+    /// reviewed by the Product Manager; and, when `held` names a status, held by `fin` there.
+    fn a_finance_task(harness: &Harness, task: &str, held: Option<&str>) {
+        harness.file(task, "ready", |wire| {
+            wire["assignee_role"] = json!("finance_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The books exist.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": "books.xlsx" }
+            }]);
+        });
+        let Some(held) = held else { return };
+        let people = json!({ "assignee": "fin", "reviewer": "pm" });
+        harness.project.moved(task, "ready", "assigned", &people);
+        if held != "assigned" {
+            harness.project.moved(task, "assigned", held, &people);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn plans_no_second_assignment_in_the_folder() {
+        // FRK-1 holds the finance folder, blocked; two Finance Specialists have room for FRK-2,
+        // and it waits all the same (5.14, 6.6).
+        let harness = a_finance_harness("orch-plan-folder-busy");
+        a_finance_task(&harness, "FRK-1", Some("blocked"));
+        a_finance_task(&harness, "FRK-2", None);
+        let adapter = harness.recorded(vec![reads_a_file()]);
+
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
+            }
+        );
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        // Cancelled, it holds nothing, and the same tick plans FRK-2.
+        harness.project.moved(
+            "FRK-1",
+            "blocked",
+            "cancelled",
+            &json!({ "assignee": "fin", "reviewer": "pm" }),
+        );
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(adapter.started().len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assignment_copies_the_books_once() {
+        let harness = a_finance_harness("orch-folder-baseline");
+        let folder = harness.project.repo.path.join(".farik/local/finance");
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "first books").expect("written");
+        std::fs::write(folder.join("forecast.xlsx"), "first forecast").expect("written");
+        a_finance_task(&harness, "FRK-1", Some("assigned"));
+        let adapter = harness.recorded(vec![]);
+
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        let copy = folder.join(".history/FRK-1");
+        let read = |name: &str| std::fs::read_to_string(copy.join(name)).ok();
+        assert_eq!(read("books.xlsx").as_deref(), Some("first books"));
+        assert_eq!(read("forecast.xlsx").as_deref(), Some("first forecast"));
+        // It has no branch and no worktree, and no session started: the next tick's rule 6 does.
+        assert!(!harness.worktree("FRK-1").exists());
+        assert!(adapter.started().is_empty());
+        // Sent back, edited and assigned again, it keeps the first copy.
+        std::fs::write(folder.join("books.xlsx"), "second books").expect("written");
+        harness.project.moved(
+            "FRK-1",
+            "in_progress",
+            "assigned",
+            &json!({ "assignee": "fin", "reviewer": "pm" }),
+        );
+        harness
+            .orchestrator(harness.recorded(vec![]))
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert_eq!(read("books.xlsx").as_deref(), Some("first books"));
+        assert!(!copy.join(".history").exists(), "the copy holds no history");
     }
 
     #[tokio::test]

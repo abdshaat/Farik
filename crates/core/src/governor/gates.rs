@@ -10,7 +10,7 @@ use crate::generated::task_contract::FarikTaskContractKind as Kind;
 use crate::governor::done::{CriterionResult, RunBy};
 use crate::governor::task_status::is_terminal;
 use crate::governor::transition_table::TransitionActor;
-use crate::team::task_private_folder;
+use crate::team::{private_folder, task_private_folder};
 use crate::text::{distinct, listed};
 
 /// What a gate says: nothing when it passes, or every reason it does not, in the order the rules
@@ -113,6 +113,11 @@ pub struct AssignmentInput {
     pub dependencies: Vec<DependencyState>,
     /// Whether a UI/UX Designer assignee could open the app; read for no other role.
     pub designer_browser: DesignerBrowser,
+    /// Whether another task holds the private folder the assignee's role works in: one that is
+    /// assigned, to any agent of a role with that folder, and neither `accepted` nor `cancelled`.
+    /// A task sent back, blocked or escalated still holds it, since `rejected -> in_progress` and
+    /// `blocked -> in_progress` pass no assignment gate. `false` for a role with no folder.
+    pub private_folder_busy: bool,
 }
 
 /// A row of the board as the sprint policy reads it (ADR 0028).
@@ -208,7 +213,8 @@ fn the_sprint_pays(contract: &TaskContract, input: &AssignmentInput) -> bool {
 /// The `Assignment` gate of `ready -> assigned` (`docs/SPEC.md` sections 5.2, 5.14, 5.16): who may
 /// ask, whether the pair of agents fits the contract, whether the agent has room, whether the
 /// sprint can pay for it, whether a UI/UX Designer can open the app (`preview_not_set`,
-/// `designer_needs_sandbox`), and whether every dependency is accepted and integrated.
+/// `designer_needs_sandbox`), whether another task holds the assignee's private folder
+/// (`private_folder_busy`), and whether every dependency is accepted and integrated.
 ///
 /// # Errors
 ///
@@ -290,6 +296,7 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
             )
         });
     }
+    reasons.extend(without_the_folder(input));
     if !in_the_open_sprint(contract.kind, input) {
         let open = input.open_sprint.as_deref().unwrap_or_default();
         reasons.push(if input.plan_in_sprints {
@@ -315,6 +322,18 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
     reasons.extend(without_a_browser(input));
     reasons.extend(unready_dependencies(contract, input));
     verdict(reasons)
+}
+
+/// Why the task cannot be assigned while another holds the assignee's private folder, if it
+/// cannot (6.6): one piece of work touches the folder at a time.
+fn without_the_folder(input: &AssignmentInput) -> Option<String> {
+    input.private_folder_busy.then(|| {
+        format!(
+            "private_folder_busy: another task holds {}, and one piece of work touches it at a \
+             time; this one waits until that task is accepted or cancelled",
+            private_folder(input.assignee_role).unwrap_or("the assignee's private folder")
+        )
+    })
 }
 
 /// Why a UI/UX Designer cannot be assigned for want of its browser (D3, D4), if it cannot.
@@ -1156,6 +1175,7 @@ mod tests {
             plan_in_sprints: false,
             dependencies: Vec::new(),
             designer_browser: DesignerBrowser::Ready,
+            private_folder_busy: false,
         }
     }
 
@@ -1887,6 +1907,30 @@ mod tests {
                 "the runtime reported nothing about FRK-2, which this task depends on"
             ]
         );
+    }
+
+    #[test]
+    fn refuses_a_second_piece_of_work_in_a_private_folder() {
+        let mut task = a_contract();
+        task.assignee_role = Role::FinanceSpecialist;
+        task.reviewer_role = Role::ProductManager;
+        let mut input = an_assignment();
+        input.assignee_role = Role::FinanceSpecialist;
+        input.reviewer_role = Role::ProductManager;
+        input.reviewer_id = "pm-1".to_string();
+        input.wip_limit = 5;
+        assert_eq!(check_assignment(&task, &input), Ok(()));
+        // Whatever the agent's room: one piece of work touches the folder at a time (6.6).
+        input.private_folder_busy = true;
+        assert_eq!(
+            reasons(check_assignment(&task, &input)),
+            [
+                "private_folder_busy: another task holds .farik/local/finance, and one piece of work \
+              touches it at a time; this one waits until that task is accepted or cancelled"
+            ]
+        );
+        input.wip_limit = 0;
+        assert_eq!(reasons(check_assignment(&task, &input)).len(), 2);
     }
 
     #[test]
