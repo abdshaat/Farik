@@ -1308,16 +1308,18 @@ const ENDED: [&str; 5] = [
 /// will. A grant with no refresh token is `Ok(None)` while its access token holds, and lapses once
 /// it has expired. The rotated refresh token is the answer's; one left out keeps the old.
 ///
-/// A grant of one of Farik's own apps (`app` set) is refreshed with no `resource` and no client
-/// secret. Every grant is asked for JSON, and an `error` in the answer is read whatever its status,
-/// since GitHub answers one with status 200.
+/// A grant of one of Farik's own apps (`app` set) is refreshed with no `resource`, and with the
+/// client secret its entry of `apps` has, if it has one; a grant whose app `apps` lacks has lapsed.
+/// Every grant is asked for JSON, and an `error` in the answer is read whatever its status, since
+/// GitHub answers one with status 200.
 ///
 /// # Errors
-/// `Lapsed` when the service ended the sign-in (`invalid_grant`, `invalid_client`,
-/// `unauthorized_client`, `bad_refresh_token` or `incorrect_client_credentials`); `Failed` for
-/// anything else, including `timeout` passing.
+/// `Lapsed` when the grant's app is not in `apps`, or the service ended the sign-in
+/// (`invalid_grant`, `invalid_client`, `unauthorized_client`, `bad_refresh_token` or
+/// `incorrect_client_credentials`); `Failed` for anything else, including `timeout` passing.
 pub async fn refreshed(
     grant: &OAuthGrant,
+    apps: &[RegisteredApp],
     now: DateTime<Utc>,
     valid_for: Duration,
     timeout: Duration,
@@ -1325,6 +1327,15 @@ pub async fn refreshed(
     if grant.lapsed {
         return Err(SignInError::Lapsed);
     }
+    // A grant of an app the table lacks, as a build without Google's secret does, is over at once.
+    let app = match grant.app.as_deref() {
+        Some(id) => Some(
+            apps.iter()
+                .find(|app| app.id == id)
+                .ok_or(SignInError::Lapsed)?,
+        ),
+        None => None,
+    };
     let due = match grant.expires_at {
         Some(expires_at) => {
             expires_at < now + chrono::Duration::from_std(valid_for).unwrap_or_default()
@@ -1348,8 +1359,15 @@ pub async fn refreshed(
         ("refresh_token", refresh.expose()),
         ("client_id", grant.client_id.as_str()),
     ];
-    if grant.app.is_none() {
-        form.push(("resource", grant.resource.as_str()));
+    match app {
+        None => form.push(("resource", grant.resource.as_str())),
+        // The secret a service insists on for a client it calls public: looked up by the grant's
+        // app on each refresh, and never kept in the grant.
+        Some(app) => {
+            if let Some(secret) = app.client_secret {
+                form.push(("client_secret", secret));
+            }
+        }
     }
     let asking = guard.post_token_form(&grant.token_endpoint, &form);
     let answer = match tokio::time::timeout(timeout, asking).await {

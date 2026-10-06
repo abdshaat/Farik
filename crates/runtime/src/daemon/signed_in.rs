@@ -155,7 +155,15 @@ async fn refresh_under_lock(
         return Err(Fresh::Lapsed);
     }
     let now = chrono::Utc::now();
-    match refreshed(&grant, now, valid_for, REFRESH_REQUEST).await {
+    match refreshed(
+        &grant,
+        state.registered_apps(),
+        now,
+        valid_for,
+        REFRESH_REQUEST,
+    )
+    .await
+    {
         Ok(None) => Ok(entry),
         // The rotated refresh token is saved before the new access token is used.
         Ok(Some(fresh)) => {

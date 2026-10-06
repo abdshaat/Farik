@@ -577,10 +577,16 @@ async fn refreshes_a_token_about_to_expire() {
     let fixture = Fixture::start().await;
     let now = Utc::now();
     let grant = kept(&fixture, now, Some(MINUTE * 4));
-    let fresh = refreshed(&grant, now, Duration::from_mins(35), Duration::from_secs(3))
-        .await
-        .expect("refreshed")
-        .expect("it was due");
+    let fresh = refreshed(
+        &grant,
+        &[],
+        now,
+        Duration::from_mins(35),
+        Duration::from_secs(3),
+    )
+    .await
+    .expect("refreshed")
+    .expect("it was due");
     assert_ne!(fresh.access_token.expose(), grant.access_token.expose());
     assert_ne!(
         fresh.refresh_token.as_ref().map(Secret::expose),
@@ -605,13 +611,21 @@ async fn leaves_a_fresh_token_alone() {
     let fixture = Fixture::start().await;
     let now = Utc::now();
     let grant = kept(&fixture, now, Some(MINUTE * 120));
-    let outcome = refreshed(&grant, now, Duration::from_mins(35), Duration::from_secs(3)).await;
+    let outcome = refreshed(
+        &grant,
+        &[],
+        now,
+        Duration::from_mins(35),
+        Duration::from_secs(3),
+    )
+    .await;
     assert_eq!(outcome, Ok(None));
     assert_eq!(fixture.count("/token"), 0);
     // With no expiry known, a token is trusted for fifty minutes.
     let unknown = kept(&fixture, now, None);
     let soon = refreshed(
         &unknown,
+        &[],
         now + MINUTE * 49,
         Duration::from_secs(60),
         Duration::from_secs(3),
@@ -620,6 +634,7 @@ async fn leaves_a_fresh_token_alone() {
     assert_eq!(soon, Ok(None));
     let later = refreshed(
         &unknown,
+        &[],
         now + MINUTE * 51,
         Duration::from_secs(60),
         Duration::from_secs(3),
@@ -641,6 +656,7 @@ async fn a_refused_refresh_lapses() {
         fixture.set(|flags| flags.refresh_error = Some((status, error.to_string())));
         let outcome = refreshed(
             &grant,
+            &[],
             now,
             Duration::from_secs(600),
             Duration::from_secs(3),
@@ -653,6 +669,7 @@ async fn a_refused_refresh_lapses() {
     fixture.set(|flags| flags.refresh_error = Some((500, "server_error".to_string())));
     let outcome = refreshed(
         &grant,
+        &[],
         now,
         Duration::from_secs(600),
         Duration::from_secs(3),
@@ -673,6 +690,7 @@ async fn a_refresh_that_does_not_finish_in_time_fails() {
     let asked = tokio::spawn(async move {
         refreshed(
             &grant,
+            &[],
             now,
             Duration::from_secs(600),
             Duration::from_secs(3),
@@ -706,6 +724,7 @@ async fn a_grant_without_a_refresh_token_lapses_once_expired() {
     assert_eq!(
         refreshed(
             &valid,
+            &[],
             now,
             Duration::from_secs(600),
             Duration::from_secs(3)
@@ -719,6 +738,7 @@ async fn a_grant_without_a_refresh_token_lapses_once_expired() {
     assert_eq!(
         refreshed(
             &expired,
+            &[],
             now,
             Duration::from_secs(600),
             Duration::from_secs(3)
@@ -735,8 +755,10 @@ async fn refresh_sends_the_kept_resource() {
     let now = Utc::now();
     let grant = kept(&fixture, now, Some(MINUTE));
     fixture.set(|flags| flags.keep_refresh_token = true);
+    // A table with a secret in it: it is for its own apps' grants alone.
     let fresh = refreshed(
         &grant,
+        google_table(&fixture),
         now,
         Duration::from_secs(600),
         Duration::from_secs(3),
@@ -747,6 +769,7 @@ async fn refresh_sends_the_kept_resource() {
     let sent = &fixture.requests("/token")[0].form;
     assert_eq!(sent["resource"], grant.resource);
     assert_eq!(sent["client_id"], grant.client_id);
+    assert!(!sent.contains_key("client_secret"), "{sent:?}");
     assert_eq!(
         fresh.refresh_token.as_ref().map(Secret::expose),
         grant.refresh_token.as_ref().map(Secret::expose),
@@ -789,6 +812,7 @@ async fn a_kept_grant_is_only_sent_to_https_endpoints() {
     grant.revocation_endpoint = Some("http://auth.example/revoke".to_string());
     let outcome = refreshed(
         &grant,
+        &[],
         now,
         Duration::from_secs(600),
         Duration::from_secs(3),
@@ -1350,6 +1374,7 @@ async fn refreshes_a_device_grant_without_resource_or_secret() {
     let grant = dev_grant(&fixture, now);
     let fresh = refreshed(
         &grant,
+        dev_table(&fixture, "127.0.0.1"),
         now,
         Duration::from_secs(600),
         Duration::from_secs(3),
@@ -1392,6 +1417,7 @@ async fn a_github_refresh_refused_at_200_lapses() {
         for grant in [dev_grant(&fixture, now), kept(&fixture, now, Some(MINUTE))] {
             let outcome = refreshed(
                 &grant,
+                dev_table(&fixture, "127.0.0.1"),
                 now,
                 Duration::from_secs(600),
                 Duration::from_secs(3),
@@ -1409,6 +1435,7 @@ async fn a_github_refresh_refused_at_200_lapses() {
     fixture.set(|flags| flags.refresh_error = Some((200, "something_else".to_string())));
     let outcome = refreshed(
         &dev_grant(&fixture, now),
+        dev_table(&fixture, "127.0.0.1"),
         now,
         Duration::from_secs(600),
         Duration::from_secs(3),
@@ -1838,4 +1865,101 @@ async fn the_app_s_endpoints_must_be_https_or_loopback() {
         SignInError::Failed("http://auth.example/token is not https".to_string())
     );
     assert_eq!(fixture.count("/token"), 0);
+}
+
+// ---- Keeping a grant of Farik's own Google app (step 08e) ----
+
+/// A grant made with `Google test`'s loopback flow, which the fixture honours, expiring in a
+/// minute.
+fn google_grant(fixture: &Fixture, now: chrono::DateTime<Utc>) -> OAuthGrant {
+    OAuthGrant {
+        client_id: "google-test-client".to_string(),
+        revocation_endpoint: None,
+        app: Some("google-test".to_string()),
+        ..kept(fixture, now, Some(MINUTE))
+    }
+}
+
+#[tokio::test]
+async fn refreshes_with_the_secret_and_without_resource() {
+    let fixture = google_fixture().await;
+    let table = google_table(&fixture);
+    let now = Utc::now();
+    let grant = google_grant(&fixture, now);
+    let fresh = refreshed(
+        &grant,
+        table,
+        now,
+        Duration::from_secs(600),
+        Duration::from_secs(3),
+    )
+    .await
+    .expect("refreshed")
+    .expect("it was due");
+    assert_ne!(fresh.access_token.expose(), grant.access_token.expose());
+    assert_eq!(fresh.app.as_deref(), Some("google-test"));
+    let asked = &fixture.requests("/token")[0];
+    assert_eq!(asked.form["client_secret"], GOOGLE_TEST_SECRET);
+    assert_eq!(asked.form["client_id"], "google-test-client");
+    assert_eq!(asked.form["grant_type"], "refresh_token");
+    assert_eq!(
+        asked.form["refresh_token"],
+        grant.refresh_token.as_ref().expect("one").expose()
+    );
+    assert!(!asked.form.contains_key("resource"), "{:?}", asked.form);
+    assert_eq!(
+        asked.headers.get("accept").map(String::as_str),
+        Some("application/json")
+    );
+}
+
+#[tokio::test]
+async fn a_grant_of_an_app_the_table_lacks_lapses() {
+    let fixture = google_fixture().await;
+    let now = Utc::now();
+    // Whether a refresh is due or not, the table has no entry for it and the grant is over.
+    for expires_in in [MINUTE, MINUTE * 600] {
+        for table in [google_table(&fixture), &[]] {
+            let grant = OAuthGrant {
+                app: Some("gone".to_string()),
+                ..kept(&fixture, now, Some(expires_in))
+            };
+            let outcome = refreshed(
+                &grant,
+                table,
+                now,
+                Duration::from_secs(600),
+                Duration::from_secs(3),
+            )
+            .await;
+            assert_eq!(outcome, Err(SignInError::Lapsed), "{expires_in}");
+        }
+    }
+    assert!(fixture.seen().is_empty(), "no request was made");
+}
+
+/// A guard: step 03's rule holds for a Testing app's seven-day sign-in.
+#[tokio::test]
+async fn an_expired_test_sign_in_lapses() {
+    let fixture = google_fixture().await;
+    fixture.set(|flags| flags.refresh_error = Some((400, "invalid_grant".to_string())));
+    let table = google_table(&fixture);
+    let now = Utc::now();
+    let outcome = refreshed(
+        &google_grant(&fixture, now),
+        table,
+        now,
+        Duration::from_secs(600),
+        Duration::from_secs(3),
+    )
+    .await;
+    assert_eq!(outcome, Err(SignInError::Lapsed));
+}
+
+/// A guard: Google's revocation ends every agent's grant at once, so none is asked for.
+#[tokio::test]
+async fn a_google_grant_is_not_revoked() {
+    let fixture = google_fixture().await;
+    revoke(&google_grant(&fixture, Utc::now())).await;
+    assert!(fixture.seen().is_empty(), "no request was made");
 }
