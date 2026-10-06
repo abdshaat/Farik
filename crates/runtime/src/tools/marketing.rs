@@ -1,7 +1,6 @@
 //! The Marketing Specialist's tools (ADR 0042): `farik_propose_marketing_plan`, which ends its
-//! session with a plan for the owner to approve. Both it and, in step 08c's last task,
-//! `farik_save_media` act on the task's worktree; a module of their own keeps the files they write
-//! under `docs/marketing/` together.
+//! session with a plan for the owner to approve. It acts on the task's worktree; a module of its
+//! own keeps the files it writes under `docs/marketing/` together.
 
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
