@@ -15,6 +15,13 @@ pub enum AppFlow {
         /// The one page the user types the code on; an answer naming another is refused.
         verification_uri: &'static str,
     },
+    /// The authorization-code flow with PKCE, back to a listener on this computer, for an app
+    /// that signs in for one of Farik's own connectors: Farik makes the requests itself, since
+    /// there is no MCP server whose metadata to discover.
+    Loopback {
+        /// The page the user is sent to, which asks them to say yes.
+        authorization_endpoint: &'static str,
+    },
 }
 
 /// One app Farik has registered with a service.

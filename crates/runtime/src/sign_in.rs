@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use farik_core::team::OAuthSettings;
+use oauth2::{CsrfToken, PkceCodeChallenge};
 use reqwest::Url;
 use rmcp::transport::auth::{
     AuthError, AuthorizationManager, AuthorizationMetadata, AuthorizationMetadataSource,
@@ -307,6 +308,9 @@ enum Way {
     Redirect(Box<Redirect>),
     /// The device flow (RFC 8628): the user types a code on the service's page and Farik polls.
     Device(Device),
+    /// Farik's own authorization-code flow with PKCE, for one of its own connectors: the service
+    /// sends the browser back to a listener on this computer.
+    Loopback(Box<Loopback>),
 }
 
 /// What the way back of a redirect sign-in needs.
@@ -317,6 +321,18 @@ struct Redirect {
     iss_promised: bool,
     state: String,
     requested_scopes: Vec<String>,
+}
+
+/// What the way back of Farik's own loopback sign-in needs: the listener, the `state` it answers
+/// to, and the verifier that proves the exchange comes from the program that started the sign-in.
+struct Loopback {
+    listeners: Vec<TcpListener>,
+    addr: SocketAddr,
+    app: RegisteredApp,
+    state: String,
+    verifier: Secret,
+    redirect_uri: String,
+    scopes: Vec<String>,
 }
 
 /// What polling a device code needs. The code never leaves Farik: the user types the other one.
@@ -368,6 +384,7 @@ impl SignIn {
     pub fn callback_addr(&self) -> Option<SocketAddr> {
         match &self.way {
             Way::Redirect(redirect) => Some(redirect.addr),
+            Way::Loopback(loopback) => Some(loopback.addr),
             Way::Device(_) => None,
         }
     }
@@ -377,7 +394,7 @@ impl SignIn {
     pub fn user_code(&self) -> Option<&str> {
         match &self.way {
             Way::Device(device) => Some(&device.user_code),
-            Way::Redirect(_) => None,
+            Way::Redirect(_) | Way::Loopback(_) => None,
         }
     }
 
@@ -405,6 +422,7 @@ impl SignIn {
         let deadline = setup.started + SIGN_IN_WINDOW;
         match way {
             Way::Redirect(redirect) => setup.finish_redirect(*redirect, deadline).await,
+            Way::Loopback(loopback) => setup.finish_loopback(*loopback, deadline).await,
             Way::Device(device) => tokio::time::timeout_at(deadline, setup.poll(&device))
                 .await
                 .map_err(|_| SignInError::TimedOut)?,
@@ -424,24 +442,105 @@ impl Setup {
             .await
             .map_err(|_| SignInError::TimedOut)??;
         let outcome = self.complete(&redirect, &params).await;
-        let host = host_of(&self.issuer);
-        let (status, headline, rest) = match &outcome {
-            Ok(_) => (
-                200,
-                format!("You're signed in to {host}."),
-                "You can close this tab and go back to Farik.",
-            ),
-            Err(error) => (
-                400,
-                format!(
-                    "Farik couldn't finish signing in: {}.",
-                    error.sentence(&host)
-                ),
-                "Close this tab and try again in Farik.",
-            ),
-        };
-        let _ = respond(&mut stream, status, &headline, rest).await;
+        tell_the_tab(&mut stream, &outcome, &host_of(&self.issuer)).await;
         outcome
+    }
+
+    /// The same for Farik's own loopback sign-in, whose tab names the provider.
+    async fn finish_loopback(
+        &self,
+        mut loopback: Loopback,
+        deadline: tokio::time::Instant,
+    ) -> Result<OAuthGrant, SignInError> {
+        let listeners = std::mem::take(&mut loopback.listeners);
+        let waiting = wait_for_callback(listeners, &loopback.state);
+        let (mut stream, params) = tokio::time::timeout_at(deadline, waiting)
+            .await
+            .map_err(|_| SignInError::TimedOut)??;
+        let outcome = self.complete_loopback(&loopback, &params).await;
+        tell_the_tab(&mut stream, &outcome, loopback.app.name).await;
+        outcome
+    }
+
+    /// What the callback of Farik's own loopback sign-in comes to: `iss` checked, the code
+    /// exchanged with the verifier (and the app's client secret, when it has one), and the
+    /// answer held to what Farik needs of it.
+    async fn complete_loopback(
+        &self,
+        loopback: &Loopback,
+        params: &HashMap<String, String>,
+    ) -> Result<OAuthGrant, SignInError> {
+        let app = &loopback.app;
+        let host = host_of(&self.token_endpoint);
+        // RFC 9207, and required here: an answer from another issuer is not acted on, nor shown.
+        if params.get("iss").map(String::as_str) != Some(self.issuer.as_str()) {
+            return Err(SignInError::Mismatch);
+        }
+        if let Some(error) = params.get("error") {
+            return Err(if error == "access_denied" {
+                SignInError::Denied("access_denied".to_string())
+            } else {
+                SignInError::Failed(format!("{} refused the sign-in", app.name))
+            });
+        }
+        let code = params
+            .get("code")
+            .ok_or_else(|| SignInError::Failed(format!("{} answered without a code", app.name)))?;
+        let mut form = vec![
+            ("code", code.as_str()),
+            ("client_id", app.client_id),
+            ("redirect_uri", loopback.redirect_uri.as_str()),
+            ("grant_type", "authorization_code"),
+            ("code_verifier", loopback.verifier.expose()),
+        ];
+        if let Some(secret) = app.client_secret {
+            form.push(("client_secret", secret));
+        }
+        self.guard.forget_status();
+        let answer = self
+            .guard
+            .post_token_form(&self.token_endpoint, &form)
+            .await
+            .map_err(|_| failed_at(&self.guard, &host, "finish signing in"))?;
+        let body: serde_json::Value = serde_json::from_slice(answer.body()).unwrap_or_default();
+        if body.get("error").is_some() || !answer.status().is_success() {
+            return Err(SignInError::Failed(format!(
+                "{} refused the token request{}",
+                app.name,
+                self.guard.status_note()
+            )));
+        }
+        if !body["token_type"]
+            .as_str()
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("bearer"))
+        {
+            return Err(SignInError::Failed(format!(
+                "{} did not give Farik a bearer token",
+                app.name
+            )));
+        }
+        if body["refresh_token"].as_str().is_none() {
+            return Err(SignInError::Failed(format!(
+                "{} did not give Farik a lasting sign-in",
+                app.name
+            )));
+        }
+        let granted: Vec<&str> = body["scope"]
+            .as_str()
+            .unwrap_or_default()
+            .split_whitespace()
+            .collect();
+        if loopback
+            .scopes
+            .iter()
+            .any(|asked| !granted.contains(&asked.as_str()))
+        {
+            return Err(SignInError::Failed(format!(
+                "you did not allow Farik all it asks of {}; sign in again and tick every box",
+                app.name
+            )));
+        }
+        self.grant_from(&body, &loopback.scopes)
     }
 
     async fn complete(
@@ -609,6 +708,30 @@ impl SignInError {
             _ => format!("{host} did not accept the sign-in"),
         }
     }
+}
+
+/// Tells the tab the callback came in how the sign-in went, and closes it.
+async fn tell_the_tab(
+    stream: &mut TcpStream,
+    outcome: &Result<OAuthGrant, SignInError>,
+    host: &str,
+) {
+    let (status, headline, rest) = match outcome {
+        Ok(_) => (
+            200,
+            format!("You're signed in to {host}."),
+            "You can close this tab and go back to Farik.",
+        ),
+        Err(error) => (
+            400,
+            format!(
+                "Farik couldn't finish signing in: {}.",
+                error.sentence(host)
+            ),
+            "Close this tab and try again in Farik.",
+        ),
+    };
+    let _ = respond(stream, status, &headline, rest).await;
 }
 
 fn escaped(text: &str) -> String {
@@ -927,9 +1050,14 @@ async fn start(
         )));
     }
     match serving {
-        Some(app) if given.is_none_or(|given| given == app.client_id) => {
-            start_device(app, url, now).await
-        }
+        Some(app) if given.is_none_or(|given| given == app.client_id) => match app.flow {
+            AppFlow::Device {
+                device_endpoint,
+                verification_uri,
+            } => start_device(app, device_endpoint, verification_uri, url, now).await,
+            // Its sign-in is for a connector Farik starts, not for an address.
+            AppFlow::Loopback { .. } => Err(SignInError::NotSupported),
+        },
         _ => start_redirect(url, settings, now).await,
     }
 }
@@ -937,13 +1065,11 @@ async fn start(
 /// The device flow (RFC 8628) with one of Farik's own apps: asks the service for a code.
 async fn start_device(
     app: &RegisteredApp,
+    device_endpoint: &str,
+    verification_uri: &str,
     url: &str,
     now: DateTime<Utc>,
 ) -> Result<SignIn, SignInError> {
-    let AppFlow::Device {
-        device_endpoint,
-        verification_uri,
-    } = app.flow;
     let guard = Guarded::new()?;
     let host = host_of(device_endpoint);
     // No `scope`: what a GitHub App may do is set on the app.
@@ -987,6 +1113,90 @@ async fn start_device(
             authorize_url: page,
             issuer: app.issuer.to_string(),
             resource: url.to_string(),
+            client_id: app.client_id.to_string(),
+            token_endpoint: app.token_endpoint.to_string(),
+            revocation_endpoint: app.revocation_endpoint.map(ToString::to_string),
+            app: Some(*app),
+            started: tokio::time::Instant::now(),
+            started_at: now,
+        },
+    })
+}
+
+/// Starts signing a user in for one of Farik's own connectors with `app`, whose flow is the
+/// loopback one: the listener is bound, and the address the user is sent to carries the app's
+/// client id, the redirect, the scopes (the app's own, or the team file's when each is one of
+/// them), `state` and an S256 challenge. Nothing is requested yet.
+///
+/// # Errors
+/// `NotSupported` for an app whose flow is not the loopback one, and `Failed` for a scope the app
+/// does not ask for, an authorization address that is not https, or no free port.
+pub async fn start_app_sign_in(
+    app: &RegisteredApp,
+    scopes: &[String],
+    now: DateTime<Utc>,
+) -> Result<SignIn, SignInError> {
+    let AppFlow::Loopback {
+        authorization_endpoint,
+    } = app.flow
+    else {
+        return Err(SignInError::NotSupported);
+    };
+    let asked: Vec<String> = if scopes.is_empty() {
+        app.scopes.iter().map(ToString::to_string).collect()
+    } else {
+        scopes.to_vec()
+    };
+    if asked
+        .iter()
+        .any(|scope| !app.scopes.contains(&scope.as_str()))
+    {
+        return Err(SignInError::Failed(format!(
+            "Farik's {} sign-in asks only for {}",
+            app.name,
+            app.scopes.join(", ")
+        )));
+    }
+    let mut authorize = Url::parse(authorization_endpoint)
+        .ok()
+        .filter(allowed)
+        .ok_or_else(|| SignInError::Failed(format!("{authorization_endpoint} is not https")))?;
+    let guard = Guarded::new()?;
+    let (listeners, addr) = bind(&OAuthSettings {
+        client_id: None,
+        callback_port: None,
+        scopes: Vec::new(),
+    })
+    .await?;
+    let redirect_uri = format!("http://localhost:{}/callback", addr.port());
+    let state = CsrfToken::new_random().secret().clone();
+    // 48 random bytes make a verifier of 64 characters, within RFC 7636's 43 to 128.
+    let (challenge, verifier) = PkceCodeChallenge::new_random_sha256_len(48);
+    authorize
+        .query_pairs_mut()
+        .append_pair("client_id", app.client_id)
+        .append_pair("redirect_uri", &redirect_uri)
+        .append_pair("response_type", "code")
+        .append_pair("scope", &asked.join(" "))
+        .append_pair("state", &state)
+        .append_pair("code_challenge", challenge.as_str())
+        .append_pair("code_challenge_method", "S256");
+    Ok(SignIn {
+        way: Way::Loopback(Box::new(Loopback {
+            listeners,
+            addr,
+            app: *app,
+            state,
+            verifier: Secret::new(verifier.secret().clone()),
+            redirect_uri,
+            scopes: asked,
+        })),
+        setup: Setup {
+            guard,
+            authorize_url: authorize.to_string(),
+            issuer: app.issuer.to_string(),
+            // Nothing reads it for an app's grant, whose refresh sends none.
+            resource: app.issuer.to_string(),
             client_id: app.client_id.to_string(),
             token_endpoint: app.token_endpoint.to_string(),
             revocation_endpoint: app.revocation_endpoint.map(ToString::to_string),

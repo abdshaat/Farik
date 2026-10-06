@@ -23,6 +23,7 @@ farik-roles.workspace = true
 farik-store.workspace = true
 http.workspace = true
 keyring.workspace = true
+oauth2.workspace = true
 reqwest.workspace = true
 rmcp.workspace = true
 rust-embed.workspace = true

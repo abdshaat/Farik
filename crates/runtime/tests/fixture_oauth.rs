@@ -17,7 +17,7 @@ use farik_runtime::claude::Secret;
 use farik_runtime::connectors::list_tools;
 use farik_runtime::registered_apps::{AppFlow, RegisteredApp};
 use farik_runtime::sign_in::{
-    OAuthGrant, SIGN_IN_WINDOW, SignInError, refreshed, revoke, start_sign_in,
+    OAuthGrant, SIGN_IN_WINDOW, SignInError, refreshed, revoke, start_app_sign_in, start_sign_in,
 };
 use oauth_fixture::{Fixture, Iss, Methods, callback, follow};
 use ports::free_port;
@@ -1426,4 +1426,416 @@ async fn a_grant_without_revocation_is_not_revoked() {
     let grant = dev_grant(&fixture, Utc::now());
     revoke(&grant).await;
     assert!(fixture.seen().is_empty(), "no request was made");
+}
+
+// ---- Farik's registered apps: the loopback flow, for Farik's own connector (step 08e) ----
+
+const GOOGLE_TEST_SCOPE: &str = "https://example.test/auth/ads";
+const GOOGLE_TEST_SECRET: &str = "the-test-secret";
+
+/// A table of one Loopback entry, `Google test`, which signs in for Farik's connector `osv` and
+/// serves no address, whose endpoints are `fixture`'s. Leaked, as [`dev_table`]'s is.
+fn google_table(fixture: &Fixture) -> &'static [RegisteredApp] {
+    let origin = &fixture.origin;
+    Box::leak(Box::new([RegisteredApp {
+        id: "google-test",
+        name: "Google test",
+        host: None,
+        farik_connector: Some("osv"),
+        flow: AppFlow::Loopback {
+            authorization_endpoint: leaked(format!("{origin}/o/oauth2/v2/auth")),
+        },
+        client_id: "google-test-client",
+        client_secret: Some(GOOGLE_TEST_SECRET),
+        scopes: &[GOOGLE_TEST_SCOPE],
+        issuer: leaked(origin.clone()),
+        token_endpoint: leaked(format!("{origin}/token")),
+        revocation_endpoint: None,
+        install_url: None,
+        settings_url: "https://myaccount.google.com/connections",
+    }]))
+}
+
+/// A fixture that insists on the client secret, as Google's token endpoint does.
+async fn google_fixture() -> Fixture {
+    let fixture = Fixture::start().await;
+    fixture.set(|flags| flags.client_secret = Some(GOOGLE_TEST_SECRET.to_string()));
+    fixture
+}
+
+/// Signs in with the `Google test` entry, asking for `scopes`, and follows the page as a browser
+/// would.
+async fn google_sign_in(fixture: &Fixture, scopes: &[String]) -> Result<OAuthGrant, SignInError> {
+    let table = google_table(fixture);
+    let sign_in = start_app_sign_in(&table[0], scopes, Utc::now()).await?;
+    let url = sign_in.authorize_url().to_string();
+    let finishing = tokio::spawn(sign_in.finish());
+    follow(&url).await;
+    finishing.await.expect("the sign-in task")
+}
+
+#[tokio::test]
+async fn signs_in_with_pkce_and_the_secret() {
+    let fixture = google_fixture().await;
+    let table = google_table(&fixture);
+    let sign_in = start_app_sign_in(&table[0], &[], Utc::now())
+        .await
+        .expect("the sign-in starts");
+    let port = sign_in.callback_addr().expect("a listener").port();
+    assert_eq!(sign_in.provider(), Some("Google test"));
+    assert_eq!(sign_in.user_code(), None);
+    assert_eq!(sign_in.install_url(), None);
+    assert_eq!(sign_in.issuer(), fixture.origin);
+    let url = sign_in.authorize_url().to_string();
+    let address = reqwest::Url::parse(&url).expect("an address");
+    assert_eq!(address.path(), "/o/oauth2/v2/auth");
+    let query: BTreeMap<String, String> = address.query_pairs().into_owned().collect();
+    // Exactly these: no `resource`, no `access_type`.
+    assert_eq!(
+        query.keys().map(String::as_str).collect::<Vec<_>>(),
+        [
+            "client_id",
+            "code_challenge",
+            "code_challenge_method",
+            "redirect_uri",
+            "response_type",
+            "scope",
+            "state",
+        ]
+    );
+    assert_eq!(query["client_id"], "google-test-client");
+    assert_eq!(
+        query["redirect_uri"],
+        format!("http://localhost:{port}/callback")
+    );
+    assert_eq!(query["response_type"], "code");
+    assert_eq!(query["scope"], GOOGLE_TEST_SCOPE);
+    assert_eq!(query["code_challenge_method"], "S256");
+    assert!(!query["state"].is_empty());
+
+    let finishing = tokio::spawn(sign_in.finish());
+    let page = follow(&url).await;
+    let grant = finishing.await.expect("task").expect("signed in");
+    assert!(
+        page.page
+            .contains("<h1>You&#39;re signed in to Google test.</h1>"),
+        "{}",
+        page.page
+    );
+
+    let exchange = &fixture.requests("/token")[0];
+    assert_eq!(exchange.form["grant_type"], "authorization_code");
+    assert_eq!(exchange.form["client_id"], "google-test-client");
+    assert_eq!(exchange.form["client_secret"], GOOGLE_TEST_SECRET);
+    assert_eq!(exchange.form["redirect_uri"], query["redirect_uri"]);
+    assert!(exchange.form["code"].starts_with("code-"));
+    let verifier = &exchange.form["code_verifier"];
+    assert_eq!(verifier.len(), 64);
+    assert_eq!(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(verifier)),
+        query["code_challenge"]
+    );
+    assert_eq!(
+        exchange.headers.get("accept").map(String::as_str),
+        Some("application/json")
+    );
+
+    assert!(grant.access_token.expose().starts_with("at-"));
+    assert!(
+        grant
+            .refresh_token
+            .as_ref()
+            .is_some_and(|token| token.expose().starts_with("rt-"))
+    );
+    assert_eq!(grant.app.as_deref(), Some("google-test"));
+    assert_eq!(grant.issuer, fixture.origin);
+    assert_eq!(grant.client_id, "google-test-client");
+    assert_eq!(grant.token_endpoint, format!("{}/token", fixture.origin));
+    assert_eq!(grant.revocation_endpoint, None);
+    assert_eq!(grant.scopes, [GOOGLE_TEST_SCOPE]);
+    assert!(grant.expires_at.is_some());
+    assert!(!grant.lapsed);
+    assert!(
+        !fixture.everything_seen().contains("resource"),
+        "no resource is sent anywhere"
+    );
+}
+
+#[tokio::test]
+async fn requires_iss() {
+    for iss in [Iss::Absent, Iss::Other("https://evil.example".to_string())] {
+        let fixture = google_fixture().await;
+        fixture.set(|flags| flags.iss = iss.clone());
+        assert_eq!(
+            google_sign_in(&fixture, &[]).await.expect_err("refused"),
+            SignInError::Mismatch
+        );
+        assert_eq!(fixture.count("/token"), 0, "no code was exchanged");
+    }
+}
+
+#[tokio::test]
+async fn asks_only_the_table_s_scopes() {
+    let fixture = google_fixture().await;
+    let table = google_table(&fixture);
+    let refused = SignInError::Failed(format!(
+        "Farik's Google test sign-in asks only for {GOOGLE_TEST_SCOPE}"
+    ));
+    for scopes in [
+        vec!["https://example.test/auth/other".to_string()],
+        vec![
+            GOOGLE_TEST_SCOPE.to_string(),
+            "https://example.test/auth/other".to_string(),
+        ],
+    ] {
+        assert_eq!(
+            start_app_sign_in(&table[0], &scopes, Utc::now())
+                .await
+                .expect_err("refused"),
+            refused,
+            "{scopes:?}"
+        );
+    }
+    assert!(fixture.seen().is_empty(), "no request was made");
+    // The entry's own scope, asked for by name, is the same as none.
+    let grant = google_sign_in(&fixture, &[GOOGLE_TEST_SCOPE.to_string()])
+        .await
+        .expect("signed in");
+    assert_eq!(grant.scopes, [GOOGLE_TEST_SCOPE]);
+}
+
+#[tokio::test]
+async fn refuses_a_sign_in_that_does_not_last_or_lacks_the_scope() {
+    type Change = fn(&mut oauth_fixture::Flags);
+    let cases: [(&str, Change, &str); 4] = [
+        (
+            "no refresh token",
+            |flags| flags.no_refresh_token = true,
+            "Google test did not give Farik a lasting sign-in",
+        ),
+        (
+            "a narrower scope",
+            |flags| flags.granted_scope = Some("https://example.test/auth/other".to_string()),
+            "you did not allow Farik all it asks of Google test; sign in again and tick every box",
+        ),
+        (
+            "no scope at all",
+            |flags| flags.granted_scope = Some(String::new()),
+            "you did not allow Farik all it asks of Google test; sign in again and tick every box",
+        ),
+        (
+            "mac",
+            |flags| flags.token_type = Some("mac".to_string()),
+            "Google test did not give Farik a bearer token",
+        ),
+    ];
+    for (what, change, sentence) in cases {
+        let fixture = google_fixture().await;
+        fixture.set(change);
+        assert_eq!(
+            google_sign_in(&fixture, &[]).await.expect_err(what),
+            SignInError::Failed(sentence.to_string()),
+            "{what}"
+        );
+    }
+    // The type is not case-sensitive.
+    let fixture = google_fixture().await;
+    fixture.set(|flags| flags.token_type = Some("bearer".to_string()));
+    google_sign_in(&fixture, &[]).await.expect("signed in");
+}
+
+#[tokio::test]
+async fn farik_s_google_client_id_is_refused_on_any_address() {
+    let fixture = google_fixture().await;
+    let table = google_table(&fixture);
+    let settings = OAuthSettings {
+        client_id: Some("google-test-client".to_string()),
+        callback_port: None,
+        scopes: Vec::new(),
+    };
+    for url in [
+        fixture.mcp_url.as_str(),
+        "https://example.org/mcp",
+        "https://accounts.example/",
+    ] {
+        let refused = start_sign_in(url, &settings, table, Utc::now())
+            .await
+            .expect_err("refused");
+        assert!(
+            matches!(&refused, SignInError::Failed(why) if why.contains("Google test")),
+            "{url}: {refused:?}"
+        );
+    }
+    assert!(fixture.seen().is_empty(), "no request was made");
+}
+
+#[tokio::test]
+async fn a_loopback_app_serves_no_address_and_a_device_app_no_connector() {
+    let fixture = google_fixture().await;
+    // A Loopback entry that, unlike Google's, names a host: its flow is for a connector's sign-in.
+    let mut serving = google_table(&fixture)[0];
+    serving.host = Some("127.0.0.1");
+    let table: &'static [RegisteredApp] = Box::leak(Box::new([serving]));
+    assert_eq!(
+        start_sign_in(&fixture.mcp_url, &auto(), table, Utc::now())
+            .await
+            .expect_err("not a flow for an address"),
+        SignInError::NotSupported
+    );
+    // And a Device entry has no loopback flow to run.
+    let device = dev_table(&fixture, "127.0.0.1");
+    assert_eq!(
+        start_app_sign_in(&device[0], &[], Utc::now())
+            .await
+            .expect_err("not a loopback flow"),
+        SignInError::NotSupported
+    );
+    assert!(fixture.seen().is_empty(), "no request was made");
+}
+
+#[tokio::test]
+async fn the_app_s_sign_in_reports_access_denied() {
+    let fixture = google_fixture().await;
+    fixture.set(|flags| flags.access_denied = true);
+    assert_eq!(
+        google_sign_in(&fixture, &[]).await.expect_err("denied"),
+        SignInError::Denied("access_denied".to_string())
+    );
+    assert_eq!(fixture.count("/token"), 0);
+}
+
+#[tokio::test]
+async fn the_app_s_sign_in_refuses_the_wrong_state() {
+    let fixture = google_fixture().await;
+    let table = google_table(&fixture);
+    let sign_in = start_app_sign_in(&table[0], &[], Utc::now())
+        .await
+        .expect("starts");
+    let addr = sign_in.callback_addr().expect("a listener");
+    let url = sign_in.authorize_url().to_string();
+    let finishing = tokio::spawn(sign_in.finish());
+    let wrong = callback(&format!(
+        "http://localhost:{}/callback?code=x&state=wrong&iss={}",
+        addr.port(),
+        fixture.origin
+    ))
+    .await;
+    assert_eq!(wrong.status, 400);
+    follow(&url).await;
+    finishing
+        .await
+        .expect("task")
+        .expect("the right callback still completes");
+    assert_eq!(fixture.count("/token"), 1);
+}
+
+#[tokio::test]
+async fn the_app_s_sign_in_answers_one_callback_then_closes() {
+    let fixture = google_fixture().await;
+    let table = google_table(&fixture);
+    let sign_in = start_app_sign_in(&table[0], &[], Utc::now())
+        .await
+        .expect("starts");
+    let addr = sign_in.callback_addr().expect("a listener");
+    let url = sign_in.authorize_url().to_string();
+    let finishing = tokio::spawn(sign_in.finish());
+    let other = callback(&format!("http://{addr}/other")).await;
+    assert_eq!(other.status, 404);
+    // Only a GET is the callback: a POST with the right state is not.
+    let state = reqwest::Url::parse(&url)
+        .expect("the address")
+        .query_pairs()
+        .find(|(name, _)| name == "state")
+        .map(|(_, value)| value.into_owned())
+        .expect("a state");
+    let posted = reqwest::Client::new()
+        .post(format!("http://{addr}/callback?state={state}&code=x"))
+        .send()
+        .await
+        .expect("answered");
+    assert_eq!(posted.status().as_u16(), 404);
+    follow(&url).await;
+    finishing.await.expect("task").expect("still completes");
+    assert!(
+        tokio::net::TcpStream::connect(addr).await.is_err(),
+        "the listener is closed"
+    );
+}
+
+#[tokio::test]
+async fn the_app_s_sign_in_refuses_a_callback_without_a_code_or_with_another_error() {
+    let fixture = google_fixture().await;
+    let table = google_table(&fixture);
+    for (query, sentence) in [
+        ("", "Google test answered without a code"),
+        ("&error=server_error", "Google test refused the sign-in"),
+    ] {
+        let sign_in = start_app_sign_in(&table[0], &[], Utc::now())
+            .await
+            .expect("starts");
+        let addr = sign_in.callback_addr().expect("a listener");
+        let state = reqwest::Url::parse(sign_in.authorize_url())
+            .expect("the address")
+            .query_pairs()
+            .find(|(name, _)| name == "state")
+            .map(|(_, value)| value.into_owned())
+            .expect("a state");
+        let finishing = tokio::spawn(sign_in.finish());
+        let page = callback(&format!(
+            "http://localhost:{}/callback?state={state}&iss={}{query}",
+            addr.port(),
+            fixture.origin
+        ))
+        .await;
+        assert_eq!(page.status, 400);
+        assert_eq!(
+            finishing.await.expect("task").expect_err("refused"),
+            SignInError::Failed(sentence.to_string()),
+            "{query}"
+        );
+    }
+    assert_eq!(fixture.count("/token"), 0);
+}
+
+#[tokio::test]
+async fn the_app_s_sign_in_names_a_refused_exchange_and_quotes_nothing() {
+    let fixture = google_fixture().await;
+    // The service wants another secret than the one the table has.
+    fixture.set(|flags| flags.client_secret = Some("another-secret".to_string()));
+    let refused = google_sign_in(&fixture, &[]).await.expect_err("refused");
+    assert_eq!(
+        refused,
+        SignInError::Failed("Google test refused the token request (HTTP 401)".to_string())
+    );
+    assert_eq!(fixture.count("/token"), 1);
+}
+
+#[tokio::test]
+async fn the_app_s_endpoints_must_be_https_or_loopback() {
+    let fixture = google_fixture().await;
+    // An authorization address that is not https is refused before a port is bound.
+    let mut insecure = google_table(&fixture)[0];
+    insecure.flow = AppFlow::Loopback {
+        authorization_endpoint: "http://auth.example/o/oauth2/v2/auth",
+    };
+    assert_eq!(
+        start_app_sign_in(&insecure, &[], Utc::now())
+            .await
+            .expect_err("refused"),
+        SignInError::Failed("http://auth.example/o/oauth2/v2/auth is not https".to_string())
+    );
+    // A token address that is not https is refused when the code would be sent to it.
+    let mut insecure = google_table(&fixture)[0];
+    insecure.token_endpoint = "http://auth.example/token";
+    let sign_in = start_app_sign_in(&insecure, &[], Utc::now())
+        .await
+        .expect("starts");
+    let url = sign_in.authorize_url().to_string();
+    let finishing = tokio::spawn(sign_in.finish());
+    follow(&url).await;
+    assert_eq!(
+        finishing.await.expect("task").expect_err("refused"),
+        SignInError::Failed("http://auth.example/token is not https".to_string())
+    );
+    assert_eq!(fixture.count("/token"), 0);
 }

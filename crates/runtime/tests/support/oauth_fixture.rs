@@ -103,6 +103,16 @@ pub struct Flags {
     /// Whether that 502 carries JSON with no `error` in it, as some gateways answer, in place of
     /// a page.
     pub device_gateway_json: bool,
+    /// The `client_secret` a code exchange and a refresh must carry, as Google's Desktop client
+    /// insists on; none asks for none.
+    pub client_secret: Option<String>,
+    /// A token answer with no refresh token.
+    pub no_refresh_token: bool,
+    /// The `scope` a code exchange's answer names instead of what was asked for; an empty one
+    /// leaves `scope` out.
+    pub granted_scope: Option<String>,
+    /// The `token_type` the answers name, when it is not `Bearer`.
+    pub token_type: Option<String>,
 }
 
 impl Default for Flags {
@@ -136,6 +146,10 @@ impl Default for Flags {
             device_interval: Some(1),
             device_bad_gateways: Vec::new(),
             device_gateway_json: false,
+            client_secret: None,
+            no_refresh_token: false,
+            granted_scope: None,
+            token_type: None,
         }
     }
 }
@@ -168,6 +182,8 @@ struct Code {
     challenge: String,
     client_id: String,
     redirect_uri: String,
+    /// What the authorization address asked for, which the exchange's answer grants.
+    scope: String,
 }
 
 struct Shared {
@@ -515,7 +531,8 @@ async fn route(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Respo
                 }),
             )
         }
-        ("GET", "/authorize") => authorize(shared, flags, request),
+        // Google's authorization address, which answers as the other one does.
+        ("GET", "/authorize" | "/o/oauth2/v2/auth") => authorize(shared, flags, request),
         ("POST", "/device/code") => device_code(shared, flags, request),
         ("POST", "/token") => {
             shared.wait_if_held("token").await;
@@ -561,6 +578,7 @@ fn authorize(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Respons
                     challenge: query.get("code_challenge").cloned().unwrap_or_default(),
                     client_id: client.clone(),
                     redirect_uri: redirect.clone(),
+                    scope: query.get("scope").cloned().unwrap_or_default(),
                 },
             );
             pairs.append_pair("code", &code);
@@ -697,7 +715,18 @@ fn token(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Response {
     let form = &request.form;
     let grant = form.get("grant_type").map(String::as_str);
     let bad = |error: &str| json(400, serde_json::json!({ "error": error }));
-    let scope = "read write offline_access";
+    let mut scope = "read write offline_access".to_string();
+    if let Some(secret) = &flags.client_secret
+        && matches!(grant, Some("authorization_code" | "refresh_token"))
+        && form.get("client_secret") != Some(secret)
+    {
+        return json(
+            401,
+            serde_json::json!({
+                "error": "invalid_client", "error_description": "client_secret is missing."
+            }),
+        );
+    }
     let (access, refresh) = match grant {
         Some("authorization_code") => {
             let Some(code) = form
@@ -714,6 +743,12 @@ fn token(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Response {
                 || form.get("redirect_uri") != Some(&code.redirect_uri)
             {
                 return bad("invalid_grant");
+            }
+            if !code.scope.is_empty() {
+                scope = code.scope.clone();
+            }
+            if let Some(granted) = &flags.granted_scope {
+                scope = granted.clone();
             }
             shared.mint()
         }
@@ -744,13 +779,15 @@ fn token(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Response {
     };
     let mut answer = serde_json::json!({
         "access_token": access,
-        "token_type": "Bearer",
-        "scope": scope,
+        "token_type": flags.token_type.clone().unwrap_or_else(|| "Bearer".to_string()),
     });
+    if !scope.is_empty() {
+        answer["scope"] = scope.into();
+    }
     if !flags.no_expiry {
         answer["expires_in"] = flags.expires_in.into();
     }
-    if !refresh.is_empty() {
+    if !refresh.is_empty() && !flags.no_refresh_token {
         answer["refresh_token"] = refresh.into();
     }
     json(200, answer)

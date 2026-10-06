@@ -1000,6 +1000,7 @@ dependencies = [
  "jsonschema",
  "keyring",
  "keyring-core",
+ "oauth2",
  "reqwest",
  "rmcp",
  "rusqlite",

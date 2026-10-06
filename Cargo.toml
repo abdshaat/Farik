@@ -28,6 +28,8 @@ jsonschema = { version = "=0.56.0", default-features = false }
 keyring = "=4.2.0"
 # Only for its in-memory mock store, standing in for the OS keychain in tests.
 keyring-core = "=1.0.0"
+# Already locked through rmcp; direct for Farik's own PKCE sign-in: the verifier, its S256 challenge and `state`.
+oauth2 = { version = "=5.0.0", default-features = false }
 regress = "=0.12.0"
 # Already locked through rmcp; direct for the https-only OAuth client and the token form POSTs.
 reqwest = { version = "=0.13.5", default-features = false, features = ["form"] }
