@@ -308,12 +308,16 @@ async fn gives_up_after_thirty_seconds() {
                     .and_then(|(_, rest)| rest.chars().next())
             })
     };
-    // Polled on the runtime, which the kill may be a task of.
+    // Waited for in real time, on a blocking thread so the runtime, which the kill is a task of,
+    // stays free to run it: on the paused clock a `tokio::time::sleep` passes all of its 5 seconds
+    // at once, before the kill has had any real time to land.
     for _ in 0..250 {
         if matches!(state(), None | Some('Z')) {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(20)))
+            .await
+            .expect("the wait ends");
     }
     assert!(matches!(state(), None | Some('Z')), "{:?}", state());
 }
