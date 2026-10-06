@@ -9,7 +9,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use farik_core::marketing::{EndReason, PlanRecord, plans_to_end};
 use farik_protocol::event::{EventBody, EventIds, FarikEvent, new_event};
-use farik_store::marketing::{MarketingPlan, marketing_plans};
+use farik_store::marketing::{MarketingPlan, PlanState, marketing_plans};
 use serde_json::{Value, json};
 
 use crate::orchestrator::{CommandError, CommandReport};
@@ -215,11 +215,7 @@ pub(crate) fn record_plan_end(
     }
     let mut body = json!({
         "plan": plan,
-        "why": match why {
-            EndReason::Replaced => "replaced",
-            EndReason::ByOwner => "by_owner",
-            EndReason::Expired => "expired",
-        },
+        "why": why.as_str(),
     });
     for (name, value) in [
         ("replaced_by", replaced_by.map(str::to_string)),
@@ -235,4 +231,93 @@ pub(crate) fn record_plan_end(
         None,
         EventBody::MarketingPlanEnded(body),
     )?])
+}
+
+/// One marketing plan as `marketing_plan.list` words a row: the daemon's answer and the command
+/// line's `--json` are one shape.
+#[must_use]
+pub fn list_row(plan: &MarketingPlan, state: PlanState) -> Value {
+    let proposal = &plan.proposal;
+    json!({
+        "plan": plan.record.id,
+        "title": proposal.title,
+        "state": state.as_str(),
+        "starts_on": proposal.starts_on.to_string(),
+        "ends_on": proposal.ends_on.to_string(),
+        "currency": proposal.currency,
+        "total": proposal.total.to_string(),
+        "agent_id": plan.agent_id,
+        "task_id": plan.task_id.as_str(),
+        "proposed_at": plan.proposed_at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+    })
+}
+
+/// One marketing plan whole, as `marketing_plan.get` words it: the proposal, its state, the owner's
+/// decision with their words, and its end.
+#[must_use]
+pub fn whole(plan: &MarketingPlan, state: PlanState) -> Value {
+    let proposal = &plan.proposal;
+    let time = |at: &chrono::DateTime<chrono::Utc>| {
+        at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+    };
+    let decided = plan.decided.as_ref().map(|(approved, words, at)| {
+        let mut decision = json!({
+            "decision": if *approved { "approved" } else { "returned" },
+            "at": time(at),
+        });
+        if let Some(words) = words {
+            decision[if *approved { "note" } else { "reason" }] = json!(words);
+        }
+        decision
+    });
+    let ended = plan
+        .record
+        .ended
+        .zip(plan.ended_at)
+        .map(|(why, at)| json!({ "why": why.as_str(), "at": time(&at) }));
+    json!({
+        "plan": plan.record.id,
+        "title": proposal.title,
+        "summary": proposal.summary,
+        "text": proposal.text,
+        "state": state.as_str(),
+        "starts_on": proposal.starts_on.to_string(),
+        "ends_on": proposal.ends_on.to_string(),
+        "currency": proposal.currency,
+        "budget": {
+            "total": proposal.total.to_string(),
+            "google_ads": proposal.google_ads.to_string(),
+        },
+        "campaigns": proposal.campaigns.iter().map(|campaign| json!({
+            "key": campaign.key,
+            "channel": "google_ads",
+            "name": campaign.name,
+            "goal": campaign.goal,
+            "budget": campaign.budget.to_string(),
+            "starts_on": campaign.starts_on.to_string(),
+            "ends_on": campaign.ends_on.to_string(),
+        })).collect::<Vec<_>>(),
+        "posts": proposal.posts.iter().map(|post| json!({
+            "key": post.key,
+            "channel": post.channel.as_str(),
+            "on": post.on.to_string(),
+            "topic": post.topic,
+        })).collect::<Vec<_>>(),
+        "measures": proposal.measures,
+        "google_ads_account": proposal.google_ads_account,
+        "replaces": proposal.replaces,
+        "agent_id": plan.agent_id,
+        "task_id": plan.task_id.as_str(),
+        "proposed_at": time(&plan.proposed_at),
+        "decided": decided,
+        "ended": ended,
+    })
+}
+
+/// The states of `plans`, in their order, given today: the one in force is active.
+#[must_use]
+pub fn states_today(plans: &[MarketingPlan], today: chrono::NaiveDate) -> Vec<PlanState> {
+    let records: Vec<PlanRecord> = plans.iter().map(|plan| plan.record.clone()).collect();
+    let active = farik_core::marketing::active_plan(&records, today).map(|plan| plan.id.as_str());
+    plans.iter().map(|plan| plan.state(active)).collect()
 }

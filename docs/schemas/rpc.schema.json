@@ -61,7 +61,9 @@
         "backlog.summary",
         "skills.list",
         "skill.get",
-        "allowances.list"
+        "allowances.list",
+        "marketing_plan.list",
+        "marketing_plan.get"
       ]
     },
     "subscribeRequest": {
@@ -276,6 +278,12 @@
             },
             {
               "$ref": "#/$defs/allowancesListQuery"
+            },
+            {
+              "$ref": "#/$defs/marketingPlanListQuery"
+            },
+            {
+              "$ref": "#/$defs/marketingPlanGetQuery"
             },
             {
               "$ref": "#/$defs/metricsQuery"
@@ -2147,6 +2155,52 @@
         }
       }
     },
+    "marketingPlanListQuery": {
+      "title": "Marketing Plan List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "marketing_plan.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "marketingPlanGetQuery": {
+      "title": "Marketing Plan Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "marketing_plan.get"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string",
+              "pattern": "^MP-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "plan"
+          ]
+        }
+      }
+    },
     "metricsQuery": {
       "title": "Metrics Query",
       "type": "object",
@@ -2255,7 +2309,7 @@
       }
     },
     "waitingListResult": {
-      "description": "What waits on the human, questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
+      "description": "What waits on the human, questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2278,6 +2332,7 @@
                   "help",
                   "integration",
                   "tool_approval",
+                  "marketing_plan",
                   "preview_missing",
                   "designer_needs_sandbox",
                   "designer_needs_browser"
@@ -2307,6 +2362,29 @@
               },
               "input": {
                 "type": "string"
+              },
+              "plan": {
+                "type": "string",
+                "pattern": "^MP-[0-9]{1,6}$"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "total": {
+                "type": "string",
+                "pattern": "^[0-9]+\\.[0-9]{2}$"
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              "starts_on": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              "ends_on": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
               }
             },
             "required": [
@@ -3064,6 +3142,126 @@
         "tasks",
         "meetings"
       ]
+    },
+    "marketingPlanListResult": {
+      "description": "Every marketing plan, newest first (docs/SPEC.md 6.5; ADR 0042): its id, title, state, dates, currency and total budget as a decimal string with two decimals, the agent that proposed it and the task it waited on the owner for, and when it was proposed. state is proposed (waiting for the owner), returned (sent back), approved (approved, and not the plan in force: not started, or another is active), active (approved, and the plan in force today) or ended.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plans"],
+      "properties": {
+        "plans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["plan", "title", "state", "starts_on", "ends_on", "currency", "total", "agent_id", "task_id", "proposed_at"],
+            "properties": {
+              "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+              "title": { "type": "string" },
+              "state": { "type": "string", "enum": ["proposed", "returned", "approved", "active", "ended"] },
+              "starts_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "ends_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+              "total": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "agent_id": { "type": "string" },
+              "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+              "proposed_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+    "marketingPlanGetResult": {
+      "description": "One marketing plan whole (docs/SPEC.md 6.5; ADR 0042): what was proposed, its state as in marketing_plan.list, the owner's decision with their words (note for an approval, empty when they added nothing; reason for a plan sent back) and when, or null while it waits, and its end with why and when, or null. text is the plan's text, to be shown as text and never rendered as markup. Refused not_found for a plan nobody proposed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "title", "summary", "text", "state", "starts_on", "ends_on", "currency", "budget", "campaigns", "posts", "measures", "google_ads_account", "replaces", "agent_id", "task_id", "proposed_at", "decided", "ended"],
+      "properties": {
+        "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "text": { "type": "string" },
+        "state": { "type": "string", "enum": ["proposed", "returned", "approved", "active", "ended"] },
+        "starts_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "ends_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["total", "google_ads"],
+          "properties": { "total": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }, "google_ads": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" } }
+        },
+        "campaigns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "channel", "name", "goal", "budget", "starts_on", "ends_on"],
+            "properties": {
+              "key": { "type": "string" },
+              "channel": { "const": "google_ads" },
+              "name": { "type": "string" },
+              "goal": { "type": "string" },
+              "budget": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "starts_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "ends_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+            }
+          }
+        },
+        "posts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "channel", "on", "topic"],
+            "properties": {
+              "key": { "type": "string" },
+              "channel": {
+                "type": "string",
+                "enum": ["instagram", "x", "facebook", "linkedin", "threads", "bluesky", "tiktok", "pinterest", "youtube", "google_business", "mastodon"]
+              },
+              "on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "topic": { "type": "string" }
+            }
+          }
+        },
+        "measures": { "type": "array", "items": { "type": "string" } },
+        "google_ads_account": { "type": ["string", "null"] },
+        "replaces": { "type": ["string", "null"] },
+        "agent_id": { "type": "string" },
+        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "proposed_at": { "type": "string", "format": "date-time" },
+        "decided": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["decision", "at"],
+              "properties": {
+                "decision": { "type": "string", "enum": ["approved", "returned"] },
+                "note": { "type": "string" },
+                "reason": { "type": "string" },
+                "at": { "type": "string", "format": "date-time" }
+              }
+            }
+          ]
+        },
+        "ended": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["why", "at"],
+              "properties": {
+                "why": { "type": "string", "enum": ["replaced", "by_owner", "expired"] },
+                "at": { "type": "string", "format": "date-time" }
+              }
+            }
+          ]
+        }
+      }
     },
     "allowancesListResult": {
       "description": "What each connected kit connector of an active agent lets it make without asking, and how many it has made this period (docs/SPEC.md 6.7, ADR 0037): the period, the open sprint's or, with none open, the UTC day's since the later of its start and the last sprint's end, and one row per allowance. used counts every call of the tool in the period, those a grant allowed among them, so it may exceed of. what is the kit's plural noun for what a call makes.",

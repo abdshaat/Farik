@@ -316,6 +316,41 @@ describe("today", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("today_skips_a_kind_it_does_not_know", async () => {
+		const { container } = await today({
+			waiting: [
+				{
+					task_id: "FRK-3",
+					kind: "question",
+					agent_id: "mira",
+					title: "the launch post",
+					line: "question line",
+				},
+				{
+					task_id: "FRK-9",
+					kind: "not_a_kind",
+					agent_id: "mira",
+					title: "something new",
+					line: "a line of a later version",
+				},
+			],
+		});
+
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const rows = within(list).getAllByRole("listitem");
+		expect(rows).toHaveLength(1);
+		expect(
+			within(rows[0] as HTMLElement).getByText("Mira has a question"),
+		).toBeTruthy();
+		expect(screen.queryByText("something new")).toBeNull();
+		expect(screen.queryByText("a line of a later version")).toBeNull();
+		// The heading counts what it shows.
+		expect(
+			screen.getByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
 	it("today_lists_an_approval_and_opens_the_dialog", async () => {
 		const { container } = await today({
 			waiting: [

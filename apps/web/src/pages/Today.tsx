@@ -98,10 +98,14 @@ export function Today() {
 		"team.activity",
 		{},
 	);
-	const { data: waiting } = useQuery<{ waiting: Waiting[] }>(
-		"waiting.list",
-		{},
-	);
+	const { data: listed } = useQuery<{ waiting: Waiting[] }>("waiting.list", {});
+	// A row of a kind this page does not know is left out, as is its count: a newer daemon may
+	// have more kinds than this page.
+	const waiting = listed && {
+		waiting: listed.waiting.filter(
+			(item) => item.kind === "tool_approval" || item.kind in KINDS,
+		),
+	};
 	// Once, so the query's key stays the same between renders.
 	const [since] = useState(() => new Date(Date.now() - DAY_MS).toISOString());
 	const today = new Date().toISOString().slice(0, 10);

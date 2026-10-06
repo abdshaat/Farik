@@ -12,6 +12,7 @@ use farik_core::team::{Integration, Team};
 use farik_protocol::event::{EventBody, EventKind, FarikEvent, TaskStatusWire};
 
 use crate::files::ProjectFiles;
+use crate::marketing::marketing_plans;
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
 /// What kind of thing waits.
@@ -29,6 +30,8 @@ pub enum WaitingKind {
     Integration,
     /// A connector's call to allow or refuse (ADR 0031).
     ToolApproval,
+    /// A marketing plan the Marketing Specialist proposed, to approve or send back (ADR 0042).
+    MarketingPlan,
 }
 
 impl WaitingKind {
@@ -42,6 +45,7 @@ impl WaitingKind {
             Self::Help => "help",
             Self::Integration => "integration",
             Self::ToolApproval => "tool_approval",
+            Self::MarketingPlan => "marketing_plan",
         }
     }
 }
@@ -65,6 +69,25 @@ pub struct Waiting {
     pub reason: Option<String>,
     /// A connector call's ask.
     pub approval: Option<ToolAsk>,
+    /// A marketing plan's ask.
+    pub plan: Option<PlanAsk>,
+}
+
+/// A marketing plan that waits for the owner, as its `marketing_plan.proposed` recorded it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanAsk {
+    /// The plan's id, `MP-<n>`.
+    pub plan: String,
+    /// What the agent tells the owner first.
+    pub summary: String,
+    /// The most it spends in all, as a decimal string with two decimals.
+    pub total: String,
+    /// The currency of every amount.
+    pub currency: String,
+    /// Its first day.
+    pub starts_on: chrono::NaiveDate,
+    /// Its last day.
+    pub ends_on: chrono::NaiveDate,
 }
 
 /// A connector call that waits for the human, as its `tool_approval.requested` recorded it.
@@ -197,9 +220,11 @@ pub fn waiting(
         question_id: None,
         reason: None,
         approval: None,
+        plan: None,
     };
     let mut waiting = unanswered(&board, &history, &item);
     waiting.extend(undecided(&board, &history, team, &item));
+    waiting.extend(plans_waiting(&board, log, team, &item)?);
     let product_manager = team
         .active_agents()
         .find(|agent| Role::from(agent.role) == Role::ProductManager)
@@ -391,6 +416,44 @@ fn undecided(
         }
     }
     waiting
+}
+
+/// Every marketing plan nobody decided yet, oldest first (ADR 0042). Its row's title is the
+/// plan's, and its line says who proposes it.
+fn plans_waiting(
+    board: &[TaskProjection],
+    log: &EventLog,
+    team: &Team,
+    item: &impl Fn(&TaskProjection, WaitingKind, Option<&str>, String) -> Waiting,
+) -> Result<Vec<Waiting>, StoreError> {
+    let mut waiting = Vec::new();
+    for plan in marketing_plans(log)?
+        .into_iter()
+        .filter(|plan| plan.decided.is_none())
+    {
+        let Some(row) = board.iter().find(|row| row.task_id == plan.task_id) else {
+            continue;
+        };
+        let proposal = &plan.proposal;
+        let line = format!(
+            "{} proposes a marketing plan: {}",
+            name_of(team, &plan.agent_id),
+            proposal.title
+        );
+        waiting.push(Waiting {
+            title: proposal.title.clone(),
+            plan: Some(PlanAsk {
+                plan: plan.record.id.clone(),
+                summary: proposal.summary.clone(),
+                total: proposal.total.to_string(),
+                currency: proposal.currency.clone(),
+                starts_on: proposal.starts_on,
+                ends_on: proposal.ends_on,
+            }),
+            ..item(row, WaitingKind::MarketingPlan, Some(&plan.agent_id), line)
+        });
+    }
+    Ok(waiting)
 }
 
 /// An agent's display name, or `id` itself when the team has no such agent.

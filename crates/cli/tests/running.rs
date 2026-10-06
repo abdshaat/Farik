@@ -801,6 +801,42 @@ fn lists_a_connector_calls_whole_input_escaped() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn lists_a_marketing_plan_that_waits_with_its_commands() {
+    let repository = a_team("run-waiting-plan");
+    let task = a_small_request(&repository);
+    let mut body = farik_protocol::event::fixtures::a_body_wire(
+        farik_protocol::event::EventKind::MarketingPlanProposed,
+    );
+    body["title"] = json!("Spring launch");
+    record_as(
+        &repository,
+        &task,
+        Some(("kai", "session-1")),
+        "marketing_plan.proposed",
+        &body,
+    );
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let line = format!(
+        "{task} waits: kai proposes a marketing plan: Spring launch: farik marketing plan approve \
+         MP-1, or farik marketing plan return MP-1 --reason <text>"
+    );
+    assert!(ran.out.lines().any(|found| found == line), "{}", ran.out);
+
+    let ran = run_with(&repository.path, &["--json", "run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
+    assert_eq!(last["waiting_on_you"][0]["plan"], "MP-1", "{last}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn says_the_backlog_waits() {
     let repository = a_team_with("run-backlog", |wire| {
         wire["policy"]["plan_in_sprints"] = json!(true);

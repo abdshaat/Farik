@@ -11,6 +11,12 @@ use chrono::NaiveDate;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Amount(pub u64);
 
+impl fmt::Display for Amount {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}.{:02}", self.0 / 100, self.0 % 100)
+    }
+}
+
 /// Reads a decimal string such as `120`, `120.5` or `120.50` as hundredths: no sign, no
 /// separator, at most eight digits before the point and two after, and no leading zero. `None`
 /// for anything else.
@@ -522,6 +528,18 @@ pub enum EndReason {
     Expired,
 }
 
+impl EndReason {
+    /// The wire's word for it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Replaced => "replaced",
+            Self::ByOwner => "by_owner",
+            Self::Expired => "expired",
+        }
+    }
+}
+
 /// What the log says of one plan, for deciding which is active.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanRecord {
@@ -944,6 +962,14 @@ mod tests {
     }
 
     #[test]
+    fn names_each_end_as_the_wire_does() {
+        assert_eq!(
+            [EndReason::Replaced, EndReason::ByOwner, EndReason::Expired].map(EndReason::as_str),
+            ["replaced", "by_owner", "expired"]
+        );
+    }
+
+    #[test]
     fn names_the_eleven_channels_as_the_wire_does() {
         let words: Vec<&str> = PostChannel::ALL
             .iter()
@@ -977,6 +1003,21 @@ mod tests {
             " x",
         ] {
             assert_eq!(PostChannel::parse(word), None, "{word:?}");
+        }
+    }
+
+    #[test]
+    fn shows_an_amount_with_two_decimals_that_reads_back() {
+        for (hundredths, text) in [
+            (0, "0.00"),
+            (5, "0.05"),
+            (50, "0.50"),
+            (80_050, "800.50"),
+            (200_000, "2000.00"),
+            (9_999_999_999, "99999999.99"),
+        ] {
+            assert_eq!(Amount(hundredths).to_string(), text);
+            assert_eq!(parse_amount(text), Some(Amount(hundredths)), "{text}");
         }
     }
 

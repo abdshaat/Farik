@@ -21,6 +21,7 @@ use farik_protocol::event::{
 use farik_store::EventQuery;
 use farik_store::activity::{ActivityState, activity, moved_since};
 use farik_store::diff::diff_of;
+use farik_store::marketing::marketing_plans;
 use farik_store::requests::{
     RequestError, TOO_SHORT, contract_write, file_request, placeholder_budget_usd,
     request_from_text, summary_of,
@@ -31,6 +32,7 @@ use serde_json::{Value, json};
 use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
 use crate::cost::extra_tries;
+use crate::marketing::{list_row, states_today, whole};
 use crate::tools::ToolDeps;
 use crate::tools::contracts::changed_fields;
 use crate::tools::design::ReviewState;
@@ -125,6 +127,14 @@ fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
         row["tool"] = json!(ask.tool);
         row["input"] = json!(ask.input);
     }
+    if let Some(ask) = &item.plan {
+        row["plan"] = json!(ask.plan);
+        row["summary"] = json!(ask.summary);
+        row["total"] = json!(ask.total);
+        row["currency"] = json!(ask.currency);
+        row["starts_on"] = json!(ask.starts_on.to_string());
+        row["ends_on"] = json!(ask.ends_on.to_string());
+    }
     row
 }
 
@@ -182,6 +192,8 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
                 json!({ "moved": moved.iter().map(|one| json!({ "at": one.at, "line": one.line })).collect::<Vec<_>>() }),
             )
         }
+        "marketing_plan.list" => marketing_plan_list(deps),
+        "marketing_plan.get" => marketing_plan_get(deps, params["plan"].as_str().unwrap_or("")),
         "sprint.current" => sprint_current(deps),
         "backlog.summary" => backlog_summary(deps, &team()?),
         "questions.list" => questions(deps, params["task_id"].as_str()),
@@ -223,6 +235,32 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
             }
         }
     }
+}
+
+/// `marketing_plan.list`: every marketing plan, newest first, with where each stands today.
+fn marketing_plan_list(deps: &ToolDeps) -> Result<Value, Failure> {
+    let plans = marketing_plans(&deps.log).map_err(|e| internal(&e))?;
+    let states = states_today(&plans, deps.clock.now().date_naive());
+    Ok(json!({
+        "plans": plans
+            .iter()
+            .zip(states)
+            .rev()
+            .map(|(plan, state)| list_row(plan, state))
+            .collect::<Vec<_>>()
+    }))
+}
+
+/// `marketing_plan.get`: one marketing plan whole, or `not_found`.
+fn marketing_plan_get(deps: &ToolDeps, id: &str) -> Result<Value, Failure> {
+    let plans = marketing_plans(&deps.log).map_err(|e| internal(&e))?;
+    let states = states_today(&plans, deps.clock.now().date_naive());
+    plans
+        .iter()
+        .zip(states)
+        .find(|(plan, _)| plan.record.id == id)
+        .map(|(plan, state)| whole(plan, state))
+        .ok_or_else(|| Failure::new(NOT_FOUND, format!("there is no marketing plan {id}")))
 }
 
 /// The task the params name, which the board must hold.
@@ -795,6 +833,174 @@ pub(super) mod tests {
                 .set_command_handler(command_handler(orchestrator))
         );
         harness
+    }
+
+    /// Kai's plans MP-1 to MP-5 on FRK-1, the fixture's today being 2026-09-22: MP-1 approved and
+    /// running, MP-2 waiting, MP-3 sent back, MP-4 approved and ended by the owner, MP-5 approved
+    /// and not started.
+    fn plans_in_every_state(harness: &Harness) {
+        let project = &harness.project;
+        project.plan_proposed("FRK-1", "MP-1", "2026-09-20", "2026-10-10");
+        project.record(
+            "FRK-1",
+            "marketing_plan.approved",
+            &json!({ "plan": "MP-1", "note": "Start small" }),
+        );
+        project.plan_proposed("FRK-1", "MP-2", "2026-10-20", "2026-11-10");
+        project.plan_proposed("FRK-1", "MP-3", "2026-11-01", "2026-11-30");
+        project.record(
+            "FRK-1",
+            "marketing_plan.returned",
+            &json!({ "plan": "MP-3", "reason": "Too early." }),
+        );
+        project.plan_proposed("FRK-1", "MP-4", "2026-10-01", "2026-10-20");
+        project.plan_approved("FRK-1", "MP-4", "");
+        project.record(
+            "",
+            "marketing_plan.ended",
+            &json!({ "plan": "MP-4", "why": "by_owner" }),
+        );
+        project.plan_proposed("FRK-1", "MP-5", "2026-12-01", "2026-12-31");
+        project.plan_approved("FRK-1", "MP-5", "");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_and_gets_plans() {
+        let harness = Harness::new(
+            "gates-plans",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        plans_in_every_state(&harness);
+
+        let listed = query(
+            &harness.daemon,
+            "marketing_plan.list",
+            &json!({}),
+            "marketingPlanListResult",
+        );
+
+        let rows = listed["plans"].as_array().expect("a list of plans");
+        let seen: Vec<(&str, &str)> = rows
+            .iter()
+            .map(|row| {
+                (
+                    row["plan"].as_str().unwrap_or(""),
+                    row["state"].as_str().unwrap_or(""),
+                )
+            })
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("MP-5", "approved"),
+                ("MP-4", "ended"),
+                ("MP-3", "returned"),
+                ("MP-2", "proposed"),
+                ("MP-1", "active"),
+            ],
+            "newest first"
+        );
+        assert_eq!(
+            rows[4],
+            json!({
+                "plan": "MP-1", "title": "Spring launch", "state": "active",
+                "starts_on": "2026-09-20", "ends_on": "2026-10-10", "currency": "USD",
+                "total": "2000.00", "agent_id": "kai", "task_id": "FRK-1",
+                "proposed_at": at().to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+            })
+        );
+
+        let get = |plan: &str| {
+            query(
+                &harness.daemon,
+                "marketing_plan.get",
+                &json!({ "plan": plan }),
+                "marketingPlanGetResult",
+            )
+        };
+        let running = get("MP-1");
+        assert_eq!(running["state"], "active");
+        assert_eq!(
+            running["summary"],
+            "Two weeks of posts and one small search campaign."
+        );
+        assert_eq!(running["text"], "x".repeat(300));
+        assert_eq!(
+            running["budget"],
+            json!({ "total": "2000.00", "google_ads": "0.00" })
+        );
+        assert_eq!(
+            running["measures"],
+            json!(["New customers who say they found us online"])
+        );
+        assert_eq!(running["decided"]["decision"], "approved");
+        assert_eq!(running["decided"]["note"], "Start small");
+        assert_eq!(running["ended"], Value::Null);
+        let waiting = get("MP-2");
+        assert_eq!(waiting["state"], "proposed");
+        assert_eq!(waiting["decided"], Value::Null);
+        let sent_back = get("MP-3");
+        assert_eq!(sent_back["decided"]["decision"], "returned");
+        assert_eq!(sent_back["decided"]["reason"], "Too early.");
+        assert!(sent_back["decided"].get("note").is_none(), "{sent_back}");
+        let ended = get("MP-4");
+        assert_eq!(ended["ended"]["why"], "by_owner");
+        assert_eq!(ended["decided"]["decision"], "approved");
+        assert!(
+            ended["decided"].get("note").is_none(),
+            "an empty note is no note"
+        );
+
+        let missing = rpc(
+            &harness.daemon,
+            "query",
+            &json!({ "name": "marketing_plan.get", "params": { "plan": "MP-9" } }),
+        );
+        assert_eq!(
+            missing["error"]["code"],
+            crate::daemon::web::NOT_FOUND,
+            "{missing}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn waiting_lists_a_plan_to_approve() {
+        let harness = Harness::new("gates-plan-waits", |wire| {
+            crate::tools::fixtures::with_the_marketing_specialist(wire);
+            wire["agents"][3]["display_name"] = json!("Kai");
+        });
+        harness.in_progress("FRK-1", "kai", "pm");
+        harness
+            .project
+            .plan_proposed("FRK-1", "MP-1", "2026-09-22", "2026-10-20");
+        let waiting = || {
+            query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult",
+            )["waiting"]
+                .clone()
+        };
+
+        assert_eq!(
+            waiting(),
+            json!([{
+                "task_id": "FRK-1", "kind": "marketing_plan", "agent_id": "kai",
+                "title": "Spring launch",
+                "line": "Kai proposes a marketing plan: Spring launch",
+                "plan": "MP-1",
+                "summary": "Two weeks of posts and one small search campaign.",
+                "total": "2000.00", "currency": "USD",
+                "starts_on": "2026-09-22", "ends_on": "2026-10-20"
+            }])
+        );
+
+        harness.project.plan_approved("FRK-1", "MP-1", "");
+        assert_eq!(waiting(), json!([]), "gone once decided");
     }
 
     #[test]
