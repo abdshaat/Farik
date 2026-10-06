@@ -1,0 +1,217 @@
+.letter {
+	display: grid;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-4);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-raised);
+}
+
+.letter p {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+/* Where the plan stands: the colour says only whether it waits on the owner or runs. */
+.state {
+	justify-self: start;
+	margin: 0;
+	padding: 0 var(--farik-space-2);
+	border: 2px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+	font-weight: 600;
+}
+
+.state[data-state="proposed"] {
+	border-color: var(--farik-color-status-waiting);
+}
+
+.state[data-state="approved"],
+.state[data-state="active"] {
+	border-color: var(--farik-color-status-working);
+}
+
+/* The owner's own decision, with their words, as the page's one quotation. */
+.decision {
+	display: grid;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-3) var(--farik-space-4);
+	border-left: 3px solid var(--farik-color-rule);
+}
+
+.decision p,
+.decision blockquote {
+	margin: 0;
+	max-width: 65ch;
+	overflow-wrap: anywhere;
+}
+
+.decision blockquote {
+	white-space: pre-wrap;
+}
+
+.allows {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+	padding-left: var(--farik-space-5);
+	max-width: 65ch;
+}
+
+.scroll {
+	overflow-x: auto;
+}
+
+.scroll:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.budget {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.budget th,
+.budget td {
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border-bottom: 1px solid var(--farik-color-rule);
+	text-align: start;
+	vertical-align: top;
+	overflow-wrap: anywhere;
+}
+
+.budget thead th {
+	color: var(--farik-color-ink-muted);
+	font-weight: 600;
+}
+
+.budget .number {
+	font-family: var(--farik-type-code-family);
+	font-variant-numeric: tabular-nums;
+	text-align: end;
+	white-space: nowrap;
+}
+
+.budget tfoot th,
+.budget tfoot td {
+	font-weight: 600;
+	border-bottom: 0;
+}
+
+.sub {
+	display: block;
+	color: var(--farik-color-ink-muted);
+}
+
+.campaign td:first-child {
+	padding-inline-start: var(--farik-space-5);
+}
+
+/* On a phone each row stacks: its name above, then its dates and its budget. */
+@media not (min-width: 640px) {
+	.budget thead {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+	}
+
+	.budget tr {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+	}
+
+	.budget tbody td:first-child,
+	.budget tfoot th {
+		grid-column: 1 / -1;
+		border-bottom: 0;
+	}
+}
+
+.week {
+	margin: var(--farik-space-3) 0 0;
+	font-weight: 600;
+}
+
+.posts {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.posts li {
+	display: grid;
+	grid-template-columns: 6.5rem 6rem minmax(0, 1fr);
+	gap: var(--farik-space-1) var(--farik-space-3);
+	overflow-wrap: anywhere;
+}
+
+.channel {
+	color: var(--farik-color-ink-muted);
+}
+
+@media not (min-width: 640px) {
+	.posts li {
+		grid-template-columns: max-content minmax(0, 1fr);
+	}
+
+	.posts li > :last-child {
+		grid-column: 1 / -1;
+	}
+}
+
+/* The agent's whole plan, as typed: wrapped, never cut off, never marked up. */
+.text {
+	margin: 0;
+	padding: var(--farik-space-3);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+	font:
+		var(--farik-type-code-weight) var(--farik-type-code-size) /
+		var(--farik-type-code-line-height) var(--farik-type-code-family);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.facts {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: var(--farik-space-1) var(--farik-space-4);
+	margin: 0;
+}
+
+.facts dt {
+	color: var(--farik-color-ink-muted);
+}
+
+.facts dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+/* The decision stays in view as the page scrolls. */
+.bar {
+	position: sticky;
+	bottom: 0;
+	display: grid;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-3) var(--farik-space-4);
+	background: var(--farik-color-surface);
+	border-top: 1px solid var(--farik-color-control-border);
+}
+
+.bar p {
+	margin: 0;
+	max-width: 65ch;
+}
+
+.over {
+	margin: 0;
+	color: var(--farik-color-status-waiting);
+	font-weight: 600;
+}

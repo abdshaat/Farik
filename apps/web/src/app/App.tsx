@@ -7,6 +7,7 @@ import { Costs } from "../pages/Costs.tsx";
 import { Events } from "../pages/Events.tsx";
 import { Gate } from "../pages/Gate.tsx";
 import { HelpNeeded } from "../pages/HelpNeeded.tsx";
+import { MarketingPlan } from "../pages/MarketingPlan.tsx";
 import { NotFound } from "../pages/NotFound.tsx";
 import { PlanEditor } from "../pages/PlanEditor.tsx";
 import { PlanPage } from "../pages/PlanPage.tsx";
@@ -65,6 +66,7 @@ export function App() {
 				<Route path="/sprints/:id" element={<SprintPage />} />
 				<Route path="/costs" element={<Costs />} />
 				<Route path="/events" element={<Events />} />
+				<Route path="/marketing/plans/:id" element={<MarketingPlan />} />
 				<Route path="/requests/:id" element={<RequestFiled />} />
 				<Route path="/tasks/:id" element={<TaskDetail />} />
 				<Route path="/tasks/:id/questions" element={<Questions />} />

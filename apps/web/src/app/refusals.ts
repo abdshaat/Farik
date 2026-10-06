@@ -46,6 +46,13 @@ const WORDS: Record<string, keyof typeof en> = {
 	no_sprint_open: "refuseNoSprintOpen",
 	triage_refused: "refuseTriage",
 	lock_refused: "refuseLock",
+	// The owner's decisions on a marketing plan (SPEC 6.5).
+	marketing_plan_decided: "refuseMarketingPlanDecided",
+	marketing_plan_expired: "refuseMarketingPlanExpired",
+	marketing_plan_reason_needed: "refuseMarketingPlanReason",
+	unknown_marketing_plan: "refuseMarketingPlanUnknown",
+	marketing_plan_not_approved: "refuseMarketingPlanNotApproved",
+	marketing_plan_ended: "refuseMarketingPlanEnded",
 	// A skill's refusals (SPEC 6.7), said at the field they belong to.
 	skill_runs_commands: "skillRunsCommands",
 	skill_attaches_files: "skillAttachesFiles",

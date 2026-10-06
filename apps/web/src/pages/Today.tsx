@@ -11,6 +11,7 @@ import { type Allowances, useAllowances } from "./allowances.tsx";
 import { type Backlog, moreWaits } from "./Board.tsx";
 import { ChannelPreview } from "./Channel.tsx";
 import { ToolApproval, type ToolAsk } from "./dialogs/ToolApproval.tsx";
+import { longRange, money } from "./marketing.ts";
 import { type Agent, roleName, type Team } from "./setup/TeamSetup.tsx";
 import type { RoleKit } from "./Team.tsx";
 import styles from "./Today.module.css";
@@ -25,13 +26,23 @@ type Kind =
 	| "preview_missing"
 	| "designer_needs_sandbox"
 	| "designer_needs_browser";
+/** What a marketing plan waiting on the owner says of itself (`waiting.list`). */
+type PlanAsk = {
+	plan: string;
+	summary: string;
+	total: string;
+	currency: string;
+	startsOn: string;
+	endsOn: string;
+};
 type Waiting = {
 	taskId: string;
-	kind: Kind | "tool_approval";
+	kind: Kind | "tool_approval" | "marketing_plan";
 	agentId: string | null;
 	title: string;
 	line: string;
-} & Partial<ToolAsk>;
+} & Partial<ToolAsk> &
+	Partial<PlanAsk>;
 type Moved = { at: string; line: string };
 type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
@@ -103,7 +114,10 @@ export function Today() {
 	// have more kinds than this page.
 	const waiting = listed && {
 		waiting: listed.waiting.filter(
-			(item) => item.kind === "tool_approval" || item.kind in KINDS,
+			(item) =>
+				item.kind === "tool_approval" ||
+				item.kind === "marketing_plan" ||
+				item.kind in KINDS,
 		),
 	};
 	// Once, so the query's key stays the same between renders.
@@ -186,6 +200,12 @@ export function Today() {
 										agent={agent(item.agentId)}
 										allowances={allowances}
 										kits={team?.kits ?? []}
+									/>
+								) : item.kind === "marketing_plan" ? (
+									<MarketingPlanRow
+										key={`${item.kind}-${item.plan}`}
+										item={item}
+										agent={agent(item.agentId)}
 									/>
 								) : (
 									<WaitingRow
@@ -353,6 +373,46 @@ function WaitingRow({
 				aria-describedby={titleId}
 			>
 				{t(kind.word)}
+			</Link>
+		</li>
+	);
+}
+
+/** A marketing plan waiting for the owner: its summary, its budget and its dates; "Review" opens its page. */
+function MarketingPlanRow({
+	item,
+	agent,
+}: {
+	item: Waiting;
+	agent: Agent | undefined;
+}) {
+	const name = agent?.displayName ?? item.agentId ?? "";
+	const titleId = `waiting-plan-${item.plan}`;
+	return (
+		<li className={styles.row}>
+			{agent?.avatar && (
+				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
+			)}
+			<div className={styles.rowText}>
+				<strong id={titleId}>
+					{t("waitingMarketingPlan", { title: item.title })}
+				</strong>
+				{/* Text, whatever the agent wrote; two lines here, all of it on the plan's page. */}
+				<span className={styles.clamp}>{item.summary}</span>
+				<span className={styles.figures}>
+					<span className={styles.amount}>
+						{money(item.total ?? "0.00", item.currency ?? "USD")}
+					</span>
+					<span>{item.currency}</span>
+					<span>{longRange(item.startsOn ?? "", item.endsOn ?? "")}</span>
+				</span>
+			</div>
+			<Link
+				className={styles.action}
+				to={`/marketing/plans/${item.plan}`}
+				aria-describedby={titleId}
+			>
+				{t("waitingReview")}
 			</Link>
 		</li>
 	);

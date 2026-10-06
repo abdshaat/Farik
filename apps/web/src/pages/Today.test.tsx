@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectionProvider } from "../app/connection.tsx";
 import { en } from "../strings/en.ts";
 import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
+import { PLAN, SUMMARY } from "../test/marketing.ts";
 import {
 	answerQuery,
 	answerStatus,
@@ -608,5 +609,78 @@ describe("today", () => {
 			expect(within(await band()).queryByText(/Backlog/)).toBeNull();
 			cleanup();
 		}
+	});
+	/** The row `waiting.list` gives while Kai's marketing plan waits on the owner. */
+	const PLAN_ROW = {
+		task_id: "FRK-31",
+		kind: "marketing_plan",
+		agent_id: "kai",
+		title: "Autumn at Corner Bakery",
+		line: "Kai proposes a marketing plan: Autumn at Corner Bakery",
+		plan: "MP-3",
+		summary: SUMMARY,
+		total: "450.00",
+		currency: "USD",
+		starts_on: "2026-10-12",
+		ends_on: "2026-11-22",
+	};
+	const WITH_KAI = {
+		...TEAM,
+		agents: [
+			...TEAM.agents,
+			agent("kai", "Kai", "marketing_specialist", "marketing-specialist"),
+		],
+	};
+
+	it("today_shows_a_plan_to_approve_with_its_summary_and_budget", async () => {
+		const { container } = await today({
+			waiting: [PLAN_ROW],
+			team: WITH_KAI,
+		});
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const row = within(list).getByRole("listitem");
+		expect(
+			within(row).getByText(
+				"Marketing plan to approve: Autumn at Corner Bakery",
+			),
+		).toBeTruthy();
+		// The whole summary is on the row, as text; the page has the rest.
+		expect(within(row).getByText(SUMMARY)).toBeTruthy();
+		expect(within(row).getByText("$450.00")).toBeTruthy();
+		expect(within(row).getByText("USD")).toBeTruthy();
+		expect(
+			within(row).getByText("Monday 12 October to Sunday 22 November"),
+		).toBeTruthy();
+		expect(within(row).getByRole("img").getAttribute("alt")).toBe("Kai");
+		expect(
+			screen.getByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("review_opens_the_plan_page", async () => {
+		const { s } = await today({ waiting: [PLAN_ROW], team: WITH_KAI });
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const review = within(list).getByRole("link", { name: en.waitingReview });
+		expect(review.getAttribute("href")).toBe("/marketing/plans/MP-3");
+		fireEvent.click(review);
+
+		// The page asks for that plan, and shows it.
+		const asked = await waitFor(() => {
+			const q = s
+				.calls("query")
+				.find((one) => one.params.name === "marketing_plan.get");
+			if (!q) throw new Error("the plan was not asked for");
+			return q;
+		});
+		expect(asked.params.params).toEqual({ plan: "MP-3" });
+		await answerQuery(s, "team.get", { team: WITH_KAI });
+		await answerQuery(s, "marketing_plan.get", PLAN);
+		expect(
+			await screen.findByRole("heading", {
+				level: 1,
+				name: "Autumn at Corner Bakery",
+			}),
+		).toBeTruthy();
 	});
 });
