@@ -903,3 +903,245 @@ fn farik_tool_refuse_shows_the_input_escaped() {
         )
     );
 }
+
+/// What the driver answers to a marketing plan command.
+fn a_plan_answer(said: &str) -> farik_runtime::orchestrator::CommandReport {
+    farik_runtime::orchestrator::CommandReport {
+        said: said.to_string(),
+        events: Vec::new(),
+    }
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn marketing_plan_approve_sends_the_decision() {
+    let repository = a_project("human-plan-approve-sent");
+    let driver = LiveDriver::answering(
+        &repository,
+        Ok(a_plan_answer("approved marketing plan MP-1")),
+    );
+
+    let noted = run(
+        &repository.path,
+        &[
+            "marketing",
+            "plan",
+            "approve",
+            "MP-1",
+            "--note",
+            "Start small",
+        ],
+    );
+    let bare = run(&repository.path, &["marketing", "plan", "approve", "MP-2"]);
+
+    assert_eq!(noted.code, 0, "{}", noted.err);
+    assert_eq!(noted.out.trim(), "approved marketing plan MP-1");
+    assert_eq!(bare.code, 0, "{}", bare.err);
+    assert_eq!(
+        driver.commands(),
+        vec![
+            Command::MarketingPlanDecide {
+                plan: "MP-1".to_string(),
+                approve: true,
+                note: Some("Start small".to_string())
+            },
+            Command::MarketingPlanDecide {
+                plan: "MP-2".to_string(),
+                approve: true,
+                note: None
+            },
+        ]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn marketing_plan_end_sends_the_end() {
+    let repository = a_project("human-plan-end-sent");
+    let driver = LiveDriver::answering(&repository, Ok(a_plan_answer("ended marketing plan MP-1")));
+
+    let ran = run(
+        &repository.path,
+        &[
+            "marketing",
+            "plan",
+            "end",
+            "MP-1",
+            "--note",
+            "Changed course.",
+        ],
+    );
+    let bare = run(&repository.path, &["marketing", "plan", "end", "MP-1"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(ran.out.trim(), "ended marketing plan MP-1");
+    assert_eq!(bare.code, 0, "{}", bare.err);
+    assert_eq!(
+        driver.commands(),
+        vec![
+            Command::MarketingPlanEnd {
+                plan: "MP-1".to_string(),
+                note: Some("Changed course.".to_string())
+            },
+            Command::MarketingPlanEnd {
+                plan: "MP-1".to_string(),
+                note: None
+            },
+        ]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn marketing_plan_return_needs_a_reason() {
+    let repository = a_project("human-plan-return-sent");
+    let driver = LiveDriver::answering(
+        &repository,
+        Ok(a_plan_answer("sent back marketing plan MP-1")),
+    );
+
+    let without = run(&repository.path, &["marketing", "plan", "return", "MP-1"]);
+    assert_eq!(without.code, 2, "{}", without.out);
+    assert!(without.err.contains("--reason"), "{}", without.err);
+    assert!(driver.commands().is_empty(), "nothing was sent");
+
+    let with = run(
+        &repository.path,
+        &[
+            "marketing",
+            "plan",
+            "return",
+            "MP-1",
+            "--reason",
+            "Halve the budget.",
+        ],
+    );
+    assert_eq!(with.code, 0, "{}", with.err);
+    assert_eq!(with.out.trim(), "sent back marketing plan MP-1");
+    assert_eq!(
+        driver.commands(),
+        vec![Command::MarketingPlanDecide {
+            plan: "MP-1".to_string(),
+            approve: false,
+            note: Some("Halve the budget.".to_string())
+        }]
+    );
+}
+
+/// Kai's plan `plan` on `task`, proposed with `title`, between `from` and `to` days from today.
+fn a_plan_proposed(
+    repository: &farik_store::git::fixtures::TempRepo,
+    task: &str,
+    plan: &str,
+    title: &str,
+    (from, to): (i64, i64),
+) {
+    let today = project::at().date_naive();
+    let day = |days: i64| (today + chrono::Duration::days(days)).to_string();
+    let mut body = farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+    body["plan"] = json!(plan);
+    body["title"] = json!(title);
+    body["starts_on"] = json!(day(from));
+    body["ends_on"] = json!(day(to));
+    body["campaigns"] = json!([]);
+    body["posts"] = json!([]);
+    body["budget"] = json!({ "total": "2000.50", "google_ads": "0" });
+    record_as(
+        repository,
+        task,
+        Some(("kai", "session-1")),
+        "marketing_plan.proposed",
+        &body,
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn marketing_plan_show_prints_the_list_and_one_plan() {
+    let repository = a_project("human-plan-show");
+    let task = filed(&repository, "Add done.txt");
+    a_plan_proposed(&repository, &task, "MP-1", "Spring launch", (-1, 10));
+    record(
+        &repository,
+        &task,
+        "marketing_plan.approved",
+        &json!({ "plan": "MP-1", "note": "Start small" }),
+    );
+    a_plan_proposed(
+        &repository,
+        &task,
+        "MP-2",
+        "Autumn push \u{1b}[2J",
+        (20, 30),
+    );
+    a_plan_proposed(&repository, &task, "MP-3", "Winter sale", (40, 50));
+    record(
+        &repository,
+        &task,
+        "marketing_plan.returned",
+        &json!({ "plan": "MP-3", "reason": "Too early." }),
+    );
+
+    let list = run(&repository.path, &["marketing", "plan", "show"]);
+
+    assert_eq!(list.code, 0, "{}", list.err);
+    let lines: Vec<&str> = list.out.lines().collect();
+    assert_eq!(lines.len(), 3, "{}", list.out);
+    for (line, plan, state) in [
+        (lines[0], "MP-3", "returned"),
+        (lines[1], "MP-2", "proposed"),
+        (lines[2], "MP-1", "active"),
+    ] {
+        assert!(line.starts_with(plan), "newest first: {line}");
+        assert!(line.contains(state), "{line}");
+        assert!(line.contains("USD 2000.50"), "{line}");
+    }
+    assert!(lines[2].contains("Spring launch"), "{}", lines[2]);
+    assert!(!list.out.contains('\u{1b}'), "{:?}", list.out);
+
+    let json = run(&repository.path, &["--json", "marketing", "plan", "show"]);
+    assert_eq!(json.code, 0, "{}", json.err);
+    assert!(json.err.is_empty(), "stdout alone: {}", json.err);
+    let all: Value = serde_json::from_str(json.out.trim()).expect("one JSON document");
+    let plans = all["plans"].as_array().expect("a list of plans");
+    assert_eq!(
+        plans
+            .iter()
+            .map(|plan| plan["plan"].as_str().expect("an id"))
+            .collect::<Vec<_>>(),
+        ["MP-3", "MP-2", "MP-1"]
+    );
+    assert_eq!(plans[2]["state"], "active");
+    assert_eq!(plans[2]["total"], "2000.50");
+    assert_eq!(plans[2]["currency"], "USD");
+    assert_eq!(plans[2]["agent_id"], "kai");
+    assert_eq!(plans[2]["task_id"], task);
+
+    let one = run(&repository.path, &["marketing", "plan", "show", "MP-1"]);
+    assert_eq!(one.code, 0, "{}", one.err);
+    for needle in [
+        "MP-1 active",
+        "Spring launch",
+        "kai",
+        "USD 2000.50",
+        "approved ",
+        ": Start small",
+        "Two weeks of posts and one small search campaign.",
+    ] {
+        assert!(one.out.contains(needle), "{needle}: {}", one.out);
+    }
+    let one_json = run(
+        &repository.path,
+        &["--json", "marketing", "plan", "show", "MP-3"],
+    );
+    let plan: Value = serde_json::from_str(one_json.out.trim()).expect("one JSON document");
+    assert_eq!(plan["plan"], "MP-3");
+    assert_eq!(plan["state"], "returned");
+    assert_eq!(plan["decided"]["decision"], "returned");
+    assert_eq!(plan["decided"]["reason"], "Too early.");
+    assert_eq!(plan["budget"]["total"], "2000.50");
+
+    let unknown = run(&repository.path, &["marketing", "plan", "show", "MP-9"]);
+    assert_eq!(unknown.code, 1, "{}", unknown.out);
+    assert!(unknown.err.contains("MP-9"), "{}", unknown.err);
+}

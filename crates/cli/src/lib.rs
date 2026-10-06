@@ -40,6 +40,7 @@ pub mod ids;
 pub mod init;
 /// The event log, filtered and exported.
 pub mod log;
+pub mod marketing;
 /// The harness metrics.
 pub mod metrics;
 /// Text as a terminal may be given it.
@@ -511,6 +512,11 @@ enum Commands {
         #[command(subcommand)]
         command: ToolCommands,
     },
+    /// Show the marketing plans, or approve, send back or end one (6.5).
+    Marketing {
+        #[command(subcommand)]
+        command: MarketingCommands,
+    },
     /// Start, end, or show a sprint (5.5).
     Sprint {
         #[command(subcommand)]
@@ -714,6 +720,48 @@ enum SprintCommands {
 }
 
 #[derive(Subcommand)]
+enum MarketingCommands {
+    /// The Marketing Specialist's plans.
+    Plan {
+        #[command(subcommand)]
+        command: PlanCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum PlanCommands {
+    /// List the plans, newest first, or show the one named.
+    Show {
+        /// The plan, as MP-<n>.
+        plan: Option<String>,
+    },
+    /// Approve a plan the Marketing Specialist proposed; it spends and posts only as it says.
+    Approve {
+        /// The plan, as MP-<n>.
+        plan: String,
+        /// A note for the Marketing Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Send a plan back, with the reason the Marketing Specialist reads.
+    Return {
+        /// The plan, as MP-<n>.
+        plan: String,
+        /// Why; the Marketing Specialist answers it in its next version.
+        #[arg(long)]
+        reason: String,
+    },
+    /// End an approved plan now.
+    End {
+        /// The plan, as MP-<n>.
+        plan: String,
+        /// Why, when you say.
+        #[arg(long)]
+        note: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum ToolCommands {
     /// Allow the call once, with exactly the input the agent asked with.
     Approve {
@@ -889,6 +937,17 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         | Commands::Sprint {
             command: SprintCommands::Start { .. } | SprintCommands::End,
         } => open_project(&io.cwd, now).and_then(|project| {
+            let (name, command) = humans(&parsed.command)?;
+            human_command(&project, command, name, io)
+        }),
+        Commands::Marketing {
+            command:
+                MarketingCommands::Plan {
+                    command: PlanCommands::Show { plan },
+                },
+        } => open_project(&io.cwd, now)
+            .and_then(|project| marketing::show(&project, plan.as_deref(), now)),
+        Commands::Marketing { .. } => open_project(&io.cwd, now).and_then(|project| {
             let (name, command) = humans(&parsed.command)?;
             human_command(&project, command, name, io)
         }),
@@ -1165,6 +1224,36 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 text: text.join(" "),
             },
         ),
+        Commands::Marketing {
+            command: MarketingCommands::Plan { command },
+        } => match command {
+            PlanCommands::Approve { plan, note } => (
+                "marketing plan approve",
+                Command::MarketingPlanDecide {
+                    plan: plan.clone(),
+                    approve: true,
+                    note: note.clone(),
+                },
+            ),
+            PlanCommands::Return { plan, reason } => (
+                "marketing plan return",
+                Command::MarketingPlanDecide {
+                    plan: plan.clone(),
+                    approve: false,
+                    note: Some(reason.clone()),
+                },
+            ),
+            PlanCommands::End { plan, note } => (
+                "marketing plan end",
+                Command::MarketingPlanEnd {
+                    plan: plan.clone(),
+                    note: note.clone(),
+                },
+            ),
+            PlanCommands::Show { .. } => {
+                return Err("farik marketing plan show only reads".to_string());
+            }
+        },
         _ => return Err("this is not one of the human's commands".to_string()),
     })
 }

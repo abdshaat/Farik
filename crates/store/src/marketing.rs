@@ -32,6 +32,54 @@ pub struct MarketingPlan {
     pub ended_at: Option<DateTime<Utc>>,
 }
 
+/// Where a plan stands (ADR 0042).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanState {
+    /// Proposed and waiting for the owner.
+    Proposed,
+    /// Sent back by the owner.
+    Returned,
+    /// Approved and not the active plan: not started yet, or another plan is active.
+    Approved,
+    /// Approved, and the plan in force today.
+    Active,
+    /// Ended.
+    Ended,
+}
+
+impl PlanState {
+    /// The wire's word for it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Proposed => "proposed",
+            Self::Returned => "returned",
+            Self::Approved => "approved",
+            Self::Active => "active",
+            Self::Ended => "ended",
+        }
+    }
+}
+
+impl MarketingPlan {
+    /// Where this plan stands, given the id of the plan that is active today, when one is
+    /// (`farik_core::marketing::active_plan`).
+    #[must_use]
+    pub fn state(&self, active: Option<&str>) -> PlanState {
+        if self.record.ended.is_some() {
+            PlanState::Ended
+        } else if self.record.returned {
+            PlanState::Returned
+        } else if self.record.approved_seq.is_none() {
+            PlanState::Proposed
+        } else if active == Some(self.record.id.as_str()) {
+            PlanState::Active
+        } else {
+            PlanState::Approved
+        }
+    }
+}
+
 /// Every marketing plan the log holds, oldest first. A decision or an end counts only when its
 /// envelope names no agent and no session, since only the owner and Farik decide or end a plan;
 /// the first decision on a plan is the only one, and so is the first end.
@@ -321,6 +369,55 @@ mod tests {
         assert_eq!(waiting.decided, None);
         assert_eq!(waiting.record.approved_seq, None);
         assert!(!waiting.record.returned);
+    }
+
+    #[test]
+    fn says_where_each_plan_stands() {
+        let log = a_log();
+        for (plan, hour) in [
+            ("MP-1", 9),
+            ("MP-2", 10),
+            ("MP-3", 11),
+            ("MP-4", 12),
+            ("MP-5", 13),
+        ] {
+            proposed(&log, plan, hour);
+        }
+        decided(
+            &log,
+            EventKind::MarketingPlanReturned,
+            "MP-1",
+            14,
+            json!({ "reason": "No." }),
+        );
+        for plan in ["MP-2", "MP-3", "MP-4"] {
+            decided(
+                &log,
+                EventKind::MarketingPlanApproved,
+                plan,
+                15,
+                json!({ "note": "" }),
+            );
+        }
+        append(&log, EventKind::MarketingPlanEnded, 16, |wire| {
+            wire["body"] = json!({ "plan": "MP-4", "why": "by_owner" });
+        });
+        let plans = marketing_plans(&log).expect("folds");
+
+        let states: Vec<&str> = plans
+            .iter()
+            .map(|plan| plan.state(Some("MP-2")).as_str())
+            .collect();
+
+        assert_eq!(
+            states,
+            ["returned", "active", "approved", "ended", "proposed"]
+        );
+        let none_active: Vec<&str> = plans.iter().map(|plan| plan.state(None).as_str()).collect();
+        assert_eq!(
+            none_active,
+            ["returned", "approved", "approved", "ended", "proposed"]
+        );
     }
 
     #[test]
