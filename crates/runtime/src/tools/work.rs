@@ -163,6 +163,13 @@ pub(super) fn request_transition(
     })?;
     let (contract, _) = call.contract(&task)?;
     let actor = actor_for(call, &contract, to)?;
+    // A marketing plan that waits for the owner is not handed in: its assignee ends its turn.
+    if to == TaskStatus::Verifying
+        && contract.status == TaskStatus::InProgress
+        && actor == TransitionActor::Assignee
+    {
+        super::marketing::refuse_while_waiting(call, &task)?;
+    }
     let ask = TransitionAsk {
         blocker: input.blocker.map(|blocker| Blocker {
             description: blocker.description,
@@ -971,5 +978,57 @@ mod tests {
         let blocker = body.blocker.as_ref().expect("the move carries its blocker");
         assert_eq!(blocker.description, "The sign-in API is down.");
         assert_eq!(blocker.needed, "A working API key.");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn no_verifying_while_the_plan_waits() {
+        let project = TestProject::new(
+            "tools-plan-no-verifying",
+            &a_team_of_three(crate::tools::fixtures::with_the_marketing_specialist),
+        );
+        project.filed_with("FRK-1", "in_progress", "task", None, |wire| {
+            wire["assignee_role"] = json!("marketing_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+        });
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "kai", "reviewer": "pm" }),
+        );
+        project.plan_proposed("FRK-1", "MP-1", "2026-09-22", "2026-10-20");
+        let before = project.event_count();
+        let verify = || {
+            project.call(
+                "kai",
+                Some("FRK-1"),
+                "farik_request_transition",
+                json!({ "to": "verifying" }),
+            )
+        };
+
+        let reason = refused_with(verify(), "marketing_plan_waiting");
+        assert_eq!(
+            reason,
+            "marketing_plan_waiting: MP-1 waits for the owner; end your turn"
+        );
+        assert_eq!(project.event_count(), before, "nothing is recorded");
+
+        // The owner's approval lifts it: the same call now reaches the governor, which records its
+        // own answer, whatever that is.
+        project.plan_approved("FRK-1", "MP-1", "");
+        let after_approval = project.event_count();
+        match verify() {
+            Ok(_) => {}
+            Err(ToolError::Refused { reason }) => {
+                assert!(!reason.starts_with("marketing_plan_waiting"), "{reason}");
+            }
+            other => panic!("the governor answers: {other:?}"),
+        }
+        assert!(
+            project.event_count() > after_approval,
+            "the governor recorded its answer"
+        );
     }
 }

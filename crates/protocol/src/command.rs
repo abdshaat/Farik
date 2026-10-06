@@ -16,7 +16,8 @@ pub use crate::generated::command::CommandName;
 use crate::generated::command::{
     AgentUpdateBody, ChatMessagePostBody, ConnectorConnectBody, ConnectorDisconnectBody, EmptyBody,
     EscalationResolveBody, FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject,
-    HumanSendBackBody, HumanSendBackBodySubject, MessagePostBody, QuestionAnswerBody,
+    HumanSendBackBody, HumanSendBackBodySubject, MarketingPlanDecideBody,
+    MarketingPlanDecideBodyDecision, MarketingPlanEndBody, MessagePostBody, QuestionAnswerBody,
     RequestTriageBody, RequestTriageBodySize, SessionStopBody, SkillConfirmBody, SkillLevel,
     SkillRemoveBody, SkillSaveBody, SprintStartBody, TaskCreateBody, TaskIdBody,
     TaskTransitionBody, ToolDecisionBody,
@@ -266,6 +267,22 @@ pub enum Command {
         /// Whether a skill of a shipped skill's name may replace it.
         replace_shipped: bool,
     },
+    /// Approve a marketing plan, or send it back with a reason (ADR 0042).
+    MarketingPlanDecide {
+        /// The plan's id, `MP-<n>`.
+        plan: String,
+        /// Whether the owner approves it (false: sends it back).
+        approve: bool,
+        /// What the owner says to the agent: the reason for a plan sent back.
+        note: Option<String>,
+    },
+    /// End an approved marketing plan.
+    MarketingPlanEnd {
+        /// The plan's id, `MP-<n>`.
+        plan: String,
+        /// Why, when the owner says.
+        note: Option<String>,
+    },
 }
 
 /// Checks a value against `docs/schemas/command.schema.json` and, when it conforms, returns the
@@ -319,6 +336,7 @@ pub fn command_from_value(input: &Value) -> Result<Command, Vec<ValidationError>
 }
 
 /// The human's commands, each read from its own body shape.
+#[allow(clippy::too_many_lines, reason = "one arm per command")]
 fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<ValidationError>> {
     match name {
         CommandName::TaskCreate | CommandName::RequestTriage => unreachable!(
@@ -419,6 +437,30 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
         CommandName::SkillSave | CommandName::SkillRemove | CommandName::SkillConfirm => {
             skill_command(name, body)
         }
+        CommandName::MarketingPlanDecide | CommandName::MarketingPlanEnd => {
+            marketing_plan_command(name, body)
+        }
+    }
+}
+
+/// `marketing_plan_decide` and `marketing_plan_end`, each read from its own body shape.
+fn marketing_plan_command(
+    name: CommandName,
+    body: &Value,
+) -> Result<Command, Vec<ValidationError>> {
+    if name == CommandName::MarketingPlanDecide {
+        let body: MarketingPlanDecideBody = read_body(body, name)?;
+        Ok(Command::MarketingPlanDecide {
+            plan: body.plan.to_string(),
+            approve: body.decision == MarketingPlanDecideBodyDecision::Approve,
+            note: body.note.map(|note| note.as_str().to_string()),
+        })
+    } else {
+        let body: MarketingPlanEndBody = read_body(body, name)?;
+        Ok(Command::MarketingPlanEnd {
+            plan: body.plan.to_string(),
+            note: body.note.map(|note| note.as_str().to_string()),
+        })
     }
 }
 
@@ -632,6 +674,26 @@ pub fn command_to_value(command: &Command) -> Value {
         Command::SkillSave { .. } | Command::SkillRemove { .. } | Command::SkillConfirm { .. } => {
             skill_wire(command)
         }
+        Command::MarketingPlanDecide {
+            plan,
+            approve,
+            note,
+        } => (
+            CommandName::MarketingPlanDecide,
+            with_optional(
+                json!({ "plan": plan, "decision": if *approve { "approve" } else { "return" } }),
+                "note",
+                note.as_ref().map(|note| json!(note)),
+            ),
+        ),
+        Command::MarketingPlanEnd { plan, note } => (
+            CommandName::MarketingPlanEnd,
+            with_optional(
+                json!({ "plan": plan }),
+                "note",
+                note.as_ref().map(|note| json!(note)),
+            ),
+        ),
     };
     json!({ "command": name.to_string(), "body": body })
 }
@@ -1249,6 +1311,94 @@ mod tests {
             let command = command_from_value(&wire).expect("the wire reads");
             assert_eq!(command_to_value(&command), wire);
         }
+    }
+
+    #[test]
+    fn reads_and_writes_the_marketing_plan_commands() {
+        for (name, body, command) in [
+            (
+                "marketing_plan_decide",
+                json!({ "plan": "MP-1", "decision": "approve" }),
+                Command::MarketingPlanDecide {
+                    plan: "MP-1".to_string(),
+                    approve: true,
+                    note: None,
+                },
+            ),
+            (
+                "marketing_plan_decide",
+                json!({ "plan": "MP-2", "decision": "approve", "note": "Start small" }),
+                Command::MarketingPlanDecide {
+                    plan: "MP-2".to_string(),
+                    approve: true,
+                    note: Some("Start small".to_string()),
+                },
+            ),
+            (
+                "marketing_plan_decide",
+                json!({ "plan": "MP-3", "decision": "return", "note": "Halve the budget." }),
+                Command::MarketingPlanDecide {
+                    plan: "MP-3".to_string(),
+                    approve: false,
+                    note: Some("Halve the budget.".to_string()),
+                },
+            ),
+            (
+                "marketing_plan_end",
+                json!({ "plan": "MP-1" }),
+                Command::MarketingPlanEnd {
+                    plan: "MP-1".to_string(),
+                    note: None,
+                },
+            ),
+            (
+                "marketing_plan_end",
+                json!({ "plan": "MP-1", "note": "Changed course." }),
+                Command::MarketingPlanEnd {
+                    plan: "MP-1".to_string(),
+                    note: Some("Changed course.".to_string()),
+                },
+            ),
+        ] {
+            assert_eq!(read(name, &body), command, "{name}");
+            assert_eq!(
+                command_to_value(&command),
+                json!({ "command": name, "body": body }),
+                "{name}"
+            );
+        }
+        for (name, body) in [
+            (
+                "marketing_plan_decide",
+                json!({ "plan": "plan-1", "decision": "approve" }),
+            ),
+            (
+                "marketing_plan_decide",
+                json!({ "plan": "MP-1", "decision": "maybe" }),
+            ),
+            ("marketing_plan_decide", json!({ "plan": "MP-1" })),
+            (
+                "marketing_plan_decide",
+                json!({ "plan": "MP-1", "decision": "return", "note": "x".repeat(601) }),
+            ),
+            (
+                "marketing_plan_end",
+                json!({ "plan": "MP-1", "note": "x".repeat(601) }),
+            ),
+            (
+                "marketing_plan_end",
+                json!({ "plan": "MP-1", "decision": "approve" }),
+            ),
+            ("marketing_plan_end", json!({})),
+        ] {
+            let errors = refusal(&json!({ "command": name, "body": body }));
+            assert!(!errors.is_empty(), "{name} {body}");
+        }
+        let a_note_of_600 = "x".repeat(600);
+        read(
+            "marketing_plan_decide",
+            &json!({ "plan": "MP-1", "decision": "return", "note": a_note_of_600 }),
+        );
     }
 
     #[test]

@@ -12,10 +12,12 @@ use farik_core::governor::gates::{fits_the_open_sprint, in_the_backlog, waits_fo
 use farik_core::governor::task_status::is_terminal;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
+use farik_core::marketing::plans_to_end;
 use farik_core::team::{Agent, AgentStatus, Team};
 use farik_protocol::event::{
     EscalationAgedBody, EventBody, EventIds, EventKind, FarikEvent, Thread, new_event,
 };
+use farik_store::marketing::marketing_plans;
 use farik_store::{CostScope, EventQuery, Git, TaskProjection};
 
 use super::design::{self, Stage};
@@ -37,6 +39,7 @@ use crate::ceremonies::{
 use crate::channel::{channel_summary, pending_mentions};
 use crate::cost::budget_state;
 use crate::exec::Executor;
+use crate::marketing::{hold_plans, record_plan_end};
 use crate::session::{EndReason, SessionPurpose};
 use crate::sleep::asleep_until;
 use crate::sprints::{EndedBy, end_sprint, planning_session_spent, sprint_hold};
@@ -57,6 +60,36 @@ pub(super) struct Waiting {
     /// The earliest time a sleeping agent whose session was not started wakes, and that agent
     /// (`asleep`).
     pub(super) slept: Option<(DateTime<Utc>, String)>,
+}
+
+/// The ends that dates bring to marketing plans (ADR 0042): each approved plan a newer one has
+/// replaced, and each whose last day has passed, recorded once. A rule with no model: it starts no
+/// session and does not use up the tick, so it runs while the team is paused too.
+///
+/// # Errors
+///
+/// What the log refused.
+pub(super) fn end_marketing_plans(
+    deps: &OrchestratorDeps,
+) -> Result<Vec<FarikEvent>, OrchestratorError> {
+    let tools = &deps.tools;
+    tools.projections.catch_up()?;
+    let held = hold_plans();
+    let records: Vec<_> = marketing_plans(&tools.log)?
+        .into_iter()
+        .map(|plan| plan.record)
+        .collect();
+    let mut events = Vec::new();
+    for (plan, why, replaced_by) in plans_to_end(&records, tools.clock.now().date_naive()) {
+        events.extend(
+            record_plan_end(&held, tools, &plan, why, replaced_by.as_deref(), None).map_err(
+                |detail| OrchestratorError::Refused {
+                    reason: format!("marketing_plan_not_ended: {plan}: {detail}"),
+                },
+            )?,
+        );
+    }
+    Ok(events)
 }
 
 /// One tick within `scope`: the first rule of the scope's set that acts on a task in scope, or
@@ -7801,5 +7834,110 @@ mod tests {
             sessions(&adapter),
             vec![("dev-b".to_string(), SessionPurpose::Verify)]
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_tick_ends_plans_by_their_dates() {
+        let harness = Harness::new(
+            "rules-plans-end",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        // Kai's task waits on a plan the owner has not decided, so no rule starts a session for
+        // it: the ends below happen with no session, whatever the other plans' dates.
+        harness.in_progress("FRK-1", "kai", "pm");
+        let project = &harness.project;
+        // The fixture's today is 2026-09-22. MP-1 ended on the 10th; MP-2 runs on through the
+        // month; MP-3, approved after it, starts today and takes its place.
+        project.plan_proposed("FRK-1", "MP-1", "2026-09-01", "2026-09-10");
+        project.plan_approved("FRK-1", "MP-1", "");
+        project.plan_proposed("FRK-1", "MP-2", "2026-09-12", "2026-09-30");
+        project.plan_approved("FRK-1", "MP-2", "");
+        project.plan_proposed("FRK-1", "MP-3", "2026-09-22", "2026-10-30");
+        project.plan_approved("FRK-1", "MP-3", "");
+        project.plan_proposed("FRK-1", "MP-4", "2026-09-22", "2026-10-30");
+        assert!(harness.row("FRK-1").waiting_on_human);
+        let adapter = harness.recorded(Vec::new());
+        let clock = Arc::new(MovableClock::new(at()));
+        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        let ends = |harness: &Harness| -> Vec<(String, String, Option<String>)> {
+            harness
+                .events(&[EventKind::MarketingPlanEnded])
+                .iter()
+                .map(|event| {
+                    let EventBody::MarketingPlanEnded(body) = &event.body else {
+                        panic!("an end");
+                    };
+                    assert_eq!(event.envelope.ids.agent_id, None);
+                    assert_eq!(event.envelope.ids.session_id, None);
+                    (
+                        body.plan.as_str().to_string(),
+                        body.why.to_string(),
+                        body.replaced_by
+                            .as_ref()
+                            .map(|plan| plan.as_str().to_string()),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(
+            ends(&harness),
+            [
+                ("MP-1".to_string(), "expired".to_string(), None),
+                (
+                    "MP-2".to_string(),
+                    "replaced".to_string(),
+                    Some("MP-3".to_string())
+                ),
+            ]
+        );
+        assert!(
+            adapter.started().is_empty(),
+            "no session started: {report:?}"
+        );
+        assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
+
+        // Once each: a second tick records nothing more.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(ends(&harness).len(), 2);
+
+        // And while the team is paused, a plan whose last day has passed still ends: MP-3 runs
+        // until the 30th of October.
+        project.record("", "team.paused", &json!({ "by": "human" }));
+        clock.set(at() + chrono::Duration::days(40));
+        let paused = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(paused, TickReport::Idle { .. }), "{paused:?}");
+        assert_eq!(
+            ends(&harness).last(),
+            Some(&("MP-3".to_string(), "expired".to_string(), None))
+        );
+        assert_eq!(ends(&harness).len(), 3);
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_task_waiting_on_a_plan_is_passed_over_by_the_rules() {
+        let harness = Harness::new(
+            "rules-plan-waits",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        harness
+            .project
+            .plan_proposed("FRK-1", "MP-1", "2026-09-22", "2026-10-20");
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            adapter.started().is_empty(),
+            "no session starts: {report:?}"
+        );
+        assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
     }
 }

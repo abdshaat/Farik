@@ -461,6 +461,11 @@ impl Orchestrator {
     /// As `tick`.
     pub async fn tick_within(&self, scope: &TickScope) -> Result<TickReport, OrchestratorError> {
         let log = &self.deps.tools.log;
+        // The ends that dates bring to marketing plans come first, before the pause is read: they
+        // start no session, so a paused team has them too (ADR 0042).
+        if scope.task_id.is_none() {
+            rules::end_marketing_plans(&self.deps)?;
+        }
         if crate::pause::paused(log)? {
             // A paused team still answers its chats (ADR 0026), unless the provider refused the
             // key, with which no chat can be answered either.

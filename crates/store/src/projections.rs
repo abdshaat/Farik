@@ -644,7 +644,9 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::ToolApprovalRequested(_)
         | EventBody::ToolApprovalGranted(_)
         | EventBody::ToolApprovalRefused(_)
-        | EventBody::MarketingPlanProposed(_) => apply_waiting(transaction, &id, &event.body, seq),
+        | EventBody::MarketingPlanProposed(_)
+        | EventBody::MarketingPlanApproved(_)
+        | EventBody::MarketingPlanReturned(_) => apply_waiting(transaction, &id, &event.body, seq),
         EventBody::DriftDetected(_)
         | EventBody::PullRequestOpened(_)
         | EventBody::ProjectScanned(_)
@@ -693,8 +695,6 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::SkillChanged(_)
         | EventBody::SkillRemoved(_)
         | EventBody::SkillConfirmed(_)
-        | EventBody::MarketingPlanApproved(_)
-        | EventBody::MarketingPlanReturned(_)
         | EventBody::MarketingPlanEnded(_) => Ok(()),
     }
 }
@@ -783,6 +783,12 @@ fn apply_waiting(
         EventBody::MarketingPlanProposed(_) => update(
             transaction,
             "UPDATE task_projections SET open_plans = open_plans + 1, updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::MarketingPlanApproved(_) | EventBody::MarketingPlanReturned(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_plans = max(0, open_plans - 1), updated_seq = ?2
              WHERE task_id = ?1",
             (id, seq),
         ),
@@ -1739,6 +1745,54 @@ mod tests {
             !row_of(&projections, "FRK-2").waiting_on_human,
             "no other task does"
         );
+    }
+
+    #[test]
+    fn stops_waiting_when_a_marketing_plan_is_approved_or_returned() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        for _ in 0..2 {
+            record(
+                &log,
+                &projections,
+                &about(EventKind::MarketingPlanProposed, "FRK-1"),
+            );
+        }
+        let decide = |kind| about(kind, "FRK-1");
+        record(
+            &log,
+            &projections,
+            &decide(EventKind::MarketingPlanApproved),
+        );
+        assert!(
+            row_of(&projections, "FRK-1").waiting_on_human,
+            "one plan still waits"
+        );
+        record(
+            &log,
+            &projections,
+            &decide(EventKind::MarketingPlanReturned),
+        );
+        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+        // A decision with nothing waiting never takes the count below nothing.
+        record(
+            &log,
+            &projections,
+            &decide(EventKind::MarketingPlanApproved),
+        );
+        record(
+            &log,
+            &projections,
+            &about(EventKind::MarketingPlanProposed, "FRK-1"),
+        );
+        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+        // An end is about no task and moves nothing.
+        record(
+            &log,
+            &projections,
+            &a_new_event(EventKind::MarketingPlanEnded),
+        );
+        assert!(row_of(&projections, "FRK-1").waiting_on_human);
     }
 
     #[test]

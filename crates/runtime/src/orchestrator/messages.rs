@@ -209,6 +209,24 @@ pub(super) fn human_message(history: &[FarikEvent], agent_id: &str) -> Option<St
                 "The human, moving this to {}: {}",
                 body.to, body.message
             )),
+            // Only the owner decides a plan: a decision an agent's session recorded is not one.
+            EventBody::MarketingPlanApproved(body) if is_the_owners(event) => {
+                let said = format!(
+                    "The owner approved your marketing plan {}.",
+                    body.plan.as_str()
+                );
+                Some(if body.note.is_empty() {
+                    said
+                } else {
+                    format!("{said} The owner adds: {}", body.note)
+                })
+            }
+            // The reason is the owner's own words, as the human's other words are: not wrapped.
+            EventBody::MarketingPlanReturned(body) if is_the_owners(event) => Some(format!(
+                "The owner sent back your marketing plan {}: {}",
+                body.plan.as_str(),
+                body.reason
+            )),
             EventBody::HumanAccepted(body) => {
                 body.message.as_ref().map(|message| match body.subject {
                     HumanAcceptedBodySubject::Result => {
@@ -223,6 +241,11 @@ pub(super) fn human_message(history: &[FarikEvent], agent_id: &str) -> Option<St
         })
         .collect();
     (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+}
+
+/// Whether `event` was recorded by the owner or by Farik, not in an agent's session.
+fn is_the_owners(event: &FarikEvent) -> bool {
+    event.envelope.ids.agent_id.is_none() && event.envelope.ids.session_id.is_none()
 }
 
 /// The human's decision `event` on `approval`, as `agent_id`'s next session is told it: only when
@@ -893,6 +916,49 @@ mod tests {
             "body": body,
         }))
         .expect("the event is schema-valid")
+    }
+
+    #[test]
+    fn tells_the_owner_s_decisions_on_a_plan_and_no_agent_s() {
+        let started = event(
+            1,
+            "session.started",
+            &json!({ "purpose": "implement", "model": "claude-haiku-4-5-20251001", "effort": "high" }),
+        );
+        let approved = |seq, plan, note| {
+            event(
+                seq,
+                "marketing_plan.approved",
+                &json!({ "plan": plan, "note": note }),
+            )
+        };
+        let returned = event(
+            4,
+            "marketing_plan.returned",
+            &json!({ "plan": "MP-2", "reason": "Halve it: <b>half</b>." }),
+        );
+        // A decision recorded in an agent's session is not the owner's.
+        let mut forged = serde_json::to_value(approved(5, "MP-3", "")).expect("a value");
+        forged["agent_id"] = json!("kai");
+        let forged = event_from_value(&forged).expect("schema-valid");
+        // And one before the last session started was told in it.
+        let history = [
+            approved(0, "MP-0", "Old."),
+            started,
+            approved(2, "MP-1", "Start small"),
+            approved(3, "MP-9", ""),
+            returned,
+            forged,
+        ];
+
+        assert_eq!(
+            human_message(&history, "kai").as_deref(),
+            Some(
+                "The owner approved your marketing plan MP-1. The owner adds: Start small\n\n\
+                 The owner approved your marketing plan MP-9.\n\n\
+                 The owner sent back your marketing plan MP-2: Halve it: <b>half</b>."
+            )
+        );
     }
 
     fn resume(commit: bool, note: Option<&str>) -> Resume {

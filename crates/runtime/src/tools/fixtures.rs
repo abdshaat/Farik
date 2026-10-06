@@ -53,6 +53,14 @@ pub(crate) fn with_the_designer(wire: &mut Value) {
     agents.push(an_agent_wire("ada", "architect"));
 }
 
+/// Adds the Marketing Specialist `kai` to a team's wire.
+pub(crate) fn with_the_marketing_specialist(wire: &mut Value) {
+    wire["agents"]
+        .as_array_mut()
+        .expect("a list of agents")
+        .push(an_agent_wire("kai", "marketing_specialist"));
+}
+
 /// The Designer `iris` and the Architect `ada` added, both with the Playwright connector on,
 /// and a preview set.
 pub(crate) fn browsing(wire: &mut Value) {
@@ -380,6 +388,36 @@ impl TestProject {
             }
         }
         self.record_at(recorded_at, task, "task.transitioned", &body)
+    }
+
+    /// Kai's proposal of marketing plan `plan` on `task`, as the tool records it: the protocol's
+    /// fixture plan between `starts_on` and `ends_on` (`YYYY-MM-DD`), with no campaign and no post.
+    pub(crate) fn plan_proposed(
+        &self,
+        task: &str,
+        plan: &str,
+        starts_on: &str,
+        ends_on: &str,
+    ) -> FarikEvent {
+        let mut body =
+            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+        body["plan"] = json!(plan);
+        body["starts_on"] = json!(starts_on);
+        body["ends_on"] = json!(ends_on);
+        body["campaigns"] = json!([]);
+        body["posts"] = json!([]);
+        body["budget"] = json!({ "total": "2000", "google_ads": "0" });
+        self.record_by(Some("kai"), at(), task, "marketing_plan.proposed", &body)
+    }
+
+    /// The owner's approval of `plan` on `task`, with `note` (empty for none): no agent, no
+    /// session.
+    pub(crate) fn plan_approved(&self, task: &str, plan: &str, note: &str) -> FarikEvent {
+        self.record(
+            task,
+            "marketing_plan.approved",
+            &json!({ "plan": plan, "note": note }),
+        )
     }
 
     /// Appends one event about `task` (or none) and projects it, as a command does.

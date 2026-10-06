@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
 use chrono::NaiveDate;
-use farik_core::contract::Role;
+use farik_core::contract::{Role, TaskId};
 use farik_core::marketing::{
     Amount, PlanCampaign, PlanProposal, PostChannel, PostSlot, ProposalRefusal, check_proposal,
     parse_amount,
@@ -168,14 +168,8 @@ pub(crate) fn propose_plan(
     let deps = call.deps();
     let _held = NUMBERING.lock().unwrap_or_else(PoisonError::into_inner);
     let plans = marketing_plans(&deps.log).map_err(failed)?;
-    if let Some(waiting) = plans
-        .iter()
-        .find(|plan| &plan.task_id == task && plan.decided.is_none())
-    {
-        return Err(refused(
-            "marketing_plan_waiting",
-            format!("{} waits for the owner; end your turn", waiting.record.id),
-        ));
+    if let Some(waiting) = waiting_on(&plans, task) {
+        return Err(waiting_refusal(&waiting.record.id));
     }
     let proposal = read_input(input).map_err(faults)?;
     let mut found = check_proposal(&proposal, deps.clock.now().date_naive())
@@ -240,6 +234,30 @@ pub(crate) fn propose_plan(
         "plan": id,
         "next": "end your turn: the owner's decision starts the next session",
     }))
+}
+
+/// The plan of `task` that waits for the owner, when there is one.
+fn waiting_on<'a>(plans: &'a [MarketingPlan], task: &TaskId) -> Option<&'a MarketingPlan> {
+    plans
+        .iter()
+        .find(|plan| &plan.task_id == task && plan.decided.is_none())
+}
+
+fn waiting_refusal(plan: &str) -> ToolError {
+    refused(
+        "marketing_plan_waiting",
+        format!("{plan} waits for the owner; end your turn"),
+    )
+}
+
+/// Refuses, as `marketing_plan_waiting`, the task's own plan while it waits for the owner: its
+/// assignee does not hand the task in meanwhile (ADR 0042).
+pub(super) fn refuse_while_waiting(call: &Call<'_>, task: &TaskId) -> Result<(), ToolError> {
+    let plans = marketing_plans(&call.deps().log).map_err(failed)?;
+    match waiting_on(&plans, task) {
+        Some(waiting) => Err(waiting_refusal(&waiting.record.id)),
+        None => Ok(()),
+    }
 }
 
 fn faults(faults: Vec<ProposalRefusal>) -> ToolError {

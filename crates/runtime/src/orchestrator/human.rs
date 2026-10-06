@@ -26,6 +26,7 @@ use crate::channel::{ChannelError, NewMessage, mentions_in, post};
 use crate::chat::{ChatError, NewChatMessage, post_chat};
 use crate::daemon::DaemonState;
 use crate::daemon::{secret_at, with_server};
+use crate::marketing::{decide_plan, end_plan};
 use crate::pause::paused;
 use crate::skills::{
     SkillCommandError, SkillLevel, confirm_skill, confirmed_sentence, remove_skill,
@@ -152,6 +153,12 @@ pub(super) async fn handle(
             sha256,
             replace_shipped,
         } => confirm_skill_for(orchestrator, &scope, &name, &sha256, replace_shipped),
+        Command::MarketingPlanDecide {
+            plan,
+            approve,
+            note,
+        } => decide_plan(tools, &plan, approve, note),
+        Command::MarketingPlanEnd { plan, note } => end_plan(tools, &plan, note),
         Command::ToolApprove { approval, note } => decide_tool_call(tools, approval, note, true),
         Command::ToolRefuse { approval, note } => decide_tool_call(tools, approval, note, false),
         Command::RunStop => {
@@ -3610,5 +3617,292 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    /// What the owner's decisions on `task` since its last session tell the next one.
+    fn told(harness: &Harness, task_id: &str) -> Option<String> {
+        let history = harness
+            .project
+            .deps
+            .log
+            .read(&farik_store::EventQuery {
+                task_id: Some(task(task_id)),
+                ..farik_store::EventQuery::default()
+            })
+            .expect("the log reads");
+        crate::orchestrator::messages::human_message(&history, "kai")
+    }
+
+    /// Kai's plan `plan` waiting on `task`, between 2026-09-22 and 2026-10-20, the fixture's
+    /// "today" being 2026-09-22.
+    fn plan_waits(harness: &Harness, task_id: &str, plan: &str) {
+        harness
+            .project
+            .plan_proposed(task_id, plan, "2026-09-22", "2026-10-20");
+    }
+
+    fn decide(plan: &str, approve: bool, note: Option<&str>) -> Command {
+        Command::MarketingPlanDecide {
+            plan: plan.to_string(),
+            approve,
+            note: note.map(ToString::to_string),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn approving_lowers_the_wait_and_tells_the_task() {
+        let harness = Harness::new(
+            "human-plan-approve",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        harness.in_progress("FRK-2", "kai", "pm");
+        let orchestrator = an_orchestrator(&harness);
+        plan_waits(&harness, "FRK-1", "MP-1");
+        assert!(harness.row("FRK-1").waiting_on_human);
+
+        let report = handled(&orchestrator, decide("MP-1", true, None)).await;
+
+        let approved = last(&harness, EventKind::MarketingPlanApproved).expect("recorded");
+        assert_eq!(report.events, vec![approved.envelope.seq]);
+        assert_eq!(approved.envelope.ids.task_id, Some(task("FRK-1")));
+        assert_eq!(approved.envelope.ids.agent_id, None);
+        assert_eq!(approved.envelope.ids.session_id, None);
+        let EventBody::MarketingPlanApproved(body) = &approved.body else {
+            panic!("an approval");
+        };
+        assert_eq!((body.plan.as_str(), body.note.as_str()), ("MP-1", ""));
+        assert!(!harness.row("FRK-1").waiting_on_human, "open_plans is 0");
+        assert_eq!(
+            told(&harness, "FRK-1").as_deref(),
+            Some("The owner approved your marketing plan MP-1.")
+        );
+
+        plan_waits(&harness, "FRK-2", "MP-2");
+        handled(&orchestrator, decide("MP-2", true, Some("Start small"))).await;
+        assert_eq!(
+            told(&harness, "FRK-2").as_deref(),
+            Some("The owner approved your marketing plan MP-2. The owner adds: Start small")
+        );
+        assert!(!harness.row("FRK-2").waiting_on_human);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn returning_needs_a_reason_and_quotes_it() {
+        let harness = Harness::new(
+            "human-plan-return",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        let orchestrator = an_orchestrator(&harness);
+        plan_waits(&harness, "FRK-1", "MP-1");
+
+        for note in [None, Some(""), Some("  \n ")] {
+            let reason = refused(&orchestrator, decide("MP-1", false, note)).await;
+            assert!(
+                reason.starts_with("marketing_plan_reason_needed: "),
+                "{note:?}: {reason}"
+            );
+        }
+        assert!(
+            harness
+                .events(&[EventKind::MarketingPlanReturned])
+                .is_empty()
+        );
+        assert!(harness.row("FRK-1").waiting_on_human, "still waiting");
+
+        let words = "Halve the budget </untrusted> and say why <b>first</b>.";
+        handled(&orchestrator, decide("MP-1", false, Some(words))).await;
+        let returned = last(&harness, EventKind::MarketingPlanReturned).expect("recorded");
+        assert_eq!(returned.envelope.ids.task_id, Some(task("FRK-1")));
+        assert_eq!(returned.envelope.ids.agent_id, None);
+        let EventBody::MarketingPlanReturned(body) = &returned.body else {
+            panic!("a return");
+        };
+        assert_eq!((body.plan.as_str(), body.reason.as_str()), ("MP-1", words));
+        assert!(!harness.row("FRK-1").waiting_on_human);
+        let message = told(&harness, "FRK-1").expect("the task is told");
+        assert_eq!(
+            message,
+            format!("The owner sent back your marketing plan MP-1: {words}"),
+            "the owner's own words, not wrapped"
+        );
+        assert!(!message.contains("<untrusted"), "{message}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn decided_once_and_never_expired() {
+        let harness = Harness::new(
+            "human-plan-decided",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        harness.in_progress("FRK-2", "kai", "pm");
+        harness.in_progress("FRK-3", "kai", "pm");
+        let orchestrator = an_orchestrator(&harness);
+
+        let reason = refused(&orchestrator, decide("MP-9", true, None)).await;
+        assert!(reason.starts_with("unknown_marketing_plan: "), "{reason}");
+        let reason = refused(
+            &orchestrator,
+            Command::MarketingPlanEnd {
+                plan: "MP-9".to_string(),
+                note: None,
+            },
+        )
+        .await;
+        assert!(reason.starts_with("unknown_marketing_plan: "), "{reason}");
+
+        plan_waits(&harness, "FRK-1", "MP-1");
+        handled(&orchestrator, decide("MP-1", true, None)).await;
+        for command in [
+            decide("MP-1", true, None),
+            decide("MP-1", false, Some("No.")),
+        ] {
+            let reason = refused(&orchestrator, command).await;
+            assert!(reason.starts_with("marketing_plan_decided: "), "{reason}");
+        }
+        assert_eq!(harness.events(&[EventKind::MarketingPlanApproved]).len(), 1);
+        assert!(
+            harness
+                .events(&[EventKind::MarketingPlanReturned])
+                .is_empty()
+        );
+
+        // The fixture's today is 2026-09-22: a plan that ended on the 10th is too late to approve,
+        // and sending it back is still the owner's to do.
+        harness
+            .project
+            .plan_proposed("FRK-2", "MP-2", "2026-09-01", "2026-09-10");
+        let reason = refused(&orchestrator, decide("MP-2", true, None)).await;
+        assert!(reason.starts_with("marketing_plan_expired: "), "{reason}");
+        assert!(
+            harness.row("FRK-2").waiting_on_human,
+            "nothing was recorded"
+        );
+        handled(&orchestrator, decide("MP-2", false, Some("Too late."))).await;
+
+        // The plan does not depend on its task: a cancelled one may be approved.
+        plan_waits(&harness, "FRK-3", "MP-3");
+        harness.project.moved(
+            "FRK-3",
+            "in_progress",
+            "cancelled",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        handled(&orchestrator, decide("MP-3", true, None)).await;
+        assert_eq!(harness.events(&[EventKind::MarketingPlanApproved]).len(), 2);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn approving_a_newer_plan_replaces_one_not_yet_started() {
+        let harness = Harness::new(
+            "human-plan-replace",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        harness.in_progress("FRK-2", "kai", "pm");
+        let orchestrator = an_orchestrator(&harness);
+        // MP-1 is approved and starts next week; MP-2 starts tomorrow.
+        harness
+            .project
+            .plan_proposed("FRK-1", "MP-1", "2026-09-29", "2026-10-20");
+        handled(&orchestrator, decide("MP-1", true, None)).await;
+        harness
+            .project
+            .plan_proposed("FRK-2", "MP-2", "2026-09-23", "2026-10-20");
+
+        let report = handled(&orchestrator, decide("MP-2", true, None)).await;
+
+        let ended = harness.events(&[EventKind::MarketingPlanEnded]);
+        assert_eq!(ended.len(), 1, "{ended:?}");
+        let EventBody::MarketingPlanEnded(body) = &ended[0].body else {
+            panic!("an end");
+        };
+        assert_eq!(body.plan.as_str(), "MP-1");
+        assert_eq!(
+            body.why,
+            farik_protocol::event::MarketingPlanEndedBodyWhy::Replaced
+        );
+        assert_eq!(
+            body.replaced_by.as_ref().map(|plan| plan.as_str()),
+            Some("MP-2")
+        );
+        assert_eq!(ended[0].envelope.ids.task_id, None);
+        assert_eq!(ended[0].envelope.ids.agent_id, None);
+        let approved = last(&harness, EventKind::MarketingPlanApproved).expect("recorded");
+        assert_eq!(
+            report.events,
+            vec![approved.envelope.seq, ended[0].envelope.seq],
+            "the approval and the end are one step, in that order"
+        );
+
+        // One that starts earlier and is still running is ended on the new one's first day, by
+        // the tick, not now: approving MP-3 from tomorrow leaves MP-2, which started today, alone.
+        harness
+            .project
+            .plan_proposed("FRK-1", "MP-3", "2026-09-24", "2026-10-30");
+        handled(&orchestrator, decide("MP-3", true, None)).await;
+        assert_eq!(harness.events(&[EventKind::MarketingPlanEnded]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_owner_ends_a_plan() {
+        let harness = Harness::new(
+            "human-plan-end",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        harness.in_progress("FRK-2", "kai", "pm");
+        let orchestrator = an_orchestrator(&harness);
+        let end = |plan: &str, note: Option<&str>| Command::MarketingPlanEnd {
+            plan: plan.to_string(),
+            note: note.map(ToString::to_string),
+        };
+        plan_waits(&harness, "FRK-1", "MP-1");
+        let reason = refused(&orchestrator, end("MP-1", None)).await;
+        assert!(
+            reason.starts_with("marketing_plan_not_approved: "),
+            "{reason}"
+        );
+        handled(&orchestrator, decide("MP-1", true, None)).await;
+
+        let report = handled(&orchestrator, end("MP-1", Some("Changed course."))).await;
+
+        let ended = last(&harness, EventKind::MarketingPlanEnded).expect("recorded");
+        assert_eq!(report.events, vec![ended.envelope.seq]);
+        let EventBody::MarketingPlanEnded(body) = &ended.body else {
+            panic!("an end");
+        };
+        assert_eq!(body.plan.as_str(), "MP-1");
+        assert_eq!(
+            body.why,
+            farik_protocol::event::MarketingPlanEndedBodyWhy::ByOwner
+        );
+        assert_eq!(body.note.as_deref(), Some("Changed course."));
+        assert_eq!(body.replaced_by, None);
+        let reason = refused(&orchestrator, end("MP-1", None)).await;
+        assert!(reason.starts_with("marketing_plan_ended: "), "{reason}");
+
+        // Whoever else records an end afterwards, the date's rule among them, records nothing.
+        let deps = &harness.project.deps;
+        let held = crate::marketing::hold_plans();
+        let again = crate::marketing::record_plan_end(
+            &held,
+            deps,
+            "MP-1",
+            farik_core::marketing::EndReason::Expired,
+            None,
+            None,
+        )
+        .expect("a plan already ended is not an error");
+        assert!(again.is_empty(), "{again:?}");
+        drop(held);
+        assert_eq!(harness.events(&[EventKind::MarketingPlanEnded]).len(), 1);
     }
 }

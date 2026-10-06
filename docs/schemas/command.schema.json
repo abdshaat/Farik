@@ -39,7 +39,9 @@
         "tool_refuse",
         "skill_save",
         "skill_remove",
-        "skill_confirm"
+        "skill_confirm",
+        "marketing_plan_decide",
+        "marketing_plan_end"
       ]
     },
     "commandBodyWire": {
@@ -65,6 +67,8 @@
         { "$ref": "#/$defs/skillSaveBody" },
         { "$ref": "#/$defs/skillRemoveBody" },
         { "$ref": "#/$defs/skillConfirmBody" },
+        { "$ref": "#/$defs/marketingPlanDecideBody" },
+        { "$ref": "#/$defs/marketingPlanEndBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -247,6 +251,29 @@
       "properties": {
         "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "note": { "type": "string" }
+      }
+    },
+    "marketingPlanDecideBody": {
+      "title": "Marketing Plan Decide Body",
+      "description": "The owner approves (decision approve) or sends back (decision return) the marketing plan plan, MP-<n> (docs/SPEC.md 6.5; ADR 0042). note is what the owner says to the agent: required for return, where it is the reason and Farik refuses it blank as marketing_plan_reason_needed, and optional for approve. Only the owner decides, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session. Refused unknown_marketing_plan when plan names none, marketing_plan_decided when it was decided before, and marketing_plan_expired when approving one whose ends_on is past. marketing_plan.approved or marketing_plan.returned is appended with the proposing task on its envelope; an approval also ends every approved plan the new one replaces.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "decision"],
+      "properties": {
+        "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+        "decision": { "type": "string", "enum": ["approve", "return"] },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "marketingPlanEndBody": {
+      "title": "Marketing Plan End Body",
+      "description": "The owner ends the approved marketing plan plan, MP-<n>, at any time (docs/SPEC.md 6.5; ADR 0042); note says why, when they say. Refused unknown_marketing_plan when plan names none, marketing_plan_not_approved when it was never approved, and marketing_plan_ended when it has ended already. marketing_plan.ended { by_owner } is appended.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan"],
+      "properties": {
+        "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+        "note": { "type": "string", "maxLength": 600 }
       }
     },
     "skillLevel": {

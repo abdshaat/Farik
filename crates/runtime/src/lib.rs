@@ -32,6 +32,8 @@ pub mod daemon;
 pub mod exec;
 /// The forge pull requests live on, driven through the `gh` program.
 pub mod forge;
+/// The owner's decisions on marketing plans, and the ends that dates bring.
+mod marketing;
 /// An OAuth authorization server and a protected MCP server for the sign-in tests.
 #[cfg(all(test, unix))]
 #[path = "../tests/support/oauth_fixture.rs"]
