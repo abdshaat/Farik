@@ -5,6 +5,7 @@ Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.1, 6.3, 6.7; F9
 Depends on: steps 05 and 05b (the kit format, keys and `key_page`, the pins), 06 (the Product Manager's kit, at edd630f), 07 (the Architect's kit, at b24dabe and 4160280) and 03b (its table, empty before phase 11, and `ConnectorAdd`'s key fields; at 40e4480), all committed on this branch; it runs after step 08e's Task 8, as the project plan's ADR 0044 line orders, and shares no file with it; phase 6 (merged in #19)
 Readiness confirmed by: not yet run
+Decided by the founder, 2026-10-06, in conversation: O1, the Product Manager files issues and comments on GitHub, each asking first ("Files, asking first"). O2 to O5 were not put to the founder and are taken as recommended: 366 days, no lockdown header, one owner per key until phase 11, and the Copilot check on a fresh free account.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
