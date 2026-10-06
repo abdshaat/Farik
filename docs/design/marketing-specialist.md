@@ -53,7 +53,7 @@ The agent writes a post with `farik_schedule_post { channel, buffer_channel, tex
 
 ## Google Ads
 
-A Farik connector of its own (ADR 0038), `google-ads`, run as `farik connector google-ads`, signed in with Google through Farik's Google app (ADR 0035's Google design, pulled forward to step 08e), scope `https://www.googleapis.com/auth/adwords` alone.
+A Farik connector of its own (ADR 0038), `google-ads`, run as `farik connector google-ads`, signed in with Google through the user's own Google app (ADR 0043, step 03f; Farik's own is phase 15's), with ADR 0035's Google design, pulled forward to step 08e, scope `https://www.googleapis.com/auth/adwords` alone.
 
 | Tool | Tag | What it does |
 |---|---|---|
@@ -94,11 +94,11 @@ The kit's skills after step 08 and 08b, gaining in 08c and 08f:
 | 08b | Buffer and Kit in the kit (posts asking per call until 08d; Kit's broadcasts drafted inside an allowance, sent by the human from Kit); the role's "never publishes" lines reworded |
 | 08c | The brand and the marketing plan: the role's mandate, four skills, `farik_propose_marketing_plan`, the plan's events, page and Today gate (mocked up first), `farik marketing plan`, `marketing_paths_owned` |
 | 08d | Posting through the plan: Farik calling a service itself, `farik_schedule_post`, the hold and Stop, `social_post.*`, Today's "Going out" (mocked up first), Buffer's writes `denied` to the agent, the skill `running-social-channels` |
-| 08e | Google's sign-in, pulled forward: route 2 for Google, the founder's Google Cloud project, the `adwords` scope, verification as a launch dependency |
+| 08e | Google's sign-in, pulled forward: route 2 for Google, the founder's Google Cloud project, the `adwords` scope, verification as a launch dependency (amended 2026-10-06 by ADR 0043: the user's own Google Cloud project and Desktop client, step 03f; verifying an app of Farik's is phase 15's) |
 | 08f | Google Ads: Farik's own `google-ads` connector, the plan mark, the spend tick and the hard stop, `marketing_budget.reached`, Today's raise or end, the skill `running-search-ads` |
 
 ## Not now
 
-- Paid Instagram and Facebook ads: Meta's official Ads server admits only listed clients; a candidate once Meta lists Farik.
+- Paid Instagram and Facebook ads: Meta's official Ads server admits only listed clients; a candidate once Meta lists Farik, which is phase 15's (ADR 0043), or once the user's own Meta app can be used.
 - Replying to comments and messages: Buffer has no tool for it, and replying as the brand to customers is a decision the founder has not made.
 - X's own server: it cannot post, and X charges per post.
