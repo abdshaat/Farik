@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use farik_core::branch::task_branch;
 use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus, Verification};
 use farik_core::governor::done::CriterionResult;
+use farik_core::marketing::network_name;
 use farik_core::team::Agent;
 use farik_protocol::event::{
     BlockerWire, BudgetExhaustedBodyScope, EventBody, FarikEvent, HumanAcceptedBodySubject,
@@ -12,6 +13,7 @@ use farik_protocol::event::{
 };
 use farik_store::TaskProjection;
 use farik_store::git::HeadSummary;
+use farik_store::marketing::{PostState, SocialPost};
 
 use crate::ceremonies::OpenEscalation;
 use crate::prompt::untrusted_block;
@@ -35,6 +37,60 @@ pub(super) struct Resume {
     /// The failed criterion ids and the reasons of the rejection this iteration answers, when it
     /// answers one.
     pub(super) rejection: Option<(Vec<String>, String)>,
+    /// What the agent hears of its social posts that settled since its previous implement session
+    /// started, one entry each (`posts_heard`).
+    pub(super) posts: Vec<String>,
+}
+
+/// What `agent` hears of the posts of `posts` that settled after the event numbered `since`, the
+/// start of its previous implement session, in the order they settled: a post that was missed or
+/// failed, Farik's sentence and Buffer's words as untrusted text; one the owner did not allow, and
+/// one they stopped, in Farik's words, with the owner's own note unwrapped (ADR 0011). A post that
+/// went to Buffer, or that a plan's end stopped, is no news.
+pub(super) fn posts_heard(posts: &[SocialPost], agent: &str, since: u64) -> Vec<String> {
+    let mut settled: Vec<&SocialPost> = posts
+        .iter()
+        .filter(|post| post.agent_id == agent && post.state_seq > since)
+        .collect();
+    settled.sort_by_key(|post| post.state_seq);
+    settled
+        .into_iter()
+        .filter_map(|post| {
+            let network = network_name(post.channel);
+            let when = post.at.format("%a %-d %b %H:%M");
+            let could_not = |words: &str| {
+                format!(
+                    "Farik could not post {} ({network}, {when}):\n{}",
+                    post.post,
+                    untrusted_block("post_reason", words, NOTE_CAP_BYTES)
+                )
+            };
+            match (post.state, post.stopped_by.as_deref()) {
+                (PostState::Failed, _) => post.reason.as_deref().map(could_not),
+                (PostState::Missed, _) => Some(could_not(match post.missed_why.as_deref() {
+                    Some("paused") => "The team was paused, so it was not sent.",
+                    Some("undecided") => {
+                        "The owner had not decided by its time, so it was not sent."
+                    }
+                    _ => "Farik was not running an hour before its time, so it was not sent.",
+                })),
+                (PostState::Stopped, Some("declined")) => {
+                    let said = format!(
+                        "The owner did not allow your post {} on {network}.",
+                        post.post
+                    );
+                    Some(match &post.note {
+                        Some(note) => format!("{said}\nThe owner adds: {note}"),
+                        None => said,
+                    })
+                }
+                (PostState::Stopped, Some("owner")) => {
+                    Some(format!("The owner stopped your post {}.", post.post))
+                }
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 /// The triage session's message: size the request.
@@ -622,29 +678,33 @@ pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> Str
             untrusted_block("rejection", &words, NOTE_CAP_BYTES)
         );
     }
-    if resume.last_commit.is_none() && resume.last_note.is_none() {
-        return message;
+    if resume.last_commit.is_some() || resume.last_note.is_some() {
+        let commit = resume.last_commit.as_ref().map_or_else(
+            || "no commit yet".to_string(),
+            |head| {
+                format!(
+                    "last commit {} {}",
+                    head.sha,
+                    untrusted_block("commit_subject", &head.subject, NOTE_CAP_BYTES)
+                )
+            },
+        );
+        let note = resume.last_note.as_ref().map_or_else(
+            || "no note yet".to_string(),
+            |(kind, text)| {
+                format!(
+                    "last note ({kind}): {}",
+                    untrusted_block("note", text, NOTE_CAP_BYTES)
+                )
+            },
+        );
+        message = format!("{message}\n\nResuming: {commit}; {note}");
     }
-    let commit = resume.last_commit.as_ref().map_or_else(
-        || "no commit yet".to_string(),
-        |head| {
-            format!(
-                "last commit {} {}",
-                head.sha,
-                untrusted_block("commit_subject", &head.subject, NOTE_CAP_BYTES)
-            )
-        },
-    );
-    let note = resume.last_note.as_ref().map_or_else(
-        || "no note yet".to_string(),
-        |(kind, text)| {
-            format!(
-                "last note ({kind}): {}",
-                untrusted_block("note", text, NOTE_CAP_BYTES)
-            )
-        },
-    );
-    format!("{message}\n\nResuming: {commit}; {note}")
+    // What happened to the agent's posts comes last, after the rest.
+    for heard in &resume.posts {
+        message = format!("{message}\n\n{heard}");
+    }
+    message
 }
 
 /// The UI/UX Designer's `explore` session's message (ADR 0026): read the task's screens, then
@@ -970,6 +1030,7 @@ mod tests {
             }),
             last_note: note.map(|text| ("progress".to_string(), text.to_string())),
             rejection: None,
+            posts: Vec::new(),
         }
     }
 

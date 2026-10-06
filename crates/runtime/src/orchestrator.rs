@@ -33,6 +33,7 @@ use crate::transitions::TransitionError;
 mod design;
 #[cfg(test)]
 pub(crate) mod fixtures;
+mod hand_over;
 mod human;
 pub(crate) use human::{forget_removed_keys, status_effects, update_agent_held};
 mod integrate;
@@ -465,6 +466,9 @@ impl Orchestrator {
         // start no session, so a paused team has them too (ADR 0042).
         if scope.task_id.is_none() {
             rules::end_marketing_plans(&self.deps)?;
+            // Posts go to Buffer between sessions, with no model, so under Farik's own pause
+            // for a refused key too, and the owner's pause alone holds them (ADR 0042).
+            rules::hand_over_posts(&self.deps).await?;
         }
         if crate::pause::paused(log)? {
             // A paused team still answers its chats (ADR 0026), unless the provider refused the

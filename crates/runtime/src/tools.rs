@@ -37,7 +37,7 @@ mod exec;
 pub(crate) mod fixtures;
 mod git;
 mod marketing;
-mod media;
+pub(crate) mod media;
 mod memory;
 mod posts;
 mod reading;

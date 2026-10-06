@@ -323,6 +323,8 @@ pub struct SocialPost {
     pub state: PostState,
     /// When it reached that state.
     pub state_at: DateTime<Utc>,
+    /// The sequence number of the event that put it in that state.
+    pub state_seq: u64,
     /// Who stopped it, `owner`, `declined` or `plan_ended`, once stopped.
     pub stopped_by: Option<String>,
     /// Whether Farik took it back from Buffer when it was stopped.
@@ -386,6 +388,7 @@ fn written(
         buffer_post: None,
         state,
         state_at: event.envelope.recorded_at,
+        state_seq: event.envelope.seq,
         stopped_by: None,
         taken_back: false,
         note: None,
@@ -436,6 +439,7 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
     for event in &events {
         let ids = &event.envelope.ids;
         let at = event.envelope.recorded_at;
+        let seq = event.envelope.seq;
         // Only the owner and Farik decide, hand over and stop: an event an agent's session
         // recorded is none of those.
         let is_not_an_agents = ids.agent_id.is_none() && ids.session_id.is_none();
@@ -449,6 +453,7 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
             {
                 found.state = to;
                 found.state_at = at;
+                found.state_seq = seq;
                 change(found);
             }
         };
@@ -860,8 +865,8 @@ mod tests {
     }
 
     /// What happens to post `post`: Farik's or the owner's event, with no agent and no session.
-    fn then(log: &EventLog, kind: EventKind, hour: u32, body: Value) {
-        append(log, kind, hour, |wire| wire["body"] = body);
+    fn then(log: &EventLog, kind: EventKind, hour: u32, body: Value) -> u64 {
+        append(log, kind, hour, |wire| wire["body"] = body)
     }
 
     #[test]
@@ -873,7 +878,7 @@ mod tests {
         let log = a_log();
         // Scheduled in the plan, handed to Buffer.
         let sent = kai_wrote(&log, EventKind::SocialPostScheduled, 9, |_| {});
-        then(
+        let sent_seq = then(
             &log,
             EventKind::SocialPostSent,
             10,
@@ -995,6 +1000,11 @@ mod tests {
         assert_eq!(first.approved_by.as_deref(), Some("plan"));
         assert_eq!(first.buffer_post.as_deref(), Some("buf-1"));
         assert_eq!(first.state_at, at(10));
+        assert_eq!(first.state_seq, sent_seq, "the event that sent it");
+        assert_eq!(
+            posts[7].state_seq, posts[7].post,
+            "a request is in its state from its own event"
+        );
         assert_eq!(first.details, None);
 
         let stopped = &posts[1];

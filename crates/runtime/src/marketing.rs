@@ -4,12 +4,13 @@
 //! lock `PLANS` is held by a decision, by the owner's end and by the dated ends alike, so that two
 //! of them never act on one reading of the plans.
 
+use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use farik_core::marketing::{EndReason, PlanRecord, plans_to_end};
 use farik_protocol::event::{EventBody, EventIds, FarikEvent, new_event};
-use farik_store::marketing::{MarketingPlan, PlanState, marketing_plans};
+use farik_store::marketing::{MarketingPlan, PlanState, PostState, marketing_plans, social_posts};
 use serde_json::{Value, json};
 
 use crate::orchestrator::{CommandError, CommandReport};
@@ -17,6 +18,49 @@ use crate::tools::ToolDeps;
 
 /// Held by whoever decides a plan or ends one. One lock for every plan: decisions are rare.
 static PLANS: Mutex<()> = Mutex::new(());
+
+/// The posts Farik is handing to Buffer this moment, each as the project's log (by where it is in
+/// memory: one process may hold several projects, as a test run does) and the post's number. A post
+/// in it is claimed: a stop of it is refused, and the end of its plan leaves it alone. Taken only
+/// while `PLANS` is held.
+static HANDING: Mutex<BTreeSet<(usize, u64)>> = Mutex::new(BTreeSet::new());
+
+/// Which project `tools` is, as `HANDING` tells projects apart.
+fn project_of(tools: &ToolDeps) -> usize {
+    std::sync::Arc::as_ptr(&tools.log) as usize
+}
+
+/// A post claimed for the hand-over, which stops being claimed when this is dropped, whatever
+/// happened to it.
+pub(crate) struct Claimed(usize, u64);
+
+impl Drop for Claimed {
+    fn drop(&mut self) {
+        HANDING
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&(self.0, self.1));
+    }
+}
+
+/// Claims post `post` of the project `tools` for the hand-over, which the caller has just found
+/// scheduled, unclaimed and to be handed over, under `PLANS` (`_held`).
+pub(crate) fn claim_post(_held: &PlansHeld, tools: &ToolDeps, post: u64) -> Claimed {
+    let project = project_of(tools);
+    HANDING
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert((project, post));
+    Claimed(project, post)
+}
+
+/// Whether post `post` of the project `tools` is being handed to Buffer this moment.
+pub(crate) fn is_being_handed_over(_held: &PlansHeld, tools: &ToolDeps, post: u64) -> bool {
+    HANDING
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .contains(&(project_of(tools), post))
+}
 
 /// The proof that `PLANS` is held, which `record_plan_end` asks for.
 pub(crate) struct PlansHeld(
@@ -52,7 +96,7 @@ fn find<'a>(plans: &'a [MarketingPlan], plan: &str) -> Result<&'a MarketingPlan,
 
 /// Records `body` as the owner's or Farik's own act: the task on the envelope when it names one,
 /// no agent, no session.
-fn append(
+pub(crate) fn append(
     tools: &ToolDeps,
     task: Option<farik_core::contract::TaskId>,
     body: EventBody,
@@ -198,7 +242,7 @@ pub(crate) fn end_plan(
 ///
 /// What the log or the board refused, in words.
 pub(crate) fn record_plan_end(
-    _held: &PlansHeld,
+    held: &PlansHeld,
     tools: &ToolDeps,
     plan: &str,
     why: EndReason,
@@ -226,11 +270,61 @@ pub(crate) fn record_plan_end(
         }
     }
     let body = serde_json::from_value(body).map_err(|error| error.to_string())?;
-    Ok(vec![append(
-        tools,
-        None,
-        EventBody::MarketingPlanEnded(body),
-    )?])
+    let mut events = vec![append(tools, None, EventBody::MarketingPlanEnded(body))?];
+    events.extend(stop_posts(held, tools, plan, why, replaced_by)?);
+    Ok(events)
+}
+
+/// Stops the posts of the plan `plan` that its end takes with it, each as `plan_ended`: a post
+/// scheduled and not yet with Buffer, when the owner ended the plan, or when a newer plan replaced
+/// it and the post's slot falls on or after the newer plan's first day. Never when the plan only
+/// ran out (each post was checked against a slot day inside the plan), and never a post Farik is
+/// handing to Buffer this moment, which goes out as one already with Buffer, with its Stop.
+fn stop_posts(
+    held: &PlansHeld,
+    tools: &ToolDeps,
+    plan: &str,
+    why: EndReason,
+    replaced_by: Option<&str>,
+) -> Result<Vec<FarikEvent>, String> {
+    let plans = marketing_plans(&tools.log).map_err(|error| error.to_string())?;
+    let slot_day = |slot: &str| {
+        plans
+            .iter()
+            .find(|found| found.record.id == plan)
+            .and_then(|found| found.proposal.posts.iter().find(|held| held.key == slot))
+            .map(|found| found.on)
+    };
+    let newer_starts_on = replaced_by.and_then(|newer| {
+        plans
+            .iter()
+            .find(|found| found.record.id == newer)
+            .map(|found| found.record.starts_on)
+    });
+    let mut stopped = Vec::new();
+    for post in social_posts(&tools.log).map_err(|error| error.to_string())? {
+        let ends_with_the_plan = match why {
+            EndReason::ByOwner => true,
+            EndReason::Replaced => post
+                .slot
+                .as_deref()
+                .and_then(slot_day)
+                .zip(newer_starts_on)
+                .is_some_and(|(on, starts_on)| on >= starts_on),
+            EndReason::Expired => false,
+        };
+        if post.plan.as_deref() != Some(plan)
+            || post.state != PostState::Scheduled
+            || !ends_with_the_plan
+            || is_being_handed_over(held, tools, post.post)
+        {
+            continue;
+        }
+        let body = serde_json::from_value(json!({ "post": post.post, "by": "plan_ended" }))
+            .map_err(|error| error.to_string())?;
+        stopped.push(append(tools, None, EventBody::SocialPostStopped(body))?);
+    }
+    Ok(stopped)
 }
 
 /// One marketing plan as `marketing_plan.list` words a row: the daemon's answer and the command
