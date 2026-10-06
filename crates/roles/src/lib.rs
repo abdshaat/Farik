@@ -725,21 +725,50 @@ mod tests {
             "{prompt}"
         );
 
+        for (name, text) in marketing_skill_texts() {
+            let lower = text.to_lowercase();
+            for phrase in ["never publish", "do not publish", "don't publish"] {
+                assert!(!lower.contains(phrase), "{name} says \"{phrase}\"");
+            }
+        }
+    }
+
+    /// Every text of the Marketing Specialist's skills, the role's and the kit's, with its skill's
+    /// name.
+    fn marketing_skill_texts() -> Vec<(String, String)> {
+        let definition = loaded(Role::MarketingSpecialist);
         let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
-        let mut texts: Vec<(&str, String)> = definition
+        let mut texts: Vec<(String, String)> = definition
             .skills
             .iter()
-            .map(|skill| (skill.name.as_str(), skill.text.clone()))
+            .map(|skill| (skill.name.clone(), skill.text.clone()))
             .collect();
         for skill in &kit.skills {
             for text in skill.session_files.values() {
-                texts.push((skill.name.as_str(), text.clone()));
+                texts.push((skill.name.clone(), text.clone()));
             }
         }
         assert!(
             texts.len() > 1,
             "the check saw the role's and the kit's skills"
         );
+        texts
+    }
+
+    /// The skills still say that a post goes out only as the plan says or after the owner allows
+    /// that call, and the role's own skill says what the role owns, with the paths.
+    #[test]
+    fn the_marketing_skills_keep_the_allowance_lines_and_name_what_is_owned() {
+        let texts = marketing_skill_texts();
+        let flatten = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let of = |name: &str| {
+            texts
+                .iter()
+                .filter(|(skill, _)| skill == name)
+                .map(|(_, text)| flatten(text))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
         // The reworded lines that name the human's allowance, one count per skill (a line may wrap).
         for (name, lines) in [
             ("marketing-what-ships", 1),
@@ -747,24 +776,12 @@ mod tests {
             ("keeping-a-content-calendar", 1),
             ("making-images-and-video", 1),
         ] {
-            let joined = texts
-                .iter()
-                .filter(|(skill, _)| *skill == name)
-                .map(|(_, text)| text.as_str())
-                .collect::<Vec<_>>()
-                .join(" ");
-            let flat = joined.split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(
-                flat.matches("allows that call").count() >= lines,
+                of(name).matches("allows that call").count() >= lines,
                 "{name} lost its \"allows that call\" line"
             );
         }
-        let ships = texts
-            .iter()
-            .filter(|(skill, _)| *skill == "marketing-what-ships")
-            .map(|(_, text)| flatten(text))
-            .collect::<Vec<_>>()
-            .join(" ");
+        let ships = of("marketing-what-ships").to_lowercase();
         for path in [
             "docs/marketing/brand/brand-kit.md",
             "docs/marketing/brand/persona.md",
@@ -775,12 +792,6 @@ mod tests {
                 ships.contains(path),
                 "marketing-what-ships does not name {path}"
             );
-        }
-        for (name, text) in texts {
-            let lower = text.to_lowercase();
-            for phrase in ["never publish", "do not publish", "don't publish"] {
-                assert!(!lower.contains(phrase), "{name} says \"{phrase}\"");
-            }
         }
     }
 
