@@ -787,8 +787,8 @@ mod tests {
         texts
     }
 
-    /// The skills still say that a post goes out only as the plan says or after the owner allows
-    /// that call, and the role's own skill says what the role owns, with the paths.
+    /// The skills still say that a post goes out only as the owner's plan says or the owner allows
+    /// it, and the role's own skill says what the role owns, with the paths.
     #[test]
     fn the_marketing_skills_keep_the_allowance_lines_and_name_what_is_owned() {
         let texts = marketing_skill_texts();
@@ -801,16 +801,20 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join(" ")
         };
-        // The reworded lines that name the human's allowance, one count per skill (a line may wrap).
-        for (name, lines) in [
-            ("marketing-what-ships", 1),
-            ("planning-a-launch", 2),
-            ("keeping-a-content-calendar", 1),
-            ("making-images-and-video", 1),
+        // The lines that say who sends a post: one in the owner's approved plan goes out through
+        // the tool that schedules it, and any other waits for the owner (a line may wrap).
+        for name in [
+            "marketing-what-ships",
+            "planning-a-launch",
+            "keeping-a-content-calendar",
+            "making-images-and-video",
         ] {
+            let said = of(name);
             assert!(
-                of(name).matches("allows that call").count() >= lines,
-                "{name} lost its \"allows that call\" line"
+                said.contains(
+                    "in the owner's approved marketing plan goes out through `farik_schedule_post`"
+                ) && said.contains("any other post waits for the owner"),
+                "{name} lost its line on who sends a post"
             );
         }
         let ships = of("marketing-what-ships").to_lowercase();
@@ -823,6 +827,37 @@ mod tests {
             assert!(
                 ships.contains(path),
                 "marketing-what-ships does not name {path}"
+            );
+        }
+    }
+
+    /// A post goes out through `farik_schedule_post` alone (ADR 0042): no Marketing Specialist skill
+    /// names Buffer's `create_post` or `edit_post`, which Farik calls itself, or says that a post goes
+    /// out after the human allows that call. The calendar, the images and the launch skills each
+    /// name the tool.
+    #[test]
+    fn marketing_skills_post_only_through_farik() {
+        let flatten = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for (name, text) in marketing_skill_texts() {
+            for tool in ["create_post", "edit_post"] {
+                assert!(!text.contains(tool), "{name} names {tool}");
+            }
+            assert!(
+                !flatten(&text).contains("after the human allows that call"),
+                "{name} says a post goes out after the human allows that call"
+            );
+        }
+        let texts = marketing_skill_texts();
+        for name in [
+            "keeping-a-content-calendar",
+            "making-images-and-video",
+            "planning-a-launch",
+        ] {
+            assert!(
+                texts
+                    .iter()
+                    .any(|(skill, text)| skill == name && text.contains("`farik_schedule_post`")),
+                "{name} does not name farik_schedule_post"
             );
         }
     }

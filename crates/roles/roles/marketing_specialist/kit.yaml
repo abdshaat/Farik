@@ -1,9 +1,10 @@
-# The Marketing Specialist's kit: thirteen skills written for any business (ADR 0040) and the services it
+# The Marketing Specialist's kit: fourteen skills written for any business (ADR 0040) and the services it
 # signs in to (route 1, ADR 0035): two creative ones that spend the user's credits inside an allowance
-# (ADR 0037), then Buffer, whose posts each ask the human, and Kit, whose email broadcasts are only
-# drafts the human sends (ADR 0042). Tool lists are pinned against each service's live listing by
-# `live_kit_pins`; a tool a service lists that is not here is never offered (`tool_not_tagged`)
-# until a pin update tags it.
+# (ADR 0037), then Buffer, whose writes are Farik's own (the agent's posts go out through
+# `farik_schedule_post`, in the plan the owner approved, and Farik calls `create_post` itself), and
+# Kit, whose email broadcasts are only drafts the human sends (ADR 0042). Tool lists are pinned
+# against each service's live listing by `live_kit_pins`; a tool a service lists that is not here is
+# never offered (`tool_not_tagged`) until a pin update tags it.
 role: marketing_specialist
 skills:
   - positioning-and-messaging
@@ -19,6 +20,7 @@ skills:
   - writing-the-brand-persona
   - researching-the-market
   - writing-the-marketing-plan
+  - running-social-channels
 connectors:
   - name: higgsfield
     transport: http
@@ -227,11 +229,9 @@ connectors:
     oauth: { scopes: [offline_access, posts:read, posts:write, account:read, insights:read, ideas:read] }
     title: Buffer
     about: "Buffer schedules posts to your social channels: Instagram, Facebook, X, LinkedIn, Pinterest, YouTube, TikTok, Threads, Bluesky and more."
-    why: "So the Marketing Specialist can prepare and schedule posts, and read how earlier ones did. Every post waits for your yes first."
-    setup: "Sign in with your Buffer account and allow Farik to read and schedule posts. Farik can reach every channel your Buffer account has, and it asks you before each post. To remove Farik completely, also remove it in Buffer's settings."
+    why: "So the Marketing Specialist can read your channels and how earlier posts did. Farik sends the posts in a marketing plan you approved, and asks you about any other."
+    setup: "Sign in with your Buffer account and allow Farik to read and schedule posts. Farik can reach every channel your Buffer account has. A post in a plan you approved shows on Today before it goes out, with a Stop button; Farik asks you about any other. To remove Farik completely, also remove it in Buffer's settings."
     labels:
-      create_post: "schedule or publish a post"
-      edit_post: "change a post"
       get_account: "read the account"
       list_channels: "list channels"
       get_channel: "read a channel"
@@ -239,8 +239,6 @@ connectors:
       get_post: "read a post"
       get_aggregated_post_metrics: "read post results"
     tools:
-      create_post: external_effect
-      edit_post: external_effect
       get_account: network
       list_channels: network
       get_channel: network
@@ -251,6 +249,8 @@ connectors:
       list_idea_groups: network
       list_post_templates: network
       get_post_template: network
+      create_post: denied
+      edit_post: denied
       delete_post: denied
       create_idea: denied
       create_post_template: denied

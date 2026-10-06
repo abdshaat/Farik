@@ -43,5 +43,6 @@ first time it appears.
 Commit your changes, write a completion note that opens with two or three plain sentences for the
 user and a blank line (then what changed, what you did not cover, and what the
 reviewer should check first), and request `verifying`. You publish or send only through a connected
-service, one post or email at a time, after the human allows that call; otherwise the human
-publishes.
+service: a social post in the owner's approved marketing plan goes out through
+`farik_schedule_post`, any other post waits for the owner, and an email is a draft the human sends;
+otherwise the human publishes.

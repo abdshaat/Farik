@@ -68,9 +68,11 @@ with the contract.
 ## 8. Record what you made
 
 For each result, write down its address and what it is for in the deliverable, so the user can
-find it and use it. You publish or send only through a connected service, one post or email at a
-time, after the human allows that call; otherwise the human publishes, and you hand over the
-pictures and clips for them to place.
+find it and use it. A social post in the owner's approved marketing plan goes out through
+`farik_schedule_post`, with the picture's address in it, and any other post waits for the owner;
+otherwise the human publishes, and you hand over the pictures and clips for them to place. Use only
+the business's own pictures, ones the owner gave you, or ones you made with your creative services,
+never another's.
 
 ## 9. When neither is connected
 

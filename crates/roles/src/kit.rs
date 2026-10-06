@@ -228,6 +228,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "writing-the-brand-persona",
             "researching-the-market",
             "writing-the-marketing-plan",
+            "running-social-channels",
         ),
         _ => Vec::new(),
     }
@@ -1101,9 +1102,10 @@ mod tests {
     }
 
     /// The kit's skills are the nine of steps 08 and 08b, then the four of step 08c: the brand kit,
-    /// the brand persona, the market and the marketing plan, each written for any business.
+    /// the brand persona, the market and the marketing plan, each written for any business; then
+    /// the one of step 08d, running the social channels, which names the tool that posts.
     #[test]
-    fn marketing_kit_carries_the_brand_and_plan_skills() {
+    fn marketing_kit_carries_running_social_channels() {
         let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
         let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
         assert_eq!(
@@ -1122,6 +1124,7 @@ mod tests {
                 "writing-the-brand-persona",
                 "researching-the-market",
                 "writing-the-marketing-plan",
+                "running-social-channels",
             ]
         );
         for skill in &kit.skills {
@@ -1131,7 +1134,7 @@ mod tests {
                 skill.name
             );
         }
-        // The four new skills: when each applies, numbered sections, under 6 KB, and the skill it
+        // The five new skills: when each applies, numbered sections, under 6 KB, and the skill it
         // sits beside named where the design says it does.
         for (name, description, beside) in [
             (
@@ -1153,6 +1156,11 @@ mod tests {
                 "writing-the-marketing-plan",
                 "Use when the task asks for a marketing plan",
                 "researching-the-market",
+            ),
+            (
+                "running-social-channels",
+                "Use when the task asks for posts on the business's social channels",
+                "`farik_schedule_post`",
             ),
         ] {
             let skill = kit
@@ -1865,8 +1873,11 @@ mod tests {
         "execute_mutation",
     ];
 
+    /// Buffer's writes are Farik's own (ADR 0042): the agent writes a post with
+    /// `farik_schedule_post`, and Farik calls `create_post` itself, with the agent's connection.
+    /// The agent is offered neither of Buffer's writes, and the user's yes to a plan covers them.
     #[test]
-    fn buffer_posts_only_when_asked() {
+    fn buffer_posts_only_through_farik() {
         let (server, copy, allowances) = marketing_service("buffer");
         let CustomTransport::Http {
             url,
@@ -1888,29 +1899,41 @@ mod tests {
                     "insights:read".to_string(),
                     "ideas:read".to_string(),
                 ][..]
-            )
+            ),
+            "the scopes stay: Farik's own calls post through the same sign-in"
         );
         assert!(headers.is_empty());
         assert!(server.credential_keys.is_empty());
         assert!(copy.key_page.is_none());
         assert_eq!(copy.title, "Buffer");
+        assert_eq!(
+            copy.why,
+            "So the Marketing Specialist can read your channels and how earlier posts did. Farik \
+             sends the posts in a marketing plan you approved, and asks you about any other."
+        );
+        assert_eq!(
+            copy.setup,
+            "Sign in with your Buffer account and allow Farik to read and schedule posts. Farik \
+             can reach every channel your Buffer account has. A post in a plan you approved shows \
+             on Today before it goes out, with a Stop button; Farik asks you about any other. To \
+             remove Farik completely, also remove it in Buffer's settings."
+        );
 
-        // Every post asks: no allowance covers a tool that changes what the public sees.
+        let mut never: Vec<&str> = BUFFER_NEVER.to_vec();
+        never.extend(["create_post", "edit_post"]);
         for tool in ["create_post", "edit_post"] {
-            assert_eq!(server.tools[tool], ConnectorTag::ExternalEffect, "{tool}");
-            assert!(!allowances.contains_key(tool), "{tool} has no allowance");
+            assert_eq!(server.tools[tool], ConnectorTag::Denied, "{tool}");
+            assert!(!copy.labels.contains_key(tool), "{tool} has no label");
         }
-        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 2);
+        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 0);
         assert!(allowances.is_empty());
-
         assert_eq!(
             names_tagged(&server, ConnectorTag::Network),
             sorted(&BUFFER_READS)
         );
-        assert_eq!(
-            names_tagged(&server, ConnectorTag::Denied),
-            sorted(&BUFFER_NEVER)
-        );
+        assert_eq!(names_tagged(&server, ConnectorTag::Denied), sorted(&never));
+        assert_eq!(tagged(&server, ConnectorTag::Network), 10);
+        assert_eq!(tagged(&server, ConnectorTag::Denied), 10);
         assert_eq!(server.tools.len(), 20);
     }
 
