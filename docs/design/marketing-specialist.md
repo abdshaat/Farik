@@ -30,7 +30,7 @@ The agent proposes a plan in the `implement` session of a marketing task with `f
 ```
 { title, summary,            // summary: 20 to 600 characters, for the owner
   text,                      // the plan, 200 to 16,000 characters, also written to docs/marketing/plans/
-  starts_on, ends_on,        // ISO dates, at most 92 days, starts_on not in the past
+  starts_on, ends_on,        // ISO dates, at most 92 days, starts_on no earlier than yesterday's UTC date (so an owner west of UTC is not refused their own today)
   currency,                  // ISO 4217, the ad account's
   budget: { total, google_ads },
   campaigns: [ { key, channel: "google_ads", name, goal, budget, starts_on, ends_on } ],   // 0 to 10
@@ -38,7 +38,7 @@ The agent proposes a plan in the `implement` session of a marketing task with `f
   measures: [ "..." ] }      // 1 to 10
 ```
 
-Farik checks it (each campaign within the plan's dates, campaign budgets adding up to no more than the channel's, unique keys, the channels among Buffer's) and records `marketing_plan.proposed` with a plan id, `MP-<n>`. Today shows "Marketing plan to approve": the summary, the budget by channel and campaign, the post calendar by week, and the full text, with "Approve" and "Send back" (a reason). `marketing_plan.approved` or `marketing_plan.returned` follow; a returned plan's reason reaches the agent's next session as untrusted text. Approving is the owner's alone, under `ask` and `auto` alike.
+Farik checks it (each campaign within the plan's dates, campaign budgets adding up to no more than the channel's, unique keys, the channels among Buffer's) and records `marketing_plan.proposed` with a plan id, `MP-<n>`. Today shows "Marketing plan to approve": the summary, the budget by channel and campaign, the post calendar by week, and the full text, with "Approve" and "Send back" (a reason). `marketing_plan.approved` or `marketing_plan.returned` follow; a returned plan's reason reaches the agent's next session as the owner's own words, unwrapped and not as untrusted text, since they are the human's (ADR 0011). Approving is the owner's alone, under `ask` and `auto` alike.
 
 An approved plan is active from `starts_on` to `ends_on`. One plan is active at a time; approving a new one ends the active one at the new one's start (`marketing_plan.ended`, `replaced`). The owner may end a plan on its page or with `farik marketing plan end MP-<n>` (`ended`, `by_owner`): Farik pauses its campaigns and stops its posts not yet sent. A plan also ends at its `ends_on` (`expired`). The plan's page shows its budget, what is spent, its posts (sent, waiting, stopped) and its campaigns.
 
@@ -76,7 +76,7 @@ The kit's skills after step 08 and 08b, gaining in 08c and 08f:
 | Skill | Step | What it teaches |
 |---|---|---|
 | `posting-and-email` | 08b | what Buffer and Kit are for, posts waiting for the human until 08d, email drafts sent from Kit, never a subscriber's data |
-| `keeping-the-brand-kit` | 08c | what the kit holds, how to build it from the business's existing material, keeping every asset with its source |
+| `keeping-the-brand-kit` | 08c | what the kit holds, how to build it from the business's existing material, naming and describing the user's own logo and pictures, and asking for any that is missing |
 | `writing-the-brand-persona` | 08c | the persona's parts, sample replies, per-network differences, what it never says |
 | `researching-the-market` | 08c | audience, competitors, search words, channel costs, each fact sourced and dated |
 | `writing-the-marketing-plan` | 08c | from research to goals, channels, budget split, calendar, campaigns and measures; proposing it; what the owner sees |
