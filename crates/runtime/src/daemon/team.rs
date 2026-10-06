@@ -5706,6 +5706,28 @@ pub(super) mod tests {
         );
     }
 
+    /// A guard: the app that signs a connector in is the one whose connector it is, and not any
+    /// app that serves one of Farik's connectors. With a table whose one entry is for another
+    /// connector, `osv` has no way to sign in, and no page is made for it.
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_farik_connector_is_signed_in_only_by_the_app_for_its_name() {
+        let signing = Signing::new("connector-sign-in-farik-other-app");
+        let for_another: &'static [crate::registered_apps::RegisteredApp] =
+            Box::leak(Box::new([crate::registered_apps::RegisteredApp {
+                farik_connector: Some("other"),
+                ..crate::registered_apps::fixtures::google_apps(&signing.fixture)[0]
+            }]));
+        assert!(signing.harness.daemon.set_registered_apps(for_another));
+        let (code, message) = signing.refused(
+            "connector.sign_in",
+            &json!({ "agent": "dev-a", "server": Signing::farik_server() }),
+        );
+        assert_eq!(code, -32005);
+        assert!(message.starts_with("sign_in_not_supported: "), "{message}");
+        assert!(signing.fixture.seen().is_empty(), "no request was made");
+    }
+
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn sign_in_status_names_the_provider() {

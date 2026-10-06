@@ -1439,6 +1439,65 @@ fn farik_connect_says_when_no_app_signs_in_for_a_connector() {
     assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "osv")).is_none());
 }
 
+/// A guard: the app that signs a connector in is the one whose connector it is, and not any app
+/// that serves one of Farik's connectors. With a table whose one entry is for another connector,
+/// `osv` has no way to sign in, no page is opened, and nothing is kept.
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_uses_only_the_app_for_the_connector_s_name() {
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = runtime.block_on(oauth_fixture::Fixture::start());
+    let repository = a_team("connect-farik-other-app");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let kits = a_farik_connector_kit();
+    let for_another: &'static [farik_runtime::registered_apps::RegisteredApp] =
+        Box::leak(Box::new([farik_runtime::registered_apps::RegisteredApp {
+            farik_connector: Some("other"),
+            ..google_table(&fixture)[0]
+        }]));
+    let pages = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    // A page that is opened is followed, as a browser would, so that a sign-in that was wrongly
+    // started ends in a failed assertion here and not in ten minutes of waiting.
+    let opener: farik::Opener = {
+        let pages = Arc::clone(&pages);
+        Arc::new(move |url: &str| {
+            pages.lock().expect("pages").push(url.to_string());
+            std::thread::spawn({
+                let url = url.to_string();
+                move || {
+                    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+                    runtime.block_on(oauth_fixture::follow(&url));
+                }
+            });
+            Ok(())
+        })
+    };
+    let config = config_of(&repository);
+    let kept_in = Arc::clone(&store);
+    let ran = run_with(&repository.path, &["connect", "dev-a", "osv"], move |io| {
+        io.connector_secrets = kept_in;
+        io.open_url = opener;
+        io.kits = kits;
+        io.registered_apps = for_another;
+        io.own_program = Some(PathBuf::from("unused"));
+        io.env
+            .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+    });
+    assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.err
+            .contains("osv does not let Farik sign in by itself yet"),
+        "{}",
+        ran.err
+    );
+    assert!(
+        pages.lock().expect("pages").is_empty(),
+        "no page was opened"
+    );
+    assert!(fixture.seen().is_empty(), "no request was made");
+    assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "osv")).is_none());
+}
+
 /// `farik connect` starts Farik's own connector as the program the process was found at (ADR
 /// 0038), with `PATH` empty so no `farik` there can stand in; without that program it says so.
 #[test]
