@@ -48,7 +48,8 @@ ADR 0042 pulls Google's route forward from after the launch for one scope, `http
 docs/schemas/team.schema.json, crates/core/src/team.rs                          modifies: oauth on the pair, CustomServer::oauth, the hash (Task 1)
 crates/roles/src/kit.rs                                                          modifies: the stdio shape allows oauth; its Stdio pattern (Task 1)
 crates/runtime/src/{connectors.rs,orchestrator/session.rs}, crates/runtime/tests/{fixture_mcp.rs,live_kit_pins.rs}   modifies: their Stdio uses alone (Task 1)
-crates/runtime/src/registered_apps.rs                                            modifies: host, farik_connector, client_secret, scopes, app_for_farik_connector (Task 2); Loopback (Task 3); Google's entry (Task 6)
+crates/runtime/src/registered_apps.rs                                            modifies: host, farik_connector, client_secret, scopes, app_for_farik_connector (Task 2); Loopback (Task 3); Google's entry (Task 6); the build-time secret and the entry built from it removed (Task 8)
+crates/runtime/tests/no_build_time_secret.rs                                     creates: no source reads a build-time variable (Task 8)
 Cargo.toml, Cargo.lock, crates/runtime/Cargo.toml                                modifies: oauth2 direct (Task 3)
 crates/runtime/src/sign_in.rs, crates/runtime/tests/{fixture_oauth.rs,support/oauth_fixture.rs}   modifies: start_app_sign_in and the Google-shaped server (Task 3); refreshed takes the table (Task 4)
 crates/runtime/src/daemon/signed_in.rs                                           modifies: refreshed's caller (Task 4); begin_sign_in, Attempt, Binding (Task 5)
@@ -84,6 +85,7 @@ pub(crate) struct Attempt { /* agent, server, issuer, started, outcome, task as 
                                                                                                     // daemon::signed_in (Task 5)
 const GOOGLE_CLIENT_SECRET: Option<&str> = option_env!("FARIK_GOOGLE_CLIENT_SECRET");             // registered_apps (Task 6)
 const GOOGLE_CLIENT_ID: Option<&str> = None;   // `Some(id)` once the founder gives it; no entry without both and a non-empty secret
+pub static REGISTERED_APPS: &[RegisteredApp] = &[];   // Task 8 (ADR 0044): the two constants above, `shipped_google` and the `match` go
 ```
 
 ## Tasks
@@ -166,6 +168,26 @@ The executor's check runs without the variable. The founder runs the one with it
 
 - [x] `docs(spec): record signing in with Google for Google Ads`
 
+### Task 8: Remove the build-time secret
+
+Added 2026-10-06 by ADR 0044 (the founder: Farik Cloud's free tier signs customers in "At the web launch"). The open-source code never holds a credential of Farik's, before or after the launch, `option_env!` included; from phase 11 Farik Cloud holds Farik's Google app and its secret. A Sonnet agent executes this task after step 09c has landed (ADR 0032), on `phase/7-role-kits`, in one commit; this step's landing review covers it.
+
+Gate: step 09c committed. Before the first test, the executor re-reads `registered_apps.rs` and the SPEC paragraphs below against HEAD and records corrections in Execution notes (not a second review). No workflow sets `FARIK_GOOGLE_CLIENT_SECRET` (`.github/` names it nowhere, read 2026-10-06); the executor checks again. If the founder set it as an Actions repository secret, the founder deletes it; no agent touches the founder's settings.
+
+What goes, in `registered_apps.rs`: `GOOGLE_CLIENT_SECRET` and its `option_env!("FARIK_GOOGLE_CLIENT_SECRET")`, `GOOGLE_CLIENT_ID`, `shipped_google`, and the `match` that builds `REGISTERED_APPS`, which becomes `&[]`, its doc comment saying that no build carries an app of Farik's and that from phase 11 Farik Cloud serves Farik's apps (ADR 0044). With them go the tests `the_shipped_table_names_google_for_google_ads_only`, `the_shipped_table_has_no_google_yet`, `ships_google_only_with_a_client_id_and_a_secret` and `the_shipped_table_serves_no_address_yet`, and the helper `builds_google`.
+
+What stays, because phase 11's sign-in through Farik Cloud builds on it: `google(id, secret)`, Google's fixed facts, moved under `#[cfg(test)]` if nothing outside the tests calls it (clippy's dead-code lint), with `google_s_entry_is_for_google_ads_alone` and `a_registered_app_does_not_print_its_secret`; `RegisteredApp` with `client_secret` and its redacted `Debug`; `AppFlow::Loopback`, `start_app_sign_in` with PKCE, `state` and `iss`; the refresh with the table; `app_for_farik_connector`; the daemon's `set_registered_apps` and `CliIo`'s table. A Farik connector's sign-in stays `sign_in_not_supported` in every build, as it is today.
+
+Tests, written first:
+- `no_source_reads_a_build_time_variable` (`crates/runtime/tests/no_build_time_secret.rs`): walks every `.rs` file under the workspace's `crates/` and `xtask/` (the root is `CARGO_MANIFEST_DIR`'s grandparent; `target` directories are skipped) and fails naming each file and line that holds `option_env!`. The needle is built with `concat!("option", "_env!")`, so the test does not find itself. RED: it names `crates/runtime/src/registered_apps.rs` at the `GOOGLE_CLIENT_SECRET` line.
+- `the_shipped_table_is_empty_in_every_build` (`registered_apps.rs`'s tests): `REGISTERED_APPS` is empty, so it holds no `google` entry and no entry with a `farik_connector` or a `host`, whether `FARIK_GOOGLE_CLIENT_SECRET` is set or not. It passes when written, since `GOOGLE_CLIENT_ID` is `None` in every build; it is a guard, and its proof is a mutation: a table built from `google("<an id>", "<a secret>")` fails it.
+
+Mutations for the landing review, each reverted: an `option_env!` of any name in any crate's source (`no_source_reads_a_build_time_variable`); a shipped table holding Google's entry (`the_shipped_table_is_empty_in_every_build`).
+
+`docs/SPEC.md`, in the same commit (hard rule 8), with the revision line of its day: 6.7's "Signing in with Google, for Farik's own connector" drops "as Google's is in a build without its client secret" and "as in a build without Google's secret", saying instead that no build has a Google entry; 8.6's "Farik's own Google app" says the secret was read at build time until this task, and is now nowhere in the code, Farik Cloud holding it from phase 11; the paragraph on Farik Cloud says the removal is done. The project plan's row 08e says Task 8 is executed.
+
+- [ ] `refactor(runtime): remove the build-time Google secret`
+
 ## Verification
 
 ```
@@ -180,7 +202,18 @@ cargo test -p farik-runtime --lib registered_apps
 # expected: test result: ok, the_shipped_table_names_google_for_google_ads_only among the passed
 ```
 
-The live sign-in with Google is checked in step 08g's verification, the founder's live check of steps 08e to 08g on a build with the secret, once `google-ads` exists to sign in for; it also settles whether Google's callback carries `iss`. This step claims no live check.
+The live sign-in with Google is checked in step 08g's verification, the founder's live check of steps 08e to 08g on a build with the secret, once `google-ads` exists to sign in for; it also settles whether Google's callback carries `iss`. This step claims no live check. (Since ADR 0044, that live check is phase 11's, through Farik Cloud, and it still settles `iss`.)
+
+After Task 8, in the executor's container, with and without `FARIK_GOOGLE_CLIENT_SECRET` set:
+
+```
+cargo test -p farik-runtime --test no_build_time_secret
+# expected: test result: ok. 1 passed
+FARIK_GOOGLE_CLIENT_SECRET=x cargo test -p farik-runtime --lib registered_apps
+# expected: test result: ok, the_shipped_table_is_empty_in_every_build among the passed
+cargo xtask check --integration
+# expected: xtask check: ok (with pnpm check)
+```
 
 ## Execution notes
 
