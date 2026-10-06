@@ -207,9 +207,9 @@ pub(crate) fn private_path(root: &Path, folder: &str, path: &str) -> Result<Path
     Ok(at)
 }
 
-/// The functions a formula may not call, because they read or send something outside the
-/// workbook, or run something.
-const OUTSIDE_FUNCTIONS: [&str; 19] = [
+/// The functions a formula may not use, because they read or send something outside the workbook,
+/// or run something.
+const OUTSIDE_FUNCTIONS: [&str; 24] = [
     "HYPERLINK",
     "WEBSERVICE",
     "FILTERXML",
@@ -229,22 +229,43 @@ const OUTSIDE_FUNCTIONS: [&str; 19] = [
     "COPILOT",
     "TRANSLATE",
     "DETECTLANGUAGE",
+    "PY",
+    "STOCKHISTORY",
+    "GOOGLETRANSLATE",
+    "GOOGLEFINANCE",
+    "AI",
 ];
 
-/// Whether `upper`, a formula in capitals, calls `name`: the name, preceded by the start of the
-/// formula, by a character that cannot be part of a name, or by `_XLFN.` or `_XLWS.`, then
-/// optional white space, then `(`. A name inside a string literal counts, which is safe.
-fn calls(upper: &str, name: &str) -> bool {
+/// What a spreadsheet file puts before a function's name, in capitals: a newer function, a
+/// worksheet function, a function passed by name, and a user-defined function.
+const NAME_PREFIXES: [&str; 4] = ["_XLFN.", "_XLWS.", "_XLETA.", "_XLUDF."];
+
+/// Whether `upper`, a formula in capitals, uses `name`: the name, preceded by the start of the
+/// formula, by a character that cannot be part of a name, or by one of [`NAME_PREFIXES`], and then
+/// either followed by white space and `(`, which is a call, or followed by white space and `)`, `,`
+/// or the end of the formula, which hands the function to another one by name, as in
+/// `=MAP(A1:A2,WEBSERVICE)`. A name before `:` or after `:` or `$` is a column, as in `RTD:RTD`,
+/// and one followed by a digit or a letter is another name, so neither counts, unless it is called.
+/// A name inside a string literal counts, which is safe.
+fn uses(upper: &str, name: &str) -> bool {
     let mut from = 0;
     while let Some(found) = upper[from..].find(name) {
         let at = from + found;
         let before = &upper[..at];
         let starts_a_name = before.is_empty()
-            || before.ends_with("_XLFN.")
-            || before.ends_with("_XLWS.")
+            || NAME_PREFIXES.iter().any(|prefix| before.ends_with(prefix))
             || !before.ends_with(|last: char| last.is_ascii_alphanumeric() || "_.".contains(last));
-        if starts_a_name && upper[at + name.len()..].trim_start().starts_with('(') {
-            return true;
+        if starts_a_name {
+            let reaches = match upper[at + name.len()..].trim_start().chars().next() {
+                Some('(') => true,
+                None | Some(')' | ',') => {
+                    !(before.ends_with('$') || before.trim_end().ends_with(':'))
+                }
+                Some(_) => false,
+            };
+            if reaches {
+                return true;
+            }
         }
         from = at + 1;
     }
@@ -253,7 +274,7 @@ fn calls(upper: &str, name: &str) -> bool {
 
 /// Why `formula` reaches outside its workbook or sends its text away: `[`, an external reference,
 /// `|`, a DDE call such as `=cmd|' /C calc'!A0`, or the name of a function of
-/// [`OUTSIDE_FUNCTIONS`] it calls; or `None` when it stays inside.
+/// [`OUTSIDE_FUNCTIONS`] it calls or passes by name; or `None` when it stays inside.
 pub(crate) fn formula_reaches_outside(formula: &str) -> Option<&'static str> {
     if formula.contains('[') {
         return Some("[");
@@ -264,7 +285,7 @@ pub(crate) fn formula_reaches_outside(formula: &str) -> Option<&'static str> {
     let upper = formula.to_ascii_uppercase();
     OUTSIDE_FUNCTIONS
         .into_iter()
-        .find(|name| calls(&upper, name))
+        .find(|name| uses(&upper, name))
 }
 
 /// What `reason` of `formula_reaches_outside` says to the agent.
@@ -272,7 +293,7 @@ fn how(reason: &str) -> String {
     match reason {
         "[" => "it holds `[`, an external reference".to_string(),
         "|" => "it holds `|`, a DDE call".to_string(),
-        name => format!("it calls {name}"),
+        name => format!("it uses {name}"),
     }
 }
 
@@ -1029,7 +1050,7 @@ mod tests {
 
     #[test]
     fn names_what_a_formula_may_not_reach() {
-        for formula in [
+        let reaching = [
             "=[book.xlsx]S!A1",
             "=cmd|' /C calc'!A0",
             "=HYPERLINK(\"x\")",
@@ -1044,25 +1065,56 @@ mod tests {
             "=1+HYPERLINK(\"x\")",
             "=Sheet1!INFO(\"os\")",
             "=_xlws.FILTERXML(\"a\",\"b\")",
-        ] {
-            assert!(
-                formula_reaches_outside(formula).is_some(),
-                "{formula} reaches outside"
-            );
-        }
-        for formula in [
+            // A function passed by name, without a call.
+            "=MAP(A1:A2,WEBSERVICE)",
+            "=_xlfn.MAP(A1,_xleta.WEBSERVICE)",
+            "=LET(f,IMAGE,f(A1))",
+            "=MAP(A1:A2, webservice )",
+            "=BYROW(A1:B2,HYPERLINK)",
+            "=IMAGE",
+            // A user-defined function's prefix.
+            "=_xludf.WEBSERVICE(\"x\")",
+            // Online functions of the spreadsheet programs.
+            "=PY(\"x\",0)",
+            "=STOCKHISTORY(\"MSFT\",A1)",
+            "=GOOGLETRANSLATE(A1,\"en\",\"fr\")",
+            "=GOOGLEFINANCE(\"GOOG\")",
+            "=AI(\"x\",A1)",
+            // A call after a range operator is still a call.
+            "=SUM(A1:INFO(\"os\"))",
+        ];
+        let passed: Vec<&str> = reaching
+            .into_iter()
+            .filter(|formula| formula_reaches_outside(formula).is_none())
+            .collect();
+        assert!(
+            passed.is_empty(),
+            "these reach outside, and passed: {passed:?}"
+        );
+        let staying = [
             "=SUM(A1:A3)",
             "=A1*B1",
             "=MYCELLS(1)",
             "=MYINFO(1)",
             "=SUM(A1:A3)+B2",
-        ] {
-            assert_eq!(
-                formula_reaches_outside(formula),
-                None,
-                "{formula} stays inside"
-            );
-        }
+            // Cell and column references that spell a listed name.
+            "=SUM(DDE1:DDE3)",
+            "=SUM(RTD:RTD)",
+            "=SUM(AI:AI)",
+            "=SUM($AI:$AI)",
+            "=SUMIF($PY:$PY,\"x\")",
+            "=AI1+PY2",
+            "=IMAGES+1",
+        ];
+        let refused: Vec<(&str, Option<&str>)> = staying
+            .into_iter()
+            .map(|formula| (formula, formula_reaches_outside(formula)))
+            .filter(|(_, reason)| reason.is_some())
+            .collect();
+        assert!(
+            refused.is_empty(),
+            "these stay inside, and were refused: {refused:?}"
+        );
     }
 
     #[test]
@@ -1081,6 +1133,15 @@ mod tests {
             "=INFO (\"os\")",
             "=CELL(\"filename\")",
             "=COPILOT(\"x\")",
+            "=MAP(A1:A2,WEBSERVICE)",
+            "=_xlfn.MAP(A1,_xleta.WEBSERVICE)",
+            "=LET(f,IMAGE,f(A1))",
+            "=_xludf.WEBSERVICE(\"x\")",
+            "=PY(\"x\",0)",
+            "=STOCKHISTORY(\"MSFT\",A1)",
+            "=GOOGLETRANSLATE(A1,\"en\",\"fr\")",
+            "=GOOGLEFINANCE(\"GOOG\")",
+            "=AI(\"x\",A1)",
         ] {
             let reason = refusal_of(write(
                 &project,
@@ -1103,7 +1164,13 @@ mod tests {
                 "{formula}: nothing is written"
             );
         }
-        for formula in ["=SUM(A1:A3)", "=A1*B1", "=MYCELLS(1)"] {
+        for formula in [
+            "=SUM(A1:A3)",
+            "=A1*B1",
+            "=MYCELLS(1)",
+            "=SUM(DDE1:DDE3)",
+            "=SUM(RTD:RTD)",
+        ] {
             write(
                 &project,
                 &one_sheet(
