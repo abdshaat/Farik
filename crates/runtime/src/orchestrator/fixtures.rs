@@ -276,6 +276,50 @@ impl Harness {
         })
     }
 
+    /// A harness whose team also has two Finance Specialists, `fin` and `fin-2`, each of whom may
+    /// hold two tasks.
+    pub(crate) fn with_finance(name: &str) -> Self {
+        Self::new(name, |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+            crate::tools::fixtures::with_the_finance_specialist(wire);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(farik_core::team::fixtures::an_agent_wire(
+                    "fin-2",
+                    "finance_specialist",
+                ));
+        })
+    }
+
+    /// The Finance Specialists' private folder in this project.
+    pub(crate) fn finance_folder(&self) -> PathBuf {
+        self.project.repo.path.join(".farik/local/finance")
+    }
+
+    /// Files `task` `ready` as a Finance Specialist's task in its folder, ended by its books,
+    /// `books.xlsx`, and reviewed by the Product Manager; and, when `held` names a status, held by
+    /// `fin` there.
+    pub(crate) fn finance_task(&self, task: &str, held: Option<&str>) {
+        self.file(task, "ready", |wire| {
+            wire["assignee_role"] = json!("finance_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The books exist.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": "books.xlsx" }
+            }]);
+        });
+        let Some(held) = held else { return };
+        let people = json!({ "assignee": "fin", "reviewer": "pm" });
+        self.project.moved(task, "ready", "assigned", &people);
+        if held != "assigned" {
+            self.project.moved(task, "assigned", held, &people);
+        }
+    }
+
     /// Files `task` `ready`, as `file` does.
     pub(crate) fn ready(&self, task: &str) {
         self.file(task, "ready", |_| {});

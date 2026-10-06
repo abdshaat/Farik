@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use farik_core::branch::task_branch;
 use farik_core::contract::{TaskId, TaskKind, TaskStatus};
-use farik_core::team::{Integration, Team};
+use farik_core::team::{Integration, Team, task_private_folder};
 use farik_protocol::event::{
     EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent,
     NoteWrittenBodyKind, PullRequestOpenedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
@@ -79,6 +79,14 @@ pub(super) async fn integrate(
         return Err(refused(format!("no_such_task: {}", task_id.as_str())));
     };
     refuse_unless_integrable(&row)?;
+    // A task in a private folder has no branch: accepting it was its end (6.6).
+    if task_private_folder(&orchestrator.deps.tools.files.read_contract(task_id)?).is_some() {
+        return Err(refused(format!(
+            "nothing_to_integrate: {} works in a private folder and has no branch; its acceptance \
+             was its end",
+            task_id.as_str()
+        )));
+    }
     let team = orchestrator.deps.tools.files.read_team()?;
     attempt(orchestrator, &team, task_id, Asker::Human)
         .await?
@@ -1076,6 +1084,43 @@ mod tests {
             "{refused:?}"
         );
         assert!(integrations(&harness).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_to_integrate_a_task_in_a_private_folder() {
+        // It was accepted with nothing to integrate: it has no branch, and acceptance is its end.
+        let harness = Harness::new("int-private-folder", |wire| {
+            wire["policy"]["integration"] = json!("auto_merge");
+            crate::tools::fixtures::with_the_finance_specialist(wire);
+        });
+        harness.finance_task("FRK-1", Some("verifying"));
+        harness.project.moved(
+            "FRK-1",
+            "verifying",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "fin",
+                     "reviewer": "pm", "effects": ["nothing_to_integrate"] }),
+        );
+        assert!(!harness.row("FRK-1").awaiting_integration);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let refused = orchestrator.integrate(&task("FRK-1")).await;
+
+        assert!(
+            matches!(&refused, Err(OrchestratorError::Refused { reason }) if reason.starts_with("nothing_to_integrate: FRK-1")),
+            "{refused:?}"
+        );
+        assert!(integrations(&harness).is_empty());
+        // Nor does a tick try: nothing awaits.
+        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
+        // An earlier refusal still comes first: a task that is not accepted is not accepted.
+        harness.finance_task("FRK-2", Some("verifying"));
+        let refused = orchestrator.integrate(&task("FRK-2")).await;
+        assert!(
+            matches!(&refused, Err(OrchestratorError::Refused { reason }) if reason.starts_with("not_accepted: FRK-2")),
+            "{refused:?}"
+        );
     }
 
     #[tokio::test]

@@ -4,7 +4,7 @@
 //! review is filed as a rejection in the reviewer's name, with its note; a passed one goes to the
 //! Product Manager's session, which accepts it, unless the human has to.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use farik_core::branch::task_branch;
@@ -27,7 +27,9 @@ use super::requests;
 use super::rules::{Waiting, acted, active, asleep, spent};
 use super::session::{SessionAsk, run_session};
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, session_dir, worktree};
-use crate::criteria::{CriterionError, CriterionOutcome, NewTestsInput, run_criteria};
+use crate::criteria::{
+    CriterionError, CriterionOutcome, NewTestsInput, check_artifact_in, run_criteria,
+};
 use crate::exec::ExecError;
 use crate::preview::designer_browser;
 use crate::session::SessionPurpose;
@@ -165,6 +167,15 @@ async fn run_what_farik_runs(
     if pending.is_empty() {
         return Ok(FarikRan::Criteria(0));
     }
+    // A task in a private folder has no worktree, branch or sandbox to run anything in (6.6).
+    if let Some(folder) = task_private_folder(contract) {
+        return run_in_the_folder(
+            deps,
+            contract,
+            &pending,
+            &deps.tools.files.root().join(folder),
+        );
+    }
     orchestrator.forget_sandbox(&contract.id);
     let base = integration_branch(team, &deps.tools.git)?;
     for criterion in &pending {
@@ -217,19 +228,57 @@ async fn run_what_farik_runs(
             }
         };
         for result in results {
-            append(
-                &deps.tools,
-                &contract.id,
-                None,
-                None,
-                EventBody::CriterionRecorded(CriterionRecordedBody {
-                    criterion_id: result.criterion_id,
-                    passed: result.passed,
-                    evidence: result.evidence,
-                    run_by: CriterionRecordedBodyRunBy::Reviewer,
-                    recorded_by: GOVERNOR.to_string(),
-                }),
-            )?;
+            record_run(deps, contract, result)?;
+        }
+    }
+    Ok(FarikRan::Criteria(pending.len()))
+}
+
+/// Records `result` as the reviewer's run, which Farik made.
+fn record_run(
+    deps: &OrchestratorDeps,
+    contract: &TaskContract,
+    result: CriterionResult,
+) -> Result<(), OrchestratorError> {
+    append(
+        &deps.tools,
+        &contract.id,
+        None,
+        None,
+        EventBody::CriterionRecorded(CriterionRecordedBody {
+            criterion_id: result.criterion_id,
+            passed: result.passed,
+            evidence: result.evidence,
+            run_by: CriterionRecordedBodyRunBy::Reviewer,
+            recorded_by: GOVERNOR.to_string(),
+        }),
+    )?;
+    Ok(())
+}
+
+/// `run_what_farik_runs` for a task in a private folder: each `artifact` criterion is checked on
+/// the host, as a file in the folder (`check_artifact_in`), and recorded before the next. A
+/// `command` or `test` criterion cannot be run for it, the folder being no worktree, and is not
+/// the work's fault, so it is escalated (readiness refuses one, so it is a contract edited by
+/// hand).
+fn run_in_the_folder(
+    deps: &OrchestratorDeps,
+    contract: &TaskContract,
+    pending: &[&ExitCriterion],
+    folder: &Path,
+) -> Result<FarikRan, OrchestratorError> {
+    for criterion in pending {
+        if wire_method(&criterion.verification) != Some("artifact") {
+            return Ok(FarikRan::Unrunnable(format!(
+                "Farik could not run {} for the reviewer: a task in a private folder has no \
+                 worktree to run a command or a test in",
+                criterion.id.as_str()
+            )));
+        }
+        if let CriterionOutcome::Result(result) =
+            check_artifact_in(folder, criterion, RunBy::Reviewer)
+        {
+            record_run(deps, contract, result)?;
         }
     }
     Ok(FarikRan::Criteria(pending.len()))

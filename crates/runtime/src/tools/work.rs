@@ -54,7 +54,13 @@ pub(crate) struct RequestTransitionInput {
     resolution: Option<String>,
     /// Why, for a move into `rejected`.
     rejection: Option<RejectionInput>,
+    /// For a move into `verifying` of a task in your private folder, which has no commit to show
+    /// its work: the workbooks you wrote, 1 to 20 paths in the folder, such as `books.xlsx`.
+    workbooks: Option<Vec<String>>,
 }
+
+/// The most workbooks a move into `verifying` names.
+const MOST_WORKBOOKS: usize = 20;
 
 /// `farik_assign_task`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -161,6 +167,16 @@ pub(super) fn request_transition(
     let to = TaskStatus::from_str(&input.to).map_err(|_| ToolError::InvalidInput {
         detail: format!("{} is not a status", input.to),
     })?;
+    if let Some(workbooks) = &input.workbooks
+        && !(1..=MOST_WORKBOOKS).contains(&workbooks.len())
+    {
+        return Err(ToolError::InvalidInput {
+            detail: format!(
+                "workbooks names 1 to {MOST_WORKBOOKS} paths, not {}",
+                workbooks.len()
+            ),
+        });
+    }
     let (contract, _) = call.contract(&task)?;
     let actor = actor_for(call, &contract, to)?;
     // A marketing plan that waits for the owner is not handed in: its assignee ends its turn.
@@ -180,6 +196,7 @@ pub(super) fn request_transition(
             failed_criterion_ids: rejection.failed_criterion_ids,
             reasons: rejection.reasons,
         }),
+        workbooks: input.workbooks,
         ..TransitionAsk::default()
     };
     ask_governor(call, task, to, actor, ask)
@@ -632,6 +649,70 @@ mod tests {
             refused[0].envelope.ids.session_id.as_deref(),
             Some("session-1")
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn request_transition_takes_the_workbooks() {
+        use crate::tools::fixtures::with_the_finance_specialist;
+
+        let project = TestProject::new(
+            "tools-workbooks",
+            &a_team_of_three(with_the_finance_specialist),
+        );
+        project.filed_with("FRK-1", "assigned", "task", None, |wire| {
+            wire["assignee_role"] = json!("finance_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The books exist.",
+                "verification": { "method": "artifact", "path": "books.xlsx" }
+            }]);
+        });
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "fin", "reviewer": "pm" }),
+        );
+        record(&project, "fin", "C1", true).expect("the assignee records its run");
+        let verifying =
+            |input: Value| project.call("fin", Some("FRK-1"), "farik_request_transition", input);
+        // None named, one not in the folder, then one that is.
+        let reason = refused_with(verifying(json!({ "to": "verifying" })), "gate_failed");
+        assert!(reason.contains("name the workbooks you wrote"), "{reason}");
+        let reason = refused_with(
+            verifying(json!({ "to": "verifying", "workbooks": ["books.xlsx"] })),
+            "gate_failed",
+        );
+        assert!(
+            reason.contains("books.xlsx is not in your folder"),
+            "{reason}"
+        );
+        let folder = project.repo.path.join(".farik/local/finance");
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+        // A path that climbs out, or is no workbook, is not in the folder either.
+        let reason = refused_with(
+            verifying(json!({ "to": "verifying", "workbooks": ["../farik.db"] })),
+            "gate_failed",
+        );
+        assert!(
+            reason.contains("../farik.db is not in your folder"),
+            "{reason}"
+        );
+        // The list is one to twenty paths.
+        for bad in [json!([]), json!(vec!["books.xlsx"; 21])] {
+            let refused = verifying(json!({ "to": "verifying", "workbooks": bad }));
+            assert!(
+                matches!(&refused, Err(ToolError::InvalidInput { detail }) if detail.contains("1 to 20")),
+                "{refused:?}"
+            );
+        }
+        let moved = verifying(json!({ "to": "verifying", "workbooks": ["books.xlsx"] }))
+            .expect("the books are in the folder");
+        assert_eq!(moved["status"], "verifying");
     }
 
     #[test]

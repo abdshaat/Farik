@@ -72,6 +72,125 @@ pub fn copy_baseline(folder: &Path, task: &TaskId) -> Result<bool, StoreError> {
     Ok(true)
 }
 
+/// How a file of a private folder differs from the copy taken when a task was assigned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderChangeKind {
+    /// The folder has the file and the copy has not.
+    New,
+    /// Both have it and its bytes differ.
+    Changed,
+    /// The copy has the file and the folder has not.
+    Removed,
+}
+
+impl FolderChangeKind {
+    /// The kind as a word a person reads: `new`, `changed` or `removed`.
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::New => "new",
+            Self::Changed => "changed",
+            Self::Removed => "removed",
+        }
+    }
+}
+
+/// One file of a private folder that differs from the copy of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderChange {
+    /// The file's path in the folder, its parts joined by `/`.
+    pub path: String,
+    /// How it differs.
+    pub kind: FolderChangeKind,
+}
+
+/// The files of `folder` that are new to, differ from, or are gone from the copy taken for `task`,
+/// by path. Bytes are compared, not times, so a file written again with what it held is not a
+/// change. `.history` is left out, links are not followed, and a task with no copy has every file
+/// of the folder new to it. The paths are in order.
+///
+/// # Errors
+///
+/// `Io` when the folder or the copy cannot be read.
+pub fn changes_since_baseline(
+    folder: &Path,
+    task: &TaskId,
+) -> Result<Vec<FolderChange>, StoreError> {
+    let now = files_under(folder, true)?;
+    let before = files_under(&baseline_of(folder, task), false)?;
+    let mut changes = Vec::new();
+    for (path, file) in &now {
+        let kind = match before.get(path) {
+            None => FolderChangeKind::New,
+            Some(copy) if differ(file, copy)? => FolderChangeKind::Changed,
+            Some(_) => continue,
+        };
+        changes.push(FolderChange {
+            path: path.clone(),
+            kind,
+        });
+    }
+    for path in before.keys().filter(|path| !now.contains_key(*path)) {
+        changes.push(FolderChange {
+            path: path.clone(),
+            kind: FolderChangeKind::Removed,
+        });
+    }
+    changes.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(changes)
+}
+
+/// Whether two files hold different bytes.
+fn differ(left: &Path, right: &Path) -> Result<bool, StoreError> {
+    let length = |path: &Path| {
+        fs::metadata(path)
+            .map(|metadata| metadata.len())
+            .map_err(|error| failed(&error, path))
+    };
+    if length(left)? != length(right)? {
+        return Ok(true);
+    }
+    let read = |path: &Path| fs::read(path).map_err(|error| failed(&error, path));
+    Ok(read(left)? != read(right)?)
+}
+
+/// Every regular file under `root`, by its path from `root` joined by `/`; none when `root` is not
+/// there. `.history` is left out at the top when `without_history` says so; links are not followed.
+fn files_under(
+    root: &Path,
+    without_history: bool,
+) -> Result<std::collections::BTreeMap<String, PathBuf>, StoreError> {
+    let mut found = std::collections::BTreeMap::new();
+    let mut pending = vec![(root.to_path_buf(), String::new())];
+    while let Some((directory, prefix)) = pending.pop() {
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound && directory == root => continue,
+            Err(error) => return Err(failed(&error, &directory)),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|error| failed(&error, &directory))?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if without_history && prefix.is_empty() && name == HISTORY {
+                continue;
+            }
+            let path = entry.path();
+            let kind = entry.file_type().map_err(|error| failed(&error, &path))?;
+            let relative = if prefix.is_empty() {
+                name
+            } else {
+                format!("{prefix}/{name}")
+            };
+            if kind.is_dir() {
+                pending.push((path, relative));
+            } else if kind.is_file() {
+                found.insert(relative, path);
+            }
+        }
+    }
+    Ok(found)
+}
+
 /// `from`'s regular files and directories into `to`, which exists.
 fn copy_directory(from: &Path, to: &Path, at_the_top: bool) -> Result<(), StoreError> {
     for entry in fs::read_dir(from).map_err(|error| failed(&error, from))? {
@@ -109,7 +228,7 @@ mod tests {
 
     use farik_core::contract::TaskId;
 
-    use super::copy_baseline;
+    use super::{changes_since_baseline, copy_baseline};
 
     fn a_folder(name: &str) -> PathBuf {
         let folder = std::env::temp_dir()
@@ -160,6 +279,51 @@ mod tests {
         assert_eq!(
             read(&folder.join(".history/FRK-2/books.xlsx")).as_deref(),
             Some("edited")
+        );
+    }
+
+    #[test]
+    fn finds_what_changed_since_the_copy() {
+        let folder = a_folder("changes");
+        copy_baseline(&folder, &task("FRK-1")).expect("copied");
+        // Nothing has changed yet, however the files were touched.
+        fs::write(folder.join("books.xlsx"), "books").expect("written again, the same");
+        assert_eq!(
+            changes_since_baseline(&folder, &task("FRK-1")),
+            Ok(Vec::new())
+        );
+        // A file changed, one new (in a folder of its own), one gone, and the history growing.
+        fs::write(folder.join("books.xlsx"), "edited").expect("written");
+        fs::create_dir_all(folder.join("2027")).expect("made");
+        fs::write(folder.join("2027/forecast.xlsx"), "forecast").expect("written");
+        fs::remove_file(folder.join("2026/pricing.xlsx")).expect("removed");
+        fs::write(
+            folder.join(".history/books.xlsx.20260102T000000Z.xlsx"),
+            "older",
+        )
+        .expect("written");
+        symlink("/etc/hostname", folder.join("link.xlsx")).expect("a link");
+        let changes = changes_since_baseline(&folder, &task("FRK-1")).expect("compared");
+        let words: Vec<(&str, &str)> = changes
+            .iter()
+            .map(|change| (change.path.as_str(), change.kind.word()))
+            .collect();
+        assert_eq!(
+            words,
+            [
+                ("2026/pricing.xlsx", "removed"),
+                ("2027/forecast.xlsx", "new"),
+                ("books.xlsx", "changed"),
+            ]
+        );
+        // A task with no copy was assigned before there were copies: everything in the folder is
+        // new to it, rather than nothing.
+        let all = changes_since_baseline(&folder, &task("FRK-9")).expect("compared");
+        assert_eq!(
+            all.iter()
+                .map(|change| (change.path.as_str(), change.kind.word()))
+                .collect::<Vec<_>>(),
+            [("2027/forecast.xlsx", "new"), ("books.xlsx", "new")]
         );
     }
 

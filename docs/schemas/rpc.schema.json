@@ -2567,6 +2567,10 @@
         "removed": {
           "type": "integer",
           "minimum": 0
+        },
+        "private_folder": {
+          "description": "True for a task that works in its role's private folder, which has no diff to show: diff is then empty, and files names what changed in the folder since the copy taken when the task was assigned.",
+          "type": "boolean"
         }
       },
       "required": [

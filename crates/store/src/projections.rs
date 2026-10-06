@@ -9,7 +9,7 @@ use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
 use farik_protocol::event::{
     ContractSummary, ContractSummaryKind, ContractSummaryRisk, ContractSummaryStatus,
     CostRecordedBody, EscalationRaisedBodyReason, EventBody, FarikEvent, RequestTriagedBodySize,
-    TaskStatusWire, TaskTransitionedBody, TransitionActorWire,
+    TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TransitionActorWire,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
@@ -736,14 +736,19 @@ fn apply_move(
     let is_intervention = body.actor == TransitionActorWire::Human
         && body.from != TaskStatusWire::Escalated
         && body.to != TaskStatusWire::Escalated;
+    // A task in a private folder has no branch (6.6): its acceptance says there is nothing to
+    // integrate, and a task that depends on it counts it integrated from then on.
+    let has_a_branch = !body
+        .effects
+        .contains(&TaskTransitionedBodyEffectsItem::NothingToIntegrate);
     update(
         transaction,
         // Nothing leaves `accepted` (5.2), so only a move into it touches the flag; the
-        // row's kind says whether there is a branch to integrate.
+        // row's kind and the move's effects say whether there is a branch to integrate.
         "UPDATE task_projections
          SET status = ?2, assignee_id = ?3, reviewer_id = ?4, iteration = ?5,
              updated_seq = ?6, awaiting_approval = 0,
-             awaiting_integration = CASE WHEN ?2 = 'accepted' THEN kind = 'task'
+             awaiting_integration = CASE WHEN ?2 = 'accepted' THEN kind = 'task' AND ?8
                                          ELSE awaiting_integration END,
              verifications = verifications + (?2 = 'verifying'),
              rejections = rejections + (?2 = 'rejected'),
@@ -757,6 +762,7 @@ fn apply_move(
             body.iteration,
             seq,
             i64::from(is_intervention),
+            has_a_branch,
         ),
     )
 }
@@ -1643,6 +1649,41 @@ mod tests {
             !awaiting(&projections, "FRK-2"),
             "an epic has no branch of its own"
         );
+    }
+
+    #[test]
+    fn awaits_no_integration_when_there_is_nothing_to_integrate() {
+        // A task in a private folder has no branch (6.6): its acceptance says so in its effects,
+        // and a task that depends on it counts it integrated from then on.
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &moved("FRK-1", "ready", "verifying"));
+        let mut accepted = an_event_wire(EventKind::TaskTransitioned);
+        accepted["task_id"] = json!("FRK-1");
+        accepted["body"]["from"] = json!("verifying");
+        accepted["body"]["to"] = json!("accepted");
+        accepted["body"]["effects"] = json!(["nothing_to_integrate"]);
+        let accepted = event_from_value(&accepted).expect("the fixture is schema-valid");
+        record(
+            &log,
+            &projections,
+            &NewEvent {
+                recorded_at: accepted.envelope.recorded_at,
+                ids: accepted.envelope.ids,
+                body: accepted.body,
+            },
+        );
+        let row = projections
+            .task(&"FRK-1".parse().expect("a task id"))
+            .expect("the read works")
+            .expect("on the board");
+        assert_eq!(row.status, TaskStatus::Accepted);
+        assert!(!row.awaiting_integration);
+        // Acceptance with any other effect still awaits.
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        record(&log, &projections, &moved("FRK-2", "ready", "verifying"));
+        record(&log, &projections, &moved("FRK-2", "verifying", "accepted"));
+        assert!(awaiting(&projections, "FRK-2"));
     }
 
     #[test]

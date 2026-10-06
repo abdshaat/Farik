@@ -374,7 +374,8 @@ fn check(deps: &ToolDeps, team: &Team, task_id: &TaskId, draft: &Value) -> Resul
     }))
 }
 
-/// `task.diff`: the task's diff, or an epic's tasks' joined.
+/// `task.diff`: the task's diff, or an epic's tasks' joined; for a task in a private folder, the
+/// names of the files that changed in it and no diff.
 fn task_diff(deps: &ToolDeps, team: &Team, task_id: &TaskId) -> Result<Value, Failure> {
     let contract = contract_of(deps, task_id)?;
     let mut children = Vec::new();
@@ -395,9 +396,14 @@ fn task_diff(deps: &ToolDeps, team: &Team, task_id: &TaskId) -> Result<Value, Fa
         &children,
     )
     .map_err(|sentence| Failure::new(REFUSED, sentence))?;
-    Ok(
-        json!({ "diff": diff.diff, "files": diff.files, "added": diff.added, "removed": diff.removed }),
-    )
+    let mut answer = json!({
+        "diff": diff.diff, "files": diff.files, "added": diff.added, "removed": diff.removed,
+    });
+    // A task in a private folder shows its files' names and no diff (6.6).
+    if diff.private_folder {
+        answer["private_folder"] = json!(true);
+    }
+    Ok(answer)
 }
 
 /// `task.checks`: each criterion's latest result since the task last entered `verifying`, in the
@@ -2474,6 +2480,49 @@ pub(super) mod tests {
             "questionsListResult",
         );
         assert_eq!(one["questions"].as_array().map(Vec::len), Some(1), "{one}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_what_a_private_folder_task_changed_and_no_diff() {
+        let harness = Harness::with_finance("gates-folder-diff");
+        harness.finance_task("FRK-1", Some("in_progress"));
+        let folder = harness.finance_folder();
+        std::fs::create_dir_all(folder.join("2026")).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+        std::fs::write(folder.join("2026/pricing.xlsx"), "pricing").expect("written");
+        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
+        std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
+        std::fs::remove_file(folder.join("2026/pricing.xlsx")).expect("removed");
+
+        let diff = query(
+            &harness.daemon,
+            "task.diff",
+            &json!({ "task_id": "FRK-1" }),
+            "taskDiffResult",
+        );
+
+        assert_eq!(
+            diff,
+            json!({
+                "diff": "",
+                "files": ["2026/pricing.xlsx", "books.xlsx", "forecast.xlsx"],
+                "added": 0,
+                "removed": 0,
+                "private_folder": true,
+            })
+        );
+        // A task of any other role answers as it did: no such key.
+        harness.in_progress("FRK-2", "dev-a", "dev-b");
+        let other = query(
+            &harness.daemon,
+            "task.diff",
+            &json!({ "task_id": "FRK-2" }),
+            "taskDiffResult",
+        );
+        assert!(other.get("private_folder").is_none(), "{other}");
     }
 
     #[test]

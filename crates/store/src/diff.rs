@@ -3,9 +3,10 @@
 
 use farik_core::branch::task_branch;
 use farik_core::contract::{TaskContract, TaskKind};
-use farik_core::team::Team;
+use farik_core::team::{Team, task_private_folder};
 use farik_protocol::event::{EventBody, FarikEvent};
 
+use crate::baseline::changes_since_baseline;
 use crate::git::{Git, integration_branch};
 
 /// A diff and what it touches.
@@ -19,6 +20,9 @@ pub struct TaskDiff {
     pub added: u64,
     /// Lines removed.
     pub removed: u64,
+    /// Whether the task works in a private folder (6.6), which is not shown: `diff` is then empty,
+    /// and `files` names what changed in the folder since the copy taken when it was assigned.
+    pub private_folder: bool,
 }
 
 /// The diff of `contract`, whose events are `history`. A task's branch is diffed against the
@@ -37,6 +41,18 @@ pub fn diff_of(
     history: &[FarikEvent],
     children: &[(TaskContract, Vec<FarikEvent>)],
 ) -> Result<TaskDiff, String> {
+    // A task in a private folder has no branch, and its files are not shown: only which changed.
+    if let Some(folder) = task_private_folder(contract) {
+        let changes = changes_since_baseline(&git.root().join(folder), &contract.id)
+            .map_err(|error| error.to_string())?;
+        return Ok(TaskDiff {
+            diff: String::new(),
+            files: changes.into_iter().map(|change| change.path).collect(),
+            added: 0,
+            removed: 0,
+            private_folder: true,
+        });
+    }
     if contract.kind != TaskKind::Epic {
         return Ok(counted(branch_diff(git, team, contract, history)?));
     }
@@ -143,5 +159,6 @@ fn counted(diff: String) -> TaskDiff {
         files,
         added,
         removed,
+        private_folder: false,
     }
 }

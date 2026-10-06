@@ -1890,52 +1890,14 @@ mod tests {
         assert!(adapter.started().is_empty());
     }
 
-    /// A harness whose team also has two Finance Specialists, `fin` and `fin-2`, each of whom may
-    /// hold two tasks.
-    fn a_finance_harness(name: &str) -> Harness {
-        Harness::new(name, |wire| {
-            wire["policy"]["wip_limit_per_agent"] = json!(2);
-            crate::tools::fixtures::with_the_finance_specialist(wire);
-            wire["agents"]
-                .as_array_mut()
-                .expect("a list of agents")
-                .push(farik_core::team::fixtures::an_agent_wire(
-                    "fin-2",
-                    "finance_specialist",
-                ));
-        })
-    }
-
-    /// Files `task` `ready` as a Finance Specialist's task in its folder, ended by its books,
-    /// reviewed by the Product Manager; and, when `held` names a status, held by `fin` there.
-    fn a_finance_task(harness: &Harness, task: &str, held: Option<&str>) {
-        harness.file(task, "ready", |wire| {
-            wire["assignee_role"] = json!("finance_specialist");
-            wire["reviewer_role"] = json!("product_manager");
-            wire["allowed_paths"] = json!([".farik/local/finance/**"]);
-            wire["exit_criteria"] = json!([{
-                "id": "C1",
-                "text": "The books exist.",
-                "satisfies": ["R1"],
-                "verification": { "method": "artifact", "path": "books.xlsx" }
-            }]);
-        });
-        let Some(held) = held else { return };
-        let people = json!({ "assignee": "fin", "reviewer": "pm" });
-        harness.project.moved(task, "ready", "assigned", &people);
-        if held != "assigned" {
-            harness.project.moved(task, "assigned", held, &people);
-        }
-    }
-
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn plans_no_second_assignment_in_the_folder() {
         // FRK-1 holds the finance folder, blocked; two Finance Specialists have room for FRK-2,
         // and it waits all the same (5.14, 6.6).
-        let harness = a_finance_harness("orch-plan-folder-busy");
-        a_finance_task(&harness, "FRK-1", Some("blocked"));
-        a_finance_task(&harness, "FRK-2", None);
+        let harness = Harness::with_finance("orch-plan-folder-busy");
+        harness.finance_task("FRK-1", Some("blocked"));
+        harness.finance_task("FRK-2", None);
         let adapter = harness.recorded(vec![reads_a_file()]);
 
         let report = harness
@@ -1975,7 +1937,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
 
         // FRK-2 is in review; FRK-1 is in progress. The folder is not made yet.
-        let harness = a_finance_harness("orch-folder-sessions");
+        let harness = Harness::with_finance("orch-folder-sessions");
         let folder = harness.project.repo.path.join(".farik/local/finance");
         harness.file("FRK-2", "ready", |wire| {
             wire["assignee_role"] = json!("finance_specialist");
@@ -2028,7 +1990,7 @@ mod tests {
         harness
             .project
             .moved("FRK-2", "verifying", "cancelled", &people);
-        a_finance_task(&harness, "FRK-1", Some("in_progress"));
+        harness.finance_task("FRK-1", Some("in_progress"));
         orchestrator
             .tick()
             .await
@@ -2054,13 +2016,53 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn farik_checks_a_finance_artifact_on_the_host() {
+        // Present, the workbook passes C1; absent, it fails it. Either way no sandbox is made, and
+        // no branch, which a task in a folder does not have, is read.
+        for (present, passes) in [(true, true), (false, false)] {
+            let harness = Harness::with_finance(&format!("orch-folder-artifact-{present}"));
+            harness.finance_task("FRK-1", Some("verifying"));
+            if present {
+                std::fs::create_dir_all(harness.finance_folder()).expect("the folder is made");
+                std::fs::write(harness.finance_folder().join("books.xlsx"), "books")
+                    .expect("written");
+            }
+            let sandboxes = Arc::new(CountingSandboxFactory::default());
+            let recorded = harness.recorded(vec![review_writes_note()]);
+            let orchestrator = harness.orchestrator_with(recorded.clone(), sandboxes.clone());
+
+            let report = orchestrator.tick().await.expect("the tick runs");
+
+            assert_eq!(acted_on(&report), Some("FRK-1"), "{present}: {report:?}");
+            let events = harness.events(&[EventKind::CriterionRecorded]);
+            let [event] = events.as_slice() else {
+                panic!("one criterion recorded, got {events:?}");
+            };
+            let EventBody::CriterionRecorded(body) = &event.body else {
+                panic!("a criterion");
+            };
+            assert_eq!(body.criterion_id, "C1");
+            assert_eq!(body.passed, passes, "{present}: {}", body.evidence);
+            assert_eq!(body.run_by, CriterionRecordedBodyRunBy::Reviewer);
+            assert_eq!(body.recorded_by, "governor");
+            assert!(body.evidence.contains("books.xlsx"), "{}", body.evidence);
+            assert_eq!(sandboxes.created("FRK-1"), 0);
+            assert_eq!(sandboxes.based("FRK-1"), 0);
+            assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
+            // The reviewer's session follows, in the folder.
+            assert_eq!(recorded.started().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn assignment_copies_the_books_once() {
-        let harness = a_finance_harness("orch-folder-baseline");
+        let harness = Harness::with_finance("orch-folder-baseline");
         let folder = harness.project.repo.path.join(".farik/local/finance");
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "first books").expect("written");
         std::fs::write(folder.join("forecast.xlsx"), "first forecast").expect("written");
-        a_finance_task(&harness, "FRK-1", Some("assigned"));
+        harness.finance_task("FRK-1", Some("assigned"));
         let adapter = harness.recorded(vec![]);
 
         let report = harness

@@ -43,7 +43,7 @@ mod posts;
 mod reading;
 pub(crate) mod refusal;
 mod retro;
-mod sheets;
+pub(crate) mod sheets;
 mod work;
 
 use refusal::Refusal;
