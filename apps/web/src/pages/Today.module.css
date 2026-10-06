@@ -195,6 +195,20 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 	}
 }
 
+/* "Post it" and "Don't post", at the row's right end; below the words on a phone. */
+.decide {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-2);
+	margin-inline-start: auto;
+}
+
+@media not (min-width: 640px) {
+	.decide {
+		flex-basis: 100%;
+	}
+}
+
 .moved li {
 	display: grid;
 	grid-template-columns: 4rem minmax(0, 1fr);

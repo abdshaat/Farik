@@ -238,12 +238,25 @@ stays there for a screen reader. */
 	color: var(--farik-color-ink-muted);
 }
 
+/* Where the slot's post stands, under its topic. */
+.written {
+	grid-column: 3;
+	display: grid;
+	gap: var(--farik-space-1);
+}
+
+.slotText {
+	color: var(--farik-color-ink-muted);
+	white-space: pre-wrap;
+}
+
 @media not (min-width: 640px) {
 	.posts li {
 		grid-template-columns: max-content minmax(0, 1fr);
 	}
 
-	.posts li > :last-child {
+	.posts li > .topic,
+	.posts li > .written {
 		grid-column: 1 / -1;
 	}
 }

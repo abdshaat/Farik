@@ -21,6 +21,7 @@ import {
 	TITLE,
 	TOPIC,
 } from "../test/marketing.ts";
+import { at } from "../test/posts.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 
 /** The page of plan MP-3, with the team and `plan` answered. */
@@ -491,5 +492,218 @@ describe("marketing plan page", () => {
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			en.pageNotFound,
 		);
+	});
+});
+
+/** A post written for one of MP-3's slots, as `marketing_plan.get` lists it. */
+const written = (post: number, slot: string, more: object) => ({
+	post,
+	slot,
+	text: `The post for ${slot}.`,
+	at: at(12, 10),
+	state: "sent",
+	state_at: at(12, 8),
+	...more,
+});
+
+describe("a plan's posts", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	/** The slot of the calendar whose topic says `topic`. */
+	const slot = (topic: string) => {
+		const item = screen
+			.getAllByRole("listitem")
+			.find((one) => one.textContent?.includes(topic));
+		if (!item) throw new Error(`no slot says "${topic}"`);
+		return item;
+	};
+
+	it("the_plan_page_shows_each_slot_s_post", async () => {
+		// Sunday 25 October, 09:15: the plan's slots p1 to p5 are today or behind it.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(2026, 9, 25, 9, 15));
+		const { container } = await opened({
+			...APPROVED,
+			written_posts: [
+				written(11, "p1", {
+					text: "Our autumn menu, first try.",
+					state: "failed",
+					at: at(12, 10),
+					state_at: at(12, 8, 5),
+				}),
+				written(12, "p1", {
+					text: `Our autumn menu ${"<b>x</b>"}`,
+					state: "sent",
+					at: at(12, 10),
+				}),
+				written(13, "p2", {
+					state: "stopped",
+					stopped_by: "owner",
+					state_at: at(13, 17),
+				}),
+				written(14, "p3", { state: "missed", missed_why: "paused" }),
+				written(15, "p4", { state: "missed", missed_why: "not_running" }),
+				written(16, "p5", {
+					state: "scheduled",
+					at: at(25, 18),
+					text: "A rainy week ahead.",
+				}),
+				// Stopped, and written again, and that one failed: the slot has none.
+				written(17, "p6", {
+					state: "stopped",
+					stopped_by: "owner",
+					state_at: at(23, 17),
+				}),
+				written(18, "p6", { state: "failed", state_at: at(24, 7, 45) }),
+			],
+		});
+		await screen.findByRole("heading", {
+			level: 2,
+			name: "Posts, week by week",
+		});
+
+		// Each slot says where its post stands, with the post's own words.
+		const sent = slot(TOPIC);
+		expect(sent.textContent).toContain("Sent");
+		expect(sent.textContent).toContain("at 10:00");
+		expect(sent.textContent).toContain("Our autumn menu <b>x</b>");
+		expect(sent.querySelector("b")).toBeNull();
+		expect(sent.textContent).toContain(
+			"An earlier post for this day failed at 08:05.",
+		);
+		expect(slot("Pumpkin loaf is back").textContent).toContain(
+			"Stopped by you on Tue 13 Oct",
+		);
+		expect(slot("Shaping the sourdough").textContent).toContain(
+			"Missed the team was paused",
+		);
+		expect(slot("Meet the bakers").textContent).toContain(
+			"Missed Farik was not running",
+		);
+		expect(slot("A rainy week ahead").textContent).toContain(
+			"Going out today at 18:00",
+		);
+		// A slot whose only post failed has none: the failure is told beside it.
+		expect(slot("Pie pre-orders open").textContent).toContain("No post yet");
+		expect(slot("Pie pre-orders open").textContent).toContain(
+			"An earlier post for this day failed at 07:45.",
+		);
+
+		// The counts, a count of none left out, and what Sent means.
+		expect(
+			screen.getByText(
+				"1 sent, 1 going out, 1 stopped by you, 2 missed, and 1 not written yet.",
+			),
+		).toBeTruthy();
+		expect(
+			screen.getByText(
+				"Sent means Farik handed the post to Buffer for its time; you stop a post on Today.",
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("says_how_a_plan_that_ended_stopped_its_posts", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(2026, 10, 3, 9, 0));
+		await opened({
+			...APPROVED,
+			state: "ended",
+			ended: { why: "by_owner", at: "2026-11-03T08:41:00Z" },
+			written_posts: [
+				written(21, "p6", { state: "stopped", stopped_by: "plan_ended" }),
+				written(22, "p5", { state: "sent" }),
+			],
+		});
+		await screen.findByRole("heading", {
+			level: 2,
+			name: "Posts, week by week",
+		});
+
+		expect(slot("Pie pre-orders open").textContent).toContain(
+			"Stopped when the plan ended",
+		);
+		expect(slot("A rainy week ahead").textContent).toContain("Sent");
+		// A plan that ended has nothing going out, and only what it counted.
+		expect(screen.getByText("1 sent and 4 not written yet.")).toBeTruthy();
+		cleanup();
+
+		// A running plan with nothing written yet says so in one clause.
+		await opened({ ...APPROVED, written_posts: [] });
+		expect(await screen.findByText("6 not written yet.")).toBeTruthy();
+	});
+
+	it("ending_the_plan_counts_its_posts", async () => {
+		// Monday 26 October, 09:15.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(2026, 9, 26, 9, 15));
+		const posts = [
+			written(31, "p1", { state: "scheduled", at: at(28, 10) }),
+			written(32, "p2", { state: "scheduled", at: at(29, 10) }),
+			written(33, "p3", { state: "scheduled", at: at(30, 10) }),
+			written(34, "p4", { state: "sent", at: at(26, 10) }),
+			// Out already: it is Buffer's to post, and no longer ours to stop.
+			written(35, "p5", { state: "sent", at: at(26, 8) }),
+		];
+		const ask = async (written_posts: object[]) => {
+			const { s } = await opened({ ...APPROVED, written_posts });
+			fireEvent.click(
+				await screen.findByRole("button", { name: "End the plan" }),
+			);
+			const dialog = await screen.findByRole("dialog", {
+				name: "End this plan now?",
+			});
+			return { dialog, s };
+		};
+
+		// Three posts not yet sent will not go out; one is with Buffer and goes out today.
+		const first = await ask(posts);
+		expect(
+			within(first.dialog).getByText(
+				"Its 3 posts not yet sent will not go out.",
+			),
+		).toBeTruthy();
+		expect(
+			within(first.dialog).getByText(
+				"1 post is already with Buffer and goes out today at 10:00. Stop it on Today if you do not want it.",
+			),
+		).toBeTruthy();
+		cleanup();
+
+		// One of each kind, and the other way round: several with Buffer, the first named.
+		const second = await ask([
+			posts[0] as object,
+			written(35, "p4", { state: "sent", at: at(27, 8, 30) }),
+			written(36, "p5", { state: "sent", at: at(28, 8, 30) }),
+		]);
+		expect(
+			within(second.dialog).getByText(
+				"Its 1 post not yet sent will not go out.",
+			),
+		).toBeTruthy();
+		expect(
+			within(second.dialog).getByText(
+				"2 posts are already with Buffer, the first going out tomorrow at 08:30. Stop them on Today if you do not want them.",
+			),
+		).toBeTruthy();
+		cleanup();
+
+		// A line of none is left out.
+		const third = await ask([
+			written(37, "p1", { state: "sent", at: at(28, 8, 30) }),
+		]);
+		expect(within(third.dialog).queryByText(/not yet sent/)).toBeNull();
+		expect(
+			within(third.dialog).getByText(
+				"1 post is already with Buffer and goes out Wednesday 28 October at 08:30. Stop it on Today if you do not want it.",
+			),
+		).toBeTruthy();
+		cleanup();
+		const none = await ask([]);
+		expect(within(none.dialog).queryByText(/not yet sent/)).toBeNull();
+		expect(within(none.dialog).queryByText(/with Buffer/)).toBeNull();
 	});
 });

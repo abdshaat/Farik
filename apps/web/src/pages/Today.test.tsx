@@ -14,6 +14,7 @@ import { ConnectionProvider } from "../app/connection.tsx";
 import { en } from "../strings/en.ts";
 import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
 import { PLAN, SUMMARY, TITLE } from "../test/marketing.ts";
+import { GOING_OUT, MARKUP, POST_ROW, todayWith } from "../test/posts.ts";
 import {
 	answerQuery,
 	answerStatus,
@@ -682,5 +683,272 @@ describe("today", () => {
 				name: TITLE,
 			}),
 		).toBeTruthy();
+	});
+});
+
+/** The command the page sent, once it has sent `count`. */
+const sent = (s: FakeSocket, count = 1) =>
+	waitFor(() => {
+		const c = s.calls("command")[count - 1];
+		if (!c) throw new Error(`fewer than ${count} commands were sent`);
+		return c;
+	});
+
+/** The rows of the list of posts going out. */
+const goingOut = async () =>
+	within(
+		await screen.findByRole("list", { name: en.goingOutList }),
+	).getAllByRole("listitem");
+
+describe("today's posts", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	it("going_out_lists_posts_with_their_time_and_pictures", async () => {
+		const { container, s } = await todayWith({ posts: GOING_OUT });
+
+		expect(
+			await screen.findByRole("heading", { name: "Going out (4)" }),
+		).toBeTruthy();
+		expect(
+			screen.getByText(
+				"Posts in your plan go out without asking you. Stop any of them before its time.",
+			),
+		).toBeTruthy();
+		const rows = await goingOut();
+		expect(rows).toHaveLength(4);
+		const [x, instagram, later, last] = rows as [
+			HTMLElement,
+			HTMLElement,
+			HTMLElement,
+			HTMLElement,
+		];
+
+		// Soonest first, each with its network, its time, how soon, and why it may go out.
+		expect(within(x).getByText("X, today at 10:00")).toBeTruthy();
+		expect(within(x).getByText("in 45 minutes")).toBeTruthy();
+		expect(x.textContent).toContain(
+			"You allowed this. Buffer has it, and posts it at 10:00.",
+		);
+		expect(within(instagram).getByText("Ig")).toBeTruthy();
+		expect(
+			within(instagram).getByText("Instagram, today at 13:00"),
+		).toBeTruthy();
+		expect(within(instagram).getByText("in 3 hours 45 minutes")).toBeTruthy();
+		expect(
+			within(instagram).getByText("Thanksgiving pies are open for pre-order."),
+		).toBeTruthy();
+		expect(instagram.textContent).toContain(
+			"Approved in your plan MP-3. Farik hands it to Buffer at 12:00.",
+		);
+		expect(
+			within(instagram)
+				.getByRole("link", { name: "MP-3" })
+				.getAttribute("href"),
+		).toBe("/marketing/plans/MP-3");
+		expect(
+			within(later).getByText("X, Wednesday 28 October at 08:30"),
+		).toBeTruthy();
+		expect(within(later).getByText("in 2 days")).toBeTruthy();
+		expect(later.textContent).toContain(
+			"Approved in your plan MP-3. Farik hands it to Buffer an hour before.",
+		);
+		expect(
+			within(last).getByText("Instagram, Saturday 31 October at 09:00"),
+		).toBeTruthy();
+		expect(within(last).getByText("in 5 days")).toBeTruthy();
+		for (const row of rows)
+			expect(within(row).getByRole("button", { name: "Stop" })).toBeTruthy();
+
+		// The daemon fetches each picture, since the browser may not load one from another site.
+		const asked = await waitFor(() => {
+			const frames = s.calls("social_post.media");
+			if (frames.length === 0) throw new Error("no picture was asked for");
+			return frames;
+		});
+		expect(asked.map((frame) => frame.params)).toEqual([
+			{ post: 42, index: 0 },
+		]);
+		await s.reply(asked[0] as never, {
+			media_type: "image/png",
+			base64: "iVBORw==",
+		});
+		const picture = await within(instagram).findByRole("img", {
+			name: "Picture 1 of this post",
+		});
+		expect(picture.getAttribute("src")).toBe("data:image/png;base64,iVBORw==");
+		await expectNoAxeViolations(container);
+	});
+
+	it("what_farik_cannot_show_opens_in_a_new_tab", async () => {
+		const { s } = await todayWith({ posts: GOING_OUT });
+		const [, instagram, , last] = (await goingOut()) as [
+			HTMLElement,
+			HTMLElement,
+			HTMLElement,
+			HTMLElement,
+		];
+
+		// A clip is not fetched: it opens where it is, in a new tab that cannot reach this page.
+		const clip = within(last).getByRole("link", { name: "Watch the clip" });
+		expect(clip.getAttribute("href")).toBe(
+			"https://cdn.example.com/cookies.mp4",
+		);
+		expect(clip.getAttribute("target")).toBe("_blank");
+		expect(clip.getAttribute("rel")).toContain("noopener");
+		expect(clip.getAttribute("rel")).toContain("noreferrer");
+		expect(s.calls("social_post.media").map((frame) => frame.params)).toEqual([
+			{ post: 42, index: 0 },
+		]);
+
+		// A picture the daemon would not fetch is opened the same way.
+		const [frame] = s.calls("social_post.media");
+		await s.fail(frame as never, -32002, "there is no picture to show");
+		const picture = await within(instagram).findByRole("link", {
+			name: "Open the picture",
+		});
+		expect(picture.getAttribute("href")).toBe(
+			"https://cdn.example.com/pies.png",
+		);
+		expect(picture.getAttribute("target")).toBe("_blank");
+		expect(picture.getAttribute("rel")).toContain("noopener");
+		expect(picture.getAttribute("rel")).toContain("noreferrer");
+		expect(within(instagram).queryByRole("img")).toBeNull();
+	});
+
+	it("never_opens_an_address_that_is_not_https", async () => {
+		const [, , , clip] = GOING_OUT.posts;
+		const posts = {
+			posts: [
+				{
+					...clip,
+					media: [
+						{ url: "javascript:alert(1)", kind: "video" },
+						{ url: "http://cdn.example.com/cookies.mp4", kind: "video" },
+					],
+				},
+			],
+		};
+		await todayWith({ posts });
+
+		const [row] = await goingOut();
+		expect(row?.textContent).toContain("Halloween sugar cookies");
+		expect(within(row as HTMLElement).queryAllByRole("link")).toHaveLength(1);
+		expect(
+			within(row as HTMLElement).queryByRole("link", {
+				name: "Watch the clip",
+			}),
+		).toBeNull();
+	});
+
+	it("a_requested_post_offers_post_it_and_dont_post", async () => {
+		const { container, s } = await todayWith({ waiting: [POST_ROW] });
+
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const row = within(list).getByRole("listitem");
+		expect(
+			within(row).getByText("Kai wants to post on Instagram"),
+		).toBeTruthy();
+		expect(
+			within(row).getByText("It is not in your plan, so Kai asks first."),
+		).toBeTruthy();
+		expect(
+			within(row).getByText("Instagram, Thursday 29 October at 18:00"),
+		).toBeTruthy();
+		// What the agent wrote is shown as typed, never as markup.
+		expect(within(row).getByText(/Bake with us/).textContent).toContain(MARKUP);
+		expect(container.querySelector("img[src='x']")).toBeNull();
+		expect(
+			within(row).getByText(
+				"If you allow it, Farik sends it at its time, and it waits under Going out until then, with Stop.",
+			),
+		).toBeTruthy();
+		expect(
+			screen.getByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+
+		fireEvent.click(within(row).getByRole("button", { name: "Post it" }));
+		const post = await sent(s);
+		expect(post.params).toEqual({
+			command: {
+				command: "social_post_decide",
+				body: { post: 45, decision: "post" },
+			},
+		});
+		// A refusal is said in words, whatever the daemon's text is.
+		await s.reply(post, {
+			error: {
+				kind: "refused",
+				detail: "post_decided: post 45 is not waiting for your decision",
+			},
+		});
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			en.refusePostDecided,
+		);
+
+		fireEvent.click(
+			within(row).getByRole("button", { name: "Don\u2019t post" }),
+		);
+		const decline = await sent(s, 2);
+		expect(decline.params).toEqual({
+			command: {
+				command: "social_post_decide",
+				body: { post: 45, decision: "dont_post" },
+			},
+		});
+		await s.reply(decline, { said: "did not allow post 45", events: [9] });
+		await expectNoAxeViolations(container);
+	});
+
+	it("a_post_that_did_not_go_out_says_why_as_text", async () => {
+		const { container } = await todayWith({ posts: GOING_OUT });
+
+		const heading = await screen.findByRole("heading", {
+			name: "Did not go out, in the last 24 hours",
+		});
+		const section = heading.closest("section") as HTMLElement;
+		const rows = within(
+			within(section).getByRole("list", { name: en.didNotGoOutList }),
+		).getAllByRole("listitem");
+		expect(rows).toHaveLength(4);
+		const [failed, missed, paused, undecided] = rows as [
+			HTMLElement,
+			HTMLElement,
+			HTMLElement,
+			HTMLElement,
+		];
+
+		expect(within(failed).getByText("Instagram, today at 08:00")).toBeTruthy();
+		expect(within(failed).getByText("Failed")).toBeTruthy();
+		// Buffer's words and the agent's are text: none of their markup became an element.
+		expect(failed.textContent).toContain(
+			`Buffer did not take it: \u201cThe image is too small ${MARKUP}\u201d`,
+		);
+		expect(failed.textContent).toContain(
+			"Kai hears of this in its next session.",
+		);
+		expect(container.querySelector("img[src='x']")).toBeNull();
+		expect(within(missed).getByText("X, yesterday at 18:00")).toBeTruthy();
+		expect(within(missed).getByText("Missed")).toBeTruthy();
+		expect(missed.textContent).toContain(
+			"Farik was not running an hour before its time, so it was not sent.",
+		);
+		expect(missed.textContent).toContain(
+			"Kai hears of this in its next session.",
+		);
+		expect(paused.textContent).toContain(
+			"The team was paused, so it was not sent.",
+		);
+		expect(undecided.textContent).toContain(
+			"You had not decided by its time, so it was not sent.",
+		);
+		expect(
+			within(undecided).getByText("Threads, yesterday at 10:00"),
+		).toBeTruthy();
+		// They are over: there is nothing to stop.
+		expect(within(section).queryByRole("button", { name: "Stop" })).toBeNull();
+		await expectNoAxeViolations(container);
 	});
 });

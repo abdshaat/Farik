@@ -21,7 +21,16 @@ import {
 	weeks,
 	when,
 } from "./marketing.ts";
+import { clock } from "./PostGoingOut.tsx";
 import styles from "./pages.module.css";
+import {
+	endingPosts,
+	slotStanding,
+	standingCounts,
+	standingDetail,
+	standingWord,
+	type WrittenPost,
+} from "./planPosts.ts";
 import type { Team } from "./setup/TeamSetup.tsx";
 
 type Campaign = {
@@ -47,6 +56,8 @@ type Plan = {
 	budget: { total: string; googleAds: string };
 	campaigns: Campaign[];
 	posts: Post[];
+	/** What was written for its slots, oldest first. */
+	writtenPosts?: WrittenPost[];
 	measures: string[];
 	googleAdsAccount: string | null;
 	agentId: string;
@@ -97,6 +108,12 @@ export function MarketingPlan() {
 	const proposed = plan.state === "proposed";
 	const live = plan.state === "approved" || plan.state === "active";
 	const cash = (amount: string) => money(amount, plan.currency);
+	const written = plan.writtenPosts ?? [];
+	const instant = new Date();
+	const counts = standingCounts(
+		written,
+		plan.posts.map((post) => post.key),
+	);
 	const channels = [...new Set(plan.posts.map((post) => post.channel))];
 	const breakdown = channels
 		.map(
@@ -342,41 +359,58 @@ export function MarketingPlan() {
 							</table>
 						</section>
 					</div>
-					{(proposed || live) && plan.posts.length > 0 && (
-						<section className={styles.section} aria-labelledby="calendar">
-							<h2 id="calendar">{t("marketingCalendar")}</h2>
-							<p className={styles.muted}>
-								{t(
-									plan.posts.length === 1
-										? "marketingCalendarLeadOne"
-										: "marketingCalendarLead",
-									{
-										n: plan.posts.length,
-										channels: listed(channels.map(channelName)),
-										name,
-									},
+					{(proposed || live || written.length > 0) &&
+						plan.posts.length > 0 && (
+							<section className={styles.section} aria-labelledby="calendar">
+								<h2 id="calendar">{t("marketingCalendar")}</h2>
+								<p className={styles.muted}>
+									{t(
+										plan.posts.length === 1
+											? "marketingCalendarLeadOne"
+											: "marketingCalendarLead",
+										{
+											n: plan.posts.length,
+											channels: listed(channels.map(channelName)),
+											name,
+										},
+									)}
+								</p>
+								{!proposed && counts !== "" && (
+									<p className={styles.muted}>{counts}</p>
 								)}
-							</p>
-							{weeks(plan.startsOn, plan.endsOn, plan.posts).map((week) => (
-								<Fragment key={week.n}>
-									<h3 id={`week-${week.n}`} className={own.week}>
-										{t("marketingWeek", { n: week.n, range: week.range })}
-									</h3>
-									<ul aria-labelledby={`week-${week.n}`} className={own.posts}>
-										{week.slots.map((post) => (
-											<li key={post.key}>
-												<time dateTime={post.on}>{shortDay(post.on)}</time>
-												<span className={own.channel}>
-													{channelName(post.channel)}
-												</span>
-												<span>{post.topic}</span>
-											</li>
-										))}
-									</ul>
-								</Fragment>
-							))}
-						</section>
-					)}
+								{!proposed && (
+									<p className={styles.muted}>{t("planPostsSentMeans")}</p>
+								)}
+								{weeks(plan.startsOn, plan.endsOn, plan.posts).map((week) => (
+									<Fragment key={week.n}>
+										<h3 id={`week-${week.n}`} className={own.week}>
+											{t("marketingWeek", { n: week.n, range: week.range })}
+										</h3>
+										<ul
+											aria-labelledby={`week-${week.n}`}
+											className={own.posts}
+										>
+											{week.slots.map((post) => (
+												<li key={post.key}>
+													<time dateTime={post.on}>{shortDay(post.on)}</time>
+													<span className={own.channel}>
+														{channelName(post.channel)}
+													</span>
+													<span className={own.topic}>{post.topic}</span>
+													{!proposed && (
+														<SlotPost
+															written={written}
+															slot={post.key}
+															instant={instant}
+														/>
+													)}
+												</li>
+											))}
+										</ul>
+									</Fragment>
+								))}
+							</section>
+						)}
 					{proposed && plan.measures.length > 0 && (
 						<section className={styles.section}>
 							<h2 id="measures">{t("marketingMeasures", { name })}</h2>
@@ -456,6 +490,7 @@ export function MarketingPlan() {
 					plan={plan}
 					name={name}
 					now={now}
+					instant={instant}
 					onClose={() => setAsking(undefined)}
 					onSent={() => {
 						setAsking(undefined);
@@ -620,6 +655,35 @@ function Words({
 	);
 }
 
+/** Where a slot's post stands: the state, the post's words as typed, and an earlier failure. */
+function SlotPost({
+	written,
+	slot,
+	instant,
+}: {
+	written: WrittenPost[];
+	slot: string;
+	instant: Date;
+}) {
+	const { shown, standing, failedAt } = slotStanding(written, slot);
+	const detail = standingDetail(standing, shown, instant);
+	return (
+		<span className={own.written}>
+			<span>
+				<strong>{standingWord(standing)}</strong>
+				{detail !== "" && ` ${detail}`}
+			</span>
+			{/* What the agent wrote: text, never markup. */}
+			{shown && <span className={own.slotText}>{shown.text}</span>}
+			{failedAt && (
+				<span className={own.sub}>
+					{t("planSlotFailedBefore", { time: clock(new Date(failedAt)) })}
+				</span>
+			)}
+		</span>
+	);
+}
+
 /** "Send back": why, in the owner's words, which the agent reads as such. */
 function SendBack({
 	plan,
@@ -674,12 +738,15 @@ function EndPlan({
 	plan,
 	name,
 	now,
+	instant,
 	onClose,
 	onSent,
 }: {
 	plan: Plan;
 	name: string;
 	now: string;
+	/** This moment, for the posts' own times. */
+	instant: Date;
 	onClose: () => void;
 	onSent: () => void;
 }) {
@@ -725,6 +792,9 @@ function EndPlan({
 			}
 		>
 			<p>{line}</p>
+			{endingPosts(plan.writtenPosts ?? [], instant).map((words) => (
+				<p key={words}>{words}</p>
+			))}
 			<p>{t("marketingEndEffect", { name })}</p>
 			<Words
 				id="plan-end-note"

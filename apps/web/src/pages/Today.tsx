@@ -10,8 +10,15 @@ import { t } from "../strings/t.ts";
 import { type Allowances, useAllowances } from "./allowances.tsx";
 import { type Backlog, moreWaits } from "./Board.tsx";
 import { ChannelPreview } from "./Channel.tsx";
+import { useCommand } from "./dialogs/StartSprint.tsx";
 import { ToolApproval, type ToolAsk } from "./dialogs/ToolApproval.tsx";
-import { longRange, money } from "./marketing.ts";
+import { channelName, longRange, money } from "./marketing.ts";
+import {
+	GoingOut,
+	type GoingOutPost,
+	PostCard,
+	type PostMedia,
+} from "./PostGoingOut.tsx";
 import { type Agent, roleName, type Team } from "./setup/TeamSetup.tsx";
 import type { RoleKit } from "./Team.tsx";
 import styles from "./Today.module.css";
@@ -35,14 +42,23 @@ type PlanAsk = {
 	startsOn: string;
 	endsOn: string;
 };
+/** What a post outside the plan waiting on the owner says of itself (`waiting.list`). */
+type PostAsk = {
+	post: number;
+	channel: string;
+	text: string;
+	media: PostMedia[];
+	at: string;
+};
 type Waiting = {
 	taskId: string;
-	kind: Kind | "tool_approval" | "marketing_plan";
+	kind: Kind | "tool_approval" | "marketing_plan" | "social_post";
 	agentId: string | null;
 	title: string;
 	line: string;
 } & Partial<ToolAsk> &
-	Partial<PlanAsk>;
+	Partial<PlanAsk> &
+	Partial<PostAsk>;
 type Moved = { at: string; line: string };
 type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
@@ -117,6 +133,7 @@ export function Today() {
 			(item) =>
 				item.kind === "tool_approval" ||
 				item.kind === "marketing_plan" ||
+				item.kind === "social_post" ||
 				item.kind in KINDS,
 		),
 	};
@@ -126,6 +143,9 @@ export function Today() {
 	const { data: moved } = useQuery<{ moved: Moved[] }>("moved.since", {
 		since,
 	});
+	const { data: posts, again: askPostsAgain } = useQuery<{
+		posts: GoingOutPost[];
+	}>("social_posts.list", {});
 	const { data: sprint } = useQuery<Sprint>("sprint.current", {});
 	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
 	// The daemon counts nothing while the team does not plan in sprints.
@@ -207,6 +227,13 @@ export function Today() {
 										item={item}
 										agent={agent(item.agentId)}
 									/>
+								) : item.kind === "social_post" ? (
+									<PostRequestRow
+										key={`${item.kind}-${item.post}`}
+										item={item}
+										agent={agent(item.agentId)}
+										now={new Date()}
+									/>
 								) : (
 									<WaitingRow
 										key={`${item.kind}-${item.taskId}`}
@@ -225,6 +252,14 @@ export function Today() {
 						</ul>
 					)}
 				</section>
+			)}
+			{posts && (
+				<GoingOut
+					posts={posts.posts}
+					agents={agents}
+					now={new Date()}
+					again={askPostsAgain}
+				/>
 			)}
 			{moved && (
 				<section className={styles.section} aria-labelledby="moved-heading">
@@ -414,6 +449,66 @@ function MarketingPlanRow({
 			>
 				{t("waitingReview")}
 			</Link>
+		</li>
+	);
+}
+
+/** A post outside the plan: its words and pictures, and the owner's "Post it" or "Don't post". */
+function PostRequestRow({
+	item,
+	agent,
+	now,
+}: {
+	item: Waiting;
+	agent: Agent | undefined;
+	now: Date;
+}) {
+	const name = agent?.displayName ?? item.agentId ?? "";
+	const titleId = `waiting-post-${item.post}`;
+	const { busy, refusal, send } = useCommand(() => {});
+	const decide = (decision: "post" | "dont_post") =>
+		send({
+			command: "social_post_decide",
+			body: { post: item.post, decision },
+		});
+	return (
+		<li className={styles.row}>
+			{agent?.avatar && (
+				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
+			)}
+			<div className={styles.rowText}>
+				<strong id={titleId}>
+					{t("waitingPost", {
+						name,
+						network: channelName(item.channel ?? ""),
+					})}
+				</strong>
+				<span>{t("postAsksFirst", { name })}</span>
+				<PostCard
+					post={{
+						post: item.post ?? 0,
+						channel: item.channel ?? "",
+						text: item.text ?? "",
+						media: item.media ?? [],
+						at: item.at ?? "",
+					}}
+					now={now}
+				/>
+				<span>{t("postIfYouAllow")}</span>
+				{refusal && (
+					<p role="alert" className={styles.alert}>
+						{refusal}
+					</p>
+				)}
+			</div>
+			<div className={styles.decide}>
+				<Button kind="primary" busy={busy} onClick={() => decide("post")}>
+					{t("postItYes")}
+				</Button>
+				<Button busy={busy} onClick={() => decide("dont_post")}>
+					{t("postItNo")}
+				</Button>
+			</div>
 		</li>
 	);
 }

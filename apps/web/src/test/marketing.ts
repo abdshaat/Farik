@@ -94,6 +94,7 @@ export const PLAN = {
 			topic: "Pie pre-orders open",
 		},
 	],
+	written_posts: [],
 	measures: [
 		`120 pie pre-orders by 22 November (last year: 74) ${MARKUP}`,
 		"A pre-order from the ads costs under $4.00",

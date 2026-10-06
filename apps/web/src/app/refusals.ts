@@ -53,6 +53,14 @@ const WORDS: Record<string, keyof typeof en> = {
 	unknown_marketing_plan: "refuseMarketingPlanUnknown",
 	marketing_plan_not_approved: "refuseMarketingPlanNotApproved",
 	marketing_plan_ended: "refuseMarketingPlanEnded",
+	// The owner's decisions on a post (SPEC 6.5).
+	post_not_taken_back: "refusePostNotTakenBack",
+	post_being_handed_over: "refusePostBeingHandedOver",
+	post_already_out: "refusePostAlreadyOut",
+	post_not_going_out: "refusePostNotGoingOut",
+	unknown_post: "refusePostUnknown",
+	post_decided: "refusePostDecided",
+	post_in_the_past: "refusePostInThePast",
 	// A skill's refusals (SPEC 6.7), said at the field they belong to.
 	skill_runs_commands: "skillRunsCommands",
 	skill_attaches_files: "skillAttachesFiles",

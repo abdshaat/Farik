@@ -1,0 +1,138 @@
+/* One post on Today: its network's badge, when it goes out, its words, its pictures and why it may. */
+.section {
+	display: grid;
+	gap: var(--farik-space-3);
+}
+
+.section h2 {
+	margin: 0;
+	font:
+		var(--farik-type-heading-weight) var(--farik-type-heading-size) /
+		var(--farik-type-heading-line-height) var(--farik-type-heading-family);
+}
+
+.rows {
+	display: grid;
+	gap: var(--farik-space-3);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.row {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: var(--farik-space-1) var(--farik-space-3);
+	align-items: start;
+	padding: var(--farik-space-3);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+}
+
+/* A post on its own, inside a row or a dialog. */
+.card {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: var(--farik-space-1) var(--farik-space-3);
+	align-items: start;
+}
+
+/* A post that did not go out is over: it reads as a record, not as a thing to act on. */
+.over {
+	color: var(--farik-color-ink-muted);
+}
+
+.badge {
+	display: inline-grid;
+	place-items: center;
+	box-sizing: border-box;
+	min-width: 2rem;
+	min-height: 2rem;
+	padding: 0 var(--farik-space-1);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+	font-weight: 600;
+}
+
+.body {
+	display: grid;
+	gap: var(--farik-space-1);
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.when {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-1) var(--farik-space-3);
+	align-items: baseline;
+}
+
+.soon {
+	color: var(--farik-color-ink-muted);
+}
+
+.state {
+	font-weight: 600;
+}
+
+/* What the agent wrote, as typed: wrapped, never cut off, never marked up. */
+.text {
+	margin: 0;
+	white-space: pre-wrap;
+}
+
+.pictures {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-2);
+	align-items: flex-start;
+}
+
+.pictures img {
+	max-width: min(100%, 14rem);
+	max-height: 12rem;
+	border-radius: var(--farik-radius-control);
+}
+
+.why {
+	margin: 0;
+	color: var(--farik-color-ink-muted);
+}
+
+/* "Stop" sits at the row's right end; on a phone it runs the row's width. */
+.stopButton {
+	grid-column: 1 / -1;
+	justify-self: end;
+	box-sizing: border-box;
+	min-height: 44px;
+	padding: var(--farik-space-2) var(--farik-space-4);
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+	background: var(--farik-color-surface);
+	color: var(--farik-color-ink);
+}
+
+@media not (min-width: 640px) {
+	.stopButton {
+		justify-self: stretch;
+	}
+}
+
+/* A line under a post's words, in their column. */
+.below {
+	grid-column: 2;
+}
+
+.dialog {
+	display: grid;
+	gap: var(--farik-space-3);
+}
+
+.dialog p {
+	margin: 0;
+}
