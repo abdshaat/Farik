@@ -3,7 +3,8 @@
 //! sends its own.
 
 use chrono::{DateTime, Utc};
-use farik_runtime::marketing::{list_row, states_today, whole};
+use farik_core::marketing::network_name;
+use farik_runtime::marketing::{list_row, post_row, posts_going_out, states_today, whole};
 use farik_store::marketing::{MarketingPlan, PlanState, marketing_plans, social_posts};
 use serde_json::json;
 
@@ -53,6 +54,51 @@ pub fn show(project: &Project, plan: Option<&str>, now: DateTime<Utc>) -> Result
                 .map(|(plan, state)| list_row(plan, *state))
                 .collect::<Vec<_>>()
         }),
+        json_lines: None,
+    })
+}
+
+/// The most characters of a post's text one line of the list shows.
+const TEXT_ON_A_LINE: usize = 60;
+
+/// The posts going out, soonest first, then those that did not go out in the last day: one line
+/// each, `<post> <Network> <at> <state>: <the text's first line>`, and the same rows as
+/// `social_posts.list` answers with `--json`.
+///
+/// # Errors
+///
+/// A sentence saying what the store refused.
+pub fn posts(project: &Project, now: DateTime<Utc>) -> Result<Report, String> {
+    let all = social_posts(&project.log).map_err(|error| error.to_string())?;
+    let going = posts_going_out(&all, now);
+    let lines = if going.is_empty() {
+        vec!["no post is going out".to_string()]
+    } else {
+        going
+            .iter()
+            .map(|post| {
+                let first: String = post
+                    .text
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(TEXT_ON_A_LINE)
+                    .collect();
+                format!(
+                    "{} {} {} {}: {}",
+                    post.post,
+                    network_name(post.channel),
+                    post_row(post)["at"].as_str().unwrap_or_default(),
+                    post.state.as_str(),
+                    first
+                )
+            })
+            .collect()
+    };
+    Ok(Report {
+        lines,
+        json: json!({ "posts": going.iter().map(|post| post_row(post)).collect::<Vec<_>>() }),
         json_lines: None,
     })
 }

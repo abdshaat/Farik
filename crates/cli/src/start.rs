@@ -195,9 +195,24 @@ pub(crate) fn command_orchestrator(
     name: &str,
     io: &CliIo<'_>,
 ) -> Result<Orchestrator, String> {
+    Ok(Orchestrator::new(command_deps(project, name, io)?))
+}
+
+/// What the orchestrator of a command handled in this process is made of. Its daemon holds the
+/// connections kept on this computer, as a driving process's does, so that a command that calls a
+/// connector itself (a Stop of a post Buffer has) reaches it.
+///
+/// # Errors
+///
+/// A sentence saying what the store refused.
+pub(crate) fn command_deps(
+    project: &Project,
+    name: &str,
+    io: &CliIo<'_>,
+) -> Result<OrchestratorDeps, String> {
     let tools = tool_deps(project, io)?;
-    Ok(Orchestrator::new(OrchestratorDeps {
-        daemon: Arc::new(DaemonState::new(Arc::clone(&tools))),
+    Ok(OrchestratorDeps {
+        daemon: connected_daemon(&tools, io),
         tools,
         adapter: Arc::new(NoSessions {
             command: name.to_string(),
@@ -207,7 +222,7 @@ pub(crate) fn command_orchestrator(
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
-    }))
+    })
 }
 
 /// A daemon over `tools` that keeps connector keys where `io` says, and runs each stdio
@@ -646,5 +661,44 @@ pub(crate) fn listen(interrupts: Interrupts) -> Result<UnboundedReceiver<()>, St
             });
             Ok(receiver)
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::sync::Arc;
+
+    use farik_protocol::clock::FixedClock;
+    use farik_runtime::connectors::{ConnectorSecrets, MemoryConnectorSecrets};
+    use farik_store::git::fixtures::TempRepo;
+
+    use super::command_deps;
+    use crate::{CliIo, open_project, run_cli};
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_command_handled_here_has_the_kept_connections() {
+        let repository = TempRepo::new("start-command-deps");
+        let at = chrono::Utc::now();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let mut io = CliIo::new(
+            repository.path.clone(),
+            Box::new(&mut out),
+            Box::new(&mut err),
+            Arc::new(FixedClock::new(at)),
+        );
+        let init = ["farik", "init"].map(String::from);
+        assert_eq!(run_cli(&init, &mut io), 0);
+        let project = open_project(&repository.path, at).expect("the project opens");
+
+        let deps = command_deps(&project, "marketing post stop", &io).expect("the deps are made");
+
+        // The daemon's store of keys is the one `io` names, as a driving process's is, so that a
+        // Stop of a post reaches Buffer with the connection kept on this computer.
+        let other: Arc<dyn ConnectorSecrets> = Arc::new(MemoryConnectorSecrets::default());
+        assert!(
+            !deps.daemon.set_connector_secrets(other),
+            "a store was set already"
+        );
     }
 }

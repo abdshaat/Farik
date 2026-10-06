@@ -512,7 +512,8 @@ enum Commands {
         #[command(subcommand)]
         command: ToolCommands,
     },
-    /// Show the marketing plans, or approve, send back or end one (6.5).
+    /// Show the marketing plans, approve, send back or end one, and list, stop or allow the posts
+    /// (6.5).
     Marketing {
         #[command(subcommand)]
         command: MarketingCommands,
@@ -725,6 +726,35 @@ enum MarketingCommands {
     Plan {
         #[command(subcommand)]
         command: PlanCommands,
+    },
+    /// The posts it writes: what goes out, and stopping or allowing one.
+    Post {
+        #[command(subcommand)]
+        command: PostCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum PostCommands {
+    /// List the posts going out, soonest first, then those that did not go out in the last day.
+    List,
+    /// Stop a post going out; one Buffer has is taken back from Buffer first.
+    Stop {
+        /// The post's number, as the list prints it.
+        post: u64,
+    },
+    /// Allow a post the Marketing Specialist asked about, which is not in the plan.
+    Send {
+        /// The post's number, as farik run prints it.
+        post: u64,
+    },
+    /// Do not allow a post the Marketing Specialist asked about.
+    Decline {
+        /// The post's number, as farik run prints it.
+        post: u64,
+        /// A note for the Marketing Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
     },
 }
 
@@ -947,6 +977,12 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
                 },
         } => open_project(&io.cwd, now)
             .and_then(|project| marketing::show(&project, plan.as_deref(), now)),
+        Commands::Marketing {
+            command:
+                MarketingCommands::Post {
+                    command: PostCommands::List,
+                },
+        } => open_project(&io.cwd, now).and_then(|project| marketing::posts(&project, now)),
         Commands::Marketing { .. } => open_project(&io.cwd, now).and_then(|project| {
             let (name, command) = humans(&parsed.command)?;
             human_command(&project, command, name, io)
@@ -1252,6 +1288,33 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
             ),
             PlanCommands::Show { .. } => {
                 return Err("farik marketing plan show only reads".to_string());
+            }
+        },
+        Commands::Marketing {
+            command: MarketingCommands::Post { command },
+        } => match command {
+            PostCommands::Stop { post } => (
+                "marketing post stop",
+                Command::SocialPostStop { post: *post },
+            ),
+            PostCommands::Send { post } => (
+                "marketing post send",
+                Command::SocialPostDecide {
+                    post: *post,
+                    post_it: true,
+                    note: None,
+                },
+            ),
+            PostCommands::Decline { post, note } => (
+                "marketing post decline",
+                Command::SocialPostDecide {
+                    post: *post,
+                    post_it: false,
+                    note: note.clone(),
+                },
+            ),
+            PostCommands::List => {
+                return Err("farik marketing post list only reads".to_string());
             }
         },
         _ => return Err("this is not one of the human's commands".to_string()),

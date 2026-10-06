@@ -1145,3 +1145,179 @@ fn marketing_plan_show_prints_the_list_and_one_plan() {
     assert_eq!(unknown.code, 1, "{}", unknown.out);
     assert!(unknown.err.contains("MP-9"), "{}", unknown.err);
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn post_stop_sends_the_number() {
+    let repository = a_project("human-post-stop-sent");
+    let driver = LiveDriver::answering(&repository, Ok(a_plan_answer("stopped post 42")));
+
+    let ran = run(&repository.path, &["marketing", "post", "stop", "42"]);
+    let bad = run(&repository.path, &["marketing", "post", "stop", "soon"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(ran.out.trim(), "stopped post 42");
+    assert_eq!(bad.code, 2, "{}", bad.out);
+    assert_eq!(
+        driver.commands(),
+        vec![Command::SocialPostStop { post: 42 }],
+        "only the number that was one"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn post_send_and_decline_send_the_decision() {
+    let repository = a_project("human-post-decide-sent");
+    let driver = LiveDriver::answering(&repository, Ok(a_plan_answer("decided post 42")));
+
+    let sent = run(&repository.path, &["marketing", "post", "send", "42"]);
+    let bare = run(&repository.path, &["marketing", "post", "decline", "43"]);
+    let noted = run(
+        &repository.path,
+        &[
+            "marketing",
+            "post",
+            "decline",
+            "44",
+            "--note",
+            "Not this week",
+        ],
+    );
+
+    for ran in [&sent, &bare, &noted] {
+        assert_eq!(ran.code, 0, "{}", ran.err);
+        assert_eq!(ran.out.trim(), "decided post 42");
+    }
+    assert_eq!(
+        driver.commands(),
+        vec![
+            Command::SocialPostDecide {
+                post: 42,
+                post_it: true,
+                note: None
+            },
+            Command::SocialPostDecide {
+                post: 43,
+                post_it: false,
+                note: None
+            },
+            Command::SocialPostDecide {
+                post: 44,
+                post_it: false,
+                note: Some("Not this week".to_string())
+            },
+        ]
+    );
+}
+
+/// Kai's post of `text` on `channel` in plan MP-1, going out `hours` from the tests' now.
+fn a_post_scheduled(
+    repository: &farik_store::git::fixtures::TempRepo,
+    task: &str,
+    (channel, text): (&str, &str),
+    hours: i64,
+) -> (u64, String) {
+    let going_out = (project::at() + chrono::Duration::hours(hours))
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+    let event = record_as(
+        repository,
+        task,
+        Some(("kai", "session-1")),
+        "social_post.scheduled",
+        &json!({
+            "channel": channel, "buffer_channel": "chan-1", "text": text, "media": [],
+            "at": going_out, "approved_by": "plan", "plan": "MP-1", "slot": "post-1",
+        }),
+    );
+    (event.envelope.seq, going_out)
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn post_list_prints_what_goes_out() {
+    let repository = a_project("human-post-list");
+    let task = filed(&repository, "Add done.txt");
+    let long = format!("{} and a tail that is cut", "Open on Wednesday ".repeat(3));
+    let (second, second_at) =
+        a_post_scheduled(&repository, &task, ("x", "Second.\nNot this line."), 6);
+    let (first, first_at) =
+        a_post_scheduled(&repository, &task, ("instagram", "Sale \u{1b}[2J now"), 3);
+    let (cut, cut_at) = a_post_scheduled(&repository, &task, ("facebook", &long), 5);
+    // Stopped, and so not going out.
+    let (gone, _) = a_post_scheduled(&repository, &task, ("linkedin", "Stopped."), 4);
+    record(
+        &repository,
+        &task,
+        "social_post.stopped",
+        &json!({ "post": gone, "by": "owner" }),
+    );
+
+    let list = run(&repository.path, &["marketing", "post", "list"]);
+
+    assert_eq!(list.code, 0, "{}", list.err);
+    let lines: Vec<&str> = list.out.lines().collect();
+    assert_eq!(
+        lines,
+        [
+            format!("{first} Instagram {first_at} scheduled: Sale \\u001b[2J now"),
+            format!(
+                "{cut} Facebook {cut_at} scheduled: {}",
+                long.chars().take(60).collect::<String>()
+            ),
+            format!("{second} X {second_at} scheduled: Second."),
+        ],
+        "soonest first, the text's first line cut at 60 characters, nothing stopped"
+    );
+    assert!(!list.out.contains('\u{1b}'), "{:?}", list.out);
+
+    let json = run(&repository.path, &["--json", "marketing", "post", "list"]);
+    assert_eq!(json.code, 0, "{}", json.err);
+    assert!(json.err.is_empty(), "stdout alone: {}", json.err);
+    let all: Value = serde_json::from_str(json.out.trim()).expect("one JSON document");
+    let posts = all["posts"].as_array().expect("a list of posts");
+    assert_eq!(
+        posts
+            .iter()
+            .map(|post| post["post"].as_u64().expect("a number"))
+            .collect::<Vec<_>>(),
+        [first, cut, second]
+    );
+    assert_eq!(posts[2]["channel"], "x");
+    assert_eq!(posts[2]["at"], second_at);
+    assert_eq!(posts[2]["state"], "scheduled");
+    assert_eq!(posts[2]["approved_by"], "plan");
+
+    let none = run(
+        &a_project("human-post-list-none").path,
+        &["marketing", "post", "list"],
+    );
+    assert_eq!(none.code, 0, "{}", none.err);
+    assert_eq!(none.out.trim(), "no post is going out");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn post_stop_with_no_driver_records_it() {
+    let repository = a_project("human-post-stop-here");
+    let task = filed(&repository, "Add done.txt");
+    let (post, _) = a_post_scheduled(&repository, &task, ("instagram", "Hello."), 5);
+
+    let ran = run(
+        &repository.path,
+        &["marketing", "post", "stop", &post.to_string()],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let stopped = events(&repository, &[EventKind::SocialPostStopped]);
+    assert_eq!(stopped.len(), 1);
+    let EventBody::SocialPostStopped(body) = &stopped[0].body else {
+        panic!("a stop");
+    };
+    assert_eq!(body.post.get(), post);
+    assert_eq!(
+        body.by,
+        farik_protocol::event::SocialPostStoppedBodyBy::Owner
+    );
+}

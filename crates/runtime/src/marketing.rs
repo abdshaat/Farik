@@ -594,6 +594,15 @@ pub fn post_row(post: &SocialPost) -> Value {
 /// the latest first.
 #[must_use]
 pub fn going_out(posts: &[SocialPost], now: DateTime<Utc>) -> Vec<Value> {
+    posts_going_out(posts, now)
+        .into_iter()
+        .map(post_row)
+        .collect()
+}
+
+/// The posts `going_out` words, as they are in the store.
+#[must_use]
+pub fn posts_going_out(posts: &[SocialPost], now: DateTime<Utc>) -> Vec<&SocialPost> {
     let mut ahead: Vec<&SocialPost> = posts
         .iter()
         .filter(|post| {
@@ -610,7 +619,7 @@ pub fn going_out(posts: &[SocialPost], now: DateTime<Utc>) -> Vec<Value> {
         })
         .collect();
     did_not.sort_by_key(|post| std::cmp::Reverse((post.state_at, post.post)));
-    ahead.into_iter().chain(did_not).map(post_row).collect()
+    ahead.into_iter().chain(did_not).collect()
 }
 
 /// The posts written for the plan `plan`'s slots, oldest first, as `marketing_plan.get` lists them.
