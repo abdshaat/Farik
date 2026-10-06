@@ -17,7 +17,7 @@ The founder wants the Marketing Specialist to own the business's marketing, not 
 
 These are ordinary documents under the team's `document_paths`, committed by the role's tasks and reviewed by the Product Manager. While the team has an active Marketing Specialist, the Definition of Ready refuses a task of another role that names `docs/marketing/**` in its `allowed_paths` (`marketing_paths_owned`); everyone may read them. The UI/UX Designer's `brand-and-design-tokens` takes the colours and voice from the brand kit when it exists.
 
-The logo and pictures the role makes with Recraft and Higgsfield live at those services; `farik_save_media { url, path }` copies one into `docs/marketing/brand/assets/` in the task's worktree: a PNG, JPEG, WebP or SVG of at most 10 MiB, from a host of a service in the agent's kit only, an SVG refused if it holds a script or an external reference.
+The brand's logo and pictures are the business's own (the founder, 2026-10-06: "The logos are user independent not Farik's. The user will provide his own logos and images."): the user puts them in `docs/marketing/brand/assets/`, and the role keeps the brand kit's text, which names and describes them, and asks the user for any that are missing. Farik does not save generated pictures into the brand kit.
 
 ## Research
 
@@ -92,7 +92,7 @@ The kit's skills after step 08 and 08b, gaining in 08c and 08f:
 | Step | What |
 |---|---|
 | 08b | Buffer and Kit in the kit (posts asking per call until 08d; Kit's broadcasts drafted inside an allowance, sent by the human from Kit); the role's "never publishes" lines reworded |
-| 08c | The brand and the marketing plan: the role's mandate, four skills, `farik_save_media`, `farik_propose_marketing_plan`, the plan's events, page and Today gate (mocked up first), `farik marketing plan`, `marketing_paths_owned` |
+| 08c | The brand and the marketing plan: the role's mandate, four skills, `farik_propose_marketing_plan`, the plan's events, page and Today gate (mocked up first), `farik marketing plan`, `marketing_paths_owned` |
 | 08d | Posting through the plan: Farik calling a service itself, `farik_schedule_post`, the hold and Stop, `social_post.*`, Today's "Going out" (mocked up first), Buffer's writes `denied` to the agent, the skill `running-social-channels` |
 | 08e | Google's sign-in, pulled forward: route 2 for Google, the founder's Google Cloud project, the `adwords` scope, verification as a launch dependency |
 | 08f | Google Ads: Farik's own `google-ads` connector, the plan mark, the spend tick and the hard stop, `marketing_budget.reached`, Today's raise or end, the skill `running-search-ads` |
