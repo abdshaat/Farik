@@ -559,11 +559,27 @@ export function ConnectorAdd({
 			)[code as "access_denied"] ?? "addSignInFailed",
 			{ host: provider ?? (hostOf(issuer) || urlHost) },
 		);
+	/**
+	 * Ends the sign-in under way on the daemon, which stops waiting for the service, so that a yes
+	 * given on its page after the user left is never kept. Best effort: one that is gone is ended.
+	 */
+	const endSignIn = () => {
+		if (!client || done || !("attempt" in sign)) return;
+		void client
+			.call("connector.sign_in_cancel", { attempt: sign.attempt })
+			.catch(() => {});
+	};
+	/** Closes the dialog; whatever sign-in was under way ends with it. */
+	const leave = () => {
+		endSignIn();
+		onClose(step === 2);
+	};
 	// Anything the sign-in was made for changing makes it another: the user signs in again.
 	const startOver = () => {
-		if (["offered", "waiting", "signedIn", "failed"].includes(sign.kind))
+		if (["offered", "waiting", "signedIn", "failed"].includes(sign.kind)) {
+			endSignIn();
 			setSign({ kind: "idle" });
-		else if (sign.kind === "keys" && sign.probed) setSign({ kind: "idle" });
+		} else if (sign.kind === "keys" && sign.probed) setSign({ kind: "idle" });
 	};
 
 	// The key fields show unless the service offers a sign-in, which stands in for them.
@@ -585,7 +601,7 @@ export function ConnectorAdd({
 		setKeys(keys.map((old, j) => (j === i ? { ...old, ...k } : old)));
 
 	return (
-		<Dialog open title={title} onClose={() => onClose(step === 2)}>
+		<Dialog open title={title} onClose={leave}>
 			<Stepper
 				steps={[t("addStepStart"), t("addStepLabel"), t("addStepDone")]}
 				current={step}
@@ -683,7 +699,10 @@ export function ConnectorAdd({
 									<span>
 										<Button
 											kind="quiet"
-											onClick={() => setSign({ kind: "keys", probed: true })}
+											onClick={() => {
+												endSignIn();
+												setSign({ kind: "keys", probed: true });
+											}}
 										>
 											{t("addUseAKey")}
 										</Button>
@@ -907,7 +926,7 @@ export function ConnectorAdd({
 								{t("addNext")}
 							</Button>
 						)}
-						<Button onClick={() => onClose(false)}>{t("agentCancel")}</Button>
+						<Button onClick={leave}>{t("agentCancel")}</Button>
 					</div>
 					{showsKeys && (
 						<p className={styles.muted}>{t("addNextNote", { name })}</p>

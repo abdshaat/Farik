@@ -227,6 +227,18 @@ export function KitConnect({
 			if (timer) clearTimeout(timer);
 		};
 	}, [waitingFor]);
+	/**
+	 * Closes the dialog and, with it, the sign-in under way, which the daemon stops waiting for, so
+	 * that a yes given on the service's page after the user left is never kept. Best effort: an
+	 * attempt that is gone is already ended.
+	 */
+	const leave = () => {
+		if (client && !done && "attempt" in sign)
+			void client
+				.call("connector.sign_in_cancel", { attempt: sign.attempt })
+				.catch(() => {});
+		onClose(done !== undefined);
+	};
 	const failedWords = (code: string) =>
 		t(
 			(
@@ -263,11 +275,7 @@ export function KitConnect({
 			.map(([tool]) => toolSaid(service.labels, tool));
 
 	return (
-		<Dialog
-			open
-			title={t("kitTitle", fill)}
-			onClose={() => onClose(done !== undefined)}
-		>
+		<Dialog open title={t("kitTitle", fill)} onClose={leave}>
 			<Stepper
 				steps={steps}
 				current={done ? steps.length - 1 : step === "how" ? 1 : 0}
@@ -430,7 +438,7 @@ export function KitConnect({
 								{t(asksHowMany ? "allowNext" : "kitConnect")}
 							</Button>
 						)}
-						<Button onClick={() => onClose(false)}>{t("agentCancel")}</Button>
+						<Button onClick={leave}>{t("agentCancel")}</Button>
 					</div>
 				</>
 			)}

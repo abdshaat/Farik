@@ -1170,6 +1170,115 @@ describe("signing in to a service", () => {
 		expect(s.calls("connector.sign_in")).toHaveLength(1);
 	});
 
+	it("connector_add_ends_the_sign_in_when_cancelled", async () => {
+		vi.spyOn(window, "open").mockReturnValue(null);
+		const { s, dialog, asked } = await askedToSignIn();
+		await offered(s, asked, "https://mcp.notion.com");
+		fireEvent.click(
+			await within(dialog).findByRole("button", {
+				name: "Sign in with mcp.notion.com",
+			}),
+		);
+		expect(
+			await within(dialog).findByText(
+				"Waiting for you to sign in to mcp.notion.com…",
+			),
+		).toBeTruthy();
+		expect(s.calls("connector.sign_in_cancel")).toHaveLength(0);
+		fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+		// The daemon is told, so a yes given on the service's page after this is never kept.
+		const cancelled = await sent(s, "connector.sign_in_cancel");
+		expect(cancelled.params).toEqual({ attempt: ATTEMPT });
+		expect(s.calls("connector.sign_in_cancel")).toHaveLength(1);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	});
+
+	it("connector_add_ends_the_sign_in_when_the_dialog_is_closed", async () => {
+		const { s, dialog, asked } = await askedToSignIn();
+		await offered(s, asked, "https://mcp.notion.com");
+		await within(dialog).findByRole("button", {
+			name: "Sign in with mcp.notion.com",
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+		const cancelled = await sent(s, "connector.sign_in_cancel");
+		expect(cancelled.params).toEqual({ attempt: ATTEMPT });
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	});
+
+	it("connector_add_ends_the_sign_in_when_a_key_is_used_instead", async () => {
+		const { s, dialog, asked } = await askedToSignIn();
+		await offered(s, asked, "https://mcp.notion.com");
+		fireEvent.click(
+			await within(dialog).findByRole("button", { name: en.addUseAKey }),
+		);
+		const cancelled = await sent(s, "connector.sign_in_cancel");
+		expect(cancelled.params).toEqual({ attempt: ATTEMPT });
+	});
+
+	it("connector_add_ends_the_sign_in_when_the_address_changes", async () => {
+		const { s, dialog, asked } = await askedToSignIn();
+		await offered(s, asked, "https://mcp.notion.com");
+		await within(dialog).findByRole("button", {
+			name: "Sign in with mcp.notion.com",
+		});
+		// The sign-in was for the old address: it ends, and the user signs in again.
+		fireEvent.change(within(dialog).getByLabelText(en.addUrl), {
+			target: { value: "https://mcp.notion.com/other" },
+		});
+		const cancelled = await sent(s, "connector.sign_in_cancel");
+		expect(cancelled.params).toEqual({ attempt: ATTEMPT });
+		expect(s.calls("connector.sign_in_cancel")).toHaveLength(1);
+	});
+
+	it("connector_add_has_no_sign_in_to_end_when_none_was_started", async () => {
+		const { s, dialog } = await startedAdding();
+		fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(s.calls("connector.sign_in_cancel")).toHaveLength(0);
+	});
+
+	it("connector_add_from_a_kit_ends_the_sign_in_when_cancelled", async () => {
+		vi.spyOn(window, "open").mockReturnValue(null);
+		const { s } = await openedWithKit([KIT_LINEAR], [], []);
+		fireEvent.click(
+			within(kitRow("Linear")).getByRole("button", { name: "Connect Linear" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Connect Linear to Theo",
+		});
+		await offered(
+			s,
+			await sent(s, "connector.sign_in"),
+			"https://linear.example",
+		);
+		fireEvent.click(
+			await within(dialog).findByRole("button", {
+				name: "Sign in with Linear",
+			}),
+		);
+		expect(
+			await within(dialog).findByText("Waiting for you to sign in to Linear…"),
+		).toBeTruthy();
+		fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+		const cancelled = await sent(s, "connector.sign_in_cancel");
+		expect(cancelled.params).toEqual({ attempt: ATTEMPT });
+		expect(s.calls("connector.sign_in_cancel")).toHaveLength(1);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	});
+
+	it("connector_add_from_a_kit_has_no_sign_in_to_end_when_it_takes_a_key", async () => {
+		const { s } = await openedWithKit([KIT_NOTION], [], []);
+		fireEvent.click(
+			within(kitRow("Notion")).getByRole("button", { name: "Connect Notion" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Connect Notion to Theo",
+		});
+		fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(s.calls("connector.sign_in_cancel")).toHaveLength(0);
+	});
+
 	it("connector_add_waits_for_the_sign_in_then_labels", async () => {
 		const open = vi.spyOn(window, "open").mockReturnValue(null);
 		const { container, s, dialog, asked } = await askedToSignIn();
@@ -1260,6 +1369,10 @@ describe("signing in to a service", () => {
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
+		// The sign-in was used up by connecting: closing now has nothing left to end.
+		fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(s.calls("connector.sign_in_cancel")).toHaveLength(0);
 	});
 
 	it("connector_add_waiting_is_accessible", async () => {
