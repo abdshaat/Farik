@@ -55,6 +55,8 @@ pub mod preview;
 pub mod prompt;
 /// Sessions replayed from recorded transcripts.
 pub mod recorded;
+/// The apps Farik has registered with a service, and which servers' addresses each serves.
+pub mod registered_apps;
 /// Where a task's commands run: a container per task, or the host in no-sandbox mode.
 pub mod sandbox;
 /// What a session is, what it reports, and the traits every runtime implements.

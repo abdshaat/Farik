@@ -1013,6 +1013,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "tower",
+ "url",
 ]
 
 [[package]]

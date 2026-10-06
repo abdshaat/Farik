@@ -33,6 +33,7 @@ serde_json.workspace = true
 sha2.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "rt-multi-thread", "sync", "time"] }
 tokio-util.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true

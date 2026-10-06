@@ -111,7 +111,7 @@ Files: `registered_apps.rs`, `lib.rs`, `crates/runtime/Cargo.toml` (`url`, at th
 - `matches_a_loopback_fixture_over_http`: `http://127.0.0.1:4000/mcp` matches an entry with host `127.0.0.1`; `http://10.0.0.1:4000/mcp` does not match an entry with host `10.0.0.1`.
 - `the_shipped_table_is_empty_until_the_founder_registers`: `REGISTERED_APPS.is_empty()`. Task 7 replaces this test with `the_shipped_table_names_github`.
 
-- [ ] `feat(runtime): name the apps Farik registers with a service`
+- [x] `feat(runtime): name the apps Farik registers with a service`
 
 ### Task 3: Signing in with Farik's GitHub App
 
@@ -202,3 +202,5 @@ Corrections against the code, read at HEAD `38136d5` on 2026-10-06 before Task 2
 - **The founder's `settings_url` reaches the page.** Decision (1) of 2026-10-06 has Remove's confirmation link to the table's `settings_url`, so the page must be told it: `team.get`'s connector rows gain `settings_url?` beside `provider?`, and `SignedIn` gains `settings_url: Option<String>` beside `provider`. `RegisteredApp.settings_url` is a `&'static str` (every app has a page where Farik is removed).
 - **`callback_addr`** is called only by `fixture_oauth.rs` (four calls); no other crate calls it. `start_sign_in` is called by `daemon/signed_in.rs:339` and `cli/src/connector.rs:416`; `connect_with` has one caller (`connect`) and the CLI's tests call it through `connect`'s fixture path (`cli/tests/connector.rs`).
 - **`reqwest::Url` is `url::Url`.** `sign_in.rs` already uses it through `reqwest`; `url` still becomes a direct dependency, as the plan says, for `registered_apps.rs`.
+
+Task 2: RED was a compile failure (`RegisteredApp`, `AppFlow` and `app_for` did not exist), then, with the types and a stub that matched nothing, the two matching tests failed on their first address. New dependency: `url` `=2.5.8` (workspace `Cargo.toml`, `url.workspace = true` in `farik-runtime`), licence `MIT OR Apache-2.0` (read in the registry's `Cargo.toml`), already locked through `reqwest` and `rmcp`, so the build gains no crate; `Cargo.lock` gains the one edge. `RegisteredApp` also has `settings_url: &'static str` (the founder's decision of 2026-10-06); it derives `Debug`, `Clone`, `Copy`, `PartialEq` and `Eq`, as every field is `'static`. `registered_apps` is not `#[cfg(unix)]` (it does no I/O); `sign_in` is. Guards, each mutation reverted and failing `matches_github_by_its_exact_host` unless noted: any port on `https`; `http` served anywhere (also fails `matches_a_loopback_fixture_over_http`); every IPv4 host loopback (`matches_a_loopback_fixture_over_http`); every name loopback; no userinfo check; a username-only check and a password-only check (two cases added beyond the plan's list, `https://:secret@api.githubcopilot.com/mcp/` and a table entry written in capitals, because a username-only check and a case-sensitive comparison survived the plan's list); a case-sensitive comparison.
