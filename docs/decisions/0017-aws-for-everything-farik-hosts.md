@@ -5,12 +5,13 @@ Status: accepted; its phase numbers are shifted by 0018 and 0020 (the launch is 
 Amended 2026-09-29 by ADR 0023: phase numbers after 6 moved up by one.
 Amended 2026-09-30 by ADR 0025: phase numbers after 9 moved up by one.
 Amended 2026-10-05 by ADR 0040: a phase, Business workspaces, follows the web launch as phase 12, so the phases after it moved up by one (Desktop 13, Native mobile 14, Premium 15); the numbers below are the old ones.
+Amended 2026-10-06 by ADR 0044: Farik hosts a third thing, Farik Cloud, from the web launch (phase 11): a free tier that signs customers in through Farik's registered apps, with a Farik account per customer, on AWS in `us-east-1` like the rest, its secrets in AWS Secrets Manager. The hosted tier below (now phase 15) is its paid tier.
 
 ## Context
 
 On 2026-09-26 the founder decided that the project uses the AWS stack. That covers getting the domain and deploying Farik on the web. Until now no document named a cloud: the product is local-first (spec 8.1), and hosted execution is phase 12's premium tier (spec 9).
 
-Farik will host two things:
+Farik will host two things (amended 2026-10-06 by ADR 0044: three, with Farik Cloud's free tier, which signs customers in, from the web launch):
 - **The public website, from now on.** It lives on the project's domain: what Farik is, how to get it, the docs, and links to the downloads. It is a static site in the brand (`docs/brand/brand.md`) with no server code and no user data.
 - **The hosted tier, in phase 12.** The daemon, the governor and agent execution run in the cloud for users who do not want to run Farik themselves. The same web app talks to it over the phase 6 RPC protocol.
 
