@@ -339,21 +339,23 @@ mod tests {
         );
     }
 
-    /// A build with `FARIK_GOOGLE_CLIENT_SECRET` ships Google's entry with that secret and no other
-    /// entry for a connector of Farik's; a build without it ships none. The secret is never
-    /// printed, so each assertion here says what it checks and prints no value.
+    /// A build with `FARIK_GOOGLE_CLIENT_SECRET` ships Google's entry with that secret, and no
+    /// other entry for a connector of Farik's; a build without it ships no Google entry. Entries
+    /// for addresses (step 03b's GitHub) may come beside it. The secret is never printed, so each
+    /// assertion here says what it checks and prints no value.
     #[test]
     fn the_shipped_table_names_google_for_google_ads_only() {
+        let google_entry = REGISTERED_APPS.iter().find(|app| app.id == "google");
         let Some(secret) = GOOGLE_CLIENT_SECRET else {
             assert!(
-                REGISTERED_APPS.is_empty(),
+                google_entry.is_none(),
                 "a build without Google's client secret has no Google entry"
             );
             return;
         };
         assert!(
-            REGISTERED_APPS == [google(secret)],
-            "the table is Google's entry with the build's secret and nothing else"
+            google_entry == Some(&google(secret)),
+            "the table has Google's entry with the build's secret"
         );
         assert!(
             REGISTERED_APPS
