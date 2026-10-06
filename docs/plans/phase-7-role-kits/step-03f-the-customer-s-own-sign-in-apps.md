@@ -5,6 +5,7 @@ Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.7, 8.4, 8.6, 9; F9
 Depends on: step 03b of this phase (Tasks 1 to 6, landing-reviewed: `RegisteredApp`, `AppFlow`, `app_for`, the device flow, `OAuthGrant.app`, `set_registered_apps`, `CliIo.registered_apps`, `provider` and `settings_url` on the wire, `CodeCard`); step 08e (executed; its landing review's fixes committed before Task 3 starts, which at the time of writing make `GOOGLE_CLIENT_ID` an `Option` and ship no Google entry for an empty secret); step 05 (`KitConnect`); phase 6 (Settings, merged in #19). Numbered with the sign-in steps 03 to 03e and run after 08e, because it rewrites 03b's and 08e's table; 08f depends on it. Before Task 2 the executor re-reads every file:line here against HEAD and records corrections in Execution notes (not a second review).
 Readiness confirmed by: not yet run
+Mockups approved by: pending (Task 1's gate, with the founder's answers to O1 and O2)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -112,7 +113,7 @@ A Sonnet agent draws these on the canvas (https://claude.ai/artifact/6tNaCmNojhi
 - **Remove's confirmation**: "Remove your Google app? Agents signed in with it will need to sign in again."
 - **`AgentEdit`**, a row whose app changed: "You changed your GitHub app. Sign in again to use it." with "Sign in again"; and 03b's signed-in board with the private-repository line of O2.
 
-Gate: the founder approves the boards and answers O1 and O2, or says to approve them automatically; the approval and the answers are written into this plan's header with the date. Task 8 does not start until then. Tasks 2 to 7 do not wait for it: Task 3 writes the how-to in the boards' words as drawn, and a word the founder changes in approving is changed in `registered_apps.rs` in Task 8's commit, the one file two tasks touch.
+Gate: the founder approves the boards and answers O1 and O2, or says to approve them automatically; the approval and the answers are written into this plan's header with the date. Task 8 does not start until then. Tasks 2 to 7 do not wait for it: Task 3 writes the how-to in the boards' words as drawn, with O1 and O2 as recommended; a word the founder changes in approving, and a fact a reversal of O1 or O2 changes (Google's "Publish app" step, GitHub's `install_url` and the test that asserts it), are changed in `registered_apps.rs` in Task 8's commit, the one file two tasks touch.
 
 - [ ] `docs(design): mock up the customer's own sign-in apps`
 
@@ -122,7 +123,7 @@ Files: `crates/core/src/team.rs`, `docs/schemas/team.schema.json` (the `oauth` d
 
 - `the_farik_connector_takes_no_client_of_its_own` (changed): each refusal's message is exactly Decisions' new sentence. RED.
 
-- [ ] `fix(core): say Farik's own connector signs in with the customer's app`
+- [ ] `feat(core): say Farik's own connector signs in with the customer's app`
 
 ### Task 3: The providers and the customer's app
 
@@ -188,7 +189,7 @@ Files: `cli/src/lib.rs` (the subcommand), `cli/src/sign_in_app.rs`, `cli/src/con
 
 ### Task 8: The screens
 
-Files: `SignInAppCard.tsx`, `SignInApps.tsx`, `Settings.tsx`, `ConnectorAdd.tsx`, `KitConnect.tsx`, `AgentEdit.tsx`, `refusals.ts` (`Refusal` gains `provider?`), `strings/en.ts`, `signInApps.test.tsx`, `connectors.test.tsx`; `registered_apps.rs` for a how-to word the approval changed (Task 1). Built from Task 1's boards.
+Files: `SignInAppCard.tsx`, `SignInApps.tsx`, `Settings.tsx`, `ConnectorAdd.tsx`, `KitConnect.tsx`, `AgentEdit.tsx`, `refusals.ts` (`Refusal` gains `provider?`), `strings/en.ts`, `signInApps.test.tsx`, `connectors.test.tsx`; `registered_apps.rs` for a how-to word or an O1 or O2 fact the approval changed (Task 1). Built from Task 1's boards.
 
 - `settings_lists_the_sign_in_apps`: the section shows each provider's state; "Set up" opens its card; Remove asks, then calls `sign_in_app.remove`.
 - `the_card_saves_and_shows_refusals`: Save sends `sign_in_app.save` with the trimmed fields (the secret field only where `needsSecret`); a refusal shows under its field; the secret field is `type="password"` and never prefilled.
