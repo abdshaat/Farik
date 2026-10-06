@@ -72,7 +72,7 @@ pub(super) fn posts_heard(posts: &[SocialPost], agent: &str, since: u64) -> Vec<
                     Some("undecided") => {
                         "The owner had not decided by its time, so it was not sent."
                     }
-                    _ => "Farik was not running an hour before its time, so it was not sent.",
+                    _ => "Farik could not hand it to Buffer before its time.",
                 })),
                 (PostState::Stopped, Some("declined")) => {
                     let said = format!(

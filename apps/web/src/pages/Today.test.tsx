@@ -933,7 +933,7 @@ describe("today's posts", () => {
 		expect(within(missed).getByText("X, yesterday at 18:00")).toBeTruthy();
 		expect(within(missed).getByText("Missed")).toBeTruthy();
 		expect(missed.textContent).toContain(
-			"Farik was not running an hour before its time, so it was not sent.",
+			"Farik could not hand it to Buffer before its time.",
 		);
 		expect(missed.textContent).toContain(
 			"Kai hears of this in its next session.",

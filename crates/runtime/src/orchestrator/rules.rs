@@ -2450,6 +2450,12 @@ mod tests {
             "social_post.sent",
             &json!({ "post": sent, "buffer_post": "buf-1" }),
         );
+        // One Farik could not hand over before its time, for whatever kept it from running.
+        let late = wrote("social_post.scheduled", &body("2026-11-10T09:00:00-05:00"));
+        settles(
+            "social_post.missed",
+            &json!({ "post": late, "why": "not_running" }),
+        );
         // And a post another agent wrote, which dev-a hears nothing of.
         let others = project
             .record_by(
@@ -2499,6 +2505,20 @@ mod tests {
         assert!(
             prompt.contains("The team was paused, so it was not sent."),
             "{prompt}"
+        );
+        assert!(
+            outside.contains(&format!(
+                "Farik could not post {late} (Instagram, Tue 10 Nov 09:00):"
+            )),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("Farik could not hand it to Buffer before its time."),
+            "a post missed because Farik was off, paused or busy: {prompt}"
+        );
+        assert!(
+            !prompt.contains("Farik was not running"),
+            "the old words say what Farik cannot know: {prompt}"
         );
         assert!(
             outside.contains(&format!(

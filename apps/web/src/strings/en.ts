@@ -1811,8 +1811,7 @@ export const en = {
 	postOpenPicture: "Open the picture",
 	postFailed: "Failed",
 	postMissed: "Missed",
-	postMissedNotRunning:
-		"Farik was not running an hour before its time, so it was not sent.",
+	postMissedNotRunning: "Farik could not hand it to Buffer before its time.",
 	postMissedPaused: "The team was paused, so it was not sent.",
 	postMissedUndecided: "You had not decided by its time, so it was not sent.",
 	postHears: "{name} hears of this in its next session.",
