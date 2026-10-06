@@ -220,6 +220,21 @@ fn buffer_id(answer: &Value) -> Option<String> {
     (!text.is_empty()).then(|| text.chars().take(200).collect())
 }
 
+/// What the owner calls agent `id`: its display name in the team file, else the id itself.
+fn called(deps: &OrchestratorDeps, id: &str) -> String {
+    deps.tools
+        .files
+        .read_team()
+        .ok()
+        .and_then(|team| {
+            team.agents
+                .iter()
+                .find(|agent| agent.id.as_str() == id)
+                .map(|agent| agent.display_name.to_string())
+        })
+        .unwrap_or_else(|| id.to_string())
+}
+
 /// Hands `post` to Buffer: Buffer's id for it, or the sentence that says why not.
 async fn deliver(deps: &OrchestratorDeps, post: &SocialPost) -> Result<String, String> {
     for media in &post.media {
@@ -252,12 +267,9 @@ async fn deliver(deps: &OrchestratorDeps, post: &SocialPost) -> Result<String, S
         Err(OwnCallError::Timeout) => Err(format!(
             "Buffer did not answer in time and may have the post: look in Buffer's queue before {when}."
         )),
-        Err(OwnCallError::NotConnected(agent)) => Err(format!(
-            "{agent}'s Buffer connection is not there; connect Buffer again."
-        )),
-        Err(OwnCallError::SignInAgain) => Err(format!(
+        Err(OwnCallError::NotConnected(_) | OwnCallError::SignInAgain) => Err(format!(
             "{}'s Buffer connection is not there; connect Buffer again.",
-            post.agent_id
+            called(deps, &post.agent_id)
         )),
         Err(OwnCallError::Failed(_) | OwnCallError::NotListed) => {
             Err("Farik could not reach Buffer.".to_string())
@@ -272,10 +284,12 @@ pub(crate) mod fixtures {
     use std::sync::Arc;
 
     use chrono::{DateTime, Duration, Utc};
+    use farik_core::team::CustomServer;
     use farik_protocol::clock::MovableClock;
     use farik_protocol::event::EventKind;
     use serde_json::{Map, Value, json};
 
+    use crate::connectors::{MemoryConnectorSecrets, SecretAt};
     use crate::daemon::own_calls::fixtures::{buffer_kit, connect_buffer, keep_a_sign_in};
     use crate::oauth_fixture::{Fixture, ToolAnswer};
     use crate::orchestrator::fixtures::Harness;
@@ -288,6 +302,10 @@ pub(crate) mod fixtures {
     pub(crate) struct Handing {
         pub(crate) harness: Harness,
         pub(crate) fixture: Fixture,
+        /// Kai's Buffer entry, where it is kept, and the store that keeps it.
+        pub(crate) server: CustomServer,
+        pub(crate) kept_at: SecretAt,
+        pub(crate) store: Arc<MemoryConnectorSecrets>,
         pub(crate) pictures: String,
         pub(crate) clock: Arc<MovableClock>,
         pub(crate) orchestrator: crate::orchestrator::Orchestrator,
@@ -322,6 +340,9 @@ pub(crate) mod fixtures {
             Handing {
                 harness,
                 fixture,
+                server,
+                kept_at,
+                store,
                 pictures,
                 clock,
                 orchestrator,
@@ -408,9 +429,10 @@ pub(crate) mod fixtures {
 mod tests {
     use chrono::Duration;
     use farik_protocol::event::EventKind;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::fixtures::{Handing, after};
+    use crate::daemon::own_calls::fixtures::keep_a_sign_in;
     use crate::oauth_fixture::ToolAnswer;
     use crate::tools::fixtures::at;
     use crate::tools::media::LoopbackAllowed;
@@ -700,6 +722,18 @@ mod tests {
         let _here = LoopbackAllowed::new();
         // Not kept at all.
         let handing = Handing::new("hand-over-no-connection").await;
+        // The owner reads the agent's name, not its id.
+        let files = &handing.harness.project.deps.files;
+        let mut wire = serde_json::to_value(files.read_team().expect("the team")).expect("a wire");
+        let agents = wire["agents"].as_array_mut().expect("agents");
+        let agent = agents
+            .iter_mut()
+            .find(|agent| agent["id"] == "kai")
+            .expect("Kai is on the team");
+        agent["display_name"] = json!("Kai");
+        files
+            .write_team(&farik_core::team::validate_team(&wire).expect("a team"))
+            .expect("the team is written");
         let kai = handing
             .harness
             .daemon
@@ -716,7 +750,36 @@ mod tests {
         handing.hands_over().await;
         assert_eq!(
             handing.the_event(EventKind::SocialPostFailed),
-            json!({ "post": post, "reason": "kai's Buffer connection is not there; connect Buffer again." })
+            json!({ "post": post, "reason": "Kai's Buffer connection is not there; connect Buffer again." })
+        );
+        assert!(handing.created().is_empty());
+
+        // Buffer ended the sign-in when Farik refreshed it: the owner reads the same words.
+        handing
+            .fixture
+            .set(|flags| flags.refresh_error = Some((400, "invalid_grant".to_string())));
+        keep_a_sign_in(
+            &handing.store,
+            (&handing.server, &handing.kept_at),
+            &handing.fixture,
+            Duration::seconds(-30),
+        );
+        let mut next = handing.a_post(&after(58));
+        next["slot"] = json!("post-2");
+        let lapsed = handing.records("social_post.scheduled", &next);
+        handing.hands_over().await;
+        let reasons: Vec<Value> = handing
+            .events(EventKind::SocialPostFailed)
+            .iter()
+            .map(farik_protocol::event::event_to_value)
+            .filter(|event| event["body"]["post"] == lapsed)
+            .map(|event| event["body"]["reason"].clone())
+            .collect();
+        assert_eq!(
+            reasons,
+            [json!(
+                "Kai's Buffer connection is not there; connect Buffer again."
+            )]
         );
         assert!(handing.created().is_empty());
     }
