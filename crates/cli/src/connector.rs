@@ -462,9 +462,10 @@ fn keep_sign_in(
     (how.open)(signing.authorize_url());
     let issuer = signing.issuer().to_string();
     let provider = signing.provider().map(ToString::to_string);
+    // The page the person said yes or no on is the provider's for one of Farik's own apps.
     let grant = runtime
         .block_on(signing.finish())
-        .map_err(|error| refused(&error, &host))?;
+        .map_err(|error| refused(&error, provider.as_deref().unwrap_or(&host)))?;
     crate::say(
         &mut io.stderr,
         &format!("Signed in to {}.", provider.as_deref().unwrap_or(&issuer)),

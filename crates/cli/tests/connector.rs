@@ -575,6 +575,48 @@ fn farik_connect_prints_the_device_code() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_names_the_provider_when_a_device_sign_in_is_refused() {
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = runtime.block_on(oauth_fixture::Fixture::start());
+    fixture.set(|flags| flags.device_error = Some("access_denied".to_string()));
+    let repository = a_team("connect-device-denied");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let table = dev_table(&fixture);
+    let config = config_of(&repository);
+    let kept_in = Arc::clone(&store);
+    let ran = run_with(
+        &repository.path,
+        &[
+            "connect",
+            "dev-a",
+            "fixture",
+            "--url",
+            fixture.mcp_url.as_str(),
+            "--sign-in",
+        ],
+        move |io| {
+            io.connector_secrets = kept_in;
+            io.open_url = Arc::new(|_: &str| Ok(()));
+            io.registered_apps = table;
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+        },
+    );
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    // The person said no on Dev's page, not on a page at the address's host, 127.0.0.1.
+    assert!(
+        ran.err
+            .contains("you said no on Dev's page, so nothing was connected"),
+        "{}",
+        ran.err
+    );
+    assert!(!ran.err.contains("127.0.0.1's page"), "{}", ran.err);
+    assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).is_none());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn farik_connect_signs_in_and_keeps_the_grant() {
     let runtime = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = runtime.block_on(oauth_fixture::Fixture::start());
