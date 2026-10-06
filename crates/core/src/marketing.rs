@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-use chrono::NaiveDate;
+use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 
 /// An amount of money in hundredths of the plan's currency, so that sums and comparisons never
 /// meet a float.
@@ -603,13 +603,150 @@ pub fn plans_to_end(
         .collect()
 }
 
+/// The most characters a post's text may have on `channel`, counted in Unicode scalar values: the
+/// network's own limit (ADR 0042).
+#[must_use]
+pub const fn text_limit(channel: PostChannel) -> usize {
+    match channel {
+        PostChannel::X => 280,
+        PostChannel::Bluesky => 300,
+        PostChannel::Threads | PostChannel::Mastodon | PostChannel::Pinterest => 500,
+        PostChannel::GoogleBusiness => 1_500,
+        PostChannel::Instagram | PostChannel::Tiktok => 2_200,
+        PostChannel::Linkedin => 3_000,
+        PostChannel::Youtube => 5_000,
+        PostChannel::Facebook => 63_206,
+    }
+}
+
+/// Whether `text` may be a post on `channel`: at least one character, at most
+/// [`text_limit`] of them, counted in Unicode scalar values, and no NUL.
+#[must_use]
+pub fn text_fits(channel: PostChannel, text: &str) -> bool {
+    let characters = text.chars().count();
+    (1..=text_limit(channel)).contains(&characters) && !text.contains('\0')
+}
+
+/// The network's name as the owner reads it: "Instagram", "X", "`LinkedIn`", "Google Business".
+#[must_use]
+pub const fn network_name(channel: PostChannel) -> &'static str {
+    match channel {
+        PostChannel::Instagram => "Instagram",
+        PostChannel::X => "X",
+        PostChannel::Facebook => "Facebook",
+        PostChannel::Linkedin => "LinkedIn",
+        PostChannel::Threads => "Threads",
+        PostChannel::Bluesky => "Bluesky",
+        PostChannel::Tiktok => "TikTok",
+        PostChannel::Pinterest => "Pinterest",
+        PostChannel::Youtube => "YouTube",
+        PostChannel::GoogleBusiness => "Google Business",
+        PostChannel::Mastodon => "Mastodon",
+    }
+}
+
+/// The fifteen `YouTube` video categories Buffer takes, as the strings its `categoryId` holds.
+pub const YOUTUBE_CATEGORIES: [&str; 15] = [
+    "1", "2", "10", "15", "17", "19", "20", "22", "23", "24", "25", "26", "27", "28", "29",
+];
+
+/// What a post on `YouTube` or Pinterest needs besides its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PostDetails {
+    /// A `YouTube` video's title (1 to 100 characters) and category (one of [`YOUTUBE_CATEGORIES`]).
+    Youtube {
+        /// The title.
+        title: String,
+        /// The category's id.
+        category_id: String,
+    },
+    /// The Pinterest board the pin goes to, by Buffer's id for it.
+    Pinterest {
+        /// The board's service id.
+        board: String,
+    },
+}
+
+/// The fewest hours between now and a post in the plan.
+const LEAD_HOURS: i64 = 3;
+
+/// A post that claims a slot of the active plan.
+#[derive(Debug, Clone, Copy)]
+pub struct SlotCheck<'a> {
+    /// The active plan, as proposed.
+    pub plan: &'a PlanProposal,
+    /// The key of the slot the post claims.
+    pub slot: &'a str,
+    /// The channel the post is for.
+    pub channel: PostChannel,
+    /// When the post goes out, with the offset the agent wrote it in.
+    pub at: DateTime<FixedOffset>,
+    /// Now.
+    pub now: DateTime<Utc>,
+    /// The keys of the plan's slots another post holds, scheduled or sent.
+    pub used: &'a [String],
+}
+
+/// Why a post does not fit the slot it claims.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotRefusal {
+    /// The plan has no such slot for this channel.
+    NotAPlanSlot,
+    /// Another post holds the slot.
+    SlotUsed,
+    /// The post is not on the slot's day, in the offset it was written in.
+    PostOffItsDay,
+    /// The post is less than three hours away.
+    PostTooSoon,
+}
+
+impl SlotRefusal {
+    /// The refusal's wire code.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::NotAPlanSlot => "not_a_plan_slot",
+            Self::SlotUsed => "slot_used",
+            Self::PostOffItsDay => "post_off_its_day",
+            Self::PostTooSoon => "post_too_soon",
+        }
+    }
+}
+
+/// Whether a post fills the slot it names: a post slot of the plan for the same channel, held by no
+/// other post, on the slot's day (the date of `at` in its own offset, so that no time-zone table
+/// is needed), and at least three hours from now. The first fault is the answer.
+///
+/// # Errors
+///
+/// The [`SlotRefusal`] of the first check the post fails.
+pub fn check_slot(check: &SlotCheck<'_>) -> Result<(), SlotRefusal> {
+    let slot = check
+        .plan
+        .posts
+        .iter()
+        .find(|slot| slot.key == check.slot && slot.channel == check.channel)
+        .ok_or(SlotRefusal::NotAPlanSlot)?;
+    if check.used.iter().any(|used| used == check.slot) {
+        return Err(SlotRefusal::SlotUsed);
+    }
+    if check.at.date_naive() != slot.on {
+        return Err(SlotRefusal::PostOffItsDay);
+    }
+    if check.at.with_timezone(&Utc) < check.now + Duration::hours(LEAD_HOURS) {
+        return Err(SlotRefusal::PostTooSoon);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use chrono::{Days, NaiveDate};
+    use chrono::{DateTime, Days, FixedOffset, NaiveDate, Utc};
 
     use super::{
         Amount, EndReason, PlanCampaign, PlanProposal, PlanRecord, PostChannel, PostSlot,
-        ProposalRefusal, active_plan, check_proposal, parse_amount, plans_to_end,
+        ProposalRefusal, SlotCheck, SlotRefusal, active_plan, check_proposal, check_slot,
+        network_name, parse_amount, plans_to_end, text_fits, text_limit,
     };
 
     fn day(text: &str) -> NaiveDate {
@@ -1182,5 +1319,257 @@ mod tests {
             [("MP-1".to_string(), EndReason::Expired, None)]
         );
         assert_eq!(active(&plans, "2026-11-21"), Some("MP-2"));
+    }
+
+    #[test]
+    fn limits_each_network_s_text() {
+        let limits = [
+            (PostChannel::X, 280),
+            (PostChannel::Bluesky, 300),
+            (PostChannel::Threads, 500),
+            (PostChannel::Mastodon, 500),
+            (PostChannel::Pinterest, 500),
+            (PostChannel::GoogleBusiness, 1_500),
+            (PostChannel::Instagram, 2_200),
+            (PostChannel::Tiktok, 2_200),
+            (PostChannel::Linkedin, 3_000),
+            (PostChannel::Youtube, 5_000),
+            (PostChannel::Facebook, 63_206),
+        ];
+        assert_eq!(
+            limits.len(),
+            PostChannel::ALL.len(),
+            "every network has its limit"
+        );
+        for (channel, limit) in limits {
+            assert_eq!(text_limit(channel), limit, "{channel:?}");
+        }
+
+        // At the limit and one past it, counted in characters, not bytes.
+        for (channel, limit) in [
+            (PostChannel::X, 280),
+            (PostChannel::Instagram, 2_200),
+            (PostChannel::Facebook, 63_206),
+        ] {
+            assert!(
+                text_fits(channel, &"a".repeat(limit)),
+                "{channel:?} at {limit}"
+            );
+            assert!(
+                !text_fits(channel, &"a".repeat(limit + 1)),
+                "{channel:?} at {}",
+                limit + 1
+            );
+            assert!(
+                text_fits(channel, &"é".repeat(limit)),
+                "{channel:?}: two bytes a character still counts one"
+            );
+        }
+        // Never empty, never a NUL.
+        assert!(!text_fits(PostChannel::X, ""));
+        assert!(text_fits(PostChannel::X, "a"));
+        assert!(!text_fits(PostChannel::X, "a\0b"));
+
+        let names: Vec<&str> = PostChannel::ALL.into_iter().map(network_name).collect();
+        assert_eq!(
+            names,
+            [
+                "Instagram",
+                "X",
+                "Facebook",
+                "LinkedIn",
+                "Threads",
+                "Bluesky",
+                "TikTok",
+                "Pinterest",
+                "YouTube",
+                "Google Business",
+                "Mastodon"
+            ]
+        );
+    }
+
+    fn at(text: &str) -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339(text).expect("a time with an offset")
+    }
+
+    fn now(text: &str) -> DateTime<Utc> {
+        text.parse().expect("a UTC time")
+    }
+
+    /// The slots checked for `channel`, on `at`, `now` and with `used`, in the plan of
+    /// `a_proposal` that also holds a slot on 2026-11-03 and one for X.
+    fn slot_of(
+        slot: &str,
+        channel: PostChannel,
+        post_at: &str,
+        now_text: &str,
+        used: &[&str],
+    ) -> Result<(), SlotRefusal> {
+        let mut plan = a_proposal();
+        plan.posts = vec![
+            PostSlot {
+                key: "post-0".to_string(),
+                channel: PostChannel::Instagram,
+                on: day("2026-11-03"),
+                topic: "Teaser".to_string(),
+            },
+            PostSlot {
+                key: "post-1".to_string(),
+                channel: PostChannel::Instagram,
+                on: day("2026-11-04"),
+                topic: "Opening day".to_string(),
+            },
+            PostSlot {
+                key: "post-x".to_string(),
+                channel: PostChannel::X,
+                on: day("2026-11-04"),
+                topic: "Opening day".to_string(),
+            },
+        ];
+        let used: Vec<String> = used.iter().map(ToString::to_string).collect();
+        check_slot(&SlotCheck {
+            plan: &plan,
+            slot,
+            channel,
+            at: at(post_at),
+            now: now(now_text),
+            used: &used,
+        })
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one case per refusal and per offset, side by side, so a missing case is plain to see"
+    )]
+    fn a_slot_is_the_plan_s_on_its_day_three_hours_ahead() {
+        let instagram = PostChannel::Instagram;
+        let ok = |slot, channel, post_at, now_text, used: &[&str]| {
+            slot_of(slot, channel, post_at, now_text, used)
+        };
+        assert_eq!(
+            ok(
+                "post-1",
+                instagram,
+                "2026-11-04T12:00:00+00:00",
+                "2026-11-04T08:00:00Z",
+                &[]
+            ),
+            Ok(())
+        );
+
+        // Each refusal, with its own code.
+        let not_a_slot = Err(SlotRefusal::NotAPlanSlot);
+        assert_eq!(
+            ok(
+                "nothing",
+                instagram,
+                "2026-11-04T12:00:00+00:00",
+                "2026-11-04T08:00:00Z",
+                &[]
+            ),
+            not_a_slot
+        );
+        assert_eq!(
+            ok(
+                "post-x",
+                instagram,
+                "2026-11-04T12:00:00+00:00",
+                "2026-11-04T08:00:00Z",
+                &[]
+            ),
+            not_a_slot,
+            "a slot of another channel is not this channel's"
+        );
+        assert_eq!(
+            ok(
+                "post-1",
+                instagram,
+                "2026-11-04T12:00:00+00:00",
+                "2026-11-04T08:00:00Z",
+                &["post-1"]
+            ),
+            Err(SlotRefusal::SlotUsed)
+        );
+        assert_eq!(
+            ok(
+                "post-1",
+                instagram,
+                "2026-11-05T12:00:00+00:00",
+                "2026-11-04T08:00:00Z",
+                &["post-0"]
+            ),
+            Err(SlotRefusal::PostOffItsDay)
+        );
+        assert_eq!(
+            ok(
+                "post-1",
+                instagram,
+                "2026-11-04T10:59:59+00:00",
+                "2026-11-04T08:00:00Z",
+                &[]
+            ),
+            Err(SlotRefusal::PostTooSoon)
+        );
+        // Three hours exactly is far enough.
+        assert_eq!(
+            ok(
+                "post-1",
+                instagram,
+                "2026-11-04T11:00:00+00:00",
+                "2026-11-04T08:00:00Z",
+                &[]
+            ),
+            Ok(())
+        );
+        assert_eq!(SlotRefusal::NotAPlanSlot.code(), "not_a_plan_slot");
+        assert_eq!(SlotRefusal::SlotUsed.code(), "slot_used");
+        assert_eq!(SlotRefusal::PostOffItsDay.code(), "post_off_its_day");
+        assert_eq!(SlotRefusal::PostTooSoon.code(), "post_too_soon");
+
+        // The slot's day is the day in the post's own offset, so no time-zone table is needed:
+        // 23:30 in New York on the 3rd is the 4th in UTC, and still the slot of the 3rd.
+        assert_eq!(
+            ok(
+                "post-0",
+                instagram,
+                "2026-11-03T23:30:00-05:00",
+                "2026-11-03T10:00:00Z",
+                &[]
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            ok(
+                "post-1",
+                instagram,
+                "2026-11-03T23:30:00-05:00",
+                "2026-11-03T10:00:00Z",
+                &[]
+            ),
+            Err(SlotRefusal::PostOffItsDay)
+        );
+        // 00:30 in Paris on the 4th is the 3rd in UTC, and the slot of the 4th.
+        assert_eq!(
+            ok(
+                "post-1",
+                instagram,
+                "2026-11-04T00:30:00+01:00",
+                "2026-11-03T10:00:00Z",
+                &[]
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            ok(
+                "post-0",
+                instagram,
+                "2026-11-04T00:30:00+01:00",
+                "2026-11-03T10:00:00Z",
+                &[]
+            ),
+            Err(SlotRefusal::PostOffItsDay)
+        );
     }
 }
