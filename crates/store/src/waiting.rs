@@ -5,14 +5,16 @@
 
 use std::str::FromStr;
 
+use chrono::{DateTime, FixedOffset};
 use farik_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use farik_core::governor::done::result_awaits_human;
 use farik_core::governor::permissions::ApprovalKey;
+use farik_core::marketing::{PostChannel, network_name};
 use farik_core::team::{Integration, Team};
 use farik_protocol::event::{EventBody, EventKind, FarikEvent, TaskStatusWire};
 
 use crate::files::ProjectFiles;
-use crate::marketing::marketing_plans;
+use crate::marketing::{PostMedia, PostState, marketing_plans, social_posts};
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
 /// What kind of thing waits.
@@ -32,6 +34,8 @@ pub enum WaitingKind {
     ToolApproval,
     /// A marketing plan the Marketing Specialist proposed, to approve or send back (ADR 0042).
     MarketingPlan,
+    /// A post outside the plan, which the owner allows or does not (ADR 0042).
+    SocialPost,
 }
 
 impl WaitingKind {
@@ -46,6 +50,7 @@ impl WaitingKind {
             Self::Integration => "integration",
             Self::ToolApproval => "tool_approval",
             Self::MarketingPlan => "marketing_plan",
+            Self::SocialPost => "social_post",
         }
     }
 }
@@ -71,6 +76,23 @@ pub struct Waiting {
     pub approval: Option<ToolAsk>,
     /// A marketing plan's ask.
     pub plan: Option<PlanAsk>,
+    /// A post's ask.
+    pub post: Option<PostAsk>,
+}
+
+/// A post outside the plan that waits for the owner, as its `social_post.requested` recorded it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostAsk {
+    /// The post's number.
+    pub post: u64,
+    /// The network.
+    pub channel: PostChannel,
+    /// What it says.
+    pub text: String,
+    /// Its pictures and clips.
+    pub media: Vec<PostMedia>,
+    /// When it would go out, with the offset it was written in.
+    pub at: DateTime<FixedOffset>,
 }
 
 /// A marketing plan that waits for the owner, as its `marketing_plan.proposed` recorded it.
@@ -199,6 +221,10 @@ const ASKED: [EventKind; 6] = [
 /// # Errors
 ///
 /// What the store refused.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one group of rows for each thing that waits"
+)]
 pub fn waiting(
     projections: &Projections,
     log: &EventLog,
@@ -221,10 +247,12 @@ pub fn waiting(
         reason: None,
         approval: None,
         plan: None,
+        post: None,
     };
     let mut waiting = unanswered(&board, &history, &item);
     waiting.extend(undecided(&board, &history, team, &item));
     waiting.extend(plans_waiting(&board, log, team, &item)?);
+    waiting.extend(posts_waiting(&board, log, team, &item)?);
     let product_manager = team
         .active_agents()
         .find(|agent| Role::from(agent.role) == Role::ProductManager)
@@ -451,6 +479,41 @@ fn plans_waiting(
                 ends_on: proposal.ends_on,
             }),
             ..item(row, WaitingKind::MarketingPlan, Some(&plan.agent_id), line)
+        });
+    }
+    Ok(waiting)
+}
+
+/// Every post outside the plan nobody decided or missed yet, oldest first (ADR 0042). Its row is
+/// about the task the request was written in, and its line says who wants to post where.
+fn posts_waiting(
+    board: &[TaskProjection],
+    log: &EventLog,
+    team: &Team,
+    item: &impl Fn(&TaskProjection, WaitingKind, Option<&str>, String) -> Waiting,
+) -> Result<Vec<Waiting>, StoreError> {
+    let mut waiting = Vec::new();
+    for post in social_posts(log)?
+        .into_iter()
+        .filter(|post| post.state == PostState::Requested)
+    {
+        let Some(row) = board.iter().find(|row| row.task_id == post.task_id) else {
+            continue;
+        };
+        let line = format!(
+            "{} wants to post on {}",
+            name_of(team, &post.agent_id),
+            network_name(post.channel)
+        );
+        waiting.push(Waiting {
+            post: Some(PostAsk {
+                post: post.post,
+                channel: post.channel,
+                text: post.text.clone(),
+                media: post.media.clone(),
+                at: post.at,
+            }),
+            ..item(row, WaitingKind::SocialPost, Some(&post.agent_id), line)
         });
     }
     Ok(waiting)
@@ -834,5 +897,104 @@ mod tests {
         );
         assert_eq!(listed[0].question_id, Some(asked.envelope.seq));
         assert_eq!(listed[2].reason.as_deref(), Some("iterations"));
+    }
+
+    /// Ada, Linus and Kai, the Marketing Specialist.
+    fn with_kai() -> farik_core::team::Team {
+        let mut wire = farik_core::team::fixtures::a_team_wire();
+        wire["agents"] = json!([
+            { "id": "ada", "display_name": "Ada", "role": "product_manager", "status": "active" },
+            { "id": "linus", "display_name": "Linus", "role": "software_developer", "status": "active" },
+            { "id": "kai", "display_name": "Kai", "role": "marketing_specialist", "status": "active" },
+        ]);
+        farik_core::team::validate_team(&wire).expect("the fixture is a team")
+    }
+
+    /// A request of Kai's for a post outside the plan, going out at `at`.
+    fn requested(board: &Board, at: &str) -> u64 {
+        board
+            .session(
+                super::fixtures::at(9, 5),
+                Some("FRK-1"),
+                "kai",
+                "session-1",
+                "social_post.requested",
+                json!({
+                    "channel": "instagram", "buffer_channel": "chan-1",
+                    "text": "We open on Wednesday.",
+                    "media": [{ "url": "https://example.com/a.png", "kind": "image" }],
+                    "at": at,
+                }),
+            )
+            .envelope
+            .seq
+    }
+
+    #[test]
+    fn waiting_lists_a_requested_post() {
+        let board = Board::new("waiting-post");
+        let team = with_kai();
+        board.file("FRK-1", "Spring posts", |_| {});
+        let post = requested(&board, "2026-09-28T14:00:00+02:00");
+        let rows = |board: &Board| {
+            waiting(&board.projections, &board.log, &board.files, &team)
+                .expect("the store reads")
+                .into_iter()
+                .filter(|item| item.kind == WaitingKind::SocialPost)
+                .collect::<Vec<_>>()
+        };
+
+        let listed = rows(&board);
+
+        assert_eq!(listed.len(), 1);
+        let row = &listed[0];
+        assert_eq!(row.line, "Kai wants to post on Instagram");
+        assert_eq!(row.agent_id.as_deref(), Some("kai"));
+        assert_eq!(row.task_id.as_str(), "FRK-1");
+        assert_eq!(WaitingKind::SocialPost.as_str(), "social_post");
+        let ask = row.post.as_ref().expect("the post's ask");
+        assert_eq!(ask.post, post);
+        assert_eq!(ask.channel, farik_core::marketing::PostChannel::Instagram);
+        assert_eq!(ask.text, "We open on Wednesday.");
+        assert_eq!(
+            ask.media,
+            [crate::marketing::PostMedia {
+                url: "https://example.com/a.png".to_string(),
+                video: false
+            }]
+        );
+        assert_eq!(ask.at.to_rfc3339(), "2026-09-28T14:00:00+02:00");
+        let all = crate::activity::activity(
+            &board.log,
+            &board.projections,
+            &board.files,
+            &team,
+            at(12, 0),
+        )
+        .expect("the store reads");
+        let kai = all.iter().find(|one| one.agent_id == "kai").expect("Kai");
+        assert_eq!(kai.line, "Waiting on you: may Kai post on Instagram?");
+
+        // Decided by the owner, it waits no more.
+        board.put(
+            at(9, 6),
+            Some("FRK-1"),
+            None,
+            "social_post.stopped",
+            json!({ "post": post, "by": "declined" }),
+        );
+        assert!(rows(&board).is_empty());
+
+        // Missed, it waits no more either.
+        let late = requested(&board, "2026-09-28T14:30:00Z");
+        assert_eq!(rows(&board).len(), 1);
+        board.put(
+            at(9, 7),
+            None,
+            None,
+            "social_post.missed",
+            json!({ "post": late, "why": "undecided" }),
+        );
+        assert!(rows(&board).is_empty());
     }
 }

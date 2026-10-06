@@ -59,7 +59,7 @@ fn recorded(detail: impl std::fmt::Display) -> OrchestratorError {
 }
 
 /// Whether the post's time is within five minutes or past.
-fn is_too_late(post: &SocialPost, now: DateTime<Utc>) -> bool {
+pub(crate) fn is_too_late(post: &SocialPost, now: DateTime<Utc>) -> bool {
     post.at.with_timezone(&Utc) <= now + TOO_LATE
 }
 
@@ -265,13 +265,15 @@ async fn deliver(deps: &OrchestratorDeps, post: &SocialPost) -> Result<String, S
     }
 }
 
+/// Kai's project with Buffer at an OAuth fixture, a server of pictures, and an orchestrator whose
+/// clock the test moves, for the tests of the hand-over and of Stop.
 #[cfg(test)]
-mod tests {
+pub(crate) mod fixtures {
     use std::sync::Arc;
 
     use chrono::{DateTime, Duration, Utc};
     use farik_protocol::clock::MovableClock;
-    use farik_protocol::event::{EventBody, EventKind};
+    use farik_protocol::event::EventKind;
     use serde_json::{Map, Value, json};
 
     use crate::daemon::own_calls::fixtures::{buffer_kit, connect_buffer, keep_a_sign_in};
@@ -279,21 +281,20 @@ mod tests {
     use crate::orchestrator::fixtures::Harness;
     use crate::orchestrator::rules;
     use crate::tools::fixtures::{at, with_the_marketing_specialist};
-    use crate::tools::media::LoopbackAllowed;
     use crate::tools::media::fixtures::serving;
 
     /// Kai's project with Buffer at an OAuth fixture that answers `create_post` with the post
     /// `buf-1`, a server of pictures, and an orchestrator whose clock the test moves.
-    struct Handing {
-        harness: Harness,
-        fixture: Fixture,
-        pictures: String,
-        clock: Arc<MovableClock>,
-        orchestrator: crate::orchestrator::Orchestrator,
+    pub(crate) struct Handing {
+        pub(crate) harness: Harness,
+        pub(crate) fixture: Fixture,
+        pub(crate) pictures: String,
+        pub(crate) clock: Arc<MovableClock>,
+        pub(crate) orchestrator: crate::orchestrator::Orchestrator,
     }
 
     impl Handing {
-        async fn new(name: &str) -> Handing {
+        pub(crate) async fn new(name: &str) -> Handing {
             let fixture = Fixture::start().await;
             fixture.set(|flags| {
                 flags.tool_answers.insert(
@@ -327,13 +328,13 @@ mod tests {
             }
         }
 
-        fn now(&self, now: DateTime<Utc>) {
+        pub(crate) fn now(&self, now: DateTime<Utc>) {
             self.clock.set(now);
         }
 
         /// A scheduled post of Kai's in plan MP-1, slot `post-1`, going out at `going_out`
         /// (RFC 3339), with one picture the server of pictures answers.
-        fn a_post(&self, going_out: &str) -> Value {
+        pub(crate) fn a_post(&self, going_out: &str) -> Value {
             json!({
                 "channel": "instagram",
                 "buffer_channel": "chan-1",
@@ -347,7 +348,7 @@ mod tests {
         }
 
         /// Records Kai's `kind` event with `body`, and answers its number.
-        fn records(&self, kind: &str, body: &Value) -> u64 {
+        pub(crate) fn records(&self, kind: &str, body: &Value) -> u64 {
             self.harness
                 .project
                 .record_by(Some("kai"), at(), "FRK-1", kind, body)
@@ -356,17 +357,17 @@ mod tests {
         }
 
         /// Kai schedules a post going out at `going_out`.
-        fn schedules(&self, going_out: &str) -> u64 {
+        pub(crate) fn schedules(&self, going_out: &str) -> u64 {
             self.records("social_post.scheduled", &self.a_post(going_out))
         }
 
         /// Records what Farik or the owner did to a post: no agent and no session.
-        fn happens(&self, kind: &str, body: &Value) {
+        pub(crate) fn happens(&self, kind: &str, body: &Value) {
             self.harness.project.record("", kind, body);
         }
 
         /// The owner allows a request: the event names its task, and no agent and no session.
-        fn allows(&self, request: u64, body: &Value) {
+        pub(crate) fn allows(&self, request: u64, body: &Value) {
             let mut allowed = body.clone();
             allowed["post"] = json!(request);
             allowed["approved_by"] = json!("owner");
@@ -376,31 +377,43 @@ mod tests {
         }
 
         /// One tick of the rules that start no session.
-        async fn hands_over(&self) {
+        pub(crate) async fn hands_over(&self) {
             rules::hand_over_posts(&self.orchestrator.deps)
                 .await
                 .expect("the hand-over runs");
         }
 
-        fn events(&self, kind: EventKind) -> Vec<farik_protocol::event::FarikEvent> {
+        pub(crate) fn events(&self, kind: EventKind) -> Vec<farik_protocol::event::FarikEvent> {
             self.harness.project.events(&[kind])
         }
 
-        fn created(&self) -> Vec<Map<String, Value>> {
+        pub(crate) fn created(&self) -> Vec<Map<String, Value>> {
             self.fixture.calls("create_post")
         }
 
         /// The one `social_post.` event of `kind`, as JSON.
-        fn the_event(&self, kind: EventKind) -> Value {
+        pub(crate) fn the_event(&self, kind: EventKind) -> Value {
             let events = self.events(kind);
             assert_eq!(events.len(), 1, "{kind:?}: {events:?}");
             farik_protocol::event::event_to_value(&events[0])["body"].clone()
         }
     }
 
-    fn after(minutes: i64) -> String {
+    pub(crate) fn after(minutes: i64) -> String {
         (at() + Duration::minutes(minutes)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Duration;
+    use farik_protocol::event::EventKind;
+    use serde_json::json;
+
+    use super::fixtures::{Handing, after};
+    use crate::oauth_fixture::ToolAnswer;
+    use crate::tools::fixtures::at;
+    use crate::tools::media::LoopbackAllowed;
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
@@ -953,7 +966,6 @@ mod tests {
         );
         assert!(expiring.events(EventKind::SocialPostStopped).is_empty());
         let _ = waiting;
-        let _ = EventBody::kind;
     }
 
     #[tokio::test]

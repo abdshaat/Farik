@@ -1,6 +1,7 @@
 //! What waits on the human when a process driving the project ends (`docs/SPEC.md` 5.7): the
 //! questions nobody answered, the contracts awaiting approval, the escalations, the results that
-//! may need the human's acceptance, and the tasks waiting to be integrated by hand.
+//! may need the human's acceptance, the tasks waiting to be integrated by hand, and the posts
+//! outside the plan that wait for the owner.
 
 use farik_core::team::Team;
 use farik_store::files::ProjectFiles;
@@ -22,6 +23,8 @@ pub(crate) struct Waiting {
     input: Option<String>,
     /// The id of the marketing plan that waits, for a script to act on.
     plan: Option<String>,
+    /// The number of the post that waits, for a script to act on.
+    post: Option<u64>,
 }
 
 impl Waiting {
@@ -45,6 +48,9 @@ impl Waiting {
         }
         if let Some(plan) = &self.plan {
             item["plan"] = json!(plan);
+        }
+        if let Some(post) = self.post {
+            item["post"] = json!(post);
         }
         item
     }
@@ -115,6 +121,13 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
                 ),
             )
         }
+        WaitingKind::SocialPost => {
+            let post = item.post.as_ref().map_or(0, |ask| ask.post);
+            (
+                format!("waits: {}", item.line),
+                format!("farik marketing post send {post}, or farik marketing post decline {post}"),
+            )
+        }
         WaitingKind::Integration => (
             "waits for you to integrate it".to_string(),
             format!("farik integrate {id}"),
@@ -127,6 +140,7 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
         question: item.kind == WaitingKind::Question,
         input: item.approval.as_ref().map(|ask| ask.input.clone()),
         plan: item.plan.as_ref().map(|ask| ask.plan.clone()),
+        post: item.post.as_ref().map(|ask| ask.post),
     }
 }
 
@@ -134,7 +148,7 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
 mod tests {
     use chrono::NaiveDate;
     use farik_core::contract::TaskId;
-    use farik_store::waiting::{PlanAsk, Waiting as Listed, WaitingKind};
+    use farik_store::waiting::{PlanAsk, PostAsk, Waiting as Listed, WaitingKind};
 
     use super::describe;
 
@@ -156,6 +170,24 @@ mod tests {
                 starts_on: NaiveDate::from_ymd_opt(2026, 11, 2).expect("a date"),
                 ends_on: NaiveDate::from_ymd_opt(2026, 11, 15).expect("a date"),
             }),
+            post: None,
+        }
+    }
+
+    fn a_post_waiting() -> Listed {
+        Listed {
+            kind: WaitingKind::SocialPost,
+            line: "Kai wants to post on Instagram".to_string(),
+            plan: None,
+            post: Some(PostAsk {
+                post: 42,
+                channel: farik_core::marketing::PostChannel::Instagram,
+                text: "We open on Wednesday.".to_string(),
+                media: Vec::new(),
+                at: chrono::DateTime::parse_from_rfc3339("2026-11-04T10:00:00+01:00")
+                    .expect("a time"),
+            }),
+            ..a_plan_waiting()
         }
     }
 
@@ -181,5 +213,25 @@ mod tests {
         question.kind = WaitingKind::Integration;
         question.plan = None;
         assert!(describe(&question).json().get("plan").is_none());
+    }
+
+    #[test]
+    fn a_run_says_which_post_waits() {
+        let waiting = describe(&a_post_waiting());
+
+        assert_eq!(
+            waiting.lines(),
+            [
+                "FRK-1 waits: Kai wants to post on Instagram: farik marketing post send 42, or farik marketing post decline 42"
+            ]
+        );
+        let json = waiting.json();
+        assert_eq!(json["post"], 42);
+        assert_eq!(json["task_id"], "FRK-1");
+        assert_eq!(
+            json["command"],
+            "farik marketing post send 42, or farik marketing post decline 42"
+        );
+        assert!(json.get("plan").is_none(), "a post names no plan");
     }
 }

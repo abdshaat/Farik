@@ -112,7 +112,8 @@ fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Fa
     Ok(rows)
 }
 
-/// One row of `waiting.list`; a connector call's also names its approval, server, tool and input.
+/// One row of `waiting.list`; a connector call's also names its approval, server, tool and input,
+/// and a post's its number, network, text, pictures and time.
 fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
     let mut row = json!({
         "task_id": item.task_id,
@@ -134,6 +135,21 @@ fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
         row["currency"] = json!(ask.currency);
         row["starts_on"] = json!(ask.starts_on.to_string());
         row["ends_on"] = json!(ask.ends_on.to_string());
+    }
+    if let Some(ask) = &item.post {
+        row["post"] = json!(ask.post);
+        row["channel"] = json!(ask.channel.as_str());
+        row["text"] = json!(ask.text);
+        row["media"] = json!(
+            ask.media
+                .iter()
+                .map(|media| json!({
+                    "url": media.url,
+                    "kind": if media.video { "video" } else { "image" },
+                }))
+                .collect::<Vec<_>>()
+        );
+        row["at"] = json!(ask.at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true));
     }
     row
 }
@@ -1024,6 +1040,62 @@ pub(super) mod tests {
         );
 
         harness.project.plan_approved("FRK-1", "MP-1", "");
+        assert_eq!(waiting(), json!([]), "gone once decided");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn waiting_lists_a_requested_post() {
+        let harness = Harness::new("gates-post-waits", |wire| {
+            crate::tools::fixtures::with_the_marketing_specialist(wire);
+            wire["agents"][3]["display_name"] = json!("Kai");
+        });
+        harness.in_progress("FRK-1", "kai", "pm");
+        let request = json!({
+            "channel": "instagram", "buffer_channel": "chan-1",
+            "text": "We open on Wednesday.",
+            "media": [{ "url": "https://example.com/a.png", "kind": "image" }],
+            "at": "2026-09-22T14:00:00+02:00",
+        });
+        let post = harness
+            .project
+            .record_by(
+                Some("kai"),
+                crate::tools::fixtures::at(),
+                "FRK-1",
+                "social_post.requested",
+                &request,
+            )
+            .envelope
+            .seq;
+        let waiting = || {
+            query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult",
+            )["waiting"]
+                .clone()
+        };
+
+        assert_eq!(
+            waiting(),
+            json!([{
+                "task_id": "FRK-1", "kind": "social_post", "agent_id": "kai",
+                "title": waiting()[0]["title"],
+                "line": "Kai wants to post on Instagram",
+                "post": post, "channel": "instagram",
+                "text": "We open on Wednesday.",
+                "media": [{ "url": "https://example.com/a.png", "kind": "image" }],
+                "at": "2026-09-22T14:00:00+02:00",
+            }])
+        );
+
+        harness.project.record(
+            "",
+            "social_post.stopped",
+            &json!({ "post": post, "by": "declined" }),
+        );
         assert_eq!(waiting(), json!([]), "gone once decided");
     }
 

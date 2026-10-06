@@ -41,7 +41,9 @@
         "skill_remove",
         "skill_confirm",
         "marketing_plan_decide",
-        "marketing_plan_end"
+        "marketing_plan_end",
+        "social_post_stop",
+        "social_post_decide"
       ]
     },
     "commandBodyWire": {
@@ -69,6 +71,8 @@
         { "$ref": "#/$defs/skillConfirmBody" },
         { "$ref": "#/$defs/marketingPlanDecideBody" },
         { "$ref": "#/$defs/marketingPlanEndBody" },
+        { "$ref": "#/$defs/socialPostStopBody" },
+        { "$ref": "#/$defs/socialPostDecideBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -273,6 +277,28 @@
       "required": ["plan"],
       "properties": {
         "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "socialPostStopBody": {
+      "title": "Social Post Stop Body",
+      "description": "The owner stops post post, which is going out or is with Buffer (docs/SPEC.md 6.5; ADR 0042): a scheduled post not yet with Buffer records social_post.stopped { by owner }; one Farik has given to Buffer is first deleted from Buffer by Farik's own delete_post, and only when Buffer takes it back is social_post.stopped { by owner, taken_back } recorded. Refused unknown_post when post names none; post_not_going_out for a post that was requested, stopped, missed or failed; post_being_handed_over while Farik is giving it to Buffer, to be tried again in a minute; post_already_out once its time has passed; post_not_taken_back when Buffer would not delete it, with nothing recorded. Only the owner stops a post: the command arrives behind the daemon's token or the browser's cookie, never from an agent's session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post"],
+      "properties": {
+        "post": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "socialPostDecideBody": {
+      "title": "Social Post Decide Body",
+      "description": "The owner allows (decision post) or does not allow (decision dont_post) post post, which the Marketing Specialist wrote outside the marketing plan (docs/SPEC.md 6.5; ADR 0042). Allowed, it is recorded as social_post.scheduled { approved_by owner } with the request's task and no agent, and Farik hands it to Buffer an hour before its time, or at once when that hour has passed. Not allowed, social_post.stopped { by declined } is recorded with note, the owner's words, which the agent reads as the owner's own. Refused unknown_post when post names none, post_decided when it was decided before, and post_in_the_past when its time has passed, or is within five minutes for one to allow, since Farik can no longer hand it to Buffer. Only the owner decides, under ask and auto alike.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post", "decision"],
+      "properties": {
+        "post": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "decision": { "type": "string", "enum": ["post", "dont_post"] },
         "note": { "type": "string", "maxLength": 600 }
       }
     },

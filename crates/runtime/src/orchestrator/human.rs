@@ -26,7 +26,7 @@ use crate::channel::{ChannelError, NewMessage, mentions_in, post};
 use crate::chat::{ChatError, NewChatMessage, post_chat};
 use crate::daemon::DaemonState;
 use crate::daemon::{secret_at, with_server};
-use crate::marketing::{decide_plan, end_plan};
+use crate::marketing::{decide_plan, decide_post, end_plan, stop_post};
 use crate::pause::paused;
 use crate::skills::{
     SkillCommandError, SkillLevel, confirm_skill, confirmed_sentence, remove_skill,
@@ -159,6 +159,12 @@ pub(super) async fn handle(
             note,
         } => decide_plan(tools, &plan, approve, note),
         Command::MarketingPlanEnd { plan, note } => end_plan(tools, &plan, note),
+        Command::SocialPostStop { post } => stop_post(&orchestrator.deps, post).await,
+        Command::SocialPostDecide {
+            post,
+            post_it,
+            note,
+        } => decide_post(tools, post, post_it, note),
         Command::ToolApprove { approval, note } => decide_tool_call(tools, approval, note, true),
         Command::ToolRefuse { approval, note } => decide_tool_call(tools, approval, note, false),
         Command::RunStop => {

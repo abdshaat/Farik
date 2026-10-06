@@ -19,8 +19,9 @@ use crate::generated::command::{
     HumanSendBackBody, HumanSendBackBodySubject, MarketingPlanDecideBody,
     MarketingPlanDecideBodyDecision, MarketingPlanEndBody, MessagePostBody, QuestionAnswerBody,
     RequestTriageBody, RequestTriageBodySize, SessionStopBody, SkillConfirmBody, SkillLevel,
-    SkillRemoveBody, SkillSaveBody, SprintStartBody, TaskCreateBody, TaskIdBody,
-    TaskTransitionBody, ToolDecisionBody,
+    SkillRemoveBody, SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision,
+    SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
+    ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -283,6 +284,20 @@ pub enum Command {
         /// Why, when the owner says.
         note: Option<String>,
     },
+    /// Stop a post that is going out or is with Buffer (ADR 0042).
+    SocialPostStop {
+        /// The post's number.
+        post: u64,
+    },
+    /// Allow a post written outside the plan, or not allow it (ADR 0042).
+    SocialPostDecide {
+        /// The post's number.
+        post: u64,
+        /// Whether the owner allows it (false: does not).
+        post_it: bool,
+        /// What the owner says to the agent when they do not allow it.
+        note: Option<String>,
+    },
 }
 
 /// Checks a value against `docs/schemas/command.schema.json` and, when it conforms, returns the
@@ -439,6 +454,20 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
         }
         CommandName::MarketingPlanDecide | CommandName::MarketingPlanEnd => {
             marketing_plan_command(name, body)
+        }
+        CommandName::SocialPostStop => {
+            let body: SocialPostStopBody = read_body(body, name)?;
+            Ok(Command::SocialPostStop {
+                post: body.post.get(),
+            })
+        }
+        CommandName::SocialPostDecide => {
+            let body: SocialPostDecideBody = read_body(body, name)?;
+            Ok(Command::SocialPostDecide {
+                post: body.post.get(),
+                post_it: body.decision == SocialPostDecideBodyDecision::Post,
+                note: body.note.map(|note| note.as_str().to_string()),
+            })
         }
     }
 }
@@ -690,6 +719,19 @@ pub fn command_to_value(command: &Command) -> Value {
             CommandName::MarketingPlanEnd,
             with_optional(
                 json!({ "plan": plan }),
+                "note",
+                note.as_ref().map(|note| json!(note)),
+            ),
+        ),
+        Command::SocialPostStop { post } => (CommandName::SocialPostStop, json!({ "post": post })),
+        Command::SocialPostDecide {
+            post,
+            post_it,
+            note,
+        } => (
+            CommandName::SocialPostDecide,
+            with_optional(
+                json!({ "post": post, "decision": if *post_it { "post" } else { "dont_post" } }),
                 "note",
                 note.as_ref().map(|note| json!(note)),
             ),
@@ -1399,6 +1441,64 @@ mod tests {
             "marketing_plan_decide",
             &json!({ "plan": "MP-1", "decision": "return", "note": a_note_of_600 }),
         );
+    }
+
+    #[test]
+    fn reads_and_writes_the_social_post_commands() {
+        for (name, body, command) in [
+            (
+                "social_post_stop",
+                json!({ "post": 42 }),
+                Command::SocialPostStop { post: 42 },
+            ),
+            (
+                "social_post_decide",
+                json!({ "post": 7, "decision": "post" }),
+                Command::SocialPostDecide {
+                    post: 7,
+                    post_it: true,
+                    note: None,
+                },
+            ),
+            (
+                "social_post_decide",
+                json!({ "post": 8, "decision": "dont_post", "note": "Not this week" }),
+                Command::SocialPostDecide {
+                    post: 8,
+                    post_it: false,
+                    note: Some("Not this week".to_string()),
+                },
+            ),
+        ] {
+            assert_eq!(read(name, &body), command, "{name}");
+            assert_eq!(
+                command_to_value(&command),
+                json!({ "command": name, "body": body }),
+                "{name}"
+            );
+        }
+        for (name, body) in [
+            ("social_post_stop", json!({})),
+            ("social_post_stop", json!({ "post": 0 })),
+            ("social_post_stop", json!({ "post": "42" })),
+            ("social_post_stop", json!({ "post": 1, "note": "no" })),
+            ("social_post_decide", json!({ "post": 1 })),
+            (
+                "social_post_decide",
+                json!({ "post": 1, "decision": "maybe" }),
+            ),
+            (
+                "social_post_decide",
+                json!({ "post": 1, "decision": "post", "note": "x".repeat(601) }),
+            ),
+            (
+                "social_post_decide",
+                json!({ "plan": "MP-1", "decision": "post" }),
+            ),
+        ] {
+            let errors = refusal(&json!({ "command": name, "body": body }));
+            assert!(!errors.is_empty(), "{name} {body}");
+        }
     }
 
     #[test]

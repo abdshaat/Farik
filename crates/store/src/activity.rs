@@ -6,6 +6,7 @@ use std::str::FromStr as _;
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::{Role, TaskId, TaskStatus};
+use farik_core::marketing::network_name;
 use farik_core::team::{AgentStatus, Team};
 use farik_protocol::event::{
     EventBody, EventKind, FarikEvent, MessageKind, SessionStartedBodyPurpose,
@@ -167,16 +168,21 @@ pub fn activity(
     Ok(all)
 }
 
-/// What an agent waiting on the human is doing, in a sentence: for a connector call, the
-/// approved board's question, which the dialog answers.
+/// What an agent waiting on the human is doing, in a sentence: for a connector call or a post
+/// outside the plan, the question the dialog answers.
 fn waiting_line(team: &Team, agent: &str, item: &crate::waiting::Waiting) -> String {
-    match &item.approval {
-        Some(ask) => format!(
+    match (&item.approval, &item.post) {
+        (Some(ask), _) => format!(
             "Waiting on you: may {} use {}?",
             name_of(team, agent),
             ask.server
         ),
-        None => format!("Waiting on you: {}", item.line),
+        (None, Some(ask)) => format!(
+            "Waiting on you: may {} post on {}?",
+            name_of(team, agent),
+            network_name(ask.channel)
+        ),
+        (None, None) => format!("Waiting on you: {}", item.line),
     }
 }
 

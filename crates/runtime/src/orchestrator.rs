@@ -33,7 +33,7 @@ use crate::transitions::TransitionError;
 mod design;
 #[cfg(test)]
 pub(crate) mod fixtures;
-mod hand_over;
+pub(crate) mod hand_over;
 mod human;
 pub(crate) use human::{forget_removed_keys, status_effects, update_agent_held};
 mod integrate;
