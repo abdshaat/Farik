@@ -327,3 +327,72 @@ pub fn states_today(plans: &[MarketingPlan], today: chrono::NaiveDate) -> Vec<Pl
     let active = farik_core::marketing::active_plan(&records, today).map(|plan| plan.id.as_str());
     plans.iter().map(|plan| plan.state(active)).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    use farik_protocol::event::EventKind;
+
+    use super::{decide_plan, end_plan, hold_plans};
+    use crate::orchestrator::fixtures::Harness;
+
+    /// How long a call that must wait for the lock is given to show that it did not.
+    const LONG_ENOUGH: Duration = Duration::from_millis(100);
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn decisions_wait_for_the_plans_lock() {
+        let harness = Harness::new(
+            "plans-lock",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        harness
+            .project
+            .plan_proposed("FRK-1", "MP-1", "2026-09-22", "2026-10-20");
+        let deps = Arc::clone(&harness.project.deps);
+        let recorded = |kind| harness.project.events(&[kind]).len();
+
+        // The owner's approval, called while the lock is held elsewhere, records nothing until
+        // the lock is let go, and then exactly one.
+        let held = hold_plans();
+        let approving = {
+            let deps = Arc::clone(&deps);
+            thread::spawn(move || decide_plan(&deps, "MP-1", true, None))
+        };
+        thread::sleep(LONG_ENOUGH);
+        assert_eq!(
+            recorded(EventKind::MarketingPlanApproved),
+            0,
+            "the approval waits for the lock"
+        );
+        drop(held);
+        approving
+            .join()
+            .expect("the approval's thread ends")
+            .expect("the approval is made");
+        assert_eq!(recorded(EventKind::MarketingPlanApproved), 1);
+
+        // The owner's end of the plan waits the same way.
+        let held = hold_plans();
+        let ending = {
+            let deps = Arc::clone(&deps);
+            thread::spawn(move || end_plan(&deps, "MP-1", None))
+        };
+        thread::sleep(LONG_ENOUGH);
+        assert_eq!(
+            recorded(EventKind::MarketingPlanEnded),
+            0,
+            "the end waits for the lock"
+        );
+        drop(held);
+        ending
+            .join()
+            .expect("the end's thread ends")
+            .expect("the end is made");
+        assert_eq!(recorded(EventKind::MarketingPlanEnded), 1);
+    }
+}
