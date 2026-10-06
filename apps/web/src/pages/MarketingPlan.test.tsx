@@ -80,6 +80,8 @@ describe("marketing plan page", () => {
 			name: "Kai, your Marketing Specialist, wrote this for you",
 		});
 		expect(within(letter).getByText(PLAN.summary)).toBeTruthy();
+		// With the agent's own picture, as Today's row has it.
+		expect(within(letter).getByRole("img", { name: "Kai" })).toBeTruthy();
 
 		// What approving allows, in this plan's own numbers.
 		const allows = screen.getByRole("region", {
@@ -182,7 +184,11 @@ describe("marketing plan page", () => {
 		expect(whole.querySelector("pre")?.textContent).toBe(TEXT);
 		// Not one element came out of it: the markup, and the markdown's bold and heading.
 		expect(whole.querySelector("pre")?.children).toHaveLength(0);
-		expect(container.querySelector("img, script, i, b")).toBeNull();
+		expect(container.querySelector("script, i, b")).toBeNull();
+		// The only picture is the agent's own: the `img` in its text is shown, not made.
+		expect(
+			[...container.querySelectorAll("img")].map((img) => img.alt),
+		).toEqual(["Kai"]);
 		expect(container.querySelectorAll("h1")).toHaveLength(1);
 		expect(screen.queryByRole("heading", { name: "What I found" })).toBeNull();
 		expect(within(budget).getByText(GOAL)).toBeTruthy();

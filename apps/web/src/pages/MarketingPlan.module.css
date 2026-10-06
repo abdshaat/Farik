@@ -72,12 +72,23 @@ stays there for a screen reader. */
 }
 
 .letter {
-	display: grid;
-	gap: var(--farik-space-2);
+	display: flex;
+	gap: var(--farik-space-4);
+	align-items: flex-start;
 	padding: var(--farik-space-4);
 	background: var(--farik-color-surface);
 	border: 1px solid var(--farik-color-rule);
 	border-radius: var(--farik-radius-raised);
+}
+
+.letter img {
+	flex-shrink: 0;
+}
+
+.letter > div {
+	display: grid;
+	gap: var(--farik-space-2);
+	min-width: 0;
 }
 
 .letter p {

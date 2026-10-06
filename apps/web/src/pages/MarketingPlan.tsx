@@ -1,4 +1,4 @@
-import { Button, Dialog, TextArea } from "@farik/ui";
+import { Avatar, type AvatarKey, Button, Dialog, TextArea } from "@farik/ui";
 import { Fragment, type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useQuery } from "../app/store.ts";
@@ -91,9 +91,8 @@ export function MarketingPlan() {
 	const decide = useCommand(again);
 	if (!plan || (!team && !e1)) return e2 ? <Failed error={e2} /> : null;
 
-	const name =
-		team?.team.agents.find((agent) => agent.id === plan.agentId)?.displayName ??
-		plan.agentId;
+	const agent = team?.team.agents.find((one) => one.id === plan.agentId);
+	const name = agent?.displayName ?? plan.agentId;
 	const now = today();
 	const proposed = plan.state === "proposed";
 	const live = plan.state === "approved" || plan.state === "active";
@@ -198,10 +197,19 @@ export function MarketingPlan() {
 				</aside>
 				<div className={own.main}>
 					<section className={own.letter} aria-labelledby="signed">
-						<p id="signed" className={styles.muted}>
-							{t("marketingSigned", { name })}
-						</p>
-						<p>{plan.summary}</p>
+						{agent?.avatar && (
+							<Avatar
+								avatarKey={agent.avatar as AvatarKey}
+								name={name}
+								size={48}
+							/>
+						)}
+						<div>
+							<p id="signed" className={styles.muted}>
+								{t("marketingSigned", { name })}
+							</p>
+							<p>{plan.summary}</p>
+						</div>
 					</section>
 					{proposed && (
 						<section className={styles.section} aria-labelledby="allows">
