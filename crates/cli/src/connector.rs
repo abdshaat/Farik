@@ -15,8 +15,8 @@ use farik_runtime::connectors::{
 };
 use farik_runtime::credential::CredentialError;
 use farik_runtime::daemon::{custom_entry, kit_entry, labelled};
-use farik_runtime::registered_apps::RegisteredApp;
-use farik_runtime::sign_in::{SignInError, revoke, start_sign_in};
+use farik_runtime::registered_apps::{RegisteredApp, app_for_farik_connector};
+use farik_runtime::sign_in::{SignInError, revoke, start_app_sign_in, start_sign_in};
 use serde_json::{Map, Value, json};
 
 use crate::project::Project;
@@ -223,10 +223,7 @@ fn connect_kit(
             .unwrap_or_default())
     };
     let build_with = |_: Map<String, Value>| build();
-    if matches!(
-        &server.transport,
-        CustomTransport::Http { oauth: Some(_), .. }
-    ) {
+    if server.oauth().is_some() {
         return keep_sign_in(
             project,
             io,
@@ -409,8 +406,9 @@ fn connect_signed_in(
     )
 }
 
-/// Signs `agent` in to the service of the web-address server `server`, lists its tools with the
-/// token, decides them with `tools_of`, keeps the grant where keys are, and connects it.
+/// Signs `agent` in to the service of `server`, a web address or one of Farik's own connectors,
+/// lists its tools (with the token for a web address, which a connector Farik starts takes none
+/// of), decides them with `tools_of`, keeps the grant where keys are, and connects it.
 fn keep_sign_in(
     project: &Project,
     io: &mut CliIo<'_>,
@@ -420,22 +418,22 @@ fn keep_sign_in(
     tools_of: ToolsOf<'_>,
     build: Build<'_>,
 ) -> Result<Report, String> {
-    let CustomTransport::Http {
-        url,
-        oauth: Some(settings),
-        ..
-    } = &server.transport
-    else {
+    let Some(settings) = server.oauth() else {
         return Err(format!("{} does not sign in", server.name));
     };
-    let host = host_of(url);
+    // What a sentence calls the service before it has said who it is: a web address by its host,
+    // one of Farik's own connectors by its name.
+    let host = match &server.transport {
+        CustomTransport::Http { url, .. } => host_of(url),
+        CustomTransport::Stdio { .. } => server.name.clone(),
+    };
     let state = state_of(io)?;
     let at = secret_at(&state, project, agent, &server.name)?;
     let folder = working_folder(&state, &project.root, &at)
         .map_err(|error| format!("{}: {}", server.name, folder_refusal(&error)))?;
     let runtime = runtime()?;
     let signing = runtime
-        .block_on(start_sign_in(url, settings, how.apps, chrono::Utc::now()))
+        .block_on(start_signing(server, settings, how.apps))
         .map_err(|error| refused(&error, &host))?;
     // Prompts, not results: on stderr, so that `--json` leaves the output as the JSON alone.
     match signing.user_code() {
@@ -454,7 +452,9 @@ fn keep_sign_in(
             &mut io.stderr,
             &format!(
                 "Sign in to {} in your browser: {}",
-                host_of(signing.issuer()),
+                signing
+                    .provider()
+                    .map_or_else(|| host_of(signing.issuer()), ToString::to_string),
                 signing.authorize_url()
             ),
         ),
@@ -520,6 +520,25 @@ fn keep_sign_in(
         io,
     ))?;
     Ok(connected_report(&listed, &entry, said, stored_in))
+}
+
+/// Starts signing in to `server`: a web address through its own sign-in or the app `apps` has for
+/// it, one of Farik's own connectors through the app `apps` has for that.
+async fn start_signing(
+    server: &CustomServer,
+    settings: &farik_core::team::OAuthSettings,
+    apps: &[RegisteredApp],
+) -> Result<farik_runtime::sign_in::SignIn, SignInError> {
+    let now = chrono::Utc::now();
+    match &server.transport {
+        CustomTransport::Http { url, .. } => start_sign_in(url, settings, apps, now).await,
+        CustomTransport::Stdio { command, args, .. } => {
+            match app_for_farik_connector(apps, command, args) {
+                Some(app) => start_app_sign_in(app, &settings.scopes, now).await,
+                None => Err(SignInError::NotSupported),
+            }
+        }
+    }
 }
 
 /// The host of `url`, for a sentence: no scheme, no userinfo, no port.

@@ -249,6 +249,27 @@ pub(crate) async fn answered(state: &Arc<DaemonState>, method: &str, params: &Va
     super::web::answer(state, &frame.to_string(), &mut None).await
 }
 
+/// An executable standing in for Farik's own program, written for `test`: it runs the stdio
+/// fixture server of `tests/fixtures/mcp_server.sh` whatever its arguments are, so that `farik
+/// connector osv` lists that server's tools.
+pub(crate) fn own_program_serving_the_fixture(test: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("farik-own-program-{}-{test}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the folder is made");
+    let server = dir.join("server.sh");
+    std::fs::write(&server, include_str!("../../tests/fixtures/mcp_server.sh"))
+        .expect("the script is written");
+    let program = dir.join("farik");
+    std::fs::write(
+        &program,
+        format!("#!/bin/sh\nexec sh '{}'\n", server.display()),
+    )
+    .expect("the program is written");
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+        .expect("the program is made executable");
+    program
+}
+
 /// What `team.get` answers of each agent's custom connectors and their states.
 pub(crate) fn connector_states(state: &Arc<DaemonState>) -> Value {
     super::gates::tests::query(state, "team.get", &serde_json::json!({}), "teamGetResult")

@@ -106,6 +106,47 @@ fn is_loopback(url: &Url) -> bool {
     }
 }
 
+/// What the tests of other modules need: a table whose one entry signs in for Farik's connector
+/// `osv` at the OAuth fixture.
+#[cfg(all(test, unix))]
+pub(crate) mod fixtures {
+    use super::{AppFlow, RegisteredApp};
+    use crate::oauth_fixture::Fixture;
+
+    /// The one scope the entry asks for.
+    pub(crate) const SCOPE: &str = "https://example.test/auth/ads";
+    /// The client secret the entry has, which a fixture that sets `Flags::client_secret` to it
+    /// insists on.
+    pub(crate) const SECRET: &str = "the-test-secret";
+
+    /// A table of one Loopback entry, `Google test`, which signs in for `osv` and serves no
+    /// address, whose endpoints are `fixture`'s. Leaked: a table is `'static`, and a test's leak is
+    /// small.
+    pub(crate) fn google_apps(fixture: &Fixture) -> &'static [RegisteredApp] {
+        fn leaked(text: String) -> &'static str {
+            Box::leak(text.into_boxed_str())
+        }
+        let origin = &fixture.origin;
+        Box::leak(Box::new([RegisteredApp {
+            id: "google-test",
+            name: "Google test",
+            host: None,
+            farik_connector: Some("osv"),
+            flow: AppFlow::Loopback {
+                authorization_endpoint: leaked(format!("{origin}/o/oauth2/v2/auth")),
+            },
+            client_id: "google-test-client",
+            client_secret: Some(SECRET),
+            scopes: &[SCOPE],
+            issuer: leaked(origin.clone()),
+            token_endpoint: leaked(format!("{origin}/token")),
+            revocation_endpoint: None,
+            install_url: None,
+            settings_url: "https://myaccount.google.com/connections",
+        }]))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

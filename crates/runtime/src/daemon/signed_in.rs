@@ -3,12 +3,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use farik_core::team::{CustomServer, CustomTransport, OAuthSettings};
+use farik_core::team::{CustomServer, CustomTransport};
 
 use crate::claude::Secret;
 use crate::connectors::{ConnectorEntry, ConnectorSecrets, SecretAt, confirmed_entry};
 use crate::credential::CredentialError;
-use crate::sign_in::{OAuthGrant, SIGN_IN_WINDOW, SignInError, refreshed, revoke, start_sign_in};
+use crate::registered_apps::app_for_farik_connector;
+use crate::sign_in::{
+    OAuthGrant, SIGN_IN_WINDOW, SignInError, refreshed, revoke, start_app_sign_in, start_sign_in,
+};
 
 use super::DaemonState;
 
@@ -216,9 +219,12 @@ enum Outcome {
 pub(crate) struct Attempt {
     agent: String,
     server: String,
-    url: String,
-    oauth: OAuthSettings,
+    /// How the server is started or reached, whole: an attempt serves the server it was made for,
+    /// with the sign-in settings it was made with, and no other.
+    transport: CustomTransport,
     issuer: String,
+    /// What Farik's own app for the service is called, when one signs in.
+    provider: Option<String>,
     started: tokio::time::Instant,
     outcome: Outcome,
     task: tokio::task::JoinHandle<()>,
@@ -235,7 +241,8 @@ pub(crate) struct Started {
     pub(crate) install_url: Option<String>,
 }
 
-/// What an attempt is bound to: the agent, and the server's name, address and sign-in settings.
+/// What an attempt is bound to: the agent, and the server's name and whole transport, its sign-in
+/// settings included.
 pub(crate) struct Binding<'a> {
     pub(crate) agent: &'a str,
     pub(crate) server: &'a CustomServer,
@@ -243,18 +250,10 @@ pub(crate) struct Binding<'a> {
 
 impl Binding<'_> {
     fn is(&self, attempt: &Attempt) -> bool {
-        let CustomTransport::Http {
-            url,
-            oauth: Some(oauth),
-            ..
-        } = &self.server.transport
-        else {
-            return false;
-        };
-        attempt.agent == self.agent
+        self.server.oauth().is_some()
+            && attempt.agent == self.agent
             && attempt.server == self.server.name
-            && attempt.url == *url
-            && attempt.oauth == *oauth
+            && attempt.transport == self.server.transport
     }
 }
 
@@ -339,12 +338,7 @@ impl DaemonState {
         agent: &str,
         server: &CustomServer,
     ) -> Result<Started, String> {
-        let CustomTransport::Http {
-            url,
-            oauth: Some(oauth),
-            ..
-        } = &server.transport
-        else {
+        let Some(oauth) = server.oauth() else {
             return Err("sign_in_failed: this server does not ask to sign in".to_string());
         };
         let ended = {
@@ -355,9 +349,20 @@ impl DaemonState {
         for task in ended {
             let _ = task.await;
         }
-        let sign_in = start_sign_in(url, oauth, self.registered_apps(), chrono::Utc::now())
-            .await
-            .map_err(|error| refusal_of(&error))?;
+        let apps = self.registered_apps();
+        let now = chrono::Utc::now();
+        let started = match &server.transport {
+            CustomTransport::Http { url, .. } => start_sign_in(url, oauth, apps, now).await,
+            // Farik's own connector signs in with the app the table names for it, and with none
+            // there is no way to.
+            CustomTransport::Stdio { command, args, .. } => {
+                match app_for_farik_connector(apps, command, args) {
+                    Some(app) => start_app_sign_in(app, &oauth.scopes, now).await,
+                    None => Err(SignInError::NotSupported),
+                }
+            }
+        };
+        let sign_in = started.map_err(|error| refusal_of(&error))?;
         let id = random_hex()
             .map_err(|_| "sign_in_failed: no random number was available".to_string())?;
         let answer = Started {
@@ -385,9 +390,9 @@ impl DaemonState {
             Attempt {
                 agent: agent.to_string(),
                 server: server.name.clone(),
-                url: url.clone(),
-                oauth: oauth.clone(),
+                transport: server.transport.clone(),
                 issuer: answer.issuer.clone(),
+                provider: answer.provider.clone(),
                 started: tokio::time::Instant::now(),
                 outcome: Outcome::Waiting,
                 task,
@@ -407,10 +412,13 @@ impl DaemonState {
         let attempt = map
             .get(id)
             .ok_or_else(|| unknown("there is no such sign-in under way"))?;
-        let host = reqwest::Url::parse(&attempt.issuer)
-            .ok()
-            .and_then(|url| url.host_str().map(ToString::to_string))
-            .unwrap_or_else(|| "the service".to_string());
+        // What the person knows the service by: Farik's own app's name, else the issuer's host.
+        let host = attempt.provider.clone().unwrap_or_else(|| {
+            reqwest::Url::parse(&attempt.issuer)
+                .ok()
+                .and_then(|url| url.host_str().map(ToString::to_string))
+                .unwrap_or_else(|| "the service".to_string())
+        });
         Ok(match &attempt.outcome {
             Outcome::Waiting => serde_json::json!({ "state": "waiting" }),
             Outcome::SignedIn(_) => serde_json::json!({ "state": "signed_in" }),

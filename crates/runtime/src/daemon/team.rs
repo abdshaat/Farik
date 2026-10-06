@@ -14,9 +14,8 @@ use farik_core::criteria::validate_criteria;
 use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::paths::{PathRefusal, check_protected_paths};
 use farik_core::team::{
-    Agent, AgentStatus, CustomServer, CustomTransport, MODEL_FAMILIES, McpServerSource,
-    McpServerWire, Team, ValidationError, custom_server, describe_change, spec_sha256,
-    validate_team,
+    Agent, AgentStatus, CustomServer, MODEL_FAMILIES, McpServerSource, McpServerWire, Team,
+    ValidationError, custom_server, describe_change, spec_sha256, validate_team,
 };
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{EventBody, new_event};
@@ -363,10 +362,7 @@ pub(super) fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team
         .map(|(agent, server)| {
             let kept = secret_at(state, deps, agent, &server.name)
                 .map_or(Kept::Unavailable, |at| state.kept(&at));
-            let signs_in = matches!(
-                &server.transport,
-                CustomTransport::Http { oauth: Some(_), .. }
-            );
+            let signs_in = server.oauth().is_some();
             let ended = matches!(&kept, Kept::Entry { spec_sha256, signed_in: Some(grant), .. }
                 if grant.lapsed && *spec_sha256 == farik_core::team::spec_sha256(&server));
             // A kit's service the kit no longer says is as it is stays unconnected until the user
@@ -793,10 +789,7 @@ enum Authority {
 
 /// Whether `server` is one the user signs in to rather than gives keys.
 fn signs_in(server: &CustomServer) -> bool {
-    matches!(
-        &server.transport,
-        CustomTransport::Http { oauth: Some(_), .. }
-    )
+    server.oauth().is_some()
 }
 
 /// The attempt `params` carries, for a server that signs in; its keys, for one that does not.
@@ -5422,6 +5415,35 @@ pub(super) mod tests {
             );
         }
 
+        /// The daemon signs in for Farik's connector `osv` with `Google test`, whose endpoints are
+        /// the fixture's, and starts that connector as the fixture's stdio server.
+        fn serving_farik(&self, test: &str) {
+            assert!(
+                self.harness.daemon.set_registered_apps(
+                    crate::registered_apps::fixtures::google_apps(&self.fixture)
+                )
+            );
+            assert!(self.harness.daemon.set_own_program(
+                crate::daemon::fixtures::own_program_serving_the_fixture(test)
+            ));
+        }
+
+        /// Farik's own connector `osv`, as `connector.sign_in` takes it.
+        fn farik_server() -> Value {
+            json!({
+                "name": "osv", "transport": "stdio", "command": "farik",
+                "args": ["connector", "osv"], "oauth": {}
+            })
+        }
+
+        /// The grant kept for `dev-a`'s `server`.
+        fn grant_of(&self, server: &str) -> Option<crate::sign_in::OAuthGrant> {
+            self.store
+                .load(&kept_at(&self.harness, "dev-a", server))
+                .expect("the store reads")
+                .and_then(|entry| entry.oauth)
+        }
+
         /// How many times the fixture saw `device_code` polled.
         fn polls_of(&self, device_code: &str) -> usize {
             self.fixture
@@ -5520,6 +5542,193 @@ pub(super) mod tests {
                 "auth": "oauth", "revokes": false, "stored_in": "keychain",
                 "provider": "Dev", "settings_url": "https://github.com/settings/apps/authorizations"
             }])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn signs_in_and_connects_a_farik_connector() {
+        let signing = Signing::new("connector-sign-in-farik");
+        signing.serving_farik("connector-sign-in-farik");
+        let server = Signing::farik_server();
+        let started = signing.sign_in(&server);
+        let origin = &signing.fixture.origin;
+        assert_eq!(started["provider"], "Google test");
+        assert_eq!(started["issuer"], *origin);
+        assert!(
+            started["authorize_url"]
+                .as_str()
+                .is_some_and(|url| url.starts_with(&format!("{origin}/o/oauth2/v2/auth?"))),
+            "{started}"
+        );
+        assert!(started.get("user_code").is_none(), "no code to type");
+        assert_eq!(signing.status(&started["attempt"])["state"], "waiting");
+        assert_eq!(signing.approve(&started)["state"], "signed_in");
+        let listed = signing.call(
+            "connector.tools",
+            &json!({ "agent": "dev-a", "server": server, "attempt": started["attempt"] }),
+            "connectorToolsResult",
+        );
+        let names: Vec<&str> = listed["tools"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert_eq!(names, ["search", "env", "delete_repo", "repo.delete"]);
+        let connected = signing.call(
+            "connector.connect",
+            &json!({
+                "agent": "dev-a", "server": server, "attempt": started["attempt"],
+                "tags": { "search": "network", "delete_repo": "denied" }
+            }),
+            "connectorConnectResult",
+        );
+        let tools =
+            json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
+        assert_eq!(
+            connected,
+            json!({ "stored_in": "keychain", "tools": tools })
+        );
+        let written = entry(&signing.harness, 1, "osv").expect("the team file has osv");
+        assert_eq!(written["oauth"], json!({}));
+        assert_eq!(written["command"], "farik");
+        let grant = signing.grant_of("osv").expect("a grant is kept");
+        assert_eq!(grant.app.as_deref(), Some("google-test"));
+        assert_eq!(
+            states(&signing.harness),
+            json!([{
+                "source": "custom", "agent": "dev-a", "server": "osv", "state": "connected",
+                "auth": "oauth", "revokes": false, "stored_in": "keychain",
+                "provider": "Google test",
+                "settings_url": "https://myaccount.google.com/connections"
+            }])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_attempt_holds_only_for_its_whole_transport() {
+        let signing = Signing::new("connector-sign-in-whole-transport");
+        signing.serving_farik("connector-sign-in-whole-transport");
+        let pair = Signing::farik_server();
+        let mut scoped = pair.clone();
+        scoped["oauth"] = json!({ "scopes": ["https://example.test/auth/other"] });
+        let web = json!({
+            "name": "osv", "transport": "http", "url": signing.fixture.mcp_url, "oauth": {}
+        });
+        // An attempt made for the pair serves neither an `http` server of the same name nor the
+        // pair with other settings; and an `http` server's serves not the pair.
+        for (made_for, used_for, what) in [
+            (&pair, &scoped, "the pair with other scopes"),
+            (&pair, &web, "an http server of the same name"),
+            (&web, &pair, "the pair, from an http server's"),
+        ] {
+            let attempt = signing.signed_in(made_for);
+            let (code, message) = signing.refused(
+                "connector.connect",
+                &json!({
+                    "agent": "dev-a", "server": used_for, "attempt": attempt, "tags": {}
+                }),
+            );
+            assert_eq!(code, -32005, "{what}");
+            assert_eq!(
+                message, "sign_in_unknown: that sign-in was for another server",
+                "{what}"
+            );
+            assert!(
+                signing.grant_of("osv").is_none(),
+                "{what}: no entry is kept"
+            );
+            // The mismatch ended the attempt: even its own server is refused now.
+            let (_, message) = signing.refused(
+                "connector.connect",
+                &json!({
+                    "agent": "dev-a", "server": made_for, "attempt": attempt, "tags": {}
+                }),
+            );
+            assert!(message.starts_with("sign_in_unknown:"), "{what}: {message}");
+        }
+        // The same transport, used for what it was made for, connects.
+        let attempt = signing.signed_in(&pair);
+        signing.call(
+            "connector.connect",
+            &json!({
+                "agent": "dev-a", "server": pair, "attempt": attempt,
+                "tags": { "search": "network" }
+            }),
+            "connectorConnectResult",
+        );
+        assert!(signing.grant_of("osv").is_some());
+    }
+
+    /// A guard: a connector no app signs in for, as in a build without Google's client secret,
+    /// cannot be signed in to; and one that does asks for the app's scopes alone.
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_farik_connector_signs_in_only_with_an_app_and_its_scopes() {
+        let signing = Signing::new("connector-sign-in-farik-no-app");
+        let (code, message) = signing.refused(
+            "connector.sign_in",
+            &json!({ "agent": "dev-a", "server": Signing::farik_server() }),
+        );
+        assert_eq!(code, -32005);
+        assert!(message.starts_with("sign_in_not_supported: "), "{message}");
+        assert!(signing.fixture.seen().is_empty());
+
+        signing.serving_farik("connector-sign-in-farik-scopes");
+        let mut asks_more = Signing::farik_server();
+        asks_more["oauth"] = json!({ "scopes": ["https://example.test/auth/other"] });
+        let (code, message) = signing.refused(
+            "connector.sign_in",
+            &json!({ "agent": "dev-a", "server": asks_more }),
+        );
+        assert_eq!(code, -32005);
+        assert_eq!(
+            message,
+            format!(
+                "sign_in_failed: Farik's Google test sign-in asks only for {}",
+                crate::registered_apps::fixtures::SCOPE
+            )
+        );
+        let mut asks_its_own = Signing::farik_server();
+        asks_its_own["oauth"] = json!({ "scopes": [crate::registered_apps::fixtures::SCOPE] });
+        let started = signing.sign_in(&asks_its_own);
+        let address = reqwest::Url::parse(started["authorize_url"].as_str().expect("an address"))
+            .expect("an address");
+        let scope = address
+            .query_pairs()
+            .find(|(name, _)| name == "scope")
+            .map(|(_, value)| value.into_owned());
+        assert_eq!(
+            scope.as_deref(),
+            Some(crate::registered_apps::fixtures::SCOPE)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn sign_in_status_names_the_provider() {
+        let signing = Signing::new("connector-sign-in-status-provider");
+        signing.serving_farik("connector-sign-in-status-provider");
+        signing.fixture.set(|flags| flags.access_denied = true);
+        let status = signing.approve(&signing.sign_in(&Signing::farik_server()));
+        assert_eq!(status["state"], "failed");
+        assert_eq!(status["reason"]["code"], "access_denied");
+        assert_eq!(
+            status["reason"]["message"],
+            "You said no on Google test's page."
+        );
+        // A sign-in that did not match on the way back names the provider too.
+        signing.fixture.set(|flags| {
+            flags.access_denied = false;
+            flags.iss = crate::oauth_fixture::Iss::Absent;
+        });
+        let status = signing.approve(&signing.sign_in(&Signing::farik_server()));
+        assert_eq!(status["reason"]["code"], "sign_in_mismatch");
+        assert_eq!(
+            status["reason"]["message"],
+            "Something did not match on the way back from Google test."
         );
     }
 

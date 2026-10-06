@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use farik_core::contract::Role;
-use farik_core::team::{CustomServer, CustomTransport, custom_server};
+use farik_core::team::{CustomServer, custom_server};
 use serde_json::Value;
 
 use super::{DaemonState, Fresh, matches_kit, refreshed_entry};
@@ -106,10 +106,7 @@ pub(crate) async fn call_as(
     if !runs {
         return Err(not_connected());
     }
-    let signs_in = matches!(
-        &definition.transport,
-        CustomTransport::Http { oauth: Some(_), .. }
-    );
+    let signs_in = definition.oauth().is_some();
     let entry: ConnectorEntry = if signs_in {
         refreshed_entry(state, &at, &definition, VALID_FOR, REFRESH_WAIT, true)
             .await

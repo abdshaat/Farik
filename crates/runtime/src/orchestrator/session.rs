@@ -351,12 +351,7 @@ async fn refresh_signed_in(
         farik_core::budget::DEFAULT_SESSION_LIMITS.max_wall_clock,
         |budget| budget.session_limits.max_wall_clock,
     );
-    for server in custom_servers(ask.agent).filter(|server| {
-        matches!(
-            &server.transport,
-            CustomTransport::Http { oauth: Some(_), .. }
-        )
-    }) {
+    for server in custom_servers(ask.agent).filter(|server| server.oauth().is_some()) {
         let Ok(at) =
             deps.daemon
                 .secret_at(deps.tools.files.root(), ask.agent.id.as_str(), &server.name)
@@ -3512,9 +3507,14 @@ mod tests {
 
     /// The grant kept for `dev-a`'s `notion` now.
     fn grant_kept(harness: &Harness) -> crate::sign_in::OAuthGrant {
+        grant_kept_of(harness, "notion")
+    }
+
+    /// The grant kept for `dev-a`'s `server` now.
+    fn grant_kept_of(harness: &Harness, server: &str) -> crate::sign_in::OAuthGrant {
         let at = harness
             .daemon
-            .secret_at(harness.project.deps.files.root(), "dev-a", "notion")
+            .secret_at(harness.project.deps.files.root(), "dev-a", server)
             .expect("an address");
         harness
             .daemon
@@ -3615,6 +3615,156 @@ mod tests {
             !adapter.started()[0].system_prompt.contains("`notion`"),
             "{}",
             adapter.started()[0].system_prompt
+        );
+    }
+
+    /// `dev-a`'s one custom server, Farik's own connector `osv`, signed in to with `Google test`.
+    fn signed_in_farik_connector(wire: &mut serde_json::Value) {
+        wire["agents"][1]["mcp_servers"] = json!([{
+            "name": "osv", "source": "custom", "transport": "stdio",
+            "command": "farik", "args": ["connector", "osv"], "oauth": {},
+            "tools": { "search": "network" }
+        }]);
+    }
+
+    /// Keeps a grant of `Google test` for `osv` that the fixture honours and that expires
+    /// `expires_in` from now, and answers it. The daemon signs in with `Google test`.
+    fn keep_signed_in_farik(
+        harness: &Harness,
+        fixture: &crate::oauth_fixture::Fixture,
+        expires_in: chrono::Duration,
+    ) -> crate::sign_in::OAuthGrant {
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
+
+        assert!(
+            harness
+                .daemon
+                .set_registered_apps(crate::registered_apps::fixtures::google_apps(fixture))
+        );
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        let server = agent(&team, "dev-a")
+            .mcp_servers
+            .iter()
+            .flatten()
+            .find_map(farik_core::team::custom_server)
+            .expect("osv");
+        let now = chrono::Utc::now();
+        let (access, refresh) = fixture.mint();
+        let grant = crate::sign_in::OAuthGrant {
+            issuer: fixture.origin.clone(),
+            resource: fixture.origin.clone(),
+            client_id: "google-test-client".to_string(),
+            token_endpoint: format!("{}/token", fixture.origin),
+            revocation_endpoint: None,
+            access_token: crate::claude::Secret::new(access),
+            refresh_token: Some(crate::claude::Secret::new(refresh)),
+            issued_at: now,
+            expires_at: Some(now + expires_in),
+            scopes: Vec::new(),
+            lapsed: false,
+            app: Some("google-test".to_string()),
+        };
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        let at = harness
+            .daemon
+            .secret_at(deps.files.root(), "dev-a", "osv")
+            .expect("an address");
+        store
+            .save(
+                &at,
+                &ConnectorEntry {
+                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    keys: std::collections::BTreeMap::new(),
+                    oauth: Some(grant.clone()),
+                },
+            )
+            .expect("kept");
+        assert!(harness.daemon.set_connector_secrets(store));
+        grant
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_session_refreshes_it_and_leaves_it_out_when_lapsed() {
+        // The fixture's server runs on this runtime, which `connector_states` cannot be inside of.
+        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+        let secret = crate::registered_apps::fixtures::SECRET;
+        // Ten minutes left, and the session may run thirty: refreshed, with the app's secret,
+        // before the session is given the server.
+        let fixture = runtime.block_on(crate::oauth_fixture::Fixture::start());
+        fixture.set(|flags| flags.client_secret = Some(secret.to_string()));
+        let harness = Harness::new("session-farik-refresh", signed_in_farik_connector);
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let old = keep_signed_in_farik(&harness, &fixture, chrono::Duration::minutes(10));
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        runtime
+            .block_on(run_session(
+                deps,
+                &team,
+                dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+            ))
+            .expect("the session runs");
+        assert_eq!(fixture.count("/token"), 1);
+        assert_eq!(fixture.requests("/token")[0].form["client_secret"], secret);
+        let started = &adapter.started()[0];
+        assert_eq!(server_names(started), ["osv"]);
+        // Started by the launcher, which asks the daemon: no token is in the session's servers.
+        assert_eq!(
+            started.mcp_servers[0].transport,
+            crate::session::McpTransport::Launched
+        );
+        assert!(started.mcp_servers[0].headers.is_empty());
+        let kept = grant_kept_of(&harness, "osv");
+        assert_ne!(kept.access_token.expose(), old.access_token.expose());
+        assert!(
+            kept.expires_at.expect("an expiry")
+                > chrono::Utc::now() + chrono::Duration::minutes(35)
+        );
+
+        // The service ends the sign-in: the server is left out, and the page says so.
+        let fixture = runtime.block_on(crate::oauth_fixture::Fixture::start());
+        fixture.set(|flags| {
+            flags.client_secret = Some(secret.to_string());
+            flags.refresh_error = Some((400, "invalid_grant".to_string()));
+        });
+        let harness = Harness::new("session-farik-lapsed", signed_in_farik_connector);
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        keep_signed_in_farik(&harness, &fixture, chrono::Duration::minutes(10));
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        runtime
+            .block_on(run_session(
+                deps,
+                &team,
+                dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+            ))
+            .expect("the session runs");
+        assert!(grant_kept_of(&harness, "osv").lapsed, "the lapse is kept");
+        assert!(server_names(&adapter.started()[0]).is_empty());
+        assert_eq!(
+            crate::daemon::fixtures::connector_states(&harness.daemon),
+            json!([{
+                "source": "custom", "agent": "dev-a", "server": "osv", "state": "sign_in_again",
+                "auth": "oauth", "revokes": false, "stored_in": "keychain",
+                "provider": "Google test",
+                "settings_url": "https://myaccount.google.com/connections"
+            }])
         );
     }
 

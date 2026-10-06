@@ -228,10 +228,7 @@ impl Kept {
     /// every key it names. Short of a key, its launcher or headers helper would be refused, and
     /// Claude Code connects an http server without its headers then (finding I2).
     pub(crate) fn runs(&self, server: &farik_core::team::CustomServer) -> bool {
-        let signs_in = matches!(
-            &server.transport,
-            farik_core::team::CustomTransport::Http { oauth: Some(_), .. }
-        );
+        let signs_in = server.oauth().is_some();
         matches!(self, Kept::Entry { spec_sha256, keys, signed_in, .. }
             if *spec_sha256 == farik_core::team::spec_sha256(server)
                 && server.credential_keys.iter().all(|key| keys.contains(key))
@@ -1175,10 +1172,7 @@ async fn launch_answer(state: &Arc<DaemonState>, asked: &LaunchAsk) -> Result<Va
     };
     let (held, ask) = (Arc::clone(state), asked.clone());
     let (server, at) = blocking(move || launched_server(&held, &ask)).await?;
-    let signs_in = matches!(
-        &server.transport,
-        CustomTransport::Http { oauth: Some(_), .. }
-    );
+    let signs_in = server.oauth().is_some();
     let entry = if signs_in {
         match signed_in::refreshed_entry(
             state,
@@ -2284,16 +2278,65 @@ mod tests {
         fixture: &crate::oauth_fixture::Fixture,
         expires_in: chrono::Duration,
     ) -> (TestDaemon, crate::sign_in::OAuthGrant) {
+        launching_signed_in_as(name, fixture, expires_in, false)
+    }
+
+    /// A grant the fixture honours, expiring `expires_in` from now: `Google test`'s, with `farik`.
+    fn a_grant(
+        fixture: &crate::oauth_fixture::Fixture,
+        expires_in: chrono::Duration,
+        farik: bool,
+    ) -> crate::sign_in::OAuthGrant {
+        let now = chrono::Utc::now();
+        let (access, refresh) = fixture.mint();
+        crate::sign_in::OAuthGrant {
+            issuer: fixture.origin.clone(),
+            resource: fixture.mcp_url.clone(),
+            client_id: if farik {
+                "google-test-client"
+            } else {
+                "client-kept"
+            }
+            .to_string(),
+            token_endpoint: format!("{}/token", fixture.origin),
+            revocation_endpoint: (!farik).then(|| format!("{}/revoke", fixture.origin)),
+            access_token: crate::claude::Secret::new(access),
+            refresh_token: Some(crate::claude::Secret::new(refresh)),
+            issued_at: now,
+            expires_at: Some(now + expires_in),
+            scopes: Vec::new(),
+            lapsed: false,
+            app: farik.then(|| "google-test".to_string()),
+        }
+    }
+
+    /// [`launching_signed_in`], or, with `farik`, for Farik's own connector `osv` signed in with
+    /// `Google test`, started as the fixture's stdio server; the grant is the other answer.
+    fn launching_signed_in_as(
+        name: &str,
+        fixture: &crate::oauth_fixture::Fixture,
+        expires_in: chrono::Duration,
+        farik: bool,
+    ) -> (TestDaemon, crate::sign_in::OAuthGrant) {
         use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
         use farik_core::governor::permissions::SessionConnector;
 
         let daemon = TestDaemon::new(name, |_| {});
+        let name_kept = if farik { "osv" } else { "notion" };
         let team = crate::tools::fixtures::a_team_of_three(|wire| {
-            wire["agents"][1]["mcp_servers"] = json!([{
-                "name": "notion", "source": "custom", "transport": "http",
-                "url": fixture.mcp_url, "oauth": {},
-                "tools": { "whoami": "network" }
-            }]);
+            wire["agents"][1]["mcp_servers"] = if farik {
+                json!([{
+                    "name": "osv", "source": "custom", "transport": "stdio",
+                    "command": "farik", "args": ["connector", "osv"], "oauth": {},
+                    "tools": { "search": "network" }
+                }])
+            } else {
+                json!([{
+                    "name": "notion", "source": "custom", "transport": "http",
+                    "url": fixture.mcp_url, "oauth": {},
+                    "tools": { "whoami": "network" }
+                }])
+            };
         });
         daemon
             .project
@@ -2306,27 +2349,22 @@ mod tests {
             .iter()
             .flatten()
             .find_map(farik_core::team::custom_server)
-            .expect("notion");
-        let now = chrono::Utc::now();
-        let (access, refresh) = fixture.mint();
-        let grant = crate::sign_in::OAuthGrant {
-            issuer: fixture.origin.clone(),
-            resource: fixture.mcp_url.clone(),
-            client_id: "client-kept".to_string(),
-            token_endpoint: format!("{}/token", fixture.origin),
-            revocation_endpoint: Some(format!("{}/revoke", fixture.origin)),
-            access_token: crate::claude::Secret::new(access),
-            refresh_token: Some(crate::claude::Secret::new(refresh)),
-            issued_at: now,
-            expires_at: Some(now + expires_in),
-            scopes: Vec::new(),
-            lapsed: false,
-            app: None,
-        };
+            .expect("the signed-in server");
+        let grant = a_grant(fixture, expires_in, farik);
+        if farik {
+            assert!(
+                daemon
+                    .state
+                    .set_registered_apps(crate::registered_apps::fixtures::google_apps(fixture))
+            );
+            assert!(daemon.state.set_own_program(
+                crate::daemon::fixtures::own_program_serving_the_fixture(name)
+            ));
+        }
         let store = Arc::new(MemoryConnectorSecrets::default());
         let at = daemon
             .state
-            .secret_at(daemon.project.deps.files.root(), "dev-a", "notion")
+            .secret_at(daemon.project.deps.files.root(), "dev-a", name_kept)
             .expect("an address");
         store
             .save(
@@ -2366,9 +2404,14 @@ mod tests {
 
     /// The grant kept for `notion` now.
     fn kept_grant(daemon: &TestDaemon) -> crate::sign_in::OAuthGrant {
+        kept_grant_of(daemon, "notion")
+    }
+
+    /// The grant kept for `server` now.
+    fn kept_grant_of(daemon: &TestDaemon, server: &str) -> crate::sign_in::OAuthGrant {
         let at = daemon
             .state
-            .secret_at(daemon.project.deps.files.root(), "dev-a", "notion")
+            .secret_at(daemon.project.deps.files.root(), "dev-a", server)
             .expect("an address");
         daemon
             .state
@@ -2424,6 +2467,145 @@ mod tests {
         let (status, body) = launch(&daemon, "session-signed", "notion").await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
         assert_eq!(fixture.count("/token"), 1);
+    }
+
+    /// Whether any file under the project or its state folder holds `needle`.
+    fn some_file_holds(daemon: &TestDaemon, needle: &str) -> bool {
+        let root = daemon.project.repo.path.clone();
+        let state = std::path::PathBuf::from(format!("{}-state", root.display()));
+        let mut stack = vec![root, state];
+        while let Some(path) = stack.pop() {
+            let Ok(read) = std::fs::read_dir(&path) else {
+                continue;
+            };
+            for item in read.flatten() {
+                let path = item.path();
+                if path.is_dir() {
+                    if path.file_name().is_none_or(|name| name != ".git") {
+                        stack.push(path);
+                    }
+                } else if std::fs::read(&path)
+                    .is_ok_and(|bytes| String::from_utf8_lossy(&bytes).contains(needle))
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_grant_never_leaves_the_daemon() {
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        let (daemon, grant) = launching_signed_in_as(
+            "launch-farik-never",
+            &fixture,
+            chrono::Duration::minutes(60),
+            true,
+        );
+        let (status, body) = launch(&daemon, "session-signed", "osv").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let answer: Value = serde_json::from_str(&body).expect("JSON");
+        // The command and an empty environment: the connector gets no token, since it takes no
+        // bearer, and nothing else would put one in a file or an event.
+        let at = daemon
+            .state
+            .secret_at(daemon.project.deps.files.root(), "dev-a", "osv")
+            .expect("an address");
+        let folder =
+            std::path::PathBuf::from(format!("{}-state", daemon.project.repo.path.display()))
+                .join("connectors")
+                .join(&at.project_id)
+                .join("dev-a/osv");
+        assert_eq!(
+            answer,
+            json!({
+                "command": "farik", "args": ["connector", "osv"], "env": {},
+                "cwd": folder.display().to_string()
+            })
+        );
+        assert_eq!(given(&daemon, "session-signed"), ["osv"]);
+        assert_eq!(fixture.count("/token"), 0, "a fresh grant is not refreshed");
+        let tokens = [
+            grant.access_token.expose().to_string(),
+            grant
+                .refresh_token
+                .as_ref()
+                .expect("a refresh token")
+                .expose()
+                .to_string(),
+        ];
+        for token in &tokens {
+            assert!(!body.contains(token), "the answer holds a token");
+            assert!(!some_file_holds(&daemon, token), "a file holds a token");
+            let events = format!("{:?}", daemon.project.events(&[]));
+            assert!(!events.contains(token), "an event holds a token");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_lapsed_farik_connector_is_not_launched() {
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        fixture.set(|flags| {
+            flags.client_secret = Some(crate::registered_apps::fixtures::SECRET.to_string());
+        });
+        // One whose sign-in the service has ended: refused, and taken from the session.
+        let (daemon, mut lapsed) = launching_signed_in_as(
+            "launch-farik-lapsed",
+            &fixture,
+            chrono::Duration::minutes(60),
+            true,
+        );
+        lapsed.lapsed = true;
+        let at = daemon
+            .state
+            .secret_at(daemon.project.deps.files.root(), "dev-a", "osv")
+            .expect("an address");
+        let mut kept = daemon
+            .state
+            .connector_secrets()
+            .load(&at)
+            .expect("readable")
+            .expect("kept");
+        kept.oauth = Some(lapsed);
+        daemon
+            .state
+            .connector_secrets()
+            .save(&at, &kept)
+            .expect("kept");
+        let (status, body) = launch(&daemon, "session-signed", "osv").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(body.starts_with("sign_in_again:"), "{body}");
+        assert!(given(&daemon, "session-signed").is_empty());
+        assert_eq!(
+            fixture.count("/token"),
+            0,
+            "a lapsed grant is not asked about"
+        );
+
+        // One expiring within a minute is refreshed, with the app's secret, before it answers.
+        let (daemon, old) = launching_signed_in_as(
+            "launch-farik-refresh",
+            &fixture,
+            chrono::Duration::seconds(30),
+            true,
+        );
+        let (status, body) = launch(&daemon, "session-signed", "osv").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(fixture.count("/token"), 1);
+        let asked = &fixture.requests("/token")[0];
+        assert_eq!(
+            asked.form["client_secret"],
+            crate::registered_apps::fixtures::SECRET
+        );
+        assert!(!asked.form.contains_key("resource"), "{:?}", asked.form);
+        let kept = kept_grant_of(&daemon, "osv");
+        assert_ne!(kept.access_token.expose(), old.access_token.expose());
+        assert_eq!(kept.app.as_deref(), Some("google-test"));
+        assert!(!body.contains(kept.access_token.expose()), "{body}");
+        assert_eq!(given(&daemon, "session-signed"), ["osv"]);
     }
 
     #[tokio::test(flavor = "multi_thread")]

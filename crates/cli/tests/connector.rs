@@ -1224,6 +1224,221 @@ fn signs_in_to_a_kit_connector_with_oauth() {
     assert_eq!(kept.oauth.expect("a grant").issuer, fixture.origin);
 }
 
+/// A table of one loopback app, `Google test`, which signs in for Farik's connector `osv`, whose
+/// endpoints are `fixture`'s. Leaked: a table is `'static`, and a test's leak is small.
+fn google_table(
+    fixture: &oauth_fixture::Fixture,
+) -> &'static [farik_runtime::registered_apps::RegisteredApp] {
+    use farik_runtime::registered_apps::{AppFlow, RegisteredApp};
+    fn leaked(text: String) -> &'static str {
+        Box::leak(text.into_boxed_str())
+    }
+    let origin = &fixture.origin;
+    Box::leak(Box::new([RegisteredApp {
+        id: "google-test",
+        name: "Google test",
+        host: None,
+        farik_connector: Some("osv"),
+        flow: AppFlow::Loopback {
+            authorization_endpoint: leaked(format!("{origin}/o/oauth2/v2/auth")),
+        },
+        client_id: "google-test-client",
+        client_secret: Some("the-test-secret"),
+        scopes: &["https://example.test/auth/ads"],
+        issuer: leaked(origin.clone()),
+        token_endpoint: leaked(format!("{origin}/token")),
+        revocation_endpoint: None,
+        install_url: None,
+        settings_url: "https://myaccount.google.com/connections",
+    }]))
+}
+
+/// The Developer's kit with one service, Farik's own connector `osv`, which signs in.
+fn a_farik_connector_kit() -> farik_runtime::KitSource {
+    a_farik_connector_kit_asking(&json!({}))
+}
+
+/// [`a_farik_connector_kit`], its `oauth` being `oauth`.
+fn a_farik_connector_kit_asking(oauth: &Value) -> farik_runtime::KitSource {
+    let file = json!({
+        "role": "software_developer", "skills": [],
+        "connectors": [{
+            "name": "osv", "transport": "stdio", "command": "farik",
+            "args": ["connector", "osv"], "oauth": oauth,
+            "title": "OSV", "about": "A stand-in.", "why": "Lets the Developer look up.",
+            "setup": "Sign in.", "labels": { "search": "search the fixture" },
+            "tools": { "search": "network", "env": "external_effect", "delete_repo": "denied" }
+        }]
+    });
+    let kit = farik_roles::parse_fixture_kit(
+        farik_core::contract::Role::SoftwareDeveloper,
+        &file.to_string(),
+        &[],
+        &[],
+    )
+    .expect("the fixture kit loads");
+    Arc::new(move |role| {
+        if role == farik_core::contract::Role::SoftwareDeveloper {
+            Ok(kit.clone())
+        } else {
+            farik_roles::load_kit(role)
+        }
+    })
+}
+
+/// `farik connect` signs in for Farik's own connector with the app the table names: the page is
+/// printed and opened, the connector (here the fixture's stdio server, run by a program standing
+/// in for Farik's own) lists its tools, and the grant is kept as the app's.
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_signs_in_a_farik_connector() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = runtime.block_on(oauth_fixture::Fixture::start());
+    fixture.set(|flags| flags.client_secret = Some("the-test-secret".to_string()));
+    let repository = a_team("connect-farik-sign-in");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let script = self::fixture("connect-farik-sign-in");
+    // Whatever it is asked, the program runs the fixture's server: `farik connector osv`.
+    let program = script.with_file_name("farik");
+    std::fs::write(
+        &program,
+        format!("#!/bin/sh\nexec sh '{}'\n", script.display()),
+    )
+    .expect("the program is written");
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+        .expect("the program is made executable");
+    let kits = a_farik_connector_kit();
+    let table = google_table(&fixture);
+    let opener = following(&runtime);
+    let config = config_of(&repository);
+    let kept_in = Arc::clone(&store);
+    let ran = run_with(&repository.path, &["connect", "dev-a", "osv"], move |io| {
+        io.connector_secrets = kept_in;
+        io.open_url = opener;
+        io.kits = kits;
+        io.registered_apps = table;
+        io.own_program = Some(program);
+        io.env
+            .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+    });
+
+    assert_eq!(ran.code, 0, "{}{}", ran.out, ran.err);
+    let lines: Vec<&str> = ran.err.lines().collect();
+    assert_eq!(lines.len(), 2, "{}", ran.err);
+    assert!(
+        lines[0].starts_with(&format!(
+            "Sign in to Google test in your browser: {}/o/oauth2/v2/auth?",
+            fixture.origin
+        )),
+        "{}",
+        ran.err
+    );
+    assert_eq!(lines[1], "Signed in to Google test.");
+    assert!(
+        ran.out.lines().any(|line| line == "search: network"),
+        "{}",
+        ran.out
+    );
+    let kept = loaded(store.as_ref(), &kept_at(&repository, "dev-a", "osv")).expect("kept");
+    let grant = kept.oauth.expect("a grant is kept");
+    assert_eq!(grant.app.as_deref(), Some("google-test"));
+    assert_eq!(grant.issuer, fixture.origin);
+    assert!(kept.keys.is_empty());
+}
+
+/// A guard: the connector asks for the app's scopes and no others, the kit's own among them.
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_asks_only_for_the_apps_scopes() {
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = runtime.block_on(oauth_fixture::Fixture::start());
+    let repository = a_team("connect-farik-scopes");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let table = google_table(&fixture);
+    let pages = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    for (scope, said) in [
+        (
+            "https://example.test/auth/other",
+            Some("Farik's Google test sign-in asks only for https://example.test/auth/ads"),
+        ),
+        ("https://example.test/auth/ads", None),
+    ] {
+        let kits = a_farik_connector_kit_asking(&json!({ "scopes": [scope] }));
+        let opener: farik::Opener = {
+            let pages = Arc::clone(&pages);
+            Arc::new(move |url: &str| {
+                pages.lock().expect("pages").push(url.to_string());
+                // Said yes, as the browser would, so that the sign-in ends.
+                std::thread::spawn({
+                    let url = url.to_string();
+                    move || {
+                        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+                        runtime.block_on(oauth_fixture::follow(&url));
+                    }
+                });
+                Ok(())
+            })
+        };
+        let config = config_of(&repository);
+        let kept_in = Arc::clone(&store);
+        let ran = run_with(&repository.path, &["connect", "dev-a", "osv"], move |io| {
+            io.connector_secrets = kept_in;
+            io.open_url = opener;
+            io.kits = kits;
+            io.registered_apps = table;
+            io.own_program = Some(PathBuf::from("unused"));
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+        });
+        if let Some(sentence) = said {
+            assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
+            assert!(ran.err.contains(sentence), "{}", ran.err);
+            assert!(
+                pages.lock().expect("pages").is_empty(),
+                "no page was opened"
+            );
+            assert!(fixture.seen().is_empty(), "no request was made");
+        } else {
+            let pages = pages.lock().expect("pages");
+            assert_eq!(pages.len(), 1, "{}", ran.err);
+            let address = reqwest::Url::parse(&pages[0]).expect("an address");
+            let asked = address
+                .query_pairs()
+                .find(|(name, _)| name == "scope")
+                .map(|(_, value)| value.into_owned());
+            assert_eq!(asked.as_deref(), Some(scope));
+        }
+    }
+}
+
+/// A guard: with no app for the connector, as in a build without Google's client secret, there is
+/// no way to sign in, and nothing is kept.
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_says_when_no_app_signs_in_for_a_connector() {
+    let repository = a_team("connect-farik-no-app");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let kits = a_farik_connector_kit();
+    let config = config_of(&repository);
+    let kept_in = Arc::clone(&store);
+    let ran = run_with(&repository.path, &["connect", "dev-a", "osv"], move |io| {
+        io.connector_secrets = kept_in;
+        io.kits = kits;
+        io.env
+            .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+    });
+    assert_eq!(ran.code, 1, "{}{}", ran.out, ran.err);
+    assert!(
+        ran.err
+            .contains("osv does not let Farik sign in by itself yet"),
+        "{}",
+        ran.err
+    );
+    assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "osv")).is_none());
+}
+
 /// `farik connect` starts Farik's own connector as the program the process was found at (ADR
 /// 0038), with `PATH` empty so no `farik` there can stand in; without that program it says so.
 #[test]
