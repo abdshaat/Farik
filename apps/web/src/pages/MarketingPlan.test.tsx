@@ -23,6 +23,7 @@ import {
 } from "../test/marketing.ts";
 import { at } from "../test/posts.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import own from "./MarketingPlan.module.css";
 
 /** The page of plan MP-3, with the team and `plan` answered. */
 async function opened(plan: object = PLAN) {
@@ -567,6 +568,14 @@ describe("a plan's posts", () => {
 
 		// Each slot says where its post stands, with the post's own words.
 		const sent = slot(TOPIC);
+		// The state is a column of its own, at the row's right end, with the day or time under it.
+		const state = within(sent).getByText("Sent").parentElement as HTMLElement;
+		expect(state.classList).toContain(own.slotState);
+		expect(state.textContent).toBe("Sent at 10:00");
+		expect(sent.lastElementChild).toBe(state);
+		// The post's words are cut after one line, whole for a reader of the page.
+		const words = sent.querySelector(`.${own.slotText}`);
+		expect(words?.textContent).toBe("Our autumn menu <b>x</b>");
 		expect(sent.textContent).toContain("Sent");
 		expect(sent.textContent).toContain("at 10:00");
 		expect(sent.textContent).toContain("Our autumn menu <b>x</b>");

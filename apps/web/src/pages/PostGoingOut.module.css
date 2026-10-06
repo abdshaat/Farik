@@ -19,54 +19,78 @@
 	list-style: none;
 }
 
+/* A row is Today's row: the agent's avatar at its start, the words, and a button at its right end,
+centred on it; when the words need the room (a phone), the button drops below them and runs the
+row's width. */
 .row {
-	display: grid;
-	grid-template-columns: max-content minmax(0, 1fr);
-	gap: var(--farik-space-1) var(--farik-space-3);
-	align-items: start;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-3);
 	padding: var(--farik-space-3);
 	background: var(--farik-color-surface);
 	border: 1px solid var(--farik-color-rule);
 	border-radius: var(--farik-radius-control);
 }
 
-/* A post on its own, inside a row or a dialog. */
-.card {
+.row > img {
+	flex-shrink: 0;
+	align-self: flex-start;
+}
+
+.rowText {
+	flex: 1 1 16rem;
+	min-width: 0;
 	display: grid;
-	grid-template-columns: max-content minmax(0, 1fr);
-	gap: var(--farik-space-1) var(--farik-space-3);
-	align-items: start;
+	gap: var(--farik-space-1);
+	overflow-wrap: anywhere;
 }
 
-/* A post that did not go out is over: it reads as a record, not as a thing to act on. */
-.over {
-	color: var(--farik-color-ink-muted);
-}
-
-.badge {
-	display: inline-grid;
-	place-items: center;
-	box-sizing: border-box;
-	min-width: 2rem;
-	min-height: 2rem;
-	padding: 0 var(--farik-space-1);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
-	font-weight: 600;
-}
-
-.body {
+/* A post on its own, inside a request's row or a dialog. */
+.card {
 	display: grid;
 	gap: var(--farik-space-1);
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
 
+/* A post that did not go out is over: a record, not a thing to act on, so its box is dashed and
+its words are muted. */
+.over {
+	background: transparent;
+	border-style: dashed;
+	border-color: var(--farik-color-control-border);
+	color: var(--farik-color-ink-muted);
+}
+
+/* The network's badge: a dark tile with its letters. */
+.badge {
+	display: inline-grid;
+	place-items: center;
+	flex-shrink: 0;
+	box-sizing: border-box;
+	width: 24px;
+	height: 24px;
+	border-radius: var(--farik-radius-control);
+	background: var(--farik-color-ink);
+	color: var(--farik-color-page);
+	font-family: var(--farik-type-code-family);
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.head {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--farik-space-2);
+}
+
 .when {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-1) var(--farik-space-3);
+	gap: var(--farik-space-1) var(--farik-space-2);
 	align-items: baseline;
+	min-width: 0;
 }
 
 .soon {
@@ -74,13 +98,23 @@
 }
 
 .state {
+	color: var(--farik-color-status-waiting);
 	font-weight: 600;
 }
 
-/* What the agent wrote, as typed: wrapped, never cut off, never marked up. */
+/* What the agent wrote, as typed: wrapped, never marked up. */
 .text {
 	margin: 0;
 	white-space: pre-wrap;
+}
+
+/* On a post that did not go out it is cut after two lines; the page holds all of it. */
+.clamp {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	overflow: hidden;
 }
 
 .pictures {
@@ -90,23 +124,58 @@
 	align-items: flex-start;
 }
 
-.pictures img {
-	max-width: min(100%, 14rem);
-	max-height: 12rem;
+/* A picture is a thumbnail, cropped to a square; a clip or a picture Farik will not show is a tile
+of the same size that opens it where it is. */
+.pictures img,
+.tile {
+	box-sizing: border-box;
+	width: 88px;
+	height: 88px;
 	border-radius: var(--farik-radius-control);
+}
+
+.pictures img {
+	display: block;
+	object-fit: cover;
+	border: 1px solid var(--farik-color-rule);
+}
+
+.tile {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: var(--farik-space-1);
+	padding: var(--farik-space-1);
+	border: 1px solid var(--farik-color-control-border);
+	background: var(--farik-color-page);
+	color: var(--farik-color-ink);
+	font-size: 13px;
+	line-height: 18px;
+	text-align: center;
+}
+
+@media not (min-width: 640px) {
+	.pictures img,
+	.tile {
+		width: 72px;
+		height: 72px;
+	}
 }
 
 .why {
 	margin: 0;
 	color: var(--farik-color-ink-muted);
+	font:
+		var(--farik-type-small-weight) var(--farik-type-small-size) /
+		var(--farik-type-small-line-height) var(--farik-type-small-family);
 }
 
-/* "Stop" sits at the row's right end; on a phone it runs the row's width. */
+/* "Stop" sits at the row's right end, centred on it; on a phone it runs the row's width. */
 .stopButton {
-	grid-column: 1 / -1;
-	justify-self: end;
 	box-sizing: border-box;
 	min-height: 44px;
+	margin-inline-start: auto;
 	padding: var(--farik-space-2) var(--farik-space-4);
 	font:
 		var(--farik-type-body-weight) var(--farik-type-body-size) /
@@ -119,13 +188,8 @@
 
 @media not (min-width: 640px) {
 	.stopButton {
-		justify-self: stretch;
+		flex-basis: 100%;
 	}
-}
-
-/* A line under a post's words, in their column. */
-.below {
-	grid-column: 2;
 }
 
 .dialog {

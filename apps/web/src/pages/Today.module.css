@@ -162,6 +162,11 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 	border-radius: var(--farik-radius-control);
 }
 
+.row > img {
+	flex-shrink: 0;
+	align-self: flex-start;
+}
+
 .rowText {
 	flex: 1 1 16rem;
 	min-width: 0;
@@ -203,9 +208,14 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 	margin-inline-start: auto;
 }
 
+/* On a phone both buttons run the row's width between them. */
 @media not (min-width: 640px) {
 	.decide {
 		flex-basis: 100%;
+	}
+
+	.decide > * {
+		flex: 1;
 	}
 }
 

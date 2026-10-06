@@ -388,7 +388,9 @@ export function MarketingPlan() {
 										</h3>
 										<ul
 											aria-labelledby={`week-${week.n}`}
-											className={own.posts}
+											className={
+												proposed ? own.posts : `${own.posts} ${own.withState}`
+											}
 										>
 											{week.slots.map((post) => (
 												<li key={post.key}>
@@ -396,9 +398,11 @@ export function MarketingPlan() {
 													<span className={own.channel}>
 														{channelName(post.channel)}
 													</span>
-													<span className={own.topic}>{post.topic}</span>
-													{!proposed && (
+													{proposed ? (
+														<span className={own.topic}>{post.topic}</span>
+													) : (
 														<SlotPost
+															topic={post.topic}
 															written={written}
 															slot={post.key}
 															instant={instant}
@@ -655,12 +659,17 @@ function Words({
 	);
 }
 
-/** Where a slot's post stands: the state, the post's words as typed, and an earlier failure. */
+/**
+ * A slot's two cells: its topic with the post's words as typed and an earlier failure, and, at the
+ * row's right end, where the post stands.
+ */
 function SlotPost({
+	topic,
 	written,
 	slot,
 	instant,
 }: {
+	topic: string;
 	written: WrittenPost[];
 	slot: string;
 	instant: Date;
@@ -668,19 +677,27 @@ function SlotPost({
 	const { shown, standing, failedAt } = slotStanding(written, slot);
 	const detail = standingDetail(standing, shown, instant);
 	return (
-		<span className={own.written}>
-			<span>
-				<strong>{standingWord(standing)}</strong>
-				{detail !== "" && ` ${detail}`}
+		<>
+			<span className={own.slotMain}>
+				<span className={own.topic}>{topic}</span>
+				{/* What the agent wrote: text, cut after one line on the page, never markup. */}
+				{shown && <span className={own.slotText}>{shown.text}</span>}
+				{failedAt && (
+					<span className={own.sub}>
+						{t("planSlotFailedBefore", { time: clock(new Date(failedAt)) })}
+					</span>
+				)}
 			</span>
-			{/* What the agent wrote: text, never markup. */}
-			{shown && <span className={own.slotText}>{shown.text}</span>}
-			{failedAt && (
-				<span className={own.sub}>
-					{t("planSlotFailedBefore", { time: clock(new Date(failedAt)) })}
-				</span>
-			)}
-		</span>
+			<span className={own.slotState}>
+				<strong data-standing={standing}>{standingWord(standing)}</strong>
+				{detail !== "" && (
+					<>
+						{" "}
+						<span className={own.slotWhen}>{detail}</span>
+					</>
+				)}
+			</span>
+		</>
 	);
 }
 

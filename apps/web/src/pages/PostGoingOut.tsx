@@ -1,4 +1,4 @@
-import { Button, Dialog } from "@farik/ui";
+import { Avatar, type AvatarKey, Button, Dialog } from "@farik/ui";
 import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -28,6 +28,8 @@ export type GoingOutPost = {
 	reason?: string;
 };
 
+/** The side of a picture's thumbnail on Today, in pixels (a phone draws it smaller, by its style). */
+const THUMBNAIL = 88;
 const MINUTE_MS = 60_000;
 const DAY_MS = 86_400_000;
 
@@ -160,6 +162,8 @@ function Picture({
 		<img
 			alt={t("postPictureAlt", { n: index + 1 })}
 			src={`data:${shown.mediaType};base64,${shown.base64}`}
+			width={THUMBNAIL}
+			height={THUMBNAIL}
 		/>
 	);
 }
@@ -174,7 +178,26 @@ function OpensInATab({
 }) {
 	if (!url.startsWith("https://")) return null;
 	return (
-		<a href={url} target="_blank" rel="noopener noreferrer">
+		<a
+			className={styles.tile}
+			href={url}
+			target="_blank"
+			rel="noopener noreferrer"
+		>
+			{word === "postWatchClip" && (
+				<svg
+					width="22"
+					height="22"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					strokeWidth="2"
+					aria-hidden="true"
+				>
+					<circle cx="12" cy="12" r="10" />
+					<path d="M10 8l6 4-6 4z" fill="currentColor" />
+				</svg>
+			)}
 			{t(word)}
 		</a>
 	);
@@ -189,51 +212,54 @@ function keyed(media: PostMedia[]) {
 	}));
 }
 
-/** A post's badge, its network and time, its words as typed, and its pictures. */
+/**
+ * A post's badge, its network and time, its words as typed, and its pictures: the parts of one
+ * column, for its caller to put in a box. `clamp` cuts the words after two lines, for a post that
+ * is over; the page holds all of them.
+ */
 export function PostBody({
 	post,
 	now,
 	titleId,
+	clamp,
 	children,
 }: {
 	post: Pick<GoingOutPost, "post" | "channel" | "text" | "media" | "at">;
 	now: Date;
 	/** The id of the line that names the post, for the button that acts on it. */
 	titleId?: string;
+	clamp?: boolean;
 	/** What goes beside the time. */
 	children?: ReactNode;
 }) {
 	return (
 		<>
-			<span className={styles.badge} aria-hidden="true">
-				{BADGES[post.channel] ?? post.channel.slice(0, 2)}
-			</span>
-			<div className={styles.body}>
+			<span className={styles.head}>
+				<span className={styles.badge} aria-hidden="true">
+					{BADGES[post.channel] ?? post.channel.slice(0, 2)}
+				</span>
 				<span className={styles.when}>
 					<strong id={titleId}>
 						{postWhen(post.channel, new Date(post.at), now)}
 					</strong>
 					{children}
 				</span>
-				{/* What the agent wrote: React shows it as text, never as markup. */}
-				<p className={styles.text}>{post.text}</p>
-				{post.media.length > 0 && (
-					<div className={styles.pictures}>
-						{keyed(post.media).map(({ key, index, one }) =>
-							one.kind === "video" ? (
-								<OpensInATab key={key} url={one.url} word="postWatchClip" />
-							) : (
-								<Picture
-									key={key}
-									post={post.post}
-									index={index}
-									url={one.url}
-								/>
-							),
-						)}
-					</div>
-				)}
-			</div>
+			</span>
+			{/* What the agent wrote: React shows it as text, never as markup. */}
+			<p className={clamp ? `${styles.text} ${styles.clamp}` : styles.text}>
+				{post.text}
+			</p>
+			{post.media.length > 0 && (
+				<div className={styles.pictures}>
+					{keyed(post.media).map(({ key, index, one }) =>
+						one.kind === "video" ? (
+							<OpensInATab key={key} url={one.url} word="postWatchClip" />
+						) : (
+							<Picture key={key} post={post.post} index={index} url={one.url} />
+						),
+					)}
+				</div>
+			)}
 		</>
 	);
 }
@@ -251,6 +277,12 @@ export function PostCard({
 			<PostBody post={post} now={now} />
 		</div>
 	);
+}
+
+/** The agent who wrote a post, by its picture; none when the team does not say which. */
+function Writer({ agent, name }: { agent: Agent | undefined; name: string }) {
+	if (!agent?.avatar) return null;
+	return <Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />;
 }
 
 /** The posts going out, soonest first, and the ones that did not go out in the last day. */
@@ -272,8 +304,8 @@ export function GoingOut({
 	const over = posts.filter(
 		(post) => post.state === "missed" || post.state === "failed",
 	);
-	const name = (id: string) =>
-		agents.find((agent) => agent.id === id)?.displayName ?? id;
+	const writer = (id: string) => agents.find((agent) => agent.id === id);
+	const name = (id: string) => writer(id)?.displayName ?? id;
 	return (
 		<>
 			{going.length > 0 && (
@@ -287,6 +319,7 @@ export function GoingOut({
 							<GoingOutRow
 								key={post.post}
 								post={post}
+								agent={writer(post.agentId)}
 								name={name(post.agentId)}
 								now={now}
 								again={again}
@@ -304,12 +337,16 @@ export function GoingOut({
 					<ul className={styles.rows} aria-label={t("didNotGoOutList")}>
 						{over.map((post) => (
 							<li key={post.post} className={`${styles.row} ${styles.over}`}>
-								<PostBody post={post} now={now}>
-									<span className={styles.state}>
-										{t(post.state === "failed" ? "postFailed" : "postMissed")}
-									</span>
-								</PostBody>
-								<div className={`${styles.body} ${styles.below}`}>
+								<Writer
+									agent={writer(post.agentId)}
+									name={name(post.agentId)}
+								/>
+								<div className={styles.rowText}>
+									<PostBody post={post} now={now} clamp>
+										<span className={styles.state}>
+											{t(post.state === "failed" ? "postFailed" : "postMissed")}
+										</span>
+									</PostBody>
 									{/* Buffer's words, or Farik's: text, never markup. */}
 									<p className={styles.why}>
 										{post.state === "failed"
@@ -359,11 +396,13 @@ function Why({ post, now }: { post: GoingOutPost; now: Date }) {
 
 function GoingOutRow({
 	post,
+	agent,
 	name,
 	now,
 	again,
 }: {
 	post: GoingOutPost;
+	agent: Agent | undefined;
 	name: string;
 	now: Date;
 	again: () => void;
@@ -372,10 +411,11 @@ function GoingOutRow({
 	const titleId = `going-out-${post.post}`;
 	return (
 		<li className={styles.row}>
-			<PostBody post={post} now={now} titleId={titleId}>
-				<span className={styles.soon}>{howSoon(new Date(post.at), now)}</span>
-			</PostBody>
-			<div className={`${styles.body} ${styles.below}`}>
+			<Writer agent={agent} name={name} />
+			<div className={styles.rowText}>
+				<PostBody post={post} now={now} titleId={titleId}>
+					<span className={styles.soon}>{howSoon(new Date(post.at), now)}</span>
+				</PostBody>
 				<Why post={post} now={now} />
 			</div>
 			<button

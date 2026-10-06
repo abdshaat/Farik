@@ -219,35 +219,77 @@ stays there for a screen reader. */
 	font-weight: 600;
 }
 
+/* The slots of a week, ruled: the day, the network, the topic, and once the plan is approved the
+post's state at the row's right end. */
 .posts {
 	display: grid;
-	gap: var(--farik-space-2);
 	margin: 0;
 	padding: 0;
 	list-style: none;
+	border-top: 1px solid var(--farik-color-rule);
 }
 
 .posts li {
 	display: grid;
 	grid-template-columns: 6.5rem 6rem minmax(0, 1fr);
 	gap: var(--farik-space-1) var(--farik-space-3);
+	padding: var(--farik-space-2) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
 	overflow-wrap: anywhere;
+}
+
+.withState li {
+	grid-template-columns: 6.5rem 6rem minmax(0, 1fr) 9.5rem;
+}
+
+.posts time {
+	color: var(--farik-color-ink-muted);
+	font-family: var(--farik-type-code-family);
+	font-size: var(--farik-type-small-size);
 }
 
 .channel {
 	color: var(--farik-color-ink-muted);
 }
 
-/* Where the slot's post stands, under its topic. */
-.written {
-	grid-column: 3;
+/* The topic, the post's own words under it, and an earlier failure. */
+.slotMain {
 	display: grid;
 	gap: var(--farik-space-1);
+	min-width: 0;
 }
 
+/* What the agent wrote: one line, cut with an ellipsis; the page holds all of it. */
 .slotText {
+	display: block;
+	overflow: hidden;
 	color: var(--farik-color-ink-muted);
-	white-space: pre-wrap;
+	font-size: var(--farik-type-small-size);
+	line-height: var(--farik-type-small-line-height);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Where the post stands: the state word, and under it when or why, both at the right. */
+.slotState {
+	display: grid;
+	gap: 2px;
+	align-content: start;
+	justify-items: end;
+	color: var(--farik-color-ink-muted);
+	text-align: right;
+}
+
+.slotState strong[data-standing="sent"] {
+	color: var(--farik-color-status-done);
+}
+
+.slotState strong[data-standing="going_out"] {
+	color: var(--farik-color-status-working);
+}
+
+.slotState strong[data-standing="missed"] {
+	color: var(--farik-color-status-waiting);
 }
 
 @media not (min-width: 640px) {
@@ -255,9 +297,49 @@ stays there for a screen reader. */
 		grid-template-columns: max-content minmax(0, 1fr);
 	}
 
-	.posts li > .topic,
-	.posts li > .written {
+	.posts li > .topic {
 		grid-column: 1 / -1;
+	}
+
+	/* Each day on a phone: the day and network with the state at the right, then the words, and
+	when or why last. */
+	.withState li {
+		grid-template-columns: max-content max-content minmax(0, 1fr);
+	}
+
+	.withState li > time,
+	.withState li > .channel {
+		grid-row: 1;
+	}
+
+	.withState .slotState {
+		display: contents;
+	}
+
+	.withState .slotState strong {
+		grid-column: 3;
+		grid-row: 1;
+		justify-self: end;
+	}
+
+	.withState .slotMain {
+		grid-column: 1 / -1;
+		grid-row: 2;
+	}
+
+	.withState .slotWhen {
+		grid-column: 1 / -1;
+		grid-row: 3;
+		text-align: left;
+	}
+
+	/* Two lines of the post's words, where there is room for them. */
+	.withState .slotText {
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		white-space: normal;
 	}
 }
 

@@ -21,6 +21,7 @@ import {
 	eventArrives,
 	renderApp,
 } from "../test/render-app.tsx";
+import styles from "./PostGoingOut.module.css";
 import { Today } from "./Today.tsx";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
@@ -779,7 +780,26 @@ describe("today's posts", () => {
 			name: "Picture 1 of this post",
 		});
 		expect(picture.getAttribute("src")).toBe("data:image/png;base64,iVBORw==");
+		// A thumbnail of the mockup's size, not the picture as large as it is.
+		expect(picture.getAttribute("width")).toBe("88");
+		expect(picture.getAttribute("height")).toBe("88");
 		await expectNoAxeViolations(container);
+	});
+
+	it("each_post_row_carries_its_agents_avatar", async () => {
+		await todayWith({ posts: GOING_OUT, waiting: [POST_ROW] });
+
+		// The agent who wrote a post is named by its picture, on each row that is about one.
+		const going = await goingOut();
+		const over = within(
+			await screen.findByRole("list", { name: en.didNotGoOutList }),
+		).getAllByRole("listitem");
+		const asking = within(
+			screen.getByRole("list", { name: en.waitingList }),
+		).getAllByRole("listitem");
+		expect([...going, ...over, ...asking]).toHaveLength(4 + 4 + 1);
+		for (const row of [...going, ...over, ...asking])
+			expect(within(row).getByRole("img", { name: "Kai" })).toBeTruthy();
 	});
 
 	it("what_farik_cannot_show_opens_in_a_new_tab", async () => {
@@ -815,7 +835,9 @@ describe("today's posts", () => {
 		expect(picture.getAttribute("target")).toBe("_blank");
 		expect(picture.getAttribute("rel")).toContain("noopener");
 		expect(picture.getAttribute("rel")).toContain("noreferrer");
-		expect(within(instagram).queryByRole("img")).toBeNull();
+		expect(
+			within(instagram).queryByRole("img", { name: /^Picture/ }),
+		).toBeNull();
 	});
 
 	it("never_opens_an_address_that_is_not_https", async () => {
@@ -930,6 +952,16 @@ describe("today's posts", () => {
 			"Kai hears of this in its next session.",
 		);
 		expect(container.querySelector("img[src='x']")).toBeNull();
+		// What was written is cut after two lines on the page and whole for a reader of it; a post
+		// still going out is shown whole.
+		const words = within(failed).getByText(/^Thanksgiving pies/);
+		expect(words.textContent).toBe(`Thanksgiving pies ${MARKUP}`);
+		expect(words.classList).toContain(styles.clamp);
+		expect(failed.classList).toContain(styles.over);
+		const [going] = await goingOut();
+		expect(
+			within(going as HTMLElement).getByText(/^We open at 10 today/).classList,
+		).not.toContain(styles.clamp);
 		expect(within(missed).getByText("X, yesterday at 18:00")).toBeTruthy();
 		expect(within(missed).getByText("Missed")).toBeTruthy();
 		expect(missed.textContent).toContain(
