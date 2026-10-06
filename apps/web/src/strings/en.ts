@@ -1681,6 +1681,8 @@ export const en = {
 	marketingYouEnded: "You ended this plan on {at}",
 	marketingEndedExpired: "This plan ended on {day}, its last day",
 	marketingEndedReplaced: "A newer plan took over from this one on {day}",
+	marketingEndedReplacedBy: "This plan ended on {day}, when ",
+	marketingEndedReplacedByTail: " took over",
 	marketingApprovedItOn:
 		"You approved it on {day}. {name} cannot post or advertise for it any more.",
 	marketingWriting:

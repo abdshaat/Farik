@@ -58,7 +58,14 @@ type Plan = {
 		reason?: string;
 		at: string;
 	} | null;
-	ended: { why: "replaced" | "by_owner" | "expired"; at: string } | null;
+	ended: {
+		why: "replaced" | "by_owner" | "expired";
+		at: string;
+		/** What the owner said when they ended it. */
+		note?: string;
+		/** The plan that took its place. */
+		replacedBy?: string;
+	} | null;
 };
 
 /** What the daemon takes in a note. */
@@ -502,16 +509,29 @@ function Header({
 			)}
 			{plan.ended && (
 				<div className={own.decision}>
-					<p>
-						{plan.ended.why === "by_owner"
-							? t("marketingYouEnded", { at: when(plan.ended.at) })
-							: t(
-									plan.ended.why === "expired"
-										? "marketingEndedExpired"
-										: "marketingEndedReplaced",
-									{ day: longDay(plan.ended.at) },
-								)}
-					</p>
+					{plan.ended.why === "replaced" && plan.ended.replacedBy ? (
+						<p>
+							{t("marketingEndedReplacedBy", { day: longDay(plan.ended.at) })}
+							<Link to={`/marketing/plans/${plan.ended.replacedBy}`}>
+								{plan.ended.replacedBy}
+							</Link>
+							{t("marketingEndedReplacedByTail")}
+						</p>
+					) : (
+						<p>
+							{plan.ended.why === "by_owner"
+								? t("marketingYouEnded", { at: when(plan.ended.at) })
+								: t(
+										plan.ended.why === "expired"
+											? "marketingEndedExpired"
+											: "marketingEndedReplaced",
+										{ day: longDay(plan.ended.at) },
+									)}
+						</p>
+					)}
+					{plan.ended.why === "by_owner" && plan.ended.note && (
+						<blockquote>{`“${plan.ended.note}”`}</blockquote>
+					)}
 					{decided?.decision === "approved" && (
 						<p className={styles.muted}>
 							{t("marketingApprovedItOn", {

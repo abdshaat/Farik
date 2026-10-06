@@ -363,30 +363,33 @@ describe("marketing plan page", () => {
 		await expectNoAxeViolations(first.container);
 		cleanup();
 
-		const ended = (why: string, at: string) => ({
+		const ended = (why: string, at: string, more: object = {}) => ({
 			...APPROVED,
 			state: "ended",
-			ended: { why, at },
+			ended: { why, at, ...more },
 		});
-		const cases: [string, string, string][] = [
+		const cases: [string, string, string, object][] = [
 			[
 				"expired",
 				"2026-11-22T00:00:01Z",
 				"This plan ended on Sunday 22 November, its last day",
+				{},
 			],
 			[
 				"by_owner",
 				"2026-11-03T09:41:00Z",
 				"You ended this plan on Tuesday 3 November at 09:41",
+				{},
 			],
 			[
 				"replaced",
 				"2026-11-16T00:00:01Z",
 				"A newer plan took over from this one on Monday 16 November",
+				{},
 			],
 		];
-		for (const [why, at, line] of cases) {
-			await opened(ended(why, at));
+		for (const [why, at, line, more] of cases) {
+			await opened(ended(why, at, more));
 			expect(await screen.findByText(line)).toBeTruthy();
 			expect(screen.getAllByText("Ended").length).toBeGreaterThan(0);
 			expect(
@@ -397,6 +400,34 @@ describe("marketing plan page", () => {
 			expect(screen.queryByRole("button", { name: "End the plan" })).toBeNull();
 			cleanup();
 		}
+
+		// An owner's end keeps their words, shown as typed.
+		const owners = await opened(
+			ended("by_owner", "2026-11-03T09:41:00Z", {
+				note: "We close early <b>for</b> the refit.",
+			}),
+		);
+		expect(
+			await screen.findByText(
+				"You ended this plan on Tuesday 3 November at 09:41",
+			),
+		).toBeTruthy();
+		expect(
+			screen.getByText("“We close early <b>for</b> the refit.”"),
+		).toBeTruthy();
+		expect(owners.container.querySelector("b")).toBeNull();
+		cleanup();
+
+		// A replaced plan names the plan that took over, and links to it.
+		await opened(
+			ended("replaced", "2026-11-16T00:00:01Z", { replaced_by: "MP-5" }),
+		);
+		const took = await screen.findByRole("link", { name: "MP-5" });
+		expect(took.getAttribute("href")).toBe("/marketing/plans/MP-5");
+		expect(took.closest("p")?.textContent).toBe(
+			"This plan ended on Monday 16 November, when MP-5 took over",
+		);
+		expect(screen.queryByText(/A newer plan took over/)).toBeNull();
 	});
 
 	it("says_when_there_is_no_such_plan", async () => {
