@@ -1,11 +1,12 @@
 # Phase 7, step 03f: The customer's own sign-in apps
 
-Status: draft. Its readiness review runs once Task 1's boards are approved (ADR 0032: one round).
+Status: dropped by the founder, 2026-10-06 (ADR 0044). Asked to approve its boards, the founder answered "The github login must be done through a single click. Lets chat about this before moving forward", then "Lets change the customer's own app. Lets provide free cloud hosting tier for customers that will allow them to sign in from their local machine into the cloud that is managed by farik.", and of this step, "Drop it". Never reviewed for readiness and never executed; its boards were never approved and are deleted (`SignInApps.dc.html`, `PhoneSignInApps.dc.html`). From the web launch, phase 11, Farik's own GitHub App and Google app sign customers in through Farik Cloud, their secrets held there; before it, GitHub takes a pasted token and Google Ads cannot be signed in to. The build-time Google secret it was to remove goes in step 08e's Task 8. This file is kept as the record; nothing below is to be built.
+Planned as: draft. Its readiness review was to run once Task 1's boards were approved (ADR 0032: one round).
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.7, 8.4, 8.6, 9; F9
 Depends on: step 03b of this phase (Tasks 1 to 6, landing-reviewed: `RegisteredApp`, `AppFlow`, `app_for`, the device flow, `OAuthGrant.app`, `set_registered_apps`, `CliIo.registered_apps`, `provider` and `settings_url` on the wire, `CodeCard`); step 08e (executed; its landing review's fixes committed before Task 3 starts, which at the time of writing make `GOOGLE_CLIENT_ID` an `Option` and ship no Google entry for an empty secret); step 05 (`KitConnect`); phase 6 (Settings, merged in #19). Numbered with the sign-in steps 03 to 03e and run after 08e, because it rewrites 03b's and 08e's table; 08f depends on it. Before Task 2 the executor re-reads every file:line here against HEAD and records corrections in Execution notes (not a second review).
 Readiness confirmed by: not yet run
-Mockups approved by: pending (Task 1's gate)
+Mockups approved by: never (dropped 2026-10-06; the boards are deleted)
 Decided by the founder, 2026-10-06, in conversation: O1, publish ("Publish it"); O2, the fixed page ("Fixed GitHub page").
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).

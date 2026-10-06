@@ -494,24 +494,6 @@
       "page": "connectors",
       "is_interactive": true
     },
-    "SignInApps.dc.html": {
-      "x": 6960,
-      "y": 0,
-      "w": 1440,
-      "h": 10250,
-      "title": "Your own sign-in apps: Settings, GitHub’s and Google’s how-to cards, Save and sign in, Remove, and an app that changed (step 03f)",
-      "page": "connectors",
-      "is_interactive": true
-    },
-    "PhoneSignInApps.dc.html": {
-      "x": 8480,
-      "y": 0,
-      "w": 360,
-      "h": 12816,
-      "title": "Your own sign-in apps, on a phone (step 03f)",
-      "page": "connectors",
-      "is_interactive": true
-    },
     "PhoneSignIn.dc.html": {
       "x": 4560,
       "y": 0,
@@ -805,8 +787,6 @@
     "PhoneToolApproval.dc.html",
     "GitHubSignIn.dc.html",
     "PhoneGitHubSignIn.dc.html",
-    "SignInApps.dc.html",
-    "PhoneSignInApps.dc.html",
     "PhoneSignIn.dc.html",
     "PhoneSkills.dc.html",
     "SignInDone.dc.html",
