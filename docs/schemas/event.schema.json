@@ -414,7 +414,7 @@
         "gate": { "$ref": "#/$defs/gateId" },
         "effects": {
           "type": "array",
-          "items": { "type": "string", "enum": ["increment_iteration", "raise_escalation", "reset_blocker", "stamp_blocked_at"] }
+          "items": { "type": "string", "enum": ["increment_iteration", "raise_escalation", "reset_blocker", "stamp_blocked_at", "nothing_to_integrate"] }
         },
         "assignee": { "type": "string" },
         "reviewer": { "type": "string" },

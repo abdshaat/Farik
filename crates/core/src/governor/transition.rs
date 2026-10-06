@@ -30,6 +30,7 @@ use crate::governor::gates::{
 };
 use crate::governor::readiness::{ReadinessContext, evaluate_readiness};
 use crate::governor::transition_table::{GateId, TransitionActor, TransitionRow, find_transitions};
+use crate::team::task_private_folder;
 
 /// A request to move one task to one status, by one actor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,7 +89,7 @@ pub struct TransitionContext {
     pub assignment: Option<AssignmentInput>,
     /// The results the assignee recorded from its own runs.
     pub assignee_results: Vec<CriterionResult>,
-    /// The state of the task's branch and worktree.
+    /// The state of the task's branch and worktree, or of its private folder.
     pub work: WorkState,
     /// What the assignee wrote when it blocked the task.
     pub blocker: Option<Blocker>,
@@ -148,6 +149,9 @@ pub enum TransitionEffect {
     /// never open, because a block the runtime recorded no time for cannot be aged, so the stamp is
     /// part of the decision rather than something to be remembered.
     StampBlockedAt,
+    /// The task, which works in a private folder and has no branch, is accepted with nothing to
+    /// integrate: acceptance is its end, and a task that depends on it counts it integrated.
+    NothingToIntegrate,
 }
 
 /// The move the governor will apply.
@@ -663,6 +667,9 @@ fn effects(gate: GateId, to: TaskStatus, context: &TransitionContext) -> Vec<Tra
     if to == TaskStatus::Blocked {
         effects.push(TransitionEffect::StampBlockedAt);
     }
+    if to == TaskStatus::Accepted && task_private_folder(&context.contract).is_some() {
+        effects.push(TransitionEffect::NothingToIntegrate);
+    }
     effects
 }
 
@@ -800,6 +807,7 @@ mod tests {
             work: WorkState {
                 commits: 1,
                 worktree_clean: true,
+                folder: None,
             },
             blocker: Some(Blocker {
                 description: "The staging database refuses the migration.".to_string(),
@@ -1589,6 +1597,30 @@ mod tests {
                     .to_string()
             ]
         );
+    }
+
+    #[test]
+    fn acceptance_of_a_finance_task_integrates_nothing() {
+        // A task in a private folder has no branch: its acceptance is its end, and the move says
+        // so.
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Verifying;
+        context.contract.assignee_role = Role::FinanceSpecialist;
+        context.contract.allowed_paths = vec![".farik/local/finance/**".to_string()];
+        context.done.changed_paths = vec![".farik/local/finance/books.xlsx".to_string()];
+        context.done.protected_paths = vec![".farik/local/**".to_string()];
+        let accepted = ask(TaskStatus::Accepted, A::ProductManager, Some("pm-1"));
+        assert_eq!(
+            effects(&accepted, &context),
+            [TransitionEffect::NothingToIntegrate]
+        );
+        // The task's other moves carry nothing, and neither does another role's acceptance.
+        let rejected = ask(TaskStatus::Rejected, A::Reviewer, Some("arch-1"));
+        assert_eq!(effects(&rejected, &context), []);
+        context.contract.assignee_role = Role::SoftwareDeveloper;
+        context.contract.allowed_paths = vec!["src/login/**".to_string()];
+        context.done.changed_paths = vec!["src/login/form.rs".to_string()];
+        assert_eq!(effects(&accepted, &context), []);
     }
 
     #[test]

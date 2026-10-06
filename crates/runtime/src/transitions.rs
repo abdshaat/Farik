@@ -688,6 +688,8 @@ impl Transitions {
         let work = WorkState {
             commits: self.git.commit_count(&base, &branch)?,
             worktree_clean: self.git.is_clean(&worktree)?,
+            // A task with a worktree does not work in a private folder.
+            folder: None,
         };
         Ok((work, self.git.changed_paths(&base, &branch)?))
     }
@@ -1029,6 +1031,7 @@ fn effect_wire(effect: TransitionEffect) -> TaskTransitionedBodyEffectsItem {
         TransitionEffect::RaiseEscalation(_) => TaskTransitionedBodyEffectsItem::RaiseEscalation,
         TransitionEffect::ResetBlocker => TaskTransitionedBodyEffectsItem::ResetBlocker,
         TransitionEffect::StampBlockedAt => TaskTransitionedBodyEffectsItem::StampBlockedAt,
+        TransitionEffect::NothingToIntegrate => TaskTransitionedBodyEffectsItem::NothingToIntegrate,
     }
 }
 
