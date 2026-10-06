@@ -601,6 +601,11 @@ mod tests {
         let limited = post("post-2", 58);
         handing.hands_over().await;
         assert_eq!(
+            handing.created().len(),
+            2,
+            "Buffer is asked once for each post, over its limit too"
+        );
+        assert_eq!(
             failed(limited),
             "Buffer did not take it: \u{201c}Rate limit exceeded (429). Retry after 60 seconds.\u{201d}"
         );
