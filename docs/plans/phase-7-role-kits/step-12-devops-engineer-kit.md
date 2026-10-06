@@ -3,10 +3,10 @@
 Status: draft. Its readiness review runs once step 11f has landed.
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.7, 6.9, 8.2, 8.6; F9
-Depends on: steps 11 to 11f (the role, `Platform`, `PlatformSource`, `shipped_platforms`, `Team::production`, the watch, incidents, the pages); steps 05 and 05b (the kit format, connect by name, `live_kit_pins`); step 03 (signing in; `signed_in::refreshed_entry`); phase 6 (merged in #19)
+Depends on: step 08d (`connectors::call_tool`, `ConnectorError::ToolError`, `OWN_CALLS`, `call_as`); steps 11 to 11f (the role, `Platform`, `PlatformSource`, `shipped_platforms`, `Team::production`, the watch, incidents, the pages); steps 05 and 05b (the kit format, connect by name, `live_kit_pins`); step 03 (signing in; `signed_in::refreshed_entry`); phase 6 (merged in #19)
 Readiness confirmed by: not yet run
 
-Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). The project plan's row 12 is split in five, by how each platform is reached: this step is the kit's skills, Farik calling a connector's tool itself, and Vercel, whose official server has every read and write Farik needs; 12b is Render and Netlify (official servers for the agent, their own APIs for Farik's writes); 12c is Railway and Fly (servers of Farik's own); 12d is Kubernetes (a pinned community server and a key kept as a file); 12e is AWS ECS and EKS (AWS's servers, which need fixed settings in the kit).
+Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). The project plan's row 12 is split in five, by how each platform is reached: this step is the kit's skills and Vercel (Farik calling a connector's tool itself is step 08d's, which builds `call_tool`), whose official server has every read and write Farik needs; 12b is Render and Netlify (official servers for the agent, their own APIs for Farik's writes); 12c is Railway and Fly (servers of Farik's own); 12d is Kubernetes (a pinned community server and a key kept as a file); 12e is AWS ECS and EKS (AWS's servers, which need fixed settings in the kit).
 
 ## Goal
 
@@ -15,7 +15,7 @@ The DevOps Engineer ships a kit: six skills, and Vercel, signed in to with nothi
 ## Decisions
 
 - **No mockups.** Step 05's screens show a kit's service; step 11's boards show production.
-- **Farik calls a connector's tool** with `connectors::call_tool`, beside `list_tools` (`connectors.rs:804`): the same start (a `stdio` server in its own folder with only `KEPT_ENV` and its keys, an `http` one with its headers and bearer), the same 30-second limit, one MCP session per call, opened and cancelled. It answers the tool's structured content when the server gives one, else its text parsed as JSON, else `{ "text": <text> }`; a tool error is `ConnectorError::ToolError { text }`, the server's text cut at 500 characters, which Farik treats as untrusted (8.6) and passes on only as a refusal's detail. Farik's arguments never hold a key, which is why a tool error's words may be kept where `list_tools` keeps none.
+- **Farik calls a connector's tool** with step 08d's `connectors::call_tool` (spec 6.7), which this step consumes and does not build: one MCP session per call within 30 seconds, an answer of the tool's structured content, else its text parsed as JSON, else `{ "text": <text> }`, and `ConnectorError::ToolError { text }` for a tool error, the server's text cut at 500 characters, which Farik treats as untrusted (8.6) and passes on only as a refusal's detail. Step 08d's `OWN_CALLS` is the fixed list of the pairs Farik calls and `call_as` the way it calls them with an agent's kept connection; this step's readiness review decides whether `connected_platforms` adds Vercel's pairs to the list and calls through `call_as`, as 08d requires of every later step that has Farik call a service itself, since it resolves the entry by the team's `production.connector` rather than by an agent it is given.
 - **Farik may call a tool the agent is denied.** A kit tags what the agent is offered; Farik's own calls are not the agent's, pass no hook, and are recorded as the deployment events of steps 11b and 11d. Only an adapter, a fixed table of calls in Farik's code, makes them, and only for the three tools and the watch.
 - **The connected platform.** `connected_platforms(daemon) -> PlatformSource`, holding the daemon weakly, is set in `start` (`crates/cli/src/start.rs`) with `daemon.set_platforms` once the daemon is made (step 11b), so it reads the keys, the connector folders and Farik's own program (`own_program`) the daemon already holds: for the team's `production.connector`, the first active DevOps Engineer whose `mcp_servers` has it as a `source: kit` entry the role's kit `matches_kit` (ADR 0036), else `NotSupported`; the entry kept on this computer and refreshed when signed in, through `signed_in::refreshed_entry` as the launch route does (`daemon.rs:1121`), else `NotConnected { why }` with "Connect <title> again on <agent>'s page" or "Sign in to <title> again on <agent>'s page"; then the adapter for the connector's name from `ADAPTERS`, which this step fills with `vercel` alone. A user's own (`custom`) server of a platform's name is never driven.
 - **The Vercel adapter** (`crates/runtime/src/platforms/vercel.rs`, read 2026-10-05 from vercel.com/docs/agent-resources/vercel-mcp/tools and its category pages, and vercel.com/docs/rest-api/deployments/create-a-new-deployment). `production.service` is `<team id>/<project id or name>`; anything else is `Refused` with "For Vercel, write your team's ID and your project's name, as team_abc/my-app". Its calls:
@@ -45,8 +45,6 @@ The DevOps Engineer ships a kit: six skills, and Vercel, signed in to with nothi
 crates/roles/roles/devops_engineer/skills/<six>/SKILL.md     creates (Task 1)
 crates/roles/roles/devops_engineer/kit.yaml                  modifies: skills (Task 1), vercel (Task 3)
 crates/roles/src/kit.rs                                      modifies: embedded_skills arm; tests (Tasks 1, 3)
-crates/runtime/src/connectors.rs                             modifies: call_tool, ConnectorError::ToolError (Task 2)
-crates/runtime/tests/fixture_mcp.rs                          tests: call_tool against the fixture server (Task 2)
 crates/runtime/src/platforms.rs, platforms/vercel.rs, crates/runtime/src/lib.rs   creates: connected_platforms, ADAPTERS, Vercel (Tasks 4, 5)
 crates/cli/src/start.rs                                      modifies: daemon.set_platforms(connected_platforms(..)) (Task 4)
 crates/runtime/src/daemon/team.rs                            tests: connect by name (Task 6)
@@ -56,14 +54,11 @@ docs/SPEC.md, docs/design/role-kits.md, docs/design/devops-engineer.md, docs/pla
 
 ## Interfaces
 
-Consumes: `load_kit`, `Kit`, `KitConnector`, `embedded_skills`, `check_skill`, `matches_kit` (`farik-roles`, `daemon::team`); `list_tools`, `KEPT_ENV`, `confirmed_entry`, `SecretAt`, `signed_in::refreshed_entry`, `DaemonState::connector_secrets`, `connector_folder` (runtime); `Platform`, `PlatformSource`, `PlatformError`, `Deployment`, `Team::production` (11b).
+Consumes: `call_tool` and `ConnectorError::ToolError` (`connectors`, step 08d), `OWN_CALLS` and `call_as` (`daemon::own_calls`, step 08d); `load_kit`, `Kit`, `KitConnector`, `embedded_skills`, `check_skill`, `matches_kit` (`farik-roles`, `daemon::team`); `list_tools`, `KEPT_ENV`, `confirmed_entry`, `SecretAt`, `signed_in::refreshed_entry`, `DaemonState::connector_secrets`, `connector_folder` (runtime); `Platform`, `PlatformSource`, `PlatformError`, `Deployment`, `Team::production` (11b).
 
 Produces:
 
 ```rust
-pub async fn call_tool(server: &CustomServer, keys: &BTreeMap<String, Secret>, bearer: Option<&Secret>,
-    folder: &Path, farik: &Path, tool: &str, arguments: serde_json::Map<String, Value>) -> Result<Value, ConnectorError>;   // connectors
-// ConnectorError::ToolError { text: String }
 pub struct Connection { pub server: CustomServer, pub keys: BTreeMap<String, Secret>, pub bearer: Option<Secret>,
     pub folder: PathBuf, pub farik: PathBuf }                                                  // farik_runtime::platforms
 pub type Adapter = fn(Connection, &Production) -> Result<Arc<dyn Platform>, PlatformError>;
@@ -81,14 +76,9 @@ pub fn platform(connection: Connection, production: &Production) -> Result<Arc<d
 
 - [ ] `feat(roles): give the DevOps Engineer's kit its skills`
 
-### Task 2: Farik calls a connector's tool
+### Task 2: dropped
 
-- `calls_a_tool_and_reads_its_answer`: against `fixture_mcp.rs`'s server, structured content, JSON text and plain text each come back as decided. RED.
-- `a_tool_error_keeps_its_words_cut`: a 2,000-character error becomes `ToolError` of 500. RED.
-- `a_stdio_server_gets_only_its_keys`: the fixture reads its environment; it holds `KEPT_ENV` and the key, and not `ANTHROPIC_API_KEY` set in the test. RED.
-- `gives_up_after_thirty_seconds` (the limit passed in for the test). RED.
-
-- [ ] `feat(runtime): let Farik call a connector's tool itself`
+Farik calling a connector's tool itself, `connectors::call_tool` and `ConnectorError::ToolError`, with their tests, is step 08d's Task 1 (executed 2026-10-06). The numbers of the tasks after it stay as they are.
 
 ### Task 3: Vercel in the kit
 

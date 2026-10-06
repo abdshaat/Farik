@@ -20,6 +20,7 @@ The founder's decision of 2026-10-05 (ADR 0041): "the user can configure whether
   - **A connector's `external_effect` call** (`hooks.rs`): with no grant and no allowance left to count, under `auto` it is allowed, not `approval_needed`, and its `tool.called` carries `approved_by: "auto"` (otherwise `"grant"`, `"allowance"` or absent). The Designer's plan gate (`design_plan_not_approved`) still refuses first.
   - **An allowance** (step 05b): under `auto`, a call within it runs as now; the first call beyond it is denied `allowance_reached` with "<used> of <of> <what> used; raise it to let the team do more", and no approval is asked. Under `ask` nothing changes.
   - **A seller message** (step 10f): under `auto`, `farik_draft_seller_message` sends at once after its checks, through the same send path, `seller_message.sent` carrying `sent_by: "auto"`; the 50-a-day cap refuses the rest (`seller_send_limit`), leaving them as drafts on Today.
+  - **A post outside the plan** (step 08d): under `auto`, a post the Marketing Specialist writes with no slot is not left waiting for the owner as `social_post.requested`: Farik records `social_post.scheduled { approved_by: auto }` at once, in the place of the owner's allowance (`approved_by` is `plan` or `owner` until this step, and gains `auto` in `event.schema.json` and every exhaustive match), and `hand_over_posts` hands it over an hour before its time, or at once, as for any scheduled post, with the owner's Stop still there. A request whose time is within five minutes is still `missed { why: undecided }`, since nobody decided it. `auto_acts.list` gives such a post the kind `post` with its text, channel, time and pictures.
   - **An escalated data pipeline** (step 10e): under `auto`, `data_pipeline.escalated` is followed at once by `data_pipeline.approved { by: "auto" }`, which files the request as a human approval does.
 - **What `auto` never changes:** a purchase order waits for the founder (ADR 0039, O1); the human's gates on contracts, epics and acceptance (spec 5.4, 5.16) and `human_accepts_contracts`; spending limits and session limits; `denied` tools; the Product Manager's own decision on a pipeline (auto only answers what reaches the owner); the DevOps Engineer's rules of spec 6.9.
 - **"Done on its own"** on Today: the query `auto_acts.list { since? }` answers the outward acts recorded with `approved_by`, `sent_by` or `by` `auto` since `since` (default: the last 7 days), newest first, each `{ at, agent, kind, what, input }` (a connector call's tool and its whole input, a message's seller, subject and body, a pipeline's name), the input as untrusted text. The page keeps the time of the newest act seen in local storage, and shows the count since then.
@@ -33,7 +34,7 @@ docs/schemas/team.schema.json, event.schema.json, rpc.schema.json   modifies (Ta
 crates/core/src/team.rs                                         modifies: Team::acts_on_its_own (Task 1)
 crates/core/src/governor/permissions.rs                         modifies: the auto path of an external_effect call (Task 2)
 crates/runtime/src/daemon/hooks.rs, crates/runtime/src/allowances.rs   modifies (Tasks 2, 3)
-crates/runtime/src/tools/seller.rs, crates/runtime/src/orchestrator/pipeline.rs   modifies (Task 4)
+crates/runtime/src/tools/seller.rs, crates/runtime/src/tools/posts.rs, crates/runtime/src/orchestrator/pipeline.rs   modifies (Task 4)
 crates/runtime/src/daemon/team.rs, daemon/gates.rs              modifies: approval_mode.changed, auto_acts.list (Tasks 1, 5)
 crates/cli/src/lib.rs, crates/cli/src/team.rs                   modifies: `RulesCommands::Approvals`, beside `RulesCommands::Show` (Task 6)
 apps/web/src/pages/TeamRules.tsx, Today.tsx, dialogs/AutoMode.tsx (+tests)   modifies/creates (Task 7)
@@ -88,6 +89,7 @@ The team rules' "Approvals" card, the turn-on dialog, and Today's "Done on its o
 
 - `a_drafted_message_is_sent_on_auto`: the fixture's SMTP receives it, `sent_by: auto`; the 51st of a day stays a draft. RED.
 - `an_escalated_pipeline_is_approved_on_auto`: `approved { by: auto }` follows the escalation and a request is filed. RED.
+- `a_post_outside_the_plan_is_scheduled_on_auto`: `farik_schedule_post` with no slot records `social_post.scheduled { approved_by: auto }` and no `requested`, and the next tick within the hour hands it over; under `ask` it is still `requested`. RED.
 - `a_purchase_order_still_waits_on_auto`: `purchase_order.drafted` is followed by nothing until the founder decides. RED.
 
 - [ ] `feat(runtime): send and approve on auto within the limits`
