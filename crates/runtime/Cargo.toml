@@ -15,6 +15,7 @@ e2e = []
 [dependencies]
 axum.workspace = true
 base64.workspace = true
+calamine.workspace = true
 chrono.workspace = true
 farik-core.workspace = true
 farik-protocol.workspace = true
@@ -25,6 +26,7 @@ keyring.workspace = true
 reqwest.workspace = true
 rmcp.workspace = true
 rust-embed.workspace = true
+rust_xlsxwriter.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

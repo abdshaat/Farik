@@ -102,6 +102,17 @@ pub fn changes_code(role: Role) -> bool {
     matches!(role, Role::SoftwareDeveloper | Role::UiUxDesigner)
 }
 
+/// The folder, under the project root, that only one role's sessions work in (`docs/SPEC.md` 6.6,
+/// D5): the Finance Specialist's books, `.farik/local/finance`. It lies under `.farik/local/`,
+/// which Farik keeps out of git, so it is never committed. No other role has one.
+#[must_use]
+pub fn private_folder(role: Role) -> Option<&'static str> {
+    match role {
+        Role::FinanceSpecialist => Some(".farik/local/finance"),
+        _ => None,
+    }
+}
+
 /// Checks a value against `docs/schemas/team.schema.json` and, when it conforms, returns the typed
 /// team.
 ///
@@ -1155,7 +1166,7 @@ mod tests {
         AgentStatus, HumanAcceptsContracts, Integration, JudgeChoice, JudgmentPolicy,
         JudgmentRequired, PermissionTier, PermissionTierWire, Preview, Role, RoleWire,
         SMALL_ENOUGH_QUESTION, Team, TeamPermissions, TeamPolicy, changes_code, defaults,
-        plain_role, validate_team,
+        plain_role, private_folder, validate_team,
     };
     use super::{CustomServer, CustomTransport, canonical_json, custom_server, spec_sha256};
     use crate::governor::permissions::ConnectorTag;
@@ -2113,6 +2124,25 @@ mod tests {
     #[test]
     fn finance_does_not_change_code() {
         assert!(!changes_code(Role::FinanceSpecialist));
+    }
+
+    #[test]
+    fn only_the_finance_specialist_has_a_folder() {
+        assert_eq!(
+            private_folder(Role::FinanceSpecialist),
+            Some(".farik/local/finance")
+        );
+        for role in [
+            Role::ProductManager,
+            Role::ScrumMaster,
+            Role::Architect,
+            Role::SoftwareDeveloper,
+            Role::MarketingSpecialist,
+            Role::UiUxDesigner,
+            Role::Human,
+        ] {
+            assert_eq!(private_folder(role), None, "{role}");
+        }
     }
 
     #[test]
