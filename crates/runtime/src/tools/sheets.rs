@@ -858,7 +858,7 @@ pub(super) fn read_sheet(call: &Call<'_>, input: &ReadSheetInput) -> Result<Valu
 mod tests {
     use std::fs;
     use std::io::BufReader;
-    use std::os::unix::fs::{PermissionsExt as _, symlink};
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _, symlink};
     use std::path::{Path, PathBuf};
 
     use calamine::{Data, DataType as _, Reader, Xlsx, open_workbook};
@@ -1186,12 +1186,19 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn keeps_the_previous_version() {
         let project = a_finance_project("sheets-history");
+        let target = folder(&project).join("books.xlsx");
         let first = write(&project, &one_sheet("books.xlsx", &json!([["one", 1]])))
             .expect("the first write");
         assert_eq!(first["replaced"], false);
+        let first_file = fs::metadata(&target).expect("the first file").ino();
         let second = write(&project, &one_sheet("books.xlsx", &json!([["two", 2]])))
             .expect("the second write");
         assert_eq!(second["replaced"], true);
+        assert_ne!(
+            fs::metadata(&target).expect("the second file").ino(),
+            first_file,
+            "the new file is written beside the target and renamed over it, not written in place"
+        );
 
         // The fixed clock is 2026-09-22 12:00:00 UTC.
         let history = folder(&project).join(".history");
