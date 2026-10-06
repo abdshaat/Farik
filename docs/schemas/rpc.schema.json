@@ -3172,7 +3172,7 @@
       }
     },
     "marketingPlanGetResult": {
-      "description": "One marketing plan whole (docs/SPEC.md 6.5; ADR 0042): what was proposed, its state as in marketing_plan.list, the owner's decision with their words (note for an approval, empty when they added nothing; reason for a plan sent back) and when, or null while it waits, and its end with why and when, or null. text is the plan's text, to be shown as text and never rendered as markup. Refused not_found for a plan nobody proposed.",
+      "description": "One marketing plan whole (docs/SPEC.md 6.5; ADR 0042): what was proposed, its state as in marketing_plan.list, the owner's decision with their words (note for an approval, empty when they added nothing; reason for a plan sent back) and when, or null while it waits, and its end with why and when, the owner's note when they ended it with one and the plan that replaced it when a newer plan did, or null. text is the plan's text, to be shown as text and never rendered as markup. Refused not_found for a plan nobody proposed.",
       "type": "object",
       "additionalProperties": false,
       "required": ["plan", "title", "summary", "text", "state", "starts_on", "ends_on", "currency", "budget", "campaigns", "posts", "measures", "google_ads_account", "replaces", "agent_id", "task_id", "proposed_at", "decided", "ended"],
@@ -3256,6 +3256,8 @@
               "required": ["why", "at"],
               "properties": {
                 "why": { "type": "string", "enum": ["replaced", "by_owner", "expired"] },
+                "note": { "type": "string", "description": "What the owner said when they ended the plan, as they wrote it; left out when they said nothing." },
+                "replaced_by": { "type": "string", "pattern": "^MP-[0-9]{1,6}$", "description": "The plan that took its place, when why is replaced." },
                 "at": { "type": "string", "format": "date-time" }
               }
             }

@@ -253,7 +253,7 @@ pub fn list_row(plan: &MarketingPlan, state: PlanState) -> Value {
 }
 
 /// One marketing plan whole, as `marketing_plan.get` words it: the proposal, its state, the owner's
-/// decision with their words, and its end.
+/// decision with their words, and its end with the owner's note and the plan that replaced it.
 #[must_use]
 pub fn whole(plan: &MarketingPlan, state: PlanState) -> Value {
     let proposal = &plan.proposal;
@@ -270,11 +270,17 @@ pub fn whole(plan: &MarketingPlan, state: PlanState) -> Value {
         }
         decision
     });
-    let ended = plan
-        .record
-        .ended
-        .zip(plan.ended_at)
-        .map(|(why, at)| json!({ "why": why.as_str(), "at": time(&at) }));
+    let ended = plan.record.ended.zip(plan.ended_at).map(|(why, at)| {
+        let mut end = json!({ "why": why.as_str(), "at": time(&at) });
+        // The owner's words, and the plan that took over, when the end has them.
+        if let Some(note) = &plan.end_note {
+            end["note"] = json!(note);
+        }
+        if let Some(newer) = &plan.replaced_by {
+            end["replaced_by"] = json!(newer);
+        }
+        end
+    });
     json!({
         "plan": plan.record.id,
         "title": proposal.title,

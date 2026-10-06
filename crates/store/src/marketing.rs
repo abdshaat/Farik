@@ -30,6 +30,10 @@ pub struct MarketingPlan {
     pub decided: Option<(bool, Option<String>, DateTime<Utc>)>,
     /// When it ended, when it did.
     pub ended_at: Option<DateTime<Utc>>,
+    /// What the owner said when they ended it, when they said anything: as they wrote it.
+    pub end_note: Option<String>,
+    /// The plan that took its place, when a newer plan did.
+    pub replaced_by: Option<String>,
 }
 
 /// Where a plan stands (ADR 0042).
@@ -139,6 +143,11 @@ pub fn marketing_plans(log: &EventLog) -> Result<Vec<MarketingPlan>, StoreError>
                         MarketingPlanEndedBodyWhy::Expired => EndReason::Expired,
                     });
                     plan.ended_at = Some(at);
+                    plan.end_note = body.note.clone().filter(|note| !note.trim().is_empty());
+                    plan.replaced_by = body
+                        .replaced_by
+                        .as_ref()
+                        .map(|newer| newer.as_str().to_string());
                 }
             }
             _ => {}
@@ -229,6 +238,8 @@ fn proposed(
         proposed_at: event.envelope.recorded_at,
         decided: None,
         ended_at: None,
+        end_note: None,
+        replaced_by: None,
     })
 }
 
@@ -314,7 +325,9 @@ mod tests {
             json!({ "note": "" }),
         );
         append(&log, EventKind::MarketingPlanEnded, 15, |wire| {
-            wire["body"] = json!({ "plan": "MP-3", "why": "by_owner" });
+            wire["body"] = json!({
+                "plan": "MP-3", "why": "by_owner", "note": "We close early for the refit."
+            });
         });
         proposed(&log, "MP-4", 16);
 
@@ -364,6 +377,14 @@ mod tests {
         assert_eq!(third.decided, Some((true, None, at(14))), "no note, none");
         assert_eq!(third.record.ended, Some(EndReason::ByOwner));
         assert_eq!(third.ended_at, Some(at(15)));
+        assert_eq!(
+            third.end_note.as_deref(),
+            Some("We close early for the refit."),
+            "the owner's words when they ended it"
+        );
+        assert_eq!(third.replaced_by, None);
+        assert_eq!(first.end_note, None);
+        assert_eq!(first.replaced_by, None);
 
         let waiting = &plans[3];
         assert_eq!(waiting.decided, None);
@@ -477,18 +498,22 @@ mod tests {
             json!({ "note": "" }),
         );
         append(&log, EventKind::MarketingPlanEnded, 16, |wire| {
-            wire["body"] = json!({ "plan": "MP-2", "why": "expired" });
+            wire["body"] = json!({ "plan": "MP-2", "why": "expired", "note": "An agent's." });
             wire["agent_id"] = json!("kai");
         });
-        assert_eq!(marketing_plans(&log).expect("folds")[1].record.ended, None);
+        let ignored = &marketing_plans(&log).expect("folds")[1];
+        assert_eq!(ignored.record.ended, None);
+        assert_eq!(ignored.end_note, None, "an agent's note is no one's end");
         append(&log, EventKind::MarketingPlanEnded, 17, |wire| {
             wire["body"] = json!({ "plan": "MP-2", "why": "replaced", "replaced_by": "MP-3" });
         });
         append(&log, EventKind::MarketingPlanEnded, 18, |wire| {
-            wire["body"] = json!({ "plan": "MP-2", "why": "by_owner" });
+            wire["body"] = json!({ "plan": "MP-2", "why": "by_owner", "note": "Too late." });
         });
         let second = &marketing_plans(&log).expect("folds")[1];
         assert_eq!(second.record.ended, Some(EndReason::Replaced));
         assert_eq!(second.ended_at, Some(at(17)));
+        assert_eq!(second.replaced_by.as_deref(), Some("MP-3"));
+        assert_eq!(second.end_note, None, "the second end's note is not kept");
     }
 }

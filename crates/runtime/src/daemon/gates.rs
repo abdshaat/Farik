@@ -858,14 +858,25 @@ pub(super) mod tests {
         project.record(
             "",
             "marketing_plan.ended",
-            &json!({ "plan": "MP-4", "why": "by_owner" }),
+            &json!({ "plan": "MP-4", "why": "by_owner", "note": "We close early." }),
         );
         project.plan_proposed("FRK-1", "MP-5", "2026-12-01", "2026-12-31");
         project.plan_approved("FRK-1", "MP-5", "");
+        project.plan_proposed("FRK-1", "MP-6", "2026-12-10", "2026-12-20");
+        project.plan_approved("FRK-1", "MP-6", "");
+        project.record(
+            "",
+            "marketing_plan.ended",
+            &json!({ "plan": "MP-6", "why": "replaced", "replaced_by": "MP-5" }),
+        );
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one plan in every state, listed and then got, each answer read whole"
+    )]
     fn lists_and_gets_plans() {
         let harness = Harness::new(
             "gates-plans",
@@ -894,6 +905,7 @@ pub(super) mod tests {
         assert_eq!(
             seen,
             [
+                ("MP-6", "ended"),
                 ("MP-5", "approved"),
                 ("MP-4", "ended"),
                 ("MP-3", "returned"),
@@ -903,7 +915,7 @@ pub(super) mod tests {
             "newest first"
         );
         assert_eq!(
-            rows[4],
+            rows[5],
             json!({
                 "plan": "MP-1", "title": "Spring launch", "state": "active",
                 "starts_on": "2026-09-20", "ends_on": "2026-10-10", "currency": "USD",
@@ -947,6 +959,18 @@ pub(super) mod tests {
         assert!(sent_back["decided"].get("note").is_none(), "{sent_back}");
         let ended = get("MP-4");
         assert_eq!(ended["ended"]["why"], "by_owner");
+        assert_eq!(
+            ended["ended"]["note"], "We close early.",
+            "the owner's words when they ended it"
+        );
+        assert!(ended["ended"].get("replaced_by").is_none(), "{ended}");
+        let replaced = get("MP-6");
+        assert_eq!(replaced["ended"]["why"], "replaced");
+        assert_eq!(
+            replaced["ended"]["replaced_by"], "MP-5",
+            "the newer plan, named"
+        );
+        assert!(replaced["ended"].get("note").is_none(), "{replaced}");
         assert_eq!(ended["decided"]["decision"], "approved");
         assert!(
             ended["decided"].get("note").is_none(),
