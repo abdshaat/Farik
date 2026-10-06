@@ -1594,6 +1594,34 @@ async fn signs_in_with_pkce_and_the_secret() {
     );
 }
 
+/// A guard against a fixed `state` and a fixed verifier: a `state` that repeats lets a callback made
+/// for one sign-in answer another, and a verifier that repeats proves nothing about who started the
+/// exchange. Each sign-in draws both again.
+#[tokio::test]
+async fn each_sign_in_has_its_own_state_and_challenge() {
+    let fixture = google_fixture().await;
+    let table = google_table(&fixture);
+    let mut seen = Vec::new();
+    for _ in 0..2 {
+        let sign_in = start_app_sign_in(&table[0], &[], Utc::now())
+            .await
+            .expect("the sign-in starts");
+        let address = reqwest::Url::parse(sign_in.authorize_url()).expect("an address");
+        let query: BTreeMap<String, String> = address.query_pairs().into_owned().collect();
+        seen.push((
+            query["state"].clone(),
+            query["code_challenge"].clone(),
+            // Kept, so that the second sign-in starts while the first still listens.
+            sign_in,
+        ));
+    }
+    assert_ne!(seen[0].0, seen[1].0, "the two sign-ins share a state");
+    assert_ne!(
+        seen[0].1, seen[1].1,
+        "the two sign-ins share a verifier: their challenges are the same"
+    );
+}
+
 #[tokio::test]
 async fn requires_iss() {
     for iss in [Iss::Absent, Iss::Other("https://evil.example".to_string())] {
