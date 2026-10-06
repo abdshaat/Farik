@@ -14,7 +14,7 @@ use farik_core::governor::gates::Rejection;
 use farik_core::governor::team_rules::is_ui_change;
 use farik_core::governor::transition::{TransitionContext, TransitionRequest};
 use farik_core::governor::transition_table::TransitionActor;
-use farik_core::team::{Agent, Team};
+use farik_core::team::{Agent, Team, task_private_folder};
 use farik_protocol::event::{
     CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody, EventIds, FarikEvent,
     NoteWrittenBodyKind, ReviewRecordedBody, new_event,
@@ -26,7 +26,7 @@ use super::messages::{ReviewBrief, accept_message, design_review_message, review
 use super::requests;
 use super::rules::{Waiting, acted, active, asleep, spent};
 use super::session::{SessionAsk, run_session};
-use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
+use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, session_dir, worktree};
 use crate::criteria::{CriterionError, CriterionOutcome, NewTestsInput, run_criteria};
 use crate::exec::ExecError;
 use crate::preview::designer_browser;
@@ -403,7 +403,7 @@ fn reject_as_designer(
     })
 }
 
-/// The reviewer's `verify` session, in the task's worktree with the read tier's built-ins and no
+/// The reviewer's `verify` session, in the task's worktree (or its private folder) with the read tier's built-ins and no
 /// executor, told what Farik found and, when `unanswered` names any, which criteria it still has
 /// to answer; then `review.recorded` when the review is complete.
 async fn review(
@@ -425,8 +425,13 @@ async fn review(
     let history = history(deps, &row.task_id)?;
     let since = since_verifying(&history);
     let context = context(deps, team, &row.task_id)?;
-    let git = &deps.tools.git;
-    let diff = git.diff(&integration_branch(team, git)?, &task_branch(&contract))?;
+    // A task in a private folder has no branch to diff (6.6).
+    let diff = if task_private_folder(&contract).is_some() {
+        String::new()
+    } else {
+        let git = &deps.tools.git;
+        git.diff(&integration_branch(team, git)?, &task_branch(&contract))?
+    };
     let initial_prompt = review_message(&ReviewBrief {
         contract: &contract,
         results: &governor_results(&history, since),
@@ -440,7 +445,7 @@ async fn review(
         read_only(
             &contract,
             reviewer,
-            worktree(deps, &row.task_id),
+            session_dir(deps, &contract)?,
             initial_prompt,
         ),
     )
@@ -567,7 +572,7 @@ async fn accept(
         read_only(
             &contract,
             product_manager,
-            worktree(deps, &row.task_id),
+            session_dir(deps, &contract)?,
             initial_prompt,
         ),
     )

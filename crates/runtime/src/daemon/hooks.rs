@@ -1499,6 +1499,72 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_session_in_a_private_folder_reaches_nothing_outside_it() {
+        // A finance task's session works in `.farik/local/finance`, with that folder as its
+        // working directory (6.6): the hook judges every path against it, so the folder is all
+        // it reaches, and no exception to the protected `.farik/local/**` is needed. The hook
+        // reads no role, so `dev-a` stands in for the Finance Specialist's session.
+        use crate::daemon::SessionRegistration;
+
+        let daemon = TestDaemon::new("hook-private-folder", |_| {});
+        let root = daemon.project.repo.path.clone();
+        let folder = root.join(".farik/local/finance");
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+        std::fs::write(root.join(".farik/local/settings.json"), "{}").expect("written");
+        std::fs::write(daemon.worktree.join("x"), "another task's").expect("written");
+        daemon.state.register_session(SessionRegistration {
+            session_id: "session-folder".to_string(),
+            agent_id: "dev-a".to_string(),
+            task_id: None,
+            purpose: crate::session::SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            skills: Vec::new(),
+            skills_root: None,
+            cwd: folder.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
+            connectors: Vec::new(),
+            preview: None,
+        });
+        let hook = |tool: &str, input: Value| {
+            decide_pre_tool_use(&daemon.call("session-folder", tool, &input), &daemon.state)
+        };
+        // What is in the folder is reachable, by a path relative to it or an absolute one.
+        for file in [
+            "books.xlsx",
+            &folder.join("books.xlsx").display().to_string(),
+        ] {
+            let allowed = hook("Read", json!({ "file_path": file }));
+            assert!(allowed.allow, "{file}: {allowed:?}");
+        }
+        let allowed = hook("LS", json!({ "path": "." }));
+        assert!(allowed.allow, "{allowed:?}");
+        // Another task's worktree, the project's database, and the files above the folder are not.
+        for file in [
+            "../worktrees/FRK-1/x".to_string(),
+            daemon.worktree.join("x").display().to_string(),
+            root.join(".farik/local/farik.db").display().to_string(),
+            "../../settings.json".to_string(),
+            root.join("README.md").display().to_string(),
+            "../finance/../../farik.db".to_string(),
+        ] {
+            denied_for(
+                &hook("Read", json!({ "file_path": file })),
+                "path_outside_workspace",
+            );
+        }
+        denied_for(
+            &hook("Glob", json!({ "pattern": "../worktrees/**" })),
+            "path_outside_workspace",
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_reach_the_skill_folder_and_writes_do_not() {
         let daemon = TestDaemon::new("hook-skill-reads", |_| {});
         let root = daemon.project.repo.path.clone();

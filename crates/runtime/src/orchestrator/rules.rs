@@ -33,7 +33,8 @@ use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
 use super::{
-    Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope, worktree,
+    Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope,
+    session_dir, worktree,
 };
 use crate::ceremonies::{
     budgets_spent_since_planning, ended_sprint, open_escalations, sprint_events, standup_moves,
@@ -1156,7 +1157,8 @@ pub(super) fn asleep(
 }
 
 /// Rule 6: a task `in_progress` gets its assignee's implement session, in its worktree, with its
-/// sandbox, told where an earlier session left the work. A task whose assignee is not active is
+/// sandbox, told where an earlier session left the work; a task in a private folder (6.6) gets it
+/// in the folder, with no sandbox. A task whose assignee is not active is
 /// passed over: every tool call of its session would be refused.
 async fn in_progress(
     orchestrator: &Orchestrator,
@@ -1187,10 +1189,15 @@ async fn in_progress(
     {
         return Ok(None);
     }
-    let sandbox = orchestrator.sandbox_for(&row.task_id, team)?;
+    // A task in a private folder (6.6) has no worktree to give a sandbox, and no command to run.
+    let executor: Option<Arc<dyn Executor>> = if task_private_folder(&contract).is_some() {
+        None
+    } else {
+        Some(orchestrator.sandbox_for(&row.task_id, team)?)
+    };
+    let cwd = session_dir(deps, &contract)?;
     let resume = resume(deps, team, &contract, assignee)?;
     let message = implement_message(&contract, &resume);
-    let executor: Arc<dyn Executor> = sandbox;
     let end = run_session(
         deps,
         team,
@@ -1198,8 +1205,8 @@ async fn in_progress(
             agent: assignee,
             contract: Some(&contract),
             purpose: SessionPurpose::Implement,
-            cwd: worktree(deps, &row.task_id),
-            executor: Some(executor),
+            cwd,
+            executor,
             read_only: false,
             only_tool: None,
             tools: None,
@@ -1960,6 +1967,89 @@ mod tests {
             .expect("the tick runs");
         assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
         assert_eq!(adapter.started().len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_finance_session_runs_in_its_folder() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        // FRK-2 is in review; FRK-1 is in progress. The folder is not made yet.
+        let harness = a_finance_harness("orch-folder-sessions");
+        let folder = harness.project.repo.path.join(".farik/local/finance");
+        harness.file("FRK-2", "ready", |wire| {
+            wire["assignee_role"] = json!("finance_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "Every number names its source.",
+                "satisfies": ["R1"],
+                "verification": { "method": "review", "rubric": ["Does every number name its source?"] }
+            }]);
+        });
+        let people = json!({ "assignee": "fin", "reviewer": "pm" });
+        for (from, to) in [
+            ("ready", "assigned"),
+            ("assigned", "in_progress"),
+            ("in_progress", "verifying"),
+        ] {
+            harness.project.moved("FRK-2", from, to, &people);
+        }
+        assert!(!folder.exists());
+        let recorded = harness.recorded(vec![review_writes_note(), accept_frk_1(), reads_a_file()]);
+        let witness = Arc::new(ExecutorWitness::new(
+            recorded.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+
+        // The review: the reviewer's session works in the folder, as the assignee's does.
+        orchestrator.tick().await.expect("the review runs");
+        assert_eq!(
+            folder
+                .metadata()
+                .map(|metadata| metadata.permissions().mode() & 0o777)
+                .ok(),
+            Some(0o700),
+            "the folder is made for its owner alone"
+        );
+        // The Product Manager's acceptance, once the reviewer has answered its one criterion.
+        harness.project.record_by(
+            Some("pm"),
+            at(),
+            "FRK-2",
+            "criterion.recorded",
+            &json!({ "criterion_id": "C1", "passed": true, "evidence": "Each number has its source.",
+                     "run_by": "reviewer", "recorded_by": "pm" }),
+        );
+        orchestrator.tick().await.expect("the acceptance runs");
+        // The implement session of another task, with no sandbox made for it.
+        harness
+            .project
+            .moved("FRK-2", "verifying", "cancelled", &people);
+        a_finance_task(&harness, "FRK-1", Some("in_progress"));
+        orchestrator
+            .tick()
+            .await
+            .expect("the implement session runs");
+
+        let started = recorded.started();
+        assert_eq!(
+            started
+                .iter()
+                .map(|spec| (spec.agent_id.as_str(), spec.purpose, spec.cwd.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("pm", SessionPurpose::Verify, folder.clone()),
+                ("pm", SessionPurpose::Verify, folder.clone()),
+                ("fin", SessionPurpose::Implement, folder.clone()),
+            ]
+        );
+        assert_eq!(witness.had_executor(), vec![false, false, false]);
+        assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
+        assert!(!harness.worktree("FRK-1").exists());
+        assert!(!harness.worktree("FRK-2").exists());
     }
 
     #[tokio::test]

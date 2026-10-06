@@ -20,8 +20,12 @@ fn failed(error: &io::Error, path: &Path) -> StoreError {
     }
 }
 
-/// A directory made for its owner alone, with its parents.
-fn private_directory(path: &Path) -> Result<(), StoreError> {
+/// A directory made for its owner alone, with its parents, when it is not there.
+///
+/// # Errors
+///
+/// `Io` when the directory cannot be made.
+pub fn make_private_directory(path: &Path) -> Result<(), StoreError> {
     DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -59,8 +63,8 @@ pub fn copy_baseline(folder: &Path, task: &TaskId) -> Result<bool, StoreError> {
     if copy.exists() {
         return Ok(false);
     }
-    private_directory(folder)?;
-    private_directory(&copy)?;
+    make_private_directory(folder)?;
+    make_private_directory(&copy)?;
     if let Err(error) = copy_directory(folder, &copy, true) {
         let _ = fs::remove_dir_all(&copy);
         return Err(error);
@@ -80,7 +84,7 @@ fn copy_directory(from: &Path, to: &Path, at_the_top: bool) -> Result<(), StoreE
         let kind = entry.file_type().map_err(|error| failed(&error, &path))?;
         let target = to.join(&name);
         if kind.is_dir() {
-            private_directory(&target)?;
+            make_private_directory(&target)?;
             copy_directory(&path, &target, false)?;
         } else if kind.is_file() {
             fs::copy(&path, &target).map_err(|error| failed(&error, &path))?;

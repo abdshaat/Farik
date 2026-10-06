@@ -9,12 +9,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use chrono::{DateTime, Utc};
-use farik_core::contract::TaskId;
+use farik_core::contract::{TaskContract, TaskId};
 use farik_core::governor::permissions::PermissionTier;
-use farik_core::team::Team;
+use farik_core::team::{Team, task_private_folder};
 use farik_protocol::clock::IdSource;
 use farik_protocol::command::{Command, CommandReply, ReplyKind};
 use farik_roles::{KitError, RoleError};
+use farik_store::baseline::make_private_directory;
 use farik_store::files::FilesError;
 use farik_store::{GitError, StoreError};
 
@@ -721,6 +722,25 @@ fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
         .root()
         .join(".farik/local/worktrees")
         .join(task_id.as_str())
+}
+
+/// Where a task's sessions work: its private folder, `.farik/local/finance` for a Finance
+/// Specialist's task, made for its owner alone when it is not there (6.6); any other task's
+/// worktree (5.14). A session in a folder has no worktree, no branch and no sandbox.
+///
+/// # Errors
+///
+/// When the folder cannot be made.
+fn session_dir(
+    deps: &OrchestratorDeps,
+    contract: &TaskContract,
+) -> Result<PathBuf, OrchestratorError> {
+    let Some(folder) = task_private_folder(contract) else {
+        return Ok(worktree(deps, &contract.id));
+    };
+    let folder = deps.tools.files.root().join(folder);
+    make_private_directory(&folder)?;
+    Ok(folder)
 }
 
 #[cfg(test)]

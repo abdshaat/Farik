@@ -6,7 +6,7 @@ use farik_core::branch::task_branch;
 use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus, Verification};
 use farik_core::governor::done::CriterionResult;
 use farik_core::marketing::network_name;
-use farik_core::team::Agent;
+use farik_core::team::{Agent, task_private_folder};
 use farik_protocol::event::{
     BlockerWire, BudgetExhaustedBodyScope, EventBody, FarikEvent, HumanAcceptedBodySubject,
     NoteWrittenBodyKind,
@@ -667,10 +667,17 @@ pub(super) fn mention_message(agent: &Agent, pending: &[FarikEvent], summary: &s
 /// the note as untrusted text, since an agent wrote both.
 pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> String {
     let task = contract.id.as_str();
-    let mut message = format!(
-        "Do the work of {task} under its contract, in this worktree, on the branch {}.",
-        task_branch(contract)
-    );
+    let mut message = if task_private_folder(contract).is_some() {
+        format!(
+            "Do the work of {task} under its contract, in your private folder, where your books \
+             are; nothing here is committed."
+        )
+    } else {
+        format!(
+            "Do the work of {task} under its contract, in this worktree, on the branch {}.",
+            task_branch(contract)
+        )
+    };
     if let Some((failed, reasons)) = &resume.rejection {
         let words = format!("failed criteria: {}\nreasons: {reasons}", listed(failed));
         message = format!(
@@ -1093,6 +1100,39 @@ mod tests {
         });
         assert!(
             message.contains("The diff from the integration branch to docs/FRK-1: "),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn says_where_a_private_folder_tasks_work_is() {
+        // A task in a private folder has no worktree and no branch to name (6.6).
+        let contract = TaskContract {
+            assignee_role: Role::FinanceSpecialist,
+            ..contract()
+        };
+
+        let message = implement_message(&contract, &resume(false, None));
+
+        assert_eq!(
+            message,
+            "Do the work of FRK-1 under its contract, in your private folder, where your books \
+             are; nothing here is committed."
+        );
+        let rejected = Resume {
+            rejection: Some((
+                vec!["C1".to_string()],
+                "The totals do not add up.".to_string(),
+            )),
+            ..resume(false, None)
+        };
+        let message = implement_message(&contract, &rejected);
+        assert!(
+            message.starts_with("Do the work of FRK-1 under its contract, in your private folder"),
+            "{message}"
+        );
+        assert!(
+            message.contains("The reviewer rejected the last iteration."),
             "{message}"
         );
     }
