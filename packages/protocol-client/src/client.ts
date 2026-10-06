@@ -51,6 +51,7 @@ export type MethodName =
 	| "connector.disconnect"
 	| "connector.sign_in"
 	| "connector.sign_in_status"
+	| "connector.sign_in_cancel"
 	| "social_post.media";
 export type Status = "connecting" | "open" | "closed";
 

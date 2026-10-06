@@ -38,7 +38,7 @@ use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 12] = [
+pub(super) const METHODS: [&str; 13] = [
     "team.save",
     "agent.replace",
     "team.start",
@@ -51,6 +51,7 @@ pub(super) const METHODS: [&str; 12] = [
     "connector.disconnect",
     "connector.sign_in",
     "connector.sign_in_status",
+    "connector.sign_in_cancel",
 ];
 
 /// The marker the setup host leaves in a project it just made one, which "Start the team" removes.
@@ -1762,6 +1763,12 @@ pub(super) async fn call(
         "connector.sign_in_status" => state
             .sign_in_status(params["attempt"].as_str().unwrap_or_default())
             .map_err(|why| Failure::new(REFUSED, why)),
+        "connector.sign_in_cancel" => {
+            state
+                .cancel_sign_in(params["attempt"].as_str().unwrap_or_default())
+                .await;
+            Ok(json!({}))
+        }
         "project.note" => off_the_worker(move || {
             deps.files
                 .append_project_note(
@@ -5291,6 +5298,15 @@ pub(super) mod tests {
             )
         }
 
+        /// The person pressed Cancel: the attempt ends, and whatever it gets is dropped.
+        fn cancel(&self, attempt: &Value) -> Value {
+            self.call(
+                "connector.sign_in_cancel",
+                &json!({ "attempt": attempt }),
+                "emptyResult",
+            )
+        }
+
         /// The user says yes on the service's page, and the status stops waiting.
         fn approve(&self, started: &Value) -> Value {
             let url = started["authorize_url"].as_str().expect("an address");
@@ -5892,6 +5908,88 @@ pub(super) mod tests {
             &json!({ "attempt": first["attempt"] }),
         );
         assert!(message.starts_with("sign_in_unknown:"), "{message}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn cancelling_a_device_attempt_stops_polling() {
+        let signing = Signing::new("connector-sign-in-device-cancel");
+        signing.serving_dev();
+        signing.fixture.set(|flags| flags.device_pending = u32::MAX);
+        let started = signing.sign_in(&signing.server());
+        signing.run_for(1.5);
+        assert!(signing.polls_of("dc-1") >= 1, "the attempt polls");
+        assert_eq!(signing.cancel(&started["attempt"]), json!({}));
+        // What was in flight when it ended has arrived; the service says yes from now on.
+        signing.run_for(0.3);
+        signing.fixture.set(|flags| flags.device_pending = 0);
+        let before = signing.polls_of("dc-1");
+        signing.run_for(2.5);
+        assert_eq!(
+            signing.polls_of("dc-1"),
+            before,
+            "a cancelled attempt is no longer polled"
+        );
+        let (_, message) = signing.refused(
+            "connector.sign_in_status",
+            &json!({ "attempt": started["attempt"] }),
+        );
+        assert!(message.starts_with("sign_in_unknown:"), "{message}");
+        // The yes the service gave after Cancel is never taken: nothing can connect it.
+        let (_, message) = signing.refused(
+            "connector.connect",
+            &json!({
+                "agent": "dev-a", "server": signing.server(), "attempt": started["attempt"],
+                "tags": { "whoami": "network" }
+            }),
+        );
+        assert!(message.starts_with("sign_in_unknown:"), "{message}");
+        assert!(signing.grant().is_none());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn cancelling_a_redirect_attempt_closes_its_callback_and_drops_its_grant() {
+        let signing = Signing::new("connector-sign-in-cancel");
+        let port = |started: &Value| {
+            reqwest::Url::parse(started["authorize_url"].as_str().expect("an address"))
+                .expect("a url")
+                .query_pairs()
+                .find(|(name, _)| name == "redirect_uri")
+                .and_then(|(_, uri)| reqwest::Url::parse(&uri).ok())
+                .and_then(|uri| uri.port())
+                .expect("the redirect's port")
+        };
+        let listening = |port: u16| {
+            signing
+                .runtime
+                .block_on(tokio::net::TcpStream::connect(("127.0.0.1", port)))
+                .is_ok()
+        };
+        // Cancelled while waiting: the way back is closed, so a yes given later reaches nothing.
+        let waiting = signing.sign_in(&signing.server());
+        assert!(listening(port(&waiting)), "the attempt listens");
+        assert_eq!(signing.cancel(&waiting["attempt"]), json!({}));
+        assert!(
+            !listening(port(&waiting)),
+            "a cancelled attempt's callback address is closed"
+        );
+        assert_eq!(signing.fixture.count("/token"), 0);
+        // Cancelled after the yes, before Next: the grant is dropped with the attempt.
+        let attempt = signing.signed_in(&signing.server());
+        assert_eq!(signing.cancel(&attempt), json!({}));
+        let (_, message) = signing.refused(
+            "connector.connect",
+            &json!({
+                "agent": "dev-a", "server": signing.server(), "attempt": attempt,
+                "tags": { "whoami": "network" }
+            }),
+        );
+        assert!(message.starts_with("sign_in_unknown:"), "{message}");
+        assert!(signing.grant().is_none());
+        // Cancelling what is already gone is done, not a refusal.
+        assert_eq!(signing.cancel(&attempt), json!({}));
+        assert_eq!(signing.cancel(&json!("0".repeat(32))), json!({}));
     }
 
     #[test]

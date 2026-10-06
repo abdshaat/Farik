@@ -430,6 +430,18 @@ impl DaemonState {
         })
     }
 
+    /// Ends the attempt `id` because the person cancelled: its task is stopped and waited for, so
+    /// that its listener is closed and a fixed port is free, and the attempt goes with whatever
+    /// it holds, a grant the service gave already included. An attempt that is gone, or was used
+    /// up, is already ended, which is not a refusal.
+    pub(crate) async fn cancel_sign_in(&self, id: &str) {
+        let ended = crate::locked(&self.sign_ins).remove(id);
+        if let Some(attempt) = ended {
+            attempt.task.abort();
+            let _ = attempt.task.await;
+        }
+    }
+
     /// The grant of the finished attempt `id`, which was made for `binding`; the attempt stays.
     /// One bound to another agent or server is ended.
     ///

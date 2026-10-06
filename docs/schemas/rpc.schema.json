@@ -524,6 +524,9 @@
           "$ref": "#/$defs/connectorSignInStatusRequest"
         },
         {
+          "$ref": "#/$defs/connectorSignInCancelRequest"
+        },
+        {
           "$ref": "#/$defs/socialPostMediaRequest"
         }
       ]
@@ -4606,6 +4609,41 @@
         },
         "method": {
           "const": "connector.sign_in_status"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attempt"
+          ],
+          "properties": {
+            "attempt": {
+              "$ref": "#/$defs/signInAttempt"
+            }
+          }
+        }
+      }
+    },
+    "connectorSignInCancelRequest": {
+      "title": "Connector Sign In Cancel Request",
+      "description": "Ends an attempt because the person pressed Cancel (docs/SPEC.md 6.7): its polling or its listener stops, and whatever the service says afterwards, or said already, is dropped, so a sign-in approved after Cancel is never kept. Answers emptyResult, also for an attempt that is already gone or was used up, since there is nothing left to end.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.sign_in_cancel"
         },
         "params": {
           "type": "object",
