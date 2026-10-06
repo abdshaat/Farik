@@ -100,7 +100,7 @@ pub enum CostScope {
     Purpose,
 }
 
-/// Which costs a sum reads: one UTC day's, one sprint's, or all of them.
+/// Which costs a sum reads: one UTC day's, a range of days', one sprint's, or all of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CostWindow {
     /// The costs recorded on this UTC day.
@@ -109,6 +109,8 @@ pub enum CostWindow {
     Sprint(String),
     /// Every cost.
     All,
+    /// The costs recorded from the first UTC day to the second, both included.
+    Between(NaiveDate, NaiveDate),
 }
 
 /// A sprint, as its `sprint.started` and `sprint.ended` left it.
@@ -298,14 +300,21 @@ impl Projections {
             CostScope::Sprint => ("sprint", "sprint"),
             CostScope::Purpose => ("purpose", "purpose"),
         };
-        // The task order holds `?1`, so the window's parameter follows it there.
-        let slot = if scope == CostScope::Task { "?2" } else { "?1" };
-        let (within, bound) = match window {
-            CostWindow::Day(day) => (format!("day = {slot}"), Some(day.to_string())),
-            CostWindow::Sprint(sprint) => (format!("sprint = {slot}"), Some(sprint)),
-            CostWindow::All => ("1".to_string(), None),
+        // The task order holds `?1`, so the window's parameters follow it there.
+        let (slot, next) = if scope == CostScope::Task {
+            ("?2", "?3")
+        } else {
+            ("?1", "?2")
         };
-        let bound = bound.map(rusqlite::types::Value::from);
+        let (within, bound) = match window {
+            CostWindow::Day(day) => (format!("day = {slot}"), vec![day.to_string()]),
+            CostWindow::Sprint(sprint) => (format!("sprint = {slot}"), vec![sprint]),
+            CostWindow::All => ("1".to_string(), Vec::new()),
+            CostWindow::Between(from, to) => (
+                format!("day BETWEEN {slot} AND {next}"),
+                vec![from.to_string(), to.to_string()],
+            ),
+        };
         let connection = self.connection();
         let mut statement = connection.prepare(&format!(
             "SELECT {column}, SUM(cost_usd), SUM(input_tokens), SUM(output_tokens),
@@ -318,7 +327,7 @@ impl Projections {
             CostScope::Task => vec![number_offset().into()],
             _ => Vec::new(),
         };
-        parameters.extend(bound);
+        parameters.extend(bound.into_iter().map(rusqlite::types::Value::from));
         let rows = statement.query_map(rusqlite::params_from_iter(parameters), |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -2780,6 +2789,39 @@ mod tests {
         assert_eq!(
             agents(CostWindow::All),
             projections.costs(CostScope::Agent).expect("the costs read")
+        );
+    }
+
+    #[test]
+    fn between_sums_the_days_inclusive() {
+        use super::CostWindow;
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        for spent in [
+            cost(Some("FRK-1"), "a", "s1", "2026-10-01", (1.0, 1, 1)),
+            cost(Some("FRK-1"), "a", "s2", "2026-10-02", (2.0, 1, 1)),
+            cost(Some("FRK-1"), "a", "s3", "2026-10-04", (4.0, 1, 1)),
+        ] {
+            record(&log, &projections, &spent);
+        }
+        let day = |day| chrono::NaiveDate::from_ymd_opt(2026, 10, day).expect("a real day");
+        let between = || CostWindow::Between(day(2), day(4));
+        // The project scope: the two later days, the first and the last of the range included.
+        assert_eq!(
+            projections
+                .costs_for(CostScope::Day, between())
+                .expect("the costs read"),
+            vec![
+                row(CostScope::Day, "2026-10-02", (2.0, 1, 1, 1)),
+                row(CostScope::Day, "2026-10-04", (4.0, 1, 1, 1)),
+            ]
+        );
+        // The task scope binds the number offset first, so the range's two ends follow it.
+        assert_eq!(
+            projections
+                .costs_for(CostScope::Task, between())
+                .expect("the costs read"),
+            vec![row(CostScope::Task, "FRK-1", (6.0, 2, 2, 2))]
         );
     }
 

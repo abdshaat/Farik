@@ -61,6 +61,14 @@ pub(crate) fn with_the_marketing_specialist(wire: &mut Value) {
         .push(an_agent_wire("kai", "marketing_specialist"));
 }
 
+/// Adds the Finance Specialist `fin` to a team's wire.
+pub(crate) fn with_the_finance_specialist(wire: &mut Value) {
+    wire["agents"]
+        .as_array_mut()
+        .expect("a list of agents")
+        .push(an_agent_wire("fin", "finance_specialist"));
+}
+
 /// The Designer `iris` and the Architect `ada` added, both with the Playwright connector on,
 /// and a preview set.
 pub(crate) fn browsing(wire: &mut Value) {
@@ -418,6 +426,53 @@ impl TestProject {
             "marketing_plan.approved",
             &json!({ "plan": plan, "note": note }),
         )
+    }
+
+    /// A `cost.recorded` of `usd` dollars for `purpose` by `agent` in session `session` on `day`
+    /// (`YYYY-MM-DD`, UTC), with `tokens` input and output, against `task` when one is named.
+    pub(crate) fn spent(
+        &self,
+        agent: &str,
+        task: Option<&str>,
+        session: &str,
+        day: &str,
+        (usd, tokens): (f64, u64),
+    ) -> FarikEvent {
+        let mut wire = json!({
+            "seq": 1,
+            "recorded_at": format!("{day}T10:00:00Z"),
+            "team_id": "farik",
+            "project_id": "farik",
+            "agent_id": agent,
+            "session_id": session,
+            "kind": "cost.recorded",
+            "body": {
+                "purpose": "implement",
+                "model_id": "claude-sonnet-5",
+                "usage": {
+                    "input_tokens": tokens,
+                    "output_tokens": tokens / 10,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0
+                },
+                "cost_usd": usd
+            },
+        });
+        if let Some(task) = task {
+            wire["task_id"] = json!(task);
+        }
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        let appended = self
+            .deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        self.deps.projections.apply(&appended).expect("projects");
+        appended
     }
 
     /// Appends one event about `task` (or none) and projects it, as a command does.

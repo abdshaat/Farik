@@ -68,7 +68,7 @@ pub(super) fn write_sheet(call: &Call<'_>, input: WriteSheetInput) -> Result<Val
 - `reads_costs_by_each_scope`: a project with recorded costs answers `by: agent` with one row per agent and `by: day` with one per day. RED.
 - `refuses_a_bad_range_and_another_role`: `from` without `to`, `from` after `to`, 367 days, and a Product Manager's call, each refused with its code. RED.
 
-- [ ] `feat(runtime): let the Finance Specialist read the team's AI spending`
+- [x] `feat(runtime): let the Finance Specialist read the team's AI spending`
 
 ### Task 2: The folder line and `farik_write_sheet`
 
@@ -118,4 +118,4 @@ Then, by the founder: open a workbook the Finance Specialist wrote in Excel, Num
 
 ## Execution notes
 
-None yet.
+- Task 1. `read_costs` takes `&ReadCostsInput`, not `ReadCostsInput` by value as Interfaces says: clippy's `needless_pass_by_value` (pedantic, `-D warnings`) refuses a by-value input the body only reads. `daemon/mcp.rs` (`lists_every_farik_tool_and_the_permission_tool`) pins the number of tools (32); it went to 33 with this commit. Refusals of the three tools and of `farik_read_costs` share one `Refusal::Finance { code, detail }`, as `Refusal::MarketingPlan` carries its code, so the five codes of this step (`sheet_refused`, `cost_range_invalid`, `formula_refused`, `sheet_too_large`, `private_path_refused`) are one variant and one match arm.

@@ -30,6 +30,7 @@ use crate::transitions::Transitions;
 mod channel;
 mod chat;
 pub(crate) mod contracts;
+mod costs;
 pub(crate) mod design;
 mod exec;
 #[cfg(test)]
@@ -298,6 +299,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "Answer the user in your one-to-one chat, once, then end your turn. When work is needed, add a request, a title and what it asks for, for the user to send.",
         ),
+        tool::<costs::ReadCostsInput>(
+            "farik_read_costs",
+            Read,
+            "Read what the team has spent on AI, summed by task, agent, sprint, day or purpose, optionally between two days.",
+        ),
         tool::<exec::ExecInput>(
             "farik_exec",
             Execute,
@@ -418,6 +424,7 @@ pub async fn call_tool(
         "farik_check_page" => design::check(&call, parse(input)?).await,
         "farik_record_design_review" => design::record_review(&call, parse(input)?),
         "farik_chat_reply" => chat::chat_reply(&call, parse(input)?),
+        "farik_read_costs" => costs::read_costs(&call, &parse(input)?),
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -634,6 +641,7 @@ mod tests {
             "farik_check_page",
             "farik_record_design_review",
             "farik_chat_reply",
+            "farik_read_costs",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -657,7 +665,7 @@ mod tests {
             tier("farik_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..26] {
+        for tool in &tools[..27] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {
