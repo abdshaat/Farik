@@ -8,7 +8,6 @@ use farik_core::team::{CustomServer, CustomTransport, OAuthSettings};
 use crate::claude::Secret;
 use crate::connectors::{ConnectorEntry, ConnectorSecrets, SecretAt, confirmed_entry};
 use crate::credential::CredentialError;
-use crate::registered_apps::REGISTERED_APPS;
 use crate::sign_in::{OAuthGrant, SIGN_IN_WINDOW, SignInError, refreshed, revoke, start_sign_in};
 
 use super::DaemonState;
@@ -217,6 +216,17 @@ pub(crate) struct Attempt {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// What starting a sign-in answers: the attempt, the page the user is sent to, who signs them in, and,
+/// when one of Farik's own apps does, its name, the code the user types, and where it is installed.
+pub(crate) struct Started {
+    pub(crate) attempt: String,
+    pub(crate) authorize_url: String,
+    pub(crate) issuer: String,
+    pub(crate) provider: Option<String>,
+    pub(crate) user_code: Option<String>,
+    pub(crate) install_url: Option<String>,
+}
+
 /// What an attempt is bound to: the agent, and the server's name, address and sign-in settings.
 pub(crate) struct Binding<'a> {
     pub(crate) agent: &'a str,
@@ -320,7 +330,7 @@ impl DaemonState {
         self: &Arc<Self>,
         agent: &str,
         server: &CustomServer,
-    ) -> Result<(String, String, String), String> {
+    ) -> Result<Started, String> {
         let CustomTransport::Http {
             url,
             oauth: Some(oauth),
@@ -337,15 +347,19 @@ impl DaemonState {
         for task in ended {
             let _ = task.await;
         }
-        let sign_in = start_sign_in(url, oauth, REGISTERED_APPS, chrono::Utc::now())
+        let sign_in = start_sign_in(url, oauth, self.registered_apps(), chrono::Utc::now())
             .await
             .map_err(|error| refusal_of(&error))?;
         let id = random_hex()
             .map_err(|_| "sign_in_failed: no random number was available".to_string())?;
-        let (authorize_url, issuer) = (
-            sign_in.authorize_url().to_string(),
-            sign_in.issuer().to_string(),
-        );
+        let answer = Started {
+            attempt: id.clone(),
+            authorize_url: sign_in.authorize_url().to_string(),
+            issuer: sign_in.issuer().to_string(),
+            provider: sign_in.provider().map(ToString::to_string),
+            user_code: sign_in.user_code().map(ToString::to_string),
+            install_url: sign_in.install_url().map(ToString::to_string),
+        };
         let mut map = crate::locked(&self.sign_ins);
         // Inserted with the lock held, so the task's own answer finds it.
         let (state, attempt_id) = (Arc::clone(self), id.clone());
@@ -365,13 +379,13 @@ impl DaemonState {
                 server: server.name.clone(),
                 url: url.clone(),
                 oauth: oauth.clone(),
-                issuer: issuer.clone(),
+                issuer: answer.issuer.clone(),
                 started: tokio::time::Instant::now(),
                 outcome: Outcome::Waiting,
                 task,
             },
         );
-        Ok((id, authorize_url, issuer))
+        Ok(answer)
     }
 
     /// How the attempt `id` is going: `waiting`, `signed_in`, or `failed` with its reason's code

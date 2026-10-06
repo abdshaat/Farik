@@ -156,6 +156,45 @@ describe("mapping", () => {
 		});
 	});
 
+	it("mapping_names_the_new_fields", () => {
+		// A registered app's sign-in (step 03b): what `connector.sign_in` answers and `team.get` rows say.
+		const wire = {
+			attempt: "0123",
+			authorize_url: "https://github.com/login/device",
+			issuer: "https://github.com/login/oauth",
+			provider: "GitHub",
+			user_code: "WDJB-MJHT",
+			install_url: "https://github.com/apps/farik/installations/new",
+		};
+		const camel = {
+			attempt: "0123",
+			authorizeUrl: "https://github.com/login/device",
+			issuer: "https://github.com/login/oauth",
+			provider: "GitHub",
+			userCode: "WDJB-MJHT",
+			installUrl: "https://github.com/apps/farik/installations/new",
+		};
+		expect(toCamel(wire)).toEqual(camel);
+		expect(toSnake(camel)).toEqual(wire);
+		const row = {
+			server: "github",
+			provider: "GitHub",
+			settings_url: "https://github.com/settings/apps/authorizations",
+		};
+		expect(toCamel({ connectors: [row] })).toEqual({
+			connectors: [
+				{
+					server: "github",
+					provider: "GitHub",
+					settingsUrl: "https://github.com/settings/apps/authorizations",
+				},
+			],
+		});
+		expect(toSnake({ connectors: [toCamel(row)] })).toEqual({
+			connectors: [row],
+		});
+	});
+
 	it("mapping_keeps_skill_file_paths", () => {
 		const files = { "SKILL.md": "a", "references/api_notes.md": "b" };
 		expect(toSnake({ body: { files } })).toEqual({ body: { files } });

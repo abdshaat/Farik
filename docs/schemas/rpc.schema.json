@@ -918,6 +918,14 @@
                 "type": "boolean",
                 "description": "For a server signed in to: whether the service has a way to be asked to forget the sign-in when it is removed. Absent for a server with keys."
               },
+              "provider": {
+                "type": "string",
+                "description": "For a server signed in to with one of Farik's own apps: what the app is called (GitHub), which the page names in place of the server's address (step 03b)."
+              },
+              "settings_url": {
+                "type": "string",
+                "description": "For the same: the page at the service where the user removes Farik's app, which Remove's confirmation links to."
+              },
               "stored_in": {
                 "type": "string",
                 "enum": [
@@ -4563,6 +4571,18 @@
         "issuer": {
           "type": "string",
           "description": "Who signs the user in, as the service says. Its host is what the page names; it can differ from the server's, as Stripe's sign-in is at access.stripe.com."
+        },
+        "provider": {
+          "type": "string",
+          "description": "What Farik's own app for the service is called (GitHub), when one signs the user in: the page names it in place of the issuer's host (step 03b)."
+        },
+        "user_code": {
+          "type": "string",
+          "description": "The short code the user types on authorize_url, for an app that signs in with a code (the device flow). The code Farik polls with is never sent."
+        },
+        "install_url": {
+          "type": "string",
+          "description": "Where the user installs Farik's own app on what the agent is to read, when it must be (a private repository on GitHub)."
         }
       }
     },

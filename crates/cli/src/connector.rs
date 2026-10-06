@@ -15,7 +15,7 @@ use farik_runtime::connectors::{
 };
 use farik_runtime::credential::CredentialError;
 use farik_runtime::daemon::{custom_entry, kit_entry, labelled};
-use farik_runtime::registered_apps::REGISTERED_APPS;
+use farik_runtime::registered_apps::RegisteredApp;
 use farik_runtime::sign_in::{SignInError, revoke, start_sign_in};
 use serde_json::{Map, Value, json};
 
@@ -23,6 +23,10 @@ use crate::project::Project;
 use crate::start::{command, runtime};
 use crate::{CliIo, Report};
 
+/// What the user is told beside a code to type, since any program can ask a service for a code in
+/// Farik's name.
+const CODE_WARNING: &str =
+    "Only enter a code that this page shows you. Farik never sends you a code in a chat.";
 /// The labels a tool can be given.
 const TAGS: [&str; 3] = ["network", "external_effect", "denied"];
 
@@ -62,12 +66,20 @@ pub(crate) fn connect(
 ) -> Result<Report, String> {
     // An opener that fails is no error: the address is printed too, and the user can open it.
     let opener = std::sync::Arc::clone(&io.open_url);
-    connect_with(project, asked, io, &move |url| {
-        let _ = opener(url);
-    })
+    let apps = io.registered_apps;
+    connect_with(
+        project,
+        asked,
+        io,
+        &move |url| {
+            let _ = opener(url);
+        },
+        apps,
+    )
 }
 
-/// [`connect`], opening the sign-in page with `open`, which a test passes to follow it.
+/// [`connect`], opening the sign-in page with `open`, which a test passes to follow it, and signing
+/// in with `apps`, the apps Farik has registered with a service.
 ///
 /// # Errors
 ///
@@ -77,9 +89,10 @@ pub(crate) fn connect_with(
     asked: &Asked<'_>,
     io: &mut CliIo<'_>,
     open: &dyn Fn(&str),
+    apps: &[RegisteredApp],
 ) -> Result<Report, String> {
     if asked.command.is_none() && asked.url.is_none() {
-        return connect_kit(project, asked, io, open);
+        return connect_kit(project, asked, io, open, apps);
     }
     if !asked.allowances.is_empty() {
         return Err(
@@ -90,7 +103,7 @@ pub(crate) fn connect_with(
     }
     needs_its_form(asked)?;
     if asked.sign_in {
-        return connect_signed_in(project, asked, io, open);
+        return connect_signed_in(project, asked, io, open, apps);
     }
     let wire = wire_of(asked)?;
     let tags = tags_of(asked.tags)?;
@@ -152,6 +165,7 @@ fn connect_kit(
     asked: &Asked<'_>,
     io: &mut CliIo<'_>,
     open: &dyn Fn(&str),
+    apps: &[RegisteredApp],
 ) -> Result<Report, String> {
     let name = asked.name;
     let given: Vec<&str> = [
@@ -216,7 +230,7 @@ fn connect_kit(
         return keep_sign_in(
             project,
             io,
-            open,
+            &SignInWith { open, apps },
             asked.agent,
             &server,
             &tools_of,
@@ -265,6 +279,12 @@ fn asked_from(given: &[String]) -> Result<BTreeMap<String, u32>, String> {
         );
     }
     farik_runtime::allowances::asked_allowances(&Value::Object(asked))
+}
+
+/// What signing in uses: how a page is opened, and the apps Farik has registered with a service.
+struct SignInWith<'a> {
+    open: &'a dyn Fn(&str),
+    apps: &'a [RegisteredApp],
 }
 
 /// What decides the tools an entry is written with: the labels the user gave, or the kit's.
@@ -361,6 +381,7 @@ fn connect_signed_in(
     asked: &Asked<'_>,
     io: &mut CliIo<'_>,
     open: &dyn Fn(&str),
+    apps: &[RegisteredApp],
 ) -> Result<Report, String> {
     let mut wire = wire_of(asked)?;
     let mut oauth = Map::new();
@@ -380,7 +401,7 @@ fn connect_signed_in(
     keep_sign_in(
         project,
         io,
-        open,
+        &SignInWith { open, apps },
         asked.agent,
         &server,
         &|listed| labelled(listed, &tags),
@@ -393,7 +414,7 @@ fn connect_signed_in(
 fn keep_sign_in(
     project: &Project,
     io: &mut CliIo<'_>,
-    open: &dyn Fn(&str),
+    how: &SignInWith<'_>,
     agent: &str,
     server: &CustomServer,
     tools_of: ToolsOf<'_>,
@@ -414,28 +435,40 @@ fn keep_sign_in(
         .map_err(|error| format!("{}: {}", server.name, folder_refusal(&error)))?;
     let runtime = runtime()?;
     let signing = runtime
-        .block_on(start_sign_in(
-            url,
-            settings,
-            REGISTERED_APPS,
-            chrono::Utc::now(),
-        ))
+        .block_on(start_sign_in(url, settings, how.apps, chrono::Utc::now()))
         .map_err(|error| refused(&error, &host))?;
     // Prompts, not results: on stderr, so that `--json` leaves the output as the JSON alone.
-    crate::say(
-        &mut io.stderr,
-        &format!(
-            "Sign in to {} in your browser: {}",
-            host_of(signing.issuer()),
-            signing.authorize_url()
+    match signing.user_code() {
+        // One of Farik's own apps: the user types a code, which is the one thing to warn about.
+        Some(code) => {
+            crate::say(
+                &mut io.stderr,
+                &format!(
+                    "Open {} and enter the code {code}.",
+                    signing.authorize_url()
+                ),
+            );
+            crate::say(&mut io.stderr, CODE_WARNING);
+        }
+        None => crate::say(
+            &mut io.stderr,
+            &format!(
+                "Sign in to {} in your browser: {}",
+                host_of(signing.issuer()),
+                signing.authorize_url()
+            ),
         ),
-    );
-    open(signing.authorize_url());
+    }
+    (how.open)(signing.authorize_url());
     let issuer = signing.issuer().to_string();
+    let provider = signing.provider().map(ToString::to_string);
     let grant = runtime
         .block_on(signing.finish())
         .map_err(|error| refused(&error, &host))?;
-    crate::say(&mut io.stderr, &format!("Signed in to {issuer}."));
+    crate::say(
+        &mut io.stderr,
+        &format!("Signed in to {}.", provider.as_deref().unwrap_or(&issuer)),
+    );
     let farik = own_program(server, io.own_program.as_deref()).map_err(str::to_string)?;
     let listed = runtime
         .block_on(list_tools(

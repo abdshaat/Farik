@@ -413,6 +413,12 @@ pub(super) fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team
                 row["stored_in"] = json!(stored_in);
                 if let (true, Some(grant)) = (signs_in, signed_in) {
                     row["revokes"] = json!(grant.revokes);
+                    if let Some(provider) = grant.provider {
+                        row["provider"] = json!(provider);
+                    }
+                    if let Some(settings_url) = grant.settings_url {
+                        row["settings_url"] = json!(settings_url);
+                    }
                 }
             }
             row
@@ -886,11 +892,23 @@ async fn connector_sign_in(
     })
     .await?;
     let agent = params["agent"].as_str().unwrap_or_default();
-    let (attempt, authorize_url, issuer) = state
+    let started = state
         .begin_sign_in(agent, &server)
         .await
         .map_err(|why| Failure::new(REFUSED, why))?;
-    Ok(json!({ "attempt": attempt, "authorize_url": authorize_url, "issuer": issuer }))
+    let mut answer = json!({
+        "attempt": started.attempt, "authorize_url": started.authorize_url, "issuer": started.issuer
+    });
+    for (name, value) in [
+        ("provider", started.provider),
+        ("user_code", started.user_code),
+        ("install_url", started.install_url),
+    ] {
+        if let Some(value) = value {
+            answer[name] = json!(value);
+        }
+    }
+    Ok(answer)
 }
 
 /// `connector.connect`: the server's tools listed with its keys, or its sign-in, each usable one
@@ -5218,11 +5236,22 @@ pub(super) mod tests {
 
         fn reply(&self, method: &str, params: &Value) -> Value {
             let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
-            let reply = self.runtime.block_on(crate::daemon::web::answer(
-                &self.harness.daemon,
-                &frame.to_string(),
-                &mut None,
-            ));
+            // A sign-in that waits for a task to end a window long (ten minutes) is a defect, not
+            // a slow test: the answer is due at once.
+            let reply = self
+                .runtime
+                .block_on(async {
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        crate::daemon::web::answer(
+                            &self.harness.daemon,
+                            &frame.to_string(),
+                            &mut None,
+                        ),
+                    )
+                    .await
+                })
+                .expect("the daemon answered within thirty seconds");
             crate::locked(&self.replies).push(reply.to_string());
             reply
         }
@@ -5333,6 +5362,144 @@ pub(super) mod tests {
             json!([{
                 "source": "custom", "agent": "dev-a", "server": "notion", "state": "connected", "auth": "oauth",
                 "revokes": true, "stored_in": "keychain"
+            }])
+        );
+    }
+
+    /// A table of one device app, `Dev`, whose endpoints are `fixture`'s, for the servers at its
+    /// address. Leaked: a table is `'static`, and a test's leak is small.
+    fn dev_apps(
+        fixture: &crate::oauth_fixture::Fixture,
+    ) -> &'static [crate::registered_apps::RegisteredApp] {
+        use crate::registered_apps::{AppFlow, RegisteredApp};
+        fn leaked(text: String) -> &'static str {
+            Box::leak(text.into_boxed_str())
+        }
+        let origin = &fixture.origin;
+        Box::leak(Box::new([RegisteredApp {
+            id: "dev",
+            name: "Dev",
+            host: "127.0.0.1",
+            flow: AppFlow::Device {
+                device_endpoint: leaked(format!("{origin}/device/code")),
+                verification_uri: leaked(format!("{origin}/login/device")),
+            },
+            client_id: "dev-client",
+            issuer: leaked(format!("{origin}/login/oauth")),
+            token_endpoint: leaked(format!("{origin}/token")),
+            revocation_endpoint: None,
+            install_url: Some("https://github.com/apps/dev/installations/new"),
+            settings_url: "https://github.com/settings/apps/authorizations",
+        }]))
+    }
+
+    impl Signing {
+        /// The daemon serves `Dev`, whose endpoints are the fixture's.
+        fn serving_dev(&self) {
+            assert!(
+                self.harness
+                    .daemon
+                    .set_registered_apps(dev_apps(&self.fixture))
+            );
+        }
+
+        /// How many times the fixture saw `device_code` polled.
+        fn polls_of(&self, device_code: &str) -> usize {
+            self.fixture
+                .requests("/token")
+                .iter()
+                .filter(|poll| {
+                    poll.form
+                        .get("device_code")
+                        .is_some_and(|code| code == device_code)
+                })
+                .count()
+        }
+
+        /// Lets the daemon's tasks run for `seconds` of real time.
+        fn run_for(&self, seconds: f64) {
+            self.runtime.block_on(async {
+                tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)).await;
+            });
+        }
+
+        /// The status of a device sign-in, asked until it stops waiting: the service says yes by
+        /// itself, after its interval.
+        fn waited_for(&self, started: &Value) -> Value {
+            for _ in 0..600 {
+                let status = self.status(&started["attempt"]);
+                if status["state"] != "waiting" {
+                    return status;
+                }
+                self.run_for(0.01);
+            }
+            panic!("the sign-in never finished");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn sign_in_answers_the_provider_and_code() {
+        let signing = Signing::new("connector-sign-in-device");
+        signing.serving_dev();
+        let started = signing.sign_in(&signing.server());
+        let origin = &signing.fixture.origin;
+        assert_eq!(started["provider"], "Dev");
+        assert_eq!(started["user_code"], "WDJB-0001");
+        assert_eq!(
+            started["install_url"],
+            "https://github.com/apps/dev/installations/new"
+        );
+        assert_eq!(started["authorize_url"], format!("{origin}/login/device"));
+        assert_eq!(started["issuer"], format!("{origin}/login/oauth"));
+        assert_eq!(signing.status(&started["attempt"])["state"], "waiting");
+        assert_eq!(signing.waited_for(&started)["state"], "signed_in");
+        // The code the user types is for the browser; the one Farik polls with never leaves it.
+        for reply in crate::locked(&signing.replies).iter() {
+            assert!(!reply.contains("dc-1"), "{reply}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_new_device_attempt_ends_the_old() {
+        let signing = Signing::new("connector-sign-in-device-twice");
+        signing.serving_dev();
+        // Never approved, so that only the second attempt's start can end the first.
+        signing.fixture.set(|flags| flags.device_pending = u32::MAX);
+        let first = signing.sign_in(&signing.server());
+        signing.run_for(1.5);
+        assert!(signing.polls_of("dc-1") >= 1, "the first attempt polls");
+        let second = signing.sign_in(&signing.server());
+        assert_ne!(first["attempt"], second["attempt"]);
+        // What was in flight when the first attempt ended has arrived.
+        signing.run_for(0.3);
+        let before = signing.polls_of("dc-1");
+        signing.run_for(2.5);
+        assert_eq!(
+            signing.polls_of("dc-1"),
+            before,
+            "the first device code is no longer polled"
+        );
+        assert!(signing.polls_of("dc-2") >= 2, "the second one is");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_names_the_provider() {
+        let signing = Signing::new("connector-sign-in-device-provider");
+        signing.serving_dev();
+        let started = signing.sign_in(&signing.server());
+        assert_eq!(signing.waited_for(&started)["state"], "signed_in");
+        signing.connect(&started["attempt"]);
+        let grant = signing.grant().expect("a grant is kept");
+        assert_eq!(grant.app.as_deref(), Some("dev"));
+        assert_eq!(
+            states(&signing.harness),
+            json!([{
+                "source": "custom", "agent": "dev-a", "server": "notion", "state": "connected",
+                "auth": "oauth", "revokes": false, "stored_in": "keychain",
+                "provider": "Dev", "settings_url": "https://github.com/settings/apps/authorizations"
             }])
         );
     }

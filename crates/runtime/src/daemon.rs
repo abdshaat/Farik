@@ -175,6 +175,9 @@ pub struct DaemonState {
     connectors_kept: Arc<Mutex<BTreeMap<String, Kept>>>,
     /// The user's state folder, where each stdio connector runs (ADR 0030), once it is set.
     state_dir: OnceLock<std::path::PathBuf>,
+    /// The apps Farik has registered with a service (ADR 0035), once a table is set; until then
+    /// `REGISTERED_APPS`.
+    registered_apps: OnceLock<&'static [crate::registered_apps::RegisteredApp]>,
     /// Farik's own executable, which runs Farik's own connectors (ADR 0038), once it is set.
     own_program: OnceLock<std::path::PathBuf>,
     /// One lock per connector entry, by account: refresh, connect, disconnect and the deletes each
@@ -188,12 +191,16 @@ pub struct DaemonState {
 }
 
 /// What a kept entry says of the agent's sign-in to the service.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SignedIn {
     /// The service ended the sign-in.
     pub(crate) lapsed: bool,
     /// The service has an endpoint to forget the grant at.
     pub(crate) revokes: bool,
+    /// What Farik's own app the grant was made with is called, when it was made with one.
+    pub(crate) provider: Option<String>,
+    /// The page where that app is removed at the service.
+    pub(crate) settings_url: Option<String>,
 }
 
 /// What the connector store held for one agent's server the last time Farik read it.
@@ -229,7 +236,7 @@ impl Kept {
             if *spec_sha256 == farik_core::team::spec_sha256(server)
                 && server.credential_keys.iter().all(|key| keys.contains(key))
                 // A server that signs in runs on a grant the service has not ended.
-                && (!signs_in || signed_in.is_some_and(|grant| !grant.lapsed)))
+                && (!signs_in || signed_in.as_ref().is_some_and(|grant| !grant.lapsed)))
     }
 }
 
@@ -249,6 +256,7 @@ impl DaemonState {
             connector_secrets: OnceLock::new(),
             connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
+            registered_apps: OnceLock::new(),
             own_program: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
             sign_ins: Mutex::new(BTreeMap::new()),
@@ -272,6 +280,7 @@ impl DaemonState {
             connector_secrets: OnceLock::new(),
             connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
+            registered_apps: OnceLock::new(),
             own_program: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
             sign_ins: Mutex::new(BTreeMap::new()),
@@ -289,6 +298,24 @@ impl DaemonState {
     /// Answers `true`, or `false` when one was already set, which is kept.
     pub fn set_state_dir(&self, directory: std::path::PathBuf) -> bool {
         self.state_dir.set(directory).is_ok()
+    }
+
+    /// Signs in with the apps of `apps` from now on, in place of `REGISTERED_APPS`: a test's table,
+    /// whose addresses are its fixture's. Answers `true`, or `false` when a table was already set,
+    /// which is kept.
+    pub fn set_registered_apps(
+        &self,
+        apps: &'static [crate::registered_apps::RegisteredApp],
+    ) -> bool {
+        self.registered_apps.set(apps).is_ok()
+    }
+
+    /// The apps Farik has registered with a service, as this daemon signs in with them.
+    pub(crate) fn registered_apps(&self) -> &'static [crate::registered_apps::RegisteredApp] {
+        self.registered_apps
+            .get()
+            .copied()
+            .unwrap_or(crate::registered_apps::REGISTERED_APPS)
     }
 
     /// Sets Farik's own executable; answers whether it was not set before.
@@ -384,9 +411,19 @@ impl DaemonState {
     pub(crate) fn read_kept(&self, at: &SecretAt) -> Kept {
         let kept = match self.connector_secrets().locate(at) {
             Ok(Some((entry, stored_in))) => Kept::Entry {
-                signed_in: entry.oauth.as_ref().map(|grant| SignedIn {
-                    lapsed: grant.lapsed,
-                    revokes: grant.revocation_endpoint.is_some(),
+                signed_in: entry.oauth.as_ref().map(|grant| {
+                    // The app is looked up by id in this daemon's table: one the table no longer
+                    // has is no provider, and the grant still refreshes at its own endpoints.
+                    let app = grant
+                        .app
+                        .as_deref()
+                        .and_then(|id| self.registered_apps().iter().find(|app| app.id == id));
+                    SignedIn {
+                        lapsed: grant.lapsed,
+                        revokes: grant.revocation_endpoint.is_some(),
+                        provider: app.map(|app| app.name.to_string()),
+                        settings_url: app.map(|app| app.settings_url.to_string()),
+                    }
                 }),
                 keys: entry.keys.into_keys().collect(),
                 spec_sha256: entry.spec_sha256,

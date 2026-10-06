@@ -171,6 +171,10 @@ pub struct CliIo<'a> {
     /// Where each role's kit comes from (ADR 0036): the shipped kits here and in `main`, which a
     /// test replaces with a fixture kit whose server is its own.
     pub kits: farik_runtime::KitSource,
+    /// The apps Farik has registered with a service (ADR 0035), which `farik connect` signs in with:
+    /// `REGISTERED_APPS` here and in `main`, which a test replaces with a table of its fixture's
+    /// addresses.
+    pub registered_apps: &'static [farik_runtime::registered_apps::RegisteredApp],
     /// Where each agent's connector keys are kept (ADR 0030): in memory here, so that no test
     /// touches a real keychain, and the keychain then `connectors.json` in `main`.
     #[cfg(unix)]
@@ -259,6 +263,7 @@ impl<'a> CliIo<'a> {
                 Arc::new(move || vec![Arc::clone(&memory)])
             },
             kits: Arc::new(farik_roles::load_kit),
+            registered_apps: farik_runtime::registered_apps::REGISTERED_APPS,
             own_program: None,
             #[cfg(unix)]
             connector_secrets: Arc::new(MemoryConnectorSecrets::default()),

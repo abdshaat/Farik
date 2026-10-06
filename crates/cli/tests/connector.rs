@@ -474,6 +474,105 @@ fn sign_in_after(
     })
 }
 
+/// A table of one device app, `Dev`, whose endpoints are `fixture`'s, for the servers at its
+/// address. Leaked: a table is `'static`, and a test's leak is small.
+fn dev_table(
+    fixture: &oauth_fixture::Fixture,
+) -> &'static [farik_runtime::registered_apps::RegisteredApp] {
+    use farik_runtime::registered_apps::{AppFlow, RegisteredApp};
+    fn leaked(text: String) -> &'static str {
+        Box::leak(text.into_boxed_str())
+    }
+    let origin = &fixture.origin;
+    Box::leak(Box::new([RegisteredApp {
+        id: "dev",
+        name: "Dev",
+        host: "127.0.0.1",
+        flow: AppFlow::Device {
+            device_endpoint: leaked(format!("{origin}/device/code")),
+            verification_uri: leaked(format!("{origin}/login/device")),
+        },
+        client_id: "dev-client",
+        issuer: leaked(format!("{origin}/login/oauth")),
+        token_endpoint: leaked(format!("{origin}/token")),
+        revocation_endpoint: None,
+        install_url: Some("https://github.com/apps/dev/installations/new"),
+        settings_url: "https://github.com/settings/apps/authorizations",
+    }]))
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_connect_prints_the_device_code() {
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = runtime.block_on(oauth_fixture::Fixture::start());
+    let repository = a_team("connect-device");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    let _driver = LiveDriver::new(&repository);
+    let pages = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let opener: farik::Opener = {
+        let pages = Arc::clone(&pages);
+        Arc::new(move |url: &str| {
+            pages.lock().expect("pages").push(url.to_string());
+            Ok(())
+        })
+    };
+    let table = dev_table(&fixture);
+    let config = config_of(&repository);
+    let kept_in = Arc::clone(&store);
+    let ran = run_with(
+        &repository.path,
+        &[
+            "connect",
+            "dev-a",
+            "fixture",
+            "--url",
+            fixture.mcp_url.as_str(),
+            "--sign-in",
+            "--tag",
+            "whoami=network",
+        ],
+        move |io| {
+            io.connector_secrets = kept_in;
+            io.open_url = opener;
+            io.registered_apps = table;
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+        },
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    // The prompts go to the error stream: the page and the code, the warning, then who signed in.
+    let lines: Vec<&str> = ran.err.lines().collect();
+    assert_eq!(
+        lines,
+        [
+            format!(
+                "Open {}/login/device and enter the code WDJB-0001.",
+                fixture.origin
+            )
+            .as_str(),
+            "Only enter a code that this page shows you. Farik never sends you a code in a chat.",
+            "Signed in to Dev.",
+        ],
+        "{}",
+        ran.err
+    );
+    assert_eq!(
+        *pages.lock().expect("pages"),
+        [format!("{}/login/device", fixture.origin)]
+    );
+    assert!(!ran.out.contains("WDJB"), "{}", ran.out);
+    let kept = loaded(store.as_ref(), &kept_at(&repository, "dev-a", "fixture")).expect("kept");
+    let grant = kept.oauth.expect("a grant is kept");
+    assert_eq!(grant.app.as_deref(), Some("dev"));
+    assert!(
+        ran.out.lines().any(|line| line == "whoami: network"),
+        "{}",
+        ran.out
+    );
+}
+
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn farik_connect_signs_in_and_keeps_the_grant() {
