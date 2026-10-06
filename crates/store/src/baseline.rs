@@ -292,6 +292,16 @@ mod tests {
             changes_since_baseline(&folder, &task("FRK-1")),
             Ok(Vec::new())
         );
+        // The same length is a change too: the bytes are compared, not only the sizes.
+        fs::write(folder.join("books.xlsx"), "BOOKS").expect("written, as long as it was");
+        assert_eq!(
+            changes_since_baseline(&folder, &task("FRK-1"))
+                .expect("compared")
+                .iter()
+                .map(|change| (change.path.as_str(), change.kind.word()))
+                .collect::<Vec<_>>(),
+            [("books.xlsx", "changed")]
+        );
         // A file changed, one new (in a folder of its own), one gone, and the history growing.
         fs::write(folder.join("books.xlsx"), "edited").expect("written");
         fs::create_dir_all(folder.join("2027")).expect("made");
