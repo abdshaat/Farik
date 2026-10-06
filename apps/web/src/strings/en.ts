@@ -1156,9 +1156,10 @@ export const en = {
 	connectorRemoveSignedFile:
 		"Farik deletes the sign-in from the private file on this computer and asks {host} to forget it.",
 	connectorRemoveSignedKeychainStays:
-		"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in {host}’s settings.",
+		"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in {settings}.",
 	connectorRemoveSignedFileStays:
-		"Farik deletes the sign-in from the private file on this computer. To remove Farik completely, also remove it in {host}’s settings.",
+		"Farik deletes the sign-in from the private file on this computer. To remove Farik completely, also remove it in {settings}.",
+	connectorSettings: "{host}’s settings",
 	connectorRemoveOthersSigned:
 		"Nobody else on the team is affected. To use it again, add it again and sign in.",
 	connectorCustom: "A custom connector",
@@ -1279,6 +1280,18 @@ export const en = {
 	addSignInFor: "for {host}",
 	addSignInNote:
 		"Farik opens its sign-in page in a new tab. Come back here when you’re done.",
+	addSignInCodeNote:
+		"Farik shows you a short code to type on {provider}’s page.",
+	addSigningIn: "Signing in",
+	addCodeLead: "Enter this code on {provider}:",
+	addCodeWarning:
+		"Only enter a code that this page shows you. Farik never sends you a code in a chat.",
+	addCodeCopy: "Copy the code",
+	addCodeOpen: "Open {page}",
+	addCodeWaiting: "Waiting for you on {provider}…",
+	addInstallLine:
+		"To let {name} read private repositories, install Farik on them on {provider}.",
+	addInstallLink: "Install Farik on {provider}",
 	addUseAKey: "Use a key instead",
 	addWaiting: "Waiting for you to sign in to {host}…",
 	addOpenAgain: "Open the sign-in page again",

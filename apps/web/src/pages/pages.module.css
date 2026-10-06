@@ -407,6 +407,30 @@
 	overflow-wrap: anywhere;
 }
 
+/* The code card's two buttons: side by side where they fit, and each the full width on a phone
+   (phase 7 step 03b's board). */
+.codeActions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-2) var(--farik-space-3);
+}
+
+@media (max-width: 40rem) {
+	.codeActions > button {
+		flex: 1 1 100%;
+	}
+}
+
+/* The code a user types on a service's page: large, in the code face, spaced (phase 7 step 03b). */
+.userCode {
+	font-family: var(--farik-type-code-family);
+	font-size: 32px;
+	line-height: 40px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	overflow-wrap: anywhere;
+}
+
 /* A tool's three labels, side by side where they fit; each a 44 px target. */
 .labels {
 	display: flex;

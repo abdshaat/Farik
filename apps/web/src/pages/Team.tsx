@@ -77,6 +77,10 @@ export type ConnectorState = {
 	auth?: "keys" | "oauth";
 	/** For a sign-in: whether the service can be asked to forget it when it is removed. */
 	revokes?: boolean;
+	/** For a sign-in made with one of Farik's own apps: what the app is called (GitHub), which the page names in place of the address. */
+	provider?: string;
+	/** For the same: the page at the service where the user removes Farik's app. */
+	settingsUrl?: string;
 	/** Where its keys or sign-in are kept, whenever some are. */
 	storedIn?: "keychain" | "file";
 };

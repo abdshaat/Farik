@@ -1919,3 +1919,324 @@ describe("a role's kit on the agent page", () => {
 		}
 	});
 });
+
+// ---- Farik's own apps: GitHub, signed in to with a code (phase 7 step 03b) ----
+
+const GITHUB_ADDRESS = "https://api.githubcopilot.com/mcp/";
+const INSTALL_URL = "https://github.com/apps/farik/installations/new";
+const GITHUB_SETTINGS = "https://github.com/settings/apps/authorizations";
+/** What `connector.sign_in` answers for Farik's GitHub App: the page to type the code on, and the code. */
+const GITHUB_OFFER = {
+	attempt: ATTEMPT,
+	authorize_url: "https://github.com/login/device",
+	issuer: "https://github.com/login/oauth",
+	provider: "GitHub",
+	user_code: "WDJB-MJHT",
+	install_url: INSTALL_URL,
+};
+const SIGNED_GITHUB = {
+	name: "github",
+	source: "custom",
+	transport: "http",
+	url: GITHUB_ADDRESS,
+	oauth: {},
+	tools: { search_code: "network", get_file_contents: "network" },
+};
+const GITHUB_ROW = {
+	agent: "theo",
+	server: "github",
+	state: "connected",
+	auth: "oauth",
+	revokes: false,
+	stored_in: "keychain",
+	provider: "GitHub",
+	settings_url: GITHUB_SETTINGS,
+};
+
+describe("signing in with one of Farik's own apps", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+		Reflect.deleteProperty(navigator, "clipboard");
+		localStorage.clear();
+	});
+
+	it("connector_add_signs_in_with_github_by_a_code", async () => {
+		const open = vi.spyOn(window, "open").mockReturnValue(null);
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", {
+			value: { writeText },
+			configurable: true,
+		});
+		const { container, s, dialog, asked } = await askedToSignIn(GITHUB_ADDRESS);
+		await s.reply(asked, GITHUB_OFFER);
+		const button = await within(dialog).findByRole("button", {
+			name: "Sign in with GitHub",
+		});
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		fireEvent.click(button);
+		// The code shows, with the warning under it; nothing is opened until the user presses Open.
+		expect(open).not.toHaveBeenCalled();
+		expect(within(dialog).getByText("Enter this code on GitHub:")).toBeTruthy();
+		expect(within(dialog).getByText("WDJB-MJHT")).toBeTruthy();
+		expect(
+			within(dialog).getByText(
+				"Only enter a code that this page shows you. Farik never sends you a code in a chat.",
+			),
+		).toBeTruthy();
+		expect(within(dialog).getByText("Waiting for you on GitHub…")).toBeTruthy();
+
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Copy the code" }),
+		);
+		expect(writeText).toHaveBeenCalledWith("WDJB-MJHT");
+		// Opened in the click itself, with no call in between, so a pop-up blocker lets it through.
+		fireEvent.click(
+			within(dialog).getByRole("button", {
+				name: "Open github.com/login/device",
+			}),
+		);
+		expect(open).toHaveBeenCalledWith(
+			"https://github.com/login/device",
+			"_blank",
+			"noopener",
+		);
+
+		// Asked every 2 seconds, until the user has said yes on GitHub.
+		await act(() => vi.advanceTimersByTimeAsync(2100));
+		const status = s.calls("connector.sign_in_status")[0] as NonNullable<
+			ReturnType<FakeSocket["calls"]>[number]
+		>;
+		expect(status.params).toEqual({ attempt: ATTEMPT });
+		await s.reply(status, { state: "signed_in" });
+		vi.useRealTimers();
+		expect(
+			await within(dialog).findByText("Signed in to GitHub."),
+		).toBeTruthy();
+		expect(
+			within(dialog).getByText(
+				"To let Theo read private repositories, install Farik on them on GitHub.",
+			),
+		).toBeTruthy();
+		const link = within(dialog).getByRole("link", {
+			name: "Install Farik on GitHub",
+		});
+		expect(link.getAttribute("href")).toBe(INSTALL_URL);
+		expect(link.getAttribute("target")).toBe("_blank");
+		expect(link.getAttribute("rel")).toContain("noopener");
+		// The code is no longer asked for, and Next lists the tools as after any sign-in.
+		expect(within(dialog).queryByText("WDJB-MJHT")).toBeNull();
+		expect(
+			within(dialog).getByRole("button", { name: en.addNext }),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("connector_add_names_the_provider", async () => {
+		const { container, s, dialog, asked } = await askedToSignIn(GITHUB_ADDRESS);
+		await s.reply(asked, GITHUB_OFFER);
+		expect(
+			await within(dialog).findByRole("button", {
+				name: "Sign in with GitHub",
+			}),
+		).toBeTruthy();
+		expect(within(dialog).getByText("GitHub lets you sign in.")).toBeTruthy();
+		// Farik offers this sign-in to GitHub's own address only, so no "for <host>" line says it.
+		expect(within(dialog).queryByText(/^for /)).toBeNull();
+		expect(
+			within(dialog).getByText(
+				"Farik shows you a short code to type on GitHub’s page.",
+			),
+		).toBeTruthy();
+		expect(within(dialog).queryByText(en.addSignInNote)).toBeNull();
+		expect(
+			within(dialog).getByRole("button", { name: en.addUseAKey }),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+		// The board with the code, checked with the clock running: axe waits on timers.
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Sign in with GitHub" }),
+		);
+		expect(await within(dialog).findByText("WDJB-MJHT")).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("connector_add_says_why_a_github_sign_in_failed", async () => {
+		const { s, dialog, asked } = await askedToSignIn(GITHUB_ADDRESS);
+		await s.reply(asked, GITHUB_OFFER);
+		const button = await within(dialog).findByRole("button", {
+			name: "Sign in with GitHub",
+		});
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		fireEvent.click(button);
+		await act(() => vi.advanceTimersByTimeAsync(2100));
+		const status = s.calls("connector.sign_in_status")[0] as NonNullable<
+			ReturnType<FakeSocket["calls"]>[number]
+		>;
+		await s.reply(status, {
+			state: "failed",
+			reason: {
+				code: "access_denied",
+				message: "You said no on github.com’s page.",
+			},
+		});
+		vi.useRealTimers();
+		expect(
+			await within(dialog).findByText(
+				"You said no on GitHub’s page, so Farik isn’t connected.",
+			),
+		).toBeTruthy();
+	});
+
+	it("agent_edit_names_the_provider_and_github_s_settings", async () => {
+		const { container } = await (async () => {
+			const { container, socket } = await renderApp("/team/theo");
+			const s = socket as FakeSocket;
+			await answerStatus(s, false);
+			await answerQuery(
+				s,
+				"team.get",
+				teamGot(theoWith([SIGNED_NOTION, SIGNED_GITHUB]), [
+					SIGNED_IN_ROWS[0] as object,
+					GITHUB_ROW,
+				]),
+			);
+			await answerQuery(s, "models.list", { models: [] });
+			await screen.findByRole("heading", { name: "Theo, your Developer" });
+			return { container, s };
+		})();
+		const github = row("github");
+		// GitHub signed Theo in, not the address it was reached at; a service that signs in by
+		// itself is still named by its address.
+		expect(within(github).getByText("Signed in to GitHub")).toBeTruthy();
+		expect(
+			within(row("notion")).getByText("Signed in to mcp.notion.com"),
+		).toBeTruthy();
+		fireEvent.click(
+			within(github).getByRole("button", { name: "Remove github" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Remove github from Theo?",
+		});
+		const settings = within(dialog).getByRole("link", {
+			name: "GitHub’s settings",
+		});
+		expect(settings.getAttribute("href")).toBe(GITHUB_SETTINGS);
+		expect(settings.getAttribute("target")).toBe("_blank");
+		expect(settings.getAttribute("rel")).toContain("noopener");
+		expect((settings.parentElement as HTMLElement).textContent).toBe(
+			"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in GitHub’s settings.",
+		);
+		expect(
+			within(dialog).getByText(
+				"Nobody else on the team is affected. To use it again, add it again and sign in.",
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("agent_edit_names_a_signed_in_command_by_its_own_name_when_nothing_else_does", async () => {
+		// An older daemon that does not say the provider: the connector has no web address either,
+		// so Remove names it by its own name, and has no page to link to.
+		const service = {
+			...KIT_LINEAR,
+			name: "google_ads",
+			title: "Google Ads",
+			auth: "oauth",
+		};
+		const held = {
+			name: "google_ads",
+			source: "kit",
+			transport: "stdio",
+			command: "farik",
+			args: ["connector", "google-ads"],
+			oauth: {},
+			tools: { search: "network" },
+		};
+		await openedWithKit(
+			[service],
+			[held],
+			[
+				{
+					agent: "theo",
+					server: "google_ads",
+					state: "connected",
+					auth: "oauth",
+					source: "kit",
+					revokes: false,
+					stored_in: "keychain",
+				},
+			],
+		);
+		fireEvent.click(
+			within(kitRow("Google Ads")).getByRole("button", {
+				name: "Remove google_ads",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Remove google_ads from Theo?",
+		});
+		expect(
+			within(dialog).getByText(
+				"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in google_ads’s settings.",
+			),
+		).toBeTruthy();
+		expect(within(dialog).queryByRole("link")).toBeNull();
+	});
+
+	it("agent_edit_names_the_provider_of_a_connector_with_no_web_address", async () => {
+		// Google Ads is Farik's own connector from a kit: a command, no address, signed in through
+		// Google (step 08e). Its row and its Remove name Google, not the kit's title.
+		const service = {
+			...KIT_LINEAR,
+			name: "google_ads",
+			title: "Google Ads",
+			auth: "oauth",
+		};
+		const held = {
+			name: "google_ads",
+			source: "kit",
+			transport: "stdio",
+			command: "farik",
+			args: ["connector", "google-ads"],
+			oauth: {},
+			tools: { search: "network" },
+		};
+		const { container } = await openedWithKit(
+			[service],
+			[held],
+			[
+				{
+					agent: "theo",
+					server: "google_ads",
+					state: "connected",
+					auth: "oauth",
+					source: "kit",
+					revokes: false,
+					stored_in: "keychain",
+					provider: "Google",
+					settings_url: "https://myaccount.google.com/connections",
+				},
+			],
+		);
+		const ads = kitRow("Google Ads");
+		expect(within(ads).getByText("Signed in to Google.")).toBeTruthy();
+		expect(within(ads).queryByText("Signed in to Google Ads.")).toBeNull();
+		fireEvent.click(
+			within(ads).getByRole("button", { name: "Remove google_ads" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Remove google_ads from Theo?",
+		});
+		const settings = within(dialog).getByRole("link", {
+			name: "Google’s settings",
+		});
+		expect(settings.getAttribute("href")).toBe(
+			"https://myaccount.google.com/connections",
+		);
+		expect((settings.parentElement as HTMLElement).textContent).toBe(
+			"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in Google’s settings.",
+		);
+		await expectNoAxeViolations(container);
+	});
+});

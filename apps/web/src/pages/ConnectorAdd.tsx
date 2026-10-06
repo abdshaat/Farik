@@ -1,5 +1,5 @@
 import { Button, Choice, Dialog, Stepper, TextField } from "@farik/ui";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, refusalsOf } from "../app/refusals.ts";
 import type { en } from "../strings/en.ts";
@@ -10,13 +10,27 @@ import type { McpServer } from "./setup/TeamSetup.tsx";
 export type Tag = "network" | "external_effect" | "denied";
 type Listed = { name: string; description: string; usable: boolean };
 type Key = { name: string; value: string };
+/** One of Farik's own apps signing the user in (phase 7 step 03b): its name, the code to type, where to install it. */
+type AppSignIn = { provider: string; userCode?: string; installUrl?: string };
 /** How signing in to the service stands (ADR 0033). `keys` is the key fields, with a sentence when the service said why. */
 type SignIn =
 	| { kind: "idle" }
-	| { kind: "offered"; attempt: string; address: string; issuer: string }
-	| { kind: "waiting"; attempt: string; address: string; issuer: string }
-	| { kind: "signedIn"; attempt: string; issuer: string }
-	| { kind: "failed"; code: string; issuer: string }
+	| {
+			kind: "offered";
+			attempt: string;
+			address: string;
+			issuer: string;
+			app?: AppSignIn;
+	  }
+	| {
+			kind: "waiting";
+			attempt: string;
+			address: string;
+			issuer: string;
+			app?: AppSignIn;
+	  }
+	| { kind: "signedIn"; attempt: string; issuer: string; app?: AppSignIn }
+	| { kind: "failed"; code: string; issuer: string; app?: AppSignIn }
 	| { kind: "keys"; probed: boolean; sentence?: string };
 /** How often the page asks whether the user has said yes. */
 const POLL_MS = 2000;
@@ -28,6 +42,42 @@ export function hostOf(url: string | undefined): string {
 	} catch {
 		return url ?? "";
 	}
+}
+
+/** The card the boards draw around one of Farik's own apps signing the user in; no card for a service that signs in by itself. */
+function SigningIn({ app, children }: { app: boolean; children: ReactNode }) {
+	if (!app) return children;
+	return (
+		<section aria-label={t("addSigningIn")} className={styles.card}>
+			{children}
+		</section>
+	);
+}
+
+/** `github.com/login/device` of `https://github.com/login/device`: a page, as the button names it. */
+export function pageOf(address: string): string {
+	try {
+		const page = new URL(address);
+		return `${page.hostname}${page.pathname.replace(/\/$/, "")}`;
+	} catch {
+		return address;
+	}
+}
+
+/** The app a sign-in's answer names, when it names one. */
+function appOf(answer: {
+	provider?: string;
+	userCode?: string;
+	installUrl?: string;
+}): { app: AppSignIn } | Record<string, never> {
+	if (!answer.provider) return {};
+	return {
+		app: {
+			provider: answer.provider,
+			...(answer.userCode && { userCode: answer.userCode }),
+			...(answer.installUrl && { installUrl: answer.installUrl }),
+		},
+	};
 }
 
 /** "notion" as "Notion": the name the user gave, said as a service's. */
@@ -326,12 +376,20 @@ export function ConnectorAdd({
 			const answer = (await client.call("connector.sign_in", {
 				agent,
 				server: signInWire,
-			})) as { attempt: string; authorizeUrl: string; issuer: string };
+			})) as {
+				attempt: string;
+				authorizeUrl: string;
+				issuer: string;
+				provider?: string;
+				userCode?: string;
+				installUrl?: string;
+			};
 			setSign({
 				kind: "offered",
 				attempt: answer.attempt,
 				address: answer.authorizeUrl,
 				issuer: answer.issuer,
+				...appOf(answer),
 			});
 		} catch (e) {
 			const code = codeOf(refusalsOf(e)[0]?.message ?? "");
@@ -365,6 +423,7 @@ export function ConnectorAdd({
 	// Whether the user has said yes, asked every 2 seconds.
 	const waitingFor = sign.kind === "waiting" ? sign.attempt : "";
 	const waitingIssuer = sign.kind === "waiting" ? sign.issuer : "";
+	const waitingApp = sign.kind === "waiting" ? sign.app : undefined;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the attempt is the dependency
 	useEffect(() => {
 		if (!waitingFor || !client) return;
@@ -381,12 +440,14 @@ export function ConnectorAdd({
 						kind: "signedIn",
 						attempt: waitingFor,
 						issuer: waitingIssuer,
+						...(waitingApp && { app: waitingApp }),
 					});
 				if (answer.state === "failed")
 					return setSign({
 						kind: "failed",
 						code: answer.reason?.code ?? "sign_in_failed",
 						issuer: waitingIssuer,
+						...(waitingApp && { app: waitingApp }),
 					});
 			} catch {
 				// The attempt is gone: it lasts ten minutes.
@@ -440,7 +501,7 @@ export function ConnectorAdd({
 		setBusy(false);
 	};
 	/** Why a sign-in failed, in the words of the code and not the daemon's. */
-	const failedWords = (code: string, issuer: string) =>
+	const failedWords = (code: string, issuer: string, provider?: string) =>
 		t(
 			(
 				{
@@ -449,7 +510,7 @@ export function ConnectorAdd({
 					sign_in_mismatch: "addSignInMismatch",
 				} as const
 			)[code as "access_denied"] ?? "addSignInFailed",
-			{ host: hostOf(issuer) || urlHost },
+			{ host: provider ?? (hostOf(issuer) || urlHost) },
 		);
 	// Anything the sign-in was made for changing makes it another: the user signs in again.
 	const startOver = () => {
@@ -461,6 +522,12 @@ export function ConnectorAdd({
 	// The key fields show unless the service offers a sign-in, which stands in for them.
 	const showsKeys = !http || sign.kind === "idle" || sign.kind === "keys";
 	const issuerHost = "issuer" in sign ? hostOf(sign.issuer) : "";
+	/** Who signs the user in: one of Farik's own apps by name, else the issuer's host. */
+	const signer = "app" in sign && sign.app ? sign.app.provider : issuerHost;
+	/** Copies the code the user types, where the browser lets a page write to the clipboard. */
+	const copy = (code: string) => {
+		void navigator.clipboard?.writeText(code).catch(() => {});
+	};
 	const title =
 		again || step > 0 ? t("addTitleNamed", fill) : t("addTitle", { name });
 	const usable = tools.filter((x) => x.usable);
@@ -539,25 +606,34 @@ export function ConnectorAdd({
 								}}
 							/>
 							{!secretInUrl && sign.kind === "offered" && (
-								<>
-									<p>{t("addSignInLead", { host: urlHost })}</p>
+								<SigningIn app={Boolean(sign.app)}>
+									<p>
+										{t("addSignInLead", {
+											host: sign.app?.provider ?? urlHost,
+										})}
+									</p>
 									<span>
 										<Button
 											kind="primary"
 											onClick={() => {
-												openPage(sign.address);
+												// A code is typed on a page the user opens from the next board.
+												if (!sign.app?.userCode) openPage(sign.address);
 												setSign({ ...sign, kind: "waiting" });
 											}}
 										>
-											{t("addSignInButton", { host: issuerHost })}
+											{t("addSignInButton", { host: signer })}
 										</Button>
 									</span>
-									{issuerHost !== urlHost && (
+									{!sign.app && issuerHost !== urlHost && (
 										<p className={styles.muted}>
 											{t("addSignInFor", { host: urlHost })}
 										</p>
 									)}
-									<p className={styles.muted}>{t("addSignInNote")}</p>
+									<p className={styles.muted}>
+										{sign.app?.userCode
+											? t("addSignInCodeNote", { provider: sign.app.provider })
+											: t("addSignInNote")}
+									</p>
 									<span>
 										<Button
 											kind="quiet"
@@ -566,27 +642,73 @@ export function ConnectorAdd({
 											{t("addUseAKey")}
 										</Button>
 									</span>
-								</>
+								</SigningIn>
 							)}
-							{!secretInUrl && sign.kind === "waiting" && (
-								<>
-									<p role="status">{t("addWaiting", { host: issuerHost })}</p>
-									<span>
-										<Button onClick={() => openPage(sign.address)}>
-											{t("addOpenAgain")}
-										</Button>
-									</span>
-								</>
-							)}
+							{!secretInUrl &&
+								sign.kind === "waiting" &&
+								sign.app?.userCode && (
+									<SigningIn app>
+										<p>{t("addCodeLead", { provider: sign.app.provider })}</p>
+										<p className={styles.userCode}>{sign.app.userCode}</p>
+										<p>{t("addCodeWarning")}</p>
+										<div className={styles.codeActions}>
+											<Button onClick={() => copy(sign.app?.userCode ?? "")}>
+												{t("addCodeCopy")}
+											</Button>
+											<Button
+												kind="primary"
+												onClick={() => openPage(sign.address)}
+											>
+												{t("addCodeOpen", { page: pageOf(sign.address) })}
+											</Button>
+										</div>
+										<p role="status">
+											{t("addCodeWaiting", { provider: sign.app.provider })}
+										</p>
+									</SigningIn>
+								)}
+							{!secretInUrl &&
+								sign.kind === "waiting" &&
+								!sign.app?.userCode && (
+									<>
+										<p role="status">{t("addWaiting", { host: signer })}</p>
+										<span>
+											<Button onClick={() => openPage(sign.address)}>
+												{t("addOpenAgain")}
+											</Button>
+										</span>
+									</>
+								)}
 							{!secretInUrl && sign.kind === "signedIn" && (
-								<p role="status">
-									<strong>{t("addSignedInTo", { host: issuerHost })}</strong>
-								</p>
+								<SigningIn app={Boolean(sign.app)}>
+									<p role="status">
+										<strong>{t("addSignedInTo", { host: signer })}</strong>
+									</p>
+									{sign.app?.installUrl?.startsWith("https://") && (
+										<>
+											<p>
+												{t("addInstallLine", {
+													name,
+													provider: sign.app.provider,
+												})}
+											</p>
+											<p>
+												<a
+													href={sign.app.installUrl}
+													target="_blank"
+													rel="noopener noreferrer"
+												>
+													{t("addInstallLink", { provider: sign.app.provider })}
+												</a>
+											</p>
+										</>
+									)}
+								</SigningIn>
 							)}
 							{!secretInUrl && sign.kind === "failed" && (
 								<>
 									<p role="alert" className={styles.alert}>
-										{failedWords(sign.code, sign.issuer)}
+										{failedWords(sign.code, sign.issuer, sign.app?.provider)}
 									</p>
 									<span>
 										<Button kind="primary" busy={busy} onClick={() => ask()}>

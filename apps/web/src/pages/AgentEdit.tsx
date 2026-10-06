@@ -1,5 +1,5 @@
 import { Button, Choice, Dialog, Switch, TextField } from "@farik/ui";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
@@ -269,24 +269,40 @@ function Editor({
 		none: "connectorRemoveBody",
 	} as const;
 	/** What Remove says it deletes, and, for a sign-in, whether the service is asked to forget it. */
-	const removeWords = (server: string) => {
+	const removeWords = (server: string): ReactNode => {
 		const kept = stateOf(server);
 		if (kept?.auth !== "oauth")
 			return t(removeBody[kept?.storedIn ?? "none"], { server, name });
-		const host = hostOf(
-			(saved.mcpServers ?? []).find((c) => c.name === server)?.url,
-		);
+		// Who signed the agent in: Farik's own app by name, else the address's host, else (a
+		// connector with no web address) the connector's own name.
+		const url = (saved.mcpServers ?? []).find((c) => c.name === server)?.url;
+		const host = kept.provider ?? (hostOf(url) || server);
 		const forgets = kept.revokes !== false;
 		const file = kept.storedIn === "file";
-		return t(
-			forgets
-				? file
-					? "connectorRemoveSignedFile"
-					: "connectorRemoveSignedKeychain"
-				: file
-					? "connectorRemoveSignedFileStays"
-					: "connectorRemoveSignedKeychainStays",
-			{ host },
+		if (forgets)
+			return t(
+				file ? "connectorRemoveSignedFile" : "connectorRemoveSignedKeychain",
+				{ host },
+			);
+		// Where Farik is removed at the service, as a link when the app knows the page.
+		const settings = t("connectorSettings", { host });
+		const [before = "", after = ""] = t(
+			file
+				? "connectorRemoveSignedFileStays"
+				: "connectorRemoveSignedKeychainStays",
+		).split("{settings}");
+		return (
+			<>
+				{before}
+				{kept.settingsUrl?.startsWith("https://") ? (
+					<a href={kept.settingsUrl} target="_blank" rel="noopener noreferrer">
+						{settings}
+					</a>
+				) : (
+					settings
+				)}
+				{after}
+			</>
 		);
 	};
 	const [adding, setAdding] = useState<{
@@ -485,6 +501,7 @@ function Editor({
 										held={held}
 										state={stateOf(service.name)?.state}
 										storedIn={stateOf(service.name)?.storedIn}
+										provider={stateOf(service.name)?.provider}
 										name={name}
 										made={allowanceRows(service.name)}
 										period={allowances?.period}
@@ -537,6 +554,7 @@ function Editor({
 									state={stateOf(c.name)?.state}
 									storedIn={stateOf(c.name)?.storedIn}
 									auth={stateOf(c.name)?.auth}
+									provider={stateOf(c.name)?.provider}
 									name={name}
 									onAgain={() => setAdding({ again: c })}
 									onSignInAgain={() => setAdding({ again: c, ended: true })}
@@ -699,6 +717,7 @@ function CustomRow({
 	state,
 	storedIn,
 	auth,
+	provider,
 	name,
 	onAgain,
 	onSignInAgain,
@@ -708,6 +727,8 @@ function CustomRow({
 	state: ConnectorState["state"] | undefined;
 	storedIn: ConnectorState["storedIn"];
 	auth: ConnectorState["auth"];
+	/** Farik's own app that signed the agent in, when one did. */
+	provider: ConnectorState["provider"];
 	name: string;
 	onAgain: () => void;
 	onSignInAgain: () => void;
@@ -742,7 +763,7 @@ function CustomRow({
 				</span>
 			</div>
 			{signedIn && state === "connected" && (
-				<p>{t("connectorSignedIn", { host })}</p>
+				<p>{t("connectorSignedIn", { host: provider ?? host })}</p>
 			)}
 			{signedIn && state === "sign_in_again" && (
 				<p>
@@ -791,6 +812,7 @@ function KitRow({
 	held,
 	state,
 	storedIn,
+	provider,
 	name,
 	made,
 	period,
@@ -802,6 +824,8 @@ function KitRow({
 	held: McpServer | undefined;
 	state: ConnectorState["state"] | undefined;
 	storedIn: ConnectorState["storedIn"];
+	/** Farik's own app that signed the agent in, when one did: it, not the service's title, signed it in. */
+	provider: ConnectorState["provider"];
 	name: string;
 	/** What the agent has made of this service's spending tools this period. */
 	made: AllowanceRow[];
@@ -822,7 +846,7 @@ function KitRow({
 					</p>
 					<p className={styles.muted}>
 						{service.auth === "oauth"
-							? t("kitSignedIn", { service: service.title })
+							? t("kitSignedIn", { service: provider ?? service.title })
 							: t(storedIn === "file" ? "connectorFile" : "connectorKeychain", {
 									name,
 								})}
