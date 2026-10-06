@@ -308,6 +308,8 @@ function Editor({
 	const [adding, setAdding] = useState<{
 		again?: McpServer;
 		ended?: boolean;
+		/** Who ended the sign-in, when Farik's own app signed it in: the provider, not the address. */
+		endedBy?: string;
 		kit?: KitService;
 	}>();
 	const [removing, setRemoving] = useState<string>();
@@ -547,23 +549,32 @@ function Editor({
 							<span className={styles.muted}>{t("connectorsYoursLead")}</span>
 						</h3>
 						<ul className={styles.ruled} aria-label={t("connectorsYours")}>
-							{custom.map((c) => (
-								<CustomRow
-									key={c.name}
-									server={c}
-									state={stateOf(c.name)?.state}
-									storedIn={stateOf(c.name)?.storedIn}
-									auth={stateOf(c.name)?.auth}
-									provider={stateOf(c.name)?.provider}
-									name={name}
-									onAgain={() => setAdding({ again: c })}
-									onSignInAgain={() => setAdding({ again: c, ended: true })}
-									onRemove={() => {
-										setRemoveRefused(undefined);
-										setRemoving(c.name);
-									}}
-								/>
-							))}
+							{custom.map((c) => {
+								const provider = stateOf(c.name)?.provider;
+								return (
+									<CustomRow
+										key={c.name}
+										server={c}
+										state={stateOf(c.name)?.state}
+										storedIn={stateOf(c.name)?.storedIn}
+										auth={stateOf(c.name)?.auth}
+										provider={provider}
+										name={name}
+										onAgain={() => setAdding({ again: c })}
+										onSignInAgain={() =>
+											setAdding({
+												again: c,
+												ended: true,
+												...(provider && { endedBy: provider }),
+											})
+										}
+										onRemove={() => {
+											setRemoveRefused(undefined);
+											setRemoving(c.name);
+										}}
+									/>
+								);
+							})}
 						</ul>
 					</>
 				)}
@@ -650,6 +661,7 @@ function Editor({
 					name={name}
 					again={adding.again}
 					ended={adding.ended}
+					endedBy={adding.endedBy}
 					sandboxed={sandboxed}
 					onClose={(changed) => {
 						setAdding(undefined);
@@ -767,7 +779,9 @@ function CustomRow({
 			)}
 			{signedIn && state === "sign_in_again" && (
 				<p>
-					<strong>{t("connectorSignInEnded", { host })}</strong>
+					<strong>
+						{t("connectorSignInEnded", { host: provider ?? host })}
+					</strong>
 				</p>
 			)}
 			{!signedIn && storedIn && (
@@ -867,7 +881,11 @@ function KitRow({
 			)}
 			{held && state === "sign_in_again" && (
 				<p>
-					<strong>{t("connectorSignInEnded", { host: service.title })}</strong>
+					<strong>
+						{t("connectorSignInEnded", {
+							host: provider ?? service.title,
+						})}
+					</strong>
 				</p>
 			)}
 			{held && state === "store_unavailable" && (

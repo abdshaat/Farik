@@ -1952,6 +1952,13 @@ const GITHUB_ROW = {
 	provider: "GitHub",
 	settings_url: GITHUB_SETTINGS,
 };
+/** A second GitHub server of Theo's, whose sign-in GitHub ended. */
+const ENDED_GITHUB = { ...SIGNED_GITHUB, name: "github_work" };
+const ENDED_GITHUB_ROW = {
+	...GITHUB_ROW,
+	server: "github_work",
+	state: "sign_in_again",
+};
 
 describe("signing in with one of Farik's own apps", () => {
 	afterEach(() => {
@@ -2089,16 +2096,17 @@ describe("signing in with one of Farik's own apps", () => {
 	});
 
 	it("agent_edit_names_the_provider_and_github_s_settings", async () => {
-		const { container } = await (async () => {
+		const { container, s } = await (async () => {
 			const { container, socket } = await renderApp("/team/theo");
 			const s = socket as FakeSocket;
 			await answerStatus(s, false);
 			await answerQuery(
 				s,
 				"team.get",
-				teamGot(theoWith([SIGNED_NOTION, SIGNED_GITHUB]), [
+				teamGot(theoWith([SIGNED_NOTION, SIGNED_GITHUB, ENDED_GITHUB]), [
 					SIGNED_IN_ROWS[0] as object,
 					GITHUB_ROW,
+					ENDED_GITHUB_ROW,
 				]),
 			);
 			await answerQuery(s, "models.list", { models: [] });
@@ -2133,6 +2141,35 @@ describe("signing in with one of Farik's own apps", () => {
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
+
+		// GitHub ended the sign-in: the row and the dialog Sign in again opens say GitHub did,
+		// not the address (api.githubcopilot.com) it is reached at.
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.connectorKeep }),
+		);
+		const ended = row("github_work");
+		expect(
+			within(ended).getByText(
+				"GitHub ended Farik’s sign-in. Sign in again to use it.",
+			),
+		).toBeTruthy();
+		expect(within(ended).queryByText(/api\.githubcopilot\.com/)).toBeNull();
+		fireEvent.click(
+			within(ended).getByRole("button", { name: en.connectorSignInAgain }),
+		);
+		const again = await screen.findByRole("dialog", {
+			name: "Add github_work to Theo",
+		});
+		expect(
+			within(again).getByText(
+				"GitHub ended Farik’s sign-in. Sign in again to use github_work.",
+			),
+		).toBeTruthy();
+		expect(
+			within(again).queryByText(/api\.githubcopilot\.com ended/),
+		).toBeNull();
+		// The service is asked at once; its answer is not this test's business.
+		await sent(s, "connector.sign_in");
 	});
 
 	it("agent_edit_names_a_signed_in_command_by_its_own_name_when_nothing_else_does", async () => {
@@ -2182,6 +2219,48 @@ describe("signing in with one of Farik's own apps", () => {
 			),
 		).toBeTruthy();
 		expect(within(dialog).queryByRole("link")).toBeNull();
+	});
+
+	it("agent_edit_names_the_provider_when_a_kit_s_sign_in_ended", async () => {
+		// Google ended the sign-in of Google Ads: the row says Google did, not the kit's title.
+		const service = {
+			...KIT_LINEAR,
+			name: "google_ads",
+			title: "Google Ads",
+			auth: "oauth",
+		};
+		const held = {
+			name: "google_ads",
+			source: "kit",
+			transport: "stdio",
+			command: "farik",
+			args: ["connector", "google-ads"],
+			oauth: {},
+			tools: { search: "network" },
+		};
+		await openedWithKit(
+			[service],
+			[held],
+			[
+				{
+					agent: "theo",
+					server: "google_ads",
+					state: "sign_in_again",
+					auth: "oauth",
+					source: "kit",
+					revokes: false,
+					stored_in: "keychain",
+					provider: "Google",
+					settings_url: "https://myaccount.google.com/connections",
+				},
+			],
+		);
+		const ads = kitRow("Google Ads");
+		expect(
+			within(ads).getByText(
+				"Google ended Farik’s sign-in. Sign in again to use it.",
+			),
+		).toBeTruthy();
 	});
 
 	it("agent_edit_names_the_provider_of_a_connector_with_no_web_address", async () => {

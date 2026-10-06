@@ -198,6 +198,7 @@ export function ConnectorAdd({
 	name,
 	again,
 	ended,
+	endedBy,
 	sandboxed,
 	onClose,
 }: {
@@ -208,6 +209,8 @@ export function ConnectorAdd({
 	again?: McpServer | undefined;
 	/** The service ended the sign-in `again` holds, so the page says so and signs in at once. */
 	ended?: boolean | undefined;
+	/** Who ended it when one of Farik's own apps signed it in: the provider's name, not the address's host. */
+	endedBy?: string | undefined;
 	/** Whether sessions run in Docker's sandbox, the one mode where no command of the agent reaches its keys. */
 	sandboxed: boolean;
 	onClose: (changed: boolean) => void;
@@ -551,7 +554,10 @@ export function ConnectorAdd({
 				<>
 					{again && ended && (
 						<p className={styles.alert}>
-							{t("addSignInEnded", { host: urlHost, server: fill.server })}
+							{t("addSignInEnded", {
+								host: endedBy ?? urlHost,
+								server: fill.server,
+							})}
 						</p>
 					)}
 					{again && !ended && (
