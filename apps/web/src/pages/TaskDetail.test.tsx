@@ -150,6 +150,39 @@ describe("task detail", () => {
 		expect(within(panel).queryByRole("region")).toBeNull();
 	});
 
+	it("a_finance_task_has_nothing_to_add_to_the_project", async () => {
+		// Accepted, and a private-folder task ends there: no main branch, no pull request, no waiting.
+		await opened(
+			{
+				...CONTRACT,
+				status: "accepted",
+				assignee_role: "finance_specialist",
+				reviewer_role: "product_manager",
+			},
+			[],
+			{
+				"task.diff": {
+					diff: "",
+					files: ["books.xlsx"],
+					added: 0,
+					removed: 0,
+					private_folder: true,
+				},
+			},
+		);
+		const adding = await screen.findByRole("region", {
+			name: "Adding it to your project",
+		});
+		expect(
+			within(adding).getByText(
+				"Nothing to add: this task’s work stays in the Finance Specialist’s private files, and its acceptance was its end.",
+			),
+		).toBeTruthy();
+		expect(within(adding).queryByText(/main branch/)).toBeNull();
+		expect(within(adding).queryByText(/waits for you to add it/)).toBeNull();
+		expect(within(adding).queryByRole("button")).toBeNull();
+	});
+
 	it("shows_the_five_tabs", async () => {
 		const { container } = await opened(CONTRACT, [], {
 			"task.history": {

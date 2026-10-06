@@ -940,6 +940,8 @@ export const en = {
 	taskCost: "Cost so far",
 	taskCostTotal: "Total, of a {limit} limit",
 	taskAddTitle: "Adding it to your project",
+	taskAddNothing:
+		"Nothing to add: this task’s work stays in the {role}’s private files, and its acceptance was its end.",
 	taskAddHint:
 		"Once the task is accepted, Farik adds its changes to your main branch, one task at a time.",
 	taskAdd: "Add to the project",

@@ -708,33 +708,45 @@ export function TaskDetail() {
 				</section>
 				<section className={styles.section} aria-labelledby="adding">
 					<h2 id="adding">{t("taskAddTitle")}</h2>
-					<p className={styles.muted}>{t("taskAddHint")}</p>
-					{integrated ? (
-						<p>{t("taskAdded").replace("{day}", day(integrated.recordedAt))}</p>
-					) : awaitsIntegration ? (
-						<div className={styles.actions}>
-							<Button
-								kind="primary"
-								busy={busy}
-								onClick={() =>
-									send({ command: "task_integrate", body: { taskId: id } })
-								}
-							>
-								{t("taskAdd")}
-							</Button>
-						</div>
-					) : (
+					{diff.privateFolder ? (
 						<p>
-							{t(
-								contract.status !== "accepted"
-									? "taskAddNotYet"
-									: team.team.policy.integration === "auto_merge"
-										? "taskAddOnItsOwn"
-										: team.team.policy.integration === "pull_request"
-											? "taskAddByPullRequest"
-											: "taskAddByHand",
-							)}
+							{t("taskAddNothing", {
+								role: roleWord(contract.assigneeRole as Agent["role"]),
+							})}
 						</p>
+					) : (
+						<>
+							<p className={styles.muted}>{t("taskAddHint")}</p>
+							{integrated ? (
+								<p>
+									{t("taskAdded").replace("{day}", day(integrated.recordedAt))}
+								</p>
+							) : awaitsIntegration ? (
+								<div className={styles.actions}>
+									<Button
+										kind="primary"
+										busy={busy}
+										onClick={() =>
+											send({ command: "task_integrate", body: { taskId: id } })
+										}
+									>
+										{t("taskAdd")}
+									</Button>
+								</div>
+							) : (
+								<p>
+									{t(
+										contract.status !== "accepted"
+											? "taskAddNotYet"
+											: team.team.policy.integration === "auto_merge"
+												? "taskAddOnItsOwn"
+												: team.team.policy.integration === "pull_request"
+													? "taskAddByPullRequest"
+													: "taskAddByHand",
+									)}
+								</p>
+							)}
+						</>
 					)}
 				</section>
 				{(session || cancellable) && (
