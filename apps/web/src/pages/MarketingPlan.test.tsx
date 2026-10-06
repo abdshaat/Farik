@@ -11,7 +11,16 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
-import { GOAL, PLAN, TEAM, TEXT } from "../test/marketing.ts";
+import {
+	GOAL,
+	NAME,
+	PLAN,
+	SUMMARY,
+	TEAM,
+	TEXT,
+	TITLE,
+	TOPIC,
+} from "../test/marketing.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 
 /** The page of plan MP-3, with the team and `plan` answered. */
@@ -60,7 +69,7 @@ describe("marketing plan page", () => {
 		expect(
 			await screen.findByRole("heading", {
 				level: 1,
-				name: "Autumn at Corner Bakery",
+				name: TITLE,
 			}),
 		).toBeTruthy();
 		expect(
@@ -81,7 +90,7 @@ describe("marketing plan page", () => {
 		const letter = screen.getByRole("region", {
 			name: "Kai, your Marketing Specialist, wrote this for you",
 		});
-		expect(within(letter).getByText(PLAN.summary)).toBeTruthy();
+		expect(within(letter).getByText(SUMMARY)).toBeTruthy();
 		// With the agent's own picture, as Today's row has it.
 		expect(within(letter).getByRole("img", { name: "Kai" })).toBeTruthy();
 
@@ -112,7 +121,7 @@ describe("marketing plan page", () => {
 			"Google Ads2 campaigns|12 Oct to 22 Nov|$450.00",
 		);
 		expect(cells(rows[2] as HTMLElement)).toBe(
-			`Pie pre-orders${GOAL}|26 Oct to 22 Nov|$300.00`,
+			`${NAME}${GOAL}|26 Oct to 22 Nov|$300.00`,
 		);
 		expect(cells(rows[3] as HTMLElement)).toBe(
 			"Bakery near meNew customers searching for a bakery within 2 miles|12 Oct to 22 Nov|$150.00",
@@ -139,7 +148,7 @@ describe("marketing plan page", () => {
 		expect(
 			week("Week 1: 12 to 18 October").map((li) => li.textContent),
 		).toEqual([
-			"Mon 12 OctInstagramOur autumn menu",
+			`Mon 12 OctInstagram${TOPIC}`,
 			"Wed 14 OctXPumpkin loaf is back",
 			"Sat 17 OctInstagramShaping the sourdough",
 		]);
@@ -186,6 +195,8 @@ describe("marketing plan page", () => {
 		expect(whole.querySelector("pre")?.textContent).toBe(TEXT);
 		// Not one element came out of it: the markup, and the markdown's bold and heading.
 		expect(whole.querySelector("pre")?.children).toHaveLength(0);
+		// Every text the agent writes carries a `<b>`: the title, the summary, a campaign's name and
+		// goal, a post's topic and a measure. Each was compared above as typed, so none is an element.
 		expect(container.querySelector("script, i, b")).toBeNull();
 		// The only picture is the agent's own: the `img` in its text is shown, not made.
 		expect(
@@ -310,9 +321,7 @@ describe("marketing plan page", () => {
 			name: "End this plan now?",
 		});
 		expect(
-			within(dialog).getByText(
-				"Autumn at Corner Bakery, MP-3, on day 23 of 42.",
-			),
+			within(dialog).getByText(`${TITLE}, MP-3, on day 23 of 42.`),
 		).toBeTruthy();
 		// Asking first: nothing is sent until it is confirmed.
 		expect(s.calls("command")).toHaveLength(0);
@@ -347,9 +356,7 @@ describe("marketing plan page", () => {
 			name: "End this plan now?",
 		});
 		expect(
-			within(dialog).getByText(
-				"Autumn at Corner Bakery, MP-3, which has not started.",
-			),
+			within(dialog).getByText(`${TITLE}, MP-3, which has not started.`),
 		).toBeTruthy();
 		fireEvent.click(
 			within(dialog).getByRole("button", { name: "Keep the plan" }),

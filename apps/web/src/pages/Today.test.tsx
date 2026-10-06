@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectionProvider } from "../app/connection.tsx";
 import { en } from "../strings/en.ts";
 import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
-import { PLAN, SUMMARY } from "../test/marketing.ts";
+import { PLAN, SUMMARY, TITLE } from "../test/marketing.ts";
 import {
 	answerQuery,
 	answerStatus,
@@ -615,8 +615,8 @@ describe("today", () => {
 		task_id: "FRK-31",
 		kind: "marketing_plan",
 		agent_id: "kai",
-		title: "Autumn at Corner Bakery",
-		line: "Kai proposes a marketing plan: Autumn at Corner Bakery",
+		title: TITLE,
+		line: `Kai proposes a marketing plan: ${TITLE}`,
 		plan: "MP-3",
 		summary: SUMMARY,
 		total: "450.00",
@@ -640,12 +640,12 @@ describe("today", () => {
 		const list = await screen.findByRole("list", { name: en.waitingList });
 		const row = within(list).getByRole("listitem");
 		expect(
-			within(row).getByText(
-				"Marketing plan to approve: Autumn at Corner Bakery",
-			),
+			within(row).getByText(`Marketing plan to approve: ${TITLE}`),
 		).toBeTruthy();
 		// The whole summary is on the row, as text; the page has the rest.
 		expect(within(row).getByText(SUMMARY)).toBeTruthy();
+		// What the agent wrote is shown as typed: no markup of it became an element.
+		expect(row.querySelector("b")).toBeNull();
 		expect(within(row).getByText("$450.00")).toBeTruthy();
 		expect(within(row).getByText("USD")).toBeTruthy();
 		expect(
@@ -679,7 +679,7 @@ describe("today", () => {
 		expect(
 			await screen.findByRole("heading", {
 				level: 1,
-				name: "Autumn at Corner Bakery",
+				name: TITLE,
 			}),
 		).toBeTruthy();
 	});

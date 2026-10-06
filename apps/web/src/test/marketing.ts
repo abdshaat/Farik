@@ -18,17 +18,22 @@ export const TEAM = {
 	rules: {},
 };
 
-export const SUMMARY =
-	"Six weeks to sell more Thanksgiving pies and bring new people in on Saturday mornings. The ads cost at most $450 in all, and the posts cost nothing.";
+/** Markup an agent can write into any of a plan's words: shown as typed, never made into an element. */
+const MARKUP = "<b>x</b>";
+
+export const TITLE = `Autumn at Corner Bakery ${MARKUP}`;
+export const SUMMARY = `Six weeks to sell more Thanksgiving pies and bring new people in on Saturday mornings. The ads cost at most $450 in all, and the posts cost nothing. ${MARKUP}`;
 /** What an agent can write in a plan's text: markup and a markdown heading, all to be shown as typed. */
 export const TEXT =
 	'# MP-3 Autumn at Corner Bakery\n## What I found\n- Last year you sold 74 Thanksgiving pies.\n<img src="x" onerror="alert(1)">\n<script>alert(1)</script>\n**not bold**';
-export const GOAL = "Thanksgiving pie pre-orders from <i>people</i> searching";
+export const NAME = `Pie pre-orders ${MARKUP}`;
+export const GOAL = `Thanksgiving pie pre-orders from <i>people</i> searching ${MARKUP}`;
+export const TOPIC = `Our autumn menu ${MARKUP}`;
 
 /** MP-3 as `marketing_plan.get` answers it while it waits on the owner. */
 export const PLAN = {
 	plan: "MP-3",
-	title: "Autumn at Corner Bakery",
+	title: TITLE,
 	summary: SUMMARY,
 	text: TEXT,
 	state: "proposed",
@@ -40,7 +45,7 @@ export const PLAN = {
 		{
 			key: "pies",
 			channel: "google_ads",
-			name: "Pie pre-orders",
+			name: NAME,
 			goal: GOAL,
 			budget: "300.00",
 			starts_on: "2026-10-26",
@@ -61,7 +66,7 @@ export const PLAN = {
 			key: "p1",
 			channel: "instagram",
 			on: "2026-10-12",
-			topic: "Our autumn menu",
+			topic: TOPIC,
 		},
 		{
 			key: "p2",
@@ -90,7 +95,7 @@ export const PLAN = {
 		},
 	],
 	measures: [
-		"120 pie pre-orders by 22 November (last year: 74)",
+		`120 pie pre-orders by 22 November (last year: 74) ${MARKUP}`,
 		"A pre-order from the ads costs under $4.00",
 	],
 	google_ads_account: "482-193-7720",
