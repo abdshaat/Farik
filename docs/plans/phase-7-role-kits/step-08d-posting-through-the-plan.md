@@ -148,7 +148,7 @@ Files: `daemon/own_calls.rs`, `daemon.rs` (the module); `tests/support/oauth_fix
 - `uses_a_keys_entry_as_kept`: a kit entry whose `Authorization` header is filled from a key holding the fixture's minted token reaches the tool with it, and `/token` sees nothing. RED.
 - `maps_what_the_service_answers`: a tool error result is `Tool` with its words; the fixture held past 30 seconds on the paused clock is `Timeout`. RED.
 
-- [ ] `feat(runtime): let Farik call a service with an agent's connection`
+- [x] `feat(runtime): let Farik call a service with an agent's connection`
 
 ### Task 3: A post, checked
 
@@ -268,3 +268,5 @@ Then, by the founder, with Buffer connected again and a test Instagram or X chan
 Task 0: the boards landed in 47781e1 with 08c's; the founder approved them as drawn on 2026-10-05.
 
 Task 1: RED was a compile failure of the five new tests (`call_tool` and `ConnectorError::ToolError` did not exist). Guards, each mutation reverted: preferring the text over structured content, not wrapping plain text, not cutting a tool error, reading an error result as an answer (each fails its test), keeping the environment (`env_clear` removed), not sending the bearer, and no time limit on a call, each fail the test named for it. `list_tools` and `call_tool` now share one private `connect`. A result with no text and no structured content answers `{ "text": "" }`. `ConnectorError::ToolError` is not one a listing meets, so the two listing matches (`daemon/team.rs`, `cli/src/connector.rs`) say only "its tools could not be listed". The in-process HTTP fixture turns the SSE keep-alive off: on a paused clock each ping is due at once and the stream answers in a loop, so the clock only moved after 15 real seconds.
+
+Task 2: RED was a compile failure (`call_as` and `OwnCallError` did not exist). Guards, each mutation reverted and each failing the test named for it: any pair callable; an entry that is not the kit's used (the test keeps the widened entry as connected, so only `matches_kit` can refuse it); the kept state not checked (a sign-in kept as ended is `NotConnected`, which only `runs` gives); a refresh never made (`VALID_FOR` 1 s); a keys entry sent through the refresh; a lapse at the refresh not told; no bearer; a tool error and a timeout mapped to `Failed`. Clarification: `Kept::runs` is false for a sign-in already kept as ended, so that case is `NotConnected`, and `SignInAgain` is what a refresh the service ends gives (`Fresh::Lapsed`); the owner is told the same either way. `call_as` runs a stdio server in its connector folder and makes none for an http one. The OAuth fixture gained `ToolAnswer` (a text, structured JSON or an error per tool), `Fixture::calls(tool)`, `hold("tool:<name>")`, and no SSE keep-alive (on a paused clock the pings hold the runtime busy for 15 real seconds). `call_as` is `expect(dead_code)` outside tests until Task 4 makes the first call.

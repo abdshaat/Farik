@@ -40,6 +40,17 @@ pub enum Iss {
     Absent,
 }
 
+/// What a tool of the protected MCP server answers when it is called.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ToolAnswer {
+    /// A result with this text.
+    Text(String),
+    /// A result whose structured content is this value.
+    Json(serde_json::Value),
+    /// A result marked as an error, with this text.
+    Error(String),
+}
+
 /// The ways this server can differ from a well-behaved one.
 #[derive(Clone)]
 pub struct Flags {
@@ -69,6 +80,9 @@ pub struct Flags {
     pub no_expiry: bool,
     /// Whether the tool's description is the `Authorization` header it was listed with.
     pub echo_authorization: bool,
+    /// What each tool answers when called, by name; a tool with no answer here answers
+    /// `whoami-ok`.
+    pub tool_answers: BTreeMap<String, ToolAnswer>,
 }
 
 impl Default for Flags {
@@ -94,6 +108,7 @@ impl Default for Flags {
             expires_in: 3600,
             no_expiry: false,
             echo_authorization: true,
+            tool_answers: BTreeMap::new(),
         }
     }
 }
@@ -125,6 +140,8 @@ struct Shared {
     clients: Mutex<HashMap<String, Vec<String>>>,
     counter: AtomicU64,
     held: tokio::sync::watch::Sender<HashSet<String>>,
+    /// Every `tools/call`: the tool and the arguments it carried, in order.
+    calls: Mutex<Vec<(String, JsonObject)>>,
 }
 
 pub struct Fixture {
@@ -145,13 +162,38 @@ impl ServerHandler for Tools {
 
     fn call_tool(
         &self,
-        _request: rmcp::model::CallToolRequestParams,
+        request: rmcp::model::CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<rmcp::model::CallToolResponse, ErrorData>> + Send + '_ {
-        std::future::ready(Ok(rmcp::model::CallToolResult::success(vec![
-            rmcp::model::ContentBlock::text("whoami-ok"),
-        ])
-        .into()))
+        let shared = self.0.clone();
+        async move {
+            let name = request.name.to_string();
+            shared
+                .calls
+                .lock()
+                .expect("calls")
+                .push((name.clone(), request.arguments.clone().unwrap_or_default()));
+            // `hold("tool:<name>")` keeps this tool from answering until `release`d.
+            shared.wait_if_held(&format!("tool:{name}")).await;
+            let answer = shared.flags().tool_answers.get(&name).cloned();
+            let result = match answer {
+                None => {
+                    rmcp::model::CallToolResult::success(vec![rmcp::model::ContentBlock::text(
+                        "whoami-ok",
+                    )])
+                }
+                Some(ToolAnswer::Text(text)) => {
+                    rmcp::model::CallToolResult::success(vec![rmcp::model::ContentBlock::text(
+                        text,
+                    )])
+                }
+                Some(ToolAnswer::Json(value)) => rmcp::model::CallToolResult::structured(value),
+                Some(ToolAnswer::Error(text)) => {
+                    rmcp::model::CallToolResult::error(vec![rmcp::model::ContentBlock::text(text)])
+                }
+            };
+            Ok(result.into())
+        }
     }
 
     fn list_tools(
@@ -524,12 +566,18 @@ impl Fixture {
             clients: Mutex::new(HashMap::new()),
             counter: AtomicU64::new(0),
             held,
+            calls: Mutex::new(Vec::new()),
         });
         let for_tools = shared.clone();
+        // No keep-alive pings: on a paused clock each one is due at once, and the stream answers
+        // them in a loop that holds the runtime busy, so the clock only moves after 15 real
+        // seconds.
+        let mut config = StreamableHttpServerConfig::default();
+        config.sse_keep_alive = None;
         let service = StreamableHttpService::new(
             move || Ok(Tools(for_tools.clone())),
             Arc::new(LocalSessionManager::default()),
-            StreamableHttpServerConfig::default(),
+            config,
         );
         let router = axum::Router::new()
             .route_service("/mcp", service)
@@ -547,7 +595,8 @@ impl Fixture {
         change(&mut self.shared.flags.lock().expect("flags"));
     }
 
-    /// Makes `route` (`prm`, `register`, `token`, `revoke`) wait until `release`d.
+    /// Makes `route` (`prm`, `register`, `token`, `revoke`, or `tool:<name>` for a tool's answer)
+    /// wait until `release`d.
     pub fn hold(&self, route: &str) {
         self.shared.held.send_modify(|held| {
             held.insert(route.to_string());
@@ -578,6 +627,18 @@ impl Fixture {
 
     pub fn count(&self, path: &str) -> usize {
         self.requests(path).len()
+    }
+
+    /// The arguments each `tools/call` of `tool` carried, in order.
+    pub fn calls(&self, tool: &str) -> Vec<JsonObject> {
+        self.shared
+            .calls
+            .lock()
+            .expect("calls")
+            .iter()
+            .filter(|(name, _)| name == tool)
+            .map(|(_, arguments)| arguments.clone())
+            .collect()
     }
 
     /// Every request body and query the server saw, as one text, for a search for a token.

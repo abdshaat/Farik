@@ -49,6 +49,7 @@ pub(crate) mod fixtures;
 mod gates;
 mod hooks;
 mod mcp;
+pub(crate) mod own_calls;
 mod setup;
 mod signed_in;
 mod team;
