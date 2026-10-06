@@ -485,17 +485,26 @@ fn create_private(path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
-/// Copies the workbook at `path` to `.history/<its path in the folder, with / as __>.<UTC
-/// yyyymmddThhmmssZ>.xlsx`, with `-<n>` before the extension when that name is taken.
+/// The path of a workbook in its folder as one file name: its parts joined by `/`, with `%` written
+/// `%25` and `/` written `%2F`, so that two paths never share a name.
+fn history_name(relative: &Path) -> String {
+    relative
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+        .replace('%', "%25")
+        .replace('/', "%2F")
+}
+
+/// Copies the workbook at `path` to `.history/<name>.<UTC yyyymmddThhmmssZ>.xlsx`, `<name>` being
+/// its path in the folder as [`history_name`] writes it, with `-<n>` before the extension when that
+/// name is taken.
 fn keep_previous(folder: &Path, path: &Path, now: DateTime<Utc>) -> Result<(), ToolError> {
     let relative = path
         .strip_prefix(folder)
         .map_err(|_| failed(format!("{} is not in {}", path.display(), folder.display())))?;
-    let flat = relative
-        .components()
-        .map(|part| part.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("__");
+    let flat = history_name(relative);
     let stamp = now.format("%Y%m%dT%H%M%SZ");
     let history = folder.join(".history");
     if is_a_link(&history)? {
@@ -872,7 +881,7 @@ mod tests {
     use calamine::{Data, DataType as _, Reader, Xlsx, open_workbook};
     use serde_json::{Value, json};
 
-    use super::{formula_reaches_outside, private_path};
+    use super::{formula_reaches_outside, history_name, private_path};
     use crate::session::SessionPurpose;
     use crate::tools::ToolError;
     use crate::tools::fixtures::{
@@ -1243,7 +1252,7 @@ mod tests {
             Data::String("three".to_string()),
             "the target holds the last"
         );
-        // A path in a subfolder keeps its folder in the name, as `__`.
+        // A path in a subfolder keeps its folder in the name, as `%2F`.
         for text in ["a", "b"] {
             write(
                 &project,
@@ -1253,10 +1262,66 @@ mod tests {
         }
         assert!(
             history
-                .join("2026__pricing.xlsx.20260922T120000Z.xlsx")
+                .join("2026%2Fpricing.xlsx.20260922T120000Z.xlsx")
                 .is_file(),
             "{:?}",
             files_under(&folder(&project))
+        );
+    }
+
+    #[test]
+    fn names_a_history_copy_after_its_path_one_to_one() {
+        for (path, name) in [
+            ("books.xlsx", "books.xlsx"),
+            ("a/b.xlsx", "a%2Fb.xlsx"),
+            ("a__b.xlsx", "a__b.xlsx"),
+            ("a/b/c.xlsx", "a%2Fb%2Fc.xlsx"),
+            ("100%/x.xlsx", "100%25%2Fx.xlsx"),
+            ("a%2F/b.xlsx", "a%252F%2Fb.xlsx"),
+        ] {
+            assert_eq!(history_name(Path::new(path)), name, "{path}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn names_each_workbooks_history_uniquely() {
+        let project = a_finance_project("sheets-history-names");
+        // Four workbooks the old `/` as `__` named alike, each written twice in the one second.
+        let workbooks = [
+            ("a/b/c.xlsx", "a%2Fb%2Fc.xlsx"),
+            ("a__b/c.xlsx", "a__b%2Fc.xlsx"),
+            ("a/b__c.xlsx", "a%2Fb__c.xlsx"),
+            ("a__b__c.xlsx", "a__b__c.xlsx"),
+        ];
+        for (path, _) in workbooks {
+            for text in ["first", "second"] {
+                write(
+                    &project,
+                    &one_sheet(path, &json!([[format!("{path} {text}"), 1]])),
+                )
+                .expect("a write");
+            }
+        }
+
+        let history = folder(&project).join(".history");
+        for (path, name) in workbooks {
+            let kept = history.join(format!("{name}.20260922T120000Z.xlsx"));
+            assert!(
+                kept.is_file(),
+                "{path} has its own copy {name}: {:?}",
+                files_under(&history)
+            );
+            assert_eq!(
+                cell(&mut open(&kept), "Books", (1, 0)),
+                Data::String(format!("{path} first")),
+                "{path} keeps its own first version"
+            );
+        }
+        assert_eq!(
+            files_under(&history).len(),
+            4,
+            "one copy each, none with `-1`"
         );
     }
 
