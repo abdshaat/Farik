@@ -39,6 +39,24 @@ pub fn baseline_of(folder: &Path, task: &TaskId) -> PathBuf {
     folder.join(HISTORY).join(task.as_str())
 }
 
+/// Refuses `folder`, its `.history` and the copy taken for `task` when any of them is a link:
+/// a copy written or read through one would be somewhere else, and the names found there would
+/// reach a reviewer as the folder's own.
+fn refuse_links(folder: &Path, task: &TaskId) -> Result<(), StoreError> {
+    let copy = baseline_of(folder, task);
+    for path in [folder.to_path_buf(), folder.join(HISTORY), copy] {
+        if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            return Err(StoreError::Io {
+                detail: format!(
+                    "{} is a link, and a private folder and its copy are read and written only in the folder",
+                    path.display()
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Copies every regular file of `folder`, `.history` left out and links not followed, to
 /// `<folder>/.history/<task>/`, in the same layout, for its owner alone. It copies once: when
 /// that directory is there already, as it is for a task sent back and assigned again, nothing is
@@ -47,19 +65,12 @@ pub fn baseline_of(folder: &Path, task: &TaskId) -> PathBuf {
 ///
 /// # Errors
 ///
-/// `Io` when `.history` is a link, when the folder cannot be read or when the copy cannot be
-/// written; a copy that stopped half way is removed, so that the next try starts over.
+/// `Io` when the folder, `.history` or the copy is a link, when the folder cannot be read or when
+/// the copy cannot be written; a copy that stopped half way is removed, so that the next try
+/// starts over.
 pub fn copy_baseline(folder: &Path, task: &TaskId) -> Result<bool, StoreError> {
+    refuse_links(folder, task)?;
     let copy = baseline_of(folder, task);
-    let history = folder.join(HISTORY);
-    if fs::symlink_metadata(&history).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-        return Err(StoreError::Io {
-            detail: format!(
-                "{} is a link, and the copy of a folder is kept only in the folder",
-                history.display()
-            ),
-        });
-    }
     if copy.exists() {
         return Ok(false);
     }
@@ -111,11 +122,13 @@ pub struct FolderChange {
 ///
 /// # Errors
 ///
-/// `Io` when the folder or the copy cannot be read.
+/// `Io` when the folder, `.history` or the copy is a link, or when the folder or the copy cannot
+/// be read.
 pub fn changes_since_baseline(
     folder: &Path,
     task: &TaskId,
 ) -> Result<Vec<FolderChange>, StoreError> {
+    refuse_links(folder, task)?;
     let now = files_under(folder, true)?;
     let before = files_under(&baseline_of(folder, task), false)?;
     let mut changes = Vec::new();
@@ -356,6 +369,40 @@ mod tests {
         let error = copy_baseline(&folder, &task("FRK-1")).expect_err("refused");
         assert!(error.to_string().contains("is a link"), "{error}");
         assert_eq!(fs::read_dir(&elsewhere).expect("read").count(), 0);
+    }
+
+    #[test]
+    fn refuses_a_task_copy_that_is_a_link() {
+        // A link at `.history/<task>` would have the copy's walk list, and the review message and
+        // `task.diff` name, what lies where it points, and a second copy skipped as taken.
+        let folder = a_folder("linked-copy");
+        let elsewhere = folder.parent().expect("a parent").join("elsewhere");
+        fs::create_dir_all(&elsewhere).expect("made");
+        fs::write(elsewhere.join("outside-secret.xlsx"), "outside").expect("written");
+        symlink(&elsewhere, folder.join(".history/FRK-1")).expect("a link");
+        let copy = copy_baseline(&folder, &task("FRK-1")).expect_err("refused");
+        assert!(copy.to_string().contains("is a link"), "{copy}");
+        let changes = changes_since_baseline(&folder, &task("FRK-1")).expect_err("refused");
+        assert!(changes.to_string().contains("is a link"), "{changes}");
+        assert!(!changes.to_string().contains("outside-secret"), "{changes}");
+        // Nothing was written where the link points.
+        assert_eq!(fs::read_dir(&elsewhere).expect("read").count(), 1);
+    }
+
+    #[test]
+    fn refuses_a_folder_that_is_a_link() {
+        let folder = a_folder("linked-folder");
+        let elsewhere = folder.parent().expect("a parent").join("elsewhere");
+        fs::create_dir_all(&elsewhere).expect("made");
+        fs::write(elsewhere.join("outside-secret.xlsx"), "outside").expect("written");
+        let linked = folder.parent().expect("a parent").join("linked");
+        symlink(&elsewhere, &linked).expect("a link");
+        let copy = copy_baseline(&linked, &task("FRK-1")).expect_err("refused");
+        assert!(copy.to_string().contains("is a link"), "{copy}");
+        let changes = changes_since_baseline(&linked, &task("FRK-1")).expect_err("refused");
+        assert!(changes.to_string().contains("is a link"), "{changes}");
+        assert!(!changes.to_string().contains("outside-secret"), "{changes}");
+        assert!(!elsewhere.join(".history").exists());
     }
 
     #[test]
