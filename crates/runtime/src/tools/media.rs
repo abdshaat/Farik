@@ -83,8 +83,9 @@ fn refused(detail: impl Into<String>) -> ToolError {
 }
 
 /// Whether `address` is one anyone on the internet could reach: not this computer, not a private
-/// network, not a link-local, shared, documentation, benchmarking, multicast or reserved range,
-/// and, for an IPv6 address that carries an IPv4 one, not a private IPv4.
+/// network, not a link-local, site-local, shared, documentation, benchmarking, multicast or
+/// reserved range, not a NAT64 prefix a network keeps for itself, and, for an IPv6 address that
+/// carries an IPv4 one, not a private IPv4.
 pub(crate) fn is_public(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(address) => is_public_v4(address),
@@ -107,7 +108,11 @@ pub(crate) fn is_public(address: IpAddr) -> bool {
                 || address.is_loopback()
                 || address.is_multicast()
                 || is_unique_local(address)
+                // Link-local, fe80::/10, and the site-local range it was replaced from, fec0::/10.
                 || (segments[0] & 0xffc0) == 0xfe80
+                || (segments[0] & 0xffc0) == 0xfec0
+                // NAT64 for a network's own use, 64:ff9b:1::/48 (RFC 8215): no public host.
+                || segments[..3] == [0x0064, 0xff9b, 0x0001]
                 || (segments[0] == 0x2001 && segments[1] == 0x0db8))
         }
     }
@@ -515,6 +520,12 @@ mod tests {
             "https://[::ffff:127.0.0.1]/a.png",
             "https://[2002:0a00:0001::1]/a.png",
             "https://[64:ff9b::a00:1]/a.png",
+            // Site-local, fec0::/10, which fe80::/10 (link-local) does not cover.
+            "https://[fec0::1]/a.png",
+            "https://[feff::1]/a.png",
+            // NAT64 for a network's own use, 64:ff9b:1::/48, which holds no IPv4 address.
+            "https://[64:ff9b:1::1]/a.png",
+            "https://[64:ff9b:1:ffff::1]/a.png",
             "https://localhost/a.png",
             "https://LOCALHOST./a.png",
             "https://app.localhost/a.png",
@@ -537,6 +548,10 @@ mod tests {
             "https://cdn.example.com:443/a.png?x=1&y=2",
             "https://93.184.216.34/a.png",
             "https://[2606:4700::1111]/a.png",
+            // The well-known NAT64 prefix of a public IPv4 address, and the one next to the local
+            // prefix.
+            "https://[64:ff9b::5db8:d822]/a.png",
+            "https://[64:ff9b:2::1]/a.png",
         ] {
             media_url_allowed(allowed).expect(allowed);
         }
