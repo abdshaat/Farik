@@ -4,6 +4,7 @@ Status: draft. Its readiness review runs once step 08f has landed (ADR 0032: one
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 5.5, 5.7, 6.5, 8.5; F3, F9
 Depends on: step 08f of this phase (`GoogleAds`, the route's grant handling in `daemon/ads_calls.rs`, `marketing_campaign.created`, `CreatedCampaign`, `check_ads_write`); step 08c (`active_plan`, `marketing_plans`, `record_plan_end`, `marketing_plan_end`, the plan's page); phase 6 (merged in #19)
+Decided by the founder, 2026-10-06: removing the Google Ads connection while a plan's campaigns run first pauses them (Farik's own call, as at a cap), then removes the connection, since Farik could no longer stop them at the budget; Remove's confirmation says so.
 Readiness confirmed by: not yet run
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from step 08f at the seam between running ads and stopping them.

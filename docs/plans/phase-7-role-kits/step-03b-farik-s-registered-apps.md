@@ -5,7 +5,8 @@ Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6.7, 8.6; F9
 Depends on: step 03 of this phase (committed before this step starts: `start_sign_in`, `SignIn`, `OAuthGrant`, `refreshed`, `revoke`, `SignInError`, the loopback listener, `connector.sign_in` and `connector.sign_in_status`, `SignedIn`, `read_kept`, `connect_with`, `ConnectorAdd`'s sign-in)
 Readiness: fresh-session Opus reviewer, 2026-10-02: not ready, 5 Blocking, all folded with the founder's decisions; no second round (ADR 0032)
-Mockups approved by: pending (Task 1's gate)
+Mockups approved by: the founder, 2026-10-06, as drawn (`docs/design/mockups/GitHubSignIn.dc.html`, `PhoneGitHubSignIn.dc.html`, on the canvas's "connectors" page; drawn as new boards rather than states added to `ConnectorAdd.dc.html` and `AgentEdit.dc.html`)
+Decided by the founder, 2026-10-06, with the boards: (1) Remove's confirmation links straight to the page where Farik is removed at the service, so each `RegisteredApp` gains `settings_url` (GitHub `https://github.com/settings/apps/authorizations`, Google `https://myaccount.google.com/connections`) and Task 6 shows it as a link; (2) the "Run by Farik" label beside Farik's own connectors stays; (3) the boards' extra line under GitHub's button, "Farik shows you a short code to type on GitHub's page.", and the Remove confirmation's second line are approved with them. Task 6 also names the provider, not the kit title, in a kit row's "Signed in to <provider>." and in Remove's words for a connector with no web address.
 
 ## Goal
 
@@ -100,7 +101,7 @@ A Sonnet agent draws these on the canvas (https://claude.ai/artifact/6tNaCmNojhi
 
 Gate: the founder approves the boards, or says to approve them automatically, and the approval is written into this plan's header with its date. Task 6 does not start until then; Tasks 2 to 5 do not depend on the boards.
 
-- [ ] `docs(design): mock up signing in with GitHub`
+- [x] `docs(design): mock up signing in with GitHub`
 
 ### Task 2: The table
 
