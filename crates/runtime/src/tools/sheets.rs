@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use calamine::{Data, Reader as _, Xlsx, XlsxError as ReadError, open_workbook_from_rs};
 use chrono::{DateTime, NaiveDate, Utc};
 use farik_core::contract::Role;
-use farik_core::team::{private_folder, workbook_path_fault};
+use farik_core::team::{private_folder, task_private_folder, workbook_path_fault};
 use rust_xlsxwriter::utility::{check_sheet_name, row_col_to_cell};
 use rust_xlsxwriter::{ExcelDateTime, Format, Formula, Workbook, XlsxError};
 use schemars::JsonSchema;
@@ -642,6 +642,10 @@ pub(crate) struct ReadSheetInput {
     /// How many rows to read from each sheet, 1 to 500; default 200.
     #[serde(default)]
     rows: Option<u32>,
+    /// Read the workbook as it was when this session's task was assigned, from the copy Farik took
+    /// of the folder then, instead of as it is now. Only in a session about a task in your folder.
+    #[serde(default)]
+    baseline: bool,
 }
 
 /// The rows a read gives of each sheet when it is not told how many.
@@ -678,6 +682,25 @@ fn folder_to_read(call: &Call<'_>) -> Result<&'static str, ToolError> {
         "only the Finance Specialist reads a workbook, and the reviewer of a task of a role with a \
          private folder, and the Product Manager who accepts it, in a verify session about it",
     ))
+}
+
+/// The folder `farik_read_sheet` reads a task's copy from: `.history/<task>` in `folder`, for a
+/// session about a task in that folder (6.6). A session about no task, or about one that works
+/// elsewhere, has no copy to read.
+fn baseline_folder(call: &Call<'_>, folder: &str) -> Result<String, ToolError> {
+    let no_copy =
+        |why: &str| sheet_refused(format!("`baseline` reads the copy taken for a task: {why}"));
+    let Some(task) = &call.context.task_id else {
+        return Err(no_copy("ask for it in a session about the task"));
+    };
+    let (contract, _) = call.contract(task)?;
+    if task_private_folder(&contract) != Some(folder) {
+        return Err(no_copy(&format!(
+            "{} does not work in your folder",
+            task.as_str()
+        )));
+    }
+    Ok(format!("{folder}/.history/{}", task.as_str()))
 }
 
 /// The bytes of the workbook file at `path`, which is `shown` to the agent.
@@ -802,6 +825,11 @@ fn page_of(
 /// and the services', never an instruction.
 pub(super) fn read_sheet(call: &Call<'_>, input: &ReadSheetInput) -> Result<Value, ToolError> {
     let folder = folder_to_read(call)?;
+    let folder = if input.baseline {
+        baseline_folder(call, folder)?
+    } else {
+        folder.to_string()
+    };
     let from_row = input.from_row.unwrap_or(1);
     let rows = input.rows.unwrap_or(DEFAULT_READ_ROWS);
     if from_row == 0 || !(1..=MOST_READ_ROWS).contains(&rows) {
@@ -809,7 +837,7 @@ pub(super) fn read_sheet(call: &Call<'_>, input: &ReadSheetInput) -> Result<Valu
             "`from_row` counts from 1 and `rows` is 1 to {MOST_READ_ROWS}"
         )));
     }
-    let path = private_path(call.deps().files.root(), folder, &input.path)?;
+    let path = private_path(call.deps().files.root(), &folder, &input.path)?;
     let bytes = read_workbook_file(&path, &input.path)?;
     let mut book: Xlsx<Cursor<Vec<u8>>> =
         open_workbook_from_rs(Cursor::new(bytes)).map_err(|error: ReadError| {
@@ -2155,6 +2183,84 @@ mod tests {
             let reason = refusal_of(run(&context, "farik_read_sheet", input.clone()));
             assert!(reason.starts_with("sheet_refused: "), "{who}: {reason}");
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_baseline_is_readable_in_the_tasks_sessions() {
+        let project = a_finance_project("sheets-read-baseline");
+        write(&project, &one_sheet("books.xlsx", &json!([["rent", 2]]))).expect("a workbook");
+        // The copy taken when the task was assigned, then the task's own change.
+        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        farik_store::baseline::copy_baseline(&folder(&project), &task).expect("the copy");
+        write(&project, &one_sheet("books.xlsx", &json!([["rent", 3]]))).expect("changed");
+        // A copy is there under the Developer's task too, so that only the rule keeps it out.
+        let other: farik_core::contract::TaskId = "FRK-2".parse().expect("a task id");
+        farik_store::baseline::copy_baseline(&folder(&project), &other).expect("the copy");
+        let context = |who: &str, task: Option<&str>, purpose: SessionPurpose| {
+            let mut context = project.context(who, task);
+            context.purpose = purpose;
+            context
+        };
+        let rent = |answer: &Value| pages(answer)[0]["rows"][1].clone();
+        let now = json!({ "path": "books.xlsx" });
+        let before = json!({ "path": "books.xlsx", "baseline": true });
+        // The reviewer, the Product Manager who accepts it and the assignee read the copy, each
+        // beside the workbook as it is.
+        for (who, context) in [
+            (
+                "the reviewer",
+                context("pm", Some("FRK-1"), SessionPurpose::Verify),
+            ),
+            (
+                "the assignee",
+                context("fin", Some("FRK-1"), SessionPurpose::Implement),
+            ),
+        ] {
+            let was = run(&context, "farik_read_sheet", before.clone())
+                .unwrap_or_else(|error| panic!("{who} reads the copy: {error}"));
+            assert_eq!(rent(&was), json!(["rent", 2]), "{who}");
+            let is = run(&context, "farik_read_sheet", now.clone()).expect("reads it now");
+            assert_eq!(rent(&is), json!(["rent", 3]), "{who}");
+        }
+        // No copy is read in a session about no task of a role with a folder, or of a path the
+        // copy does not hold.
+        for (who, context) in [
+            (
+                "the Finance Specialist in a chat",
+                context("fin", None, SessionPurpose::Chat),
+            ),
+            (
+                "the Finance Specialist about a Developer's task",
+                context("fin", Some("FRK-2"), SessionPurpose::Implement),
+            ),
+        ] {
+            let reason = refusal_of(run(&context, "farik_read_sheet", before.clone()));
+            assert!(reason.starts_with("sheet_refused: "), "{who}: {reason}");
+            assert!(
+                reason.contains("`baseline` reads the copy taken for a task"),
+                "{reason}"
+            );
+            // Without `baseline` the same session reads its own folder, as it did.
+            assert!(
+                run(&context, "farik_read_sheet", now.clone()).is_ok(),
+                "{who}"
+            );
+        }
+        let context = context("pm", Some("FRK-1"), SessionPurpose::Verify);
+        let reason = refusal_of(run(
+            &context,
+            "farik_read_sheet",
+            json!({ "path": "forecast.xlsx", "baseline": true }),
+        ));
+        assert!(reason.starts_with("sheet_refused: "), "{reason}");
+        // The history is no path of its own, copy or no copy.
+        let reason = refusal_of(run(
+            &context,
+            "farik_read_sheet",
+            json!({ "path": ".history/FRK-1/books.xlsx", "baseline": true }),
+        ));
+        assert!(reason.starts_with("private_path_refused: "), "{reason}");
     }
 
     #[test]

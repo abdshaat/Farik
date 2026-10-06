@@ -19,10 +19,13 @@ use farik_protocol::event::{
     CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody, EventIds, FarikEvent,
     NoteWrittenBodyKind, ReviewRecordedBody, new_event,
 };
+use farik_store::baseline::{FolderChangeKind, baseline_of, changes_since_baseline};
 use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::design::DESIGN_REVIEW_TOOLS;
-use super::messages::{ReviewBrief, accept_message, design_review_message, review_message};
+use super::messages::{
+    Changes, ReviewBrief, accept_message, design_review_message, review_message,
+};
 use super::requests;
 use super::rules::{Waiting, acted, active, asleep, spent};
 use super::session::{SessionAsk, run_session};
@@ -474,18 +477,22 @@ async fn review(
     let history = history(deps, &row.task_id)?;
     let since = since_verifying(&history);
     let context = context(deps, team, &row.task_id)?;
-    // A task in a private folder has no branch to diff (6.6).
-    let diff = if task_private_folder(&contract).is_some() {
-        String::new()
+    // A task in a private folder has no branch to diff: its reviewer is told which files changed
+    // in the folder, and reads each beside its copy from the start of the task (6.6).
+    let (diff, files);
+    let changes = if let Some(folder) = task_private_folder(&contract) {
+        files = folder_changes(&deps.tools.files.root().join(folder), &contract.id)?;
+        Changes::Folder(&files)
     } else {
         let git = &deps.tools.git;
-        git.diff(&integration_branch(team, git)?, &task_branch(&contract))?
+        diff = git.diff(&integration_branch(team, git)?, &task_branch(&contract))?;
+        Changes::Diff(&diff)
     };
     let initial_prompt = review_message(&ReviewBrief {
         contract: &contract,
         results: &governor_results(&history, since),
         completion_note: context.done.completion_note.as_deref(),
-        diff: &diff,
+        changes,
         unanswered,
     });
     let end = run_session(
@@ -501,6 +508,34 @@ async fn review(
     .await?;
     record_review(deps, team, &contract, reviewer, &end.session_id, since)?;
     Ok(Some(acted(row, reviewer, "verify", &end)))
+}
+
+/// One line for each file a task changed in its private `folder` since the copy taken for it:
+/// its path, whether it is `new`, `changed` or `removed`, and its size, which for a removed file
+/// is the copy's. Or one line saying nothing changed.
+fn folder_changes(folder: &Path, task: &TaskId) -> Result<Vec<String>, OrchestratorError> {
+    let size = |path: PathBuf| std::fs::metadata(path).map_or(0, |metadata| metadata.len());
+    let lines: Vec<String> = changes_since_baseline(folder, task)?
+        .into_iter()
+        .map(|change| match change.kind {
+            FolderChangeKind::Removed => format!(
+                "{}: removed, it was {} bytes",
+                change.path,
+                size(baseline_of(folder, task).join(&change.path))
+            ),
+            kind => format!(
+                "{}: {}, {} bytes",
+                change.path,
+                kind.word(),
+                size(folder.join(&change.path))
+            ),
+        })
+        .collect();
+    Ok(if lines.is_empty() {
+        vec!["no file in the folder differs from the copy".to_string()]
+    } else {
+        lines
+    })
 }
 
 /// `review.recorded`, once per verification: when none was recorded since the task last moved into

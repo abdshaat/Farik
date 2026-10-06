@@ -2056,6 +2056,39 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_reviewer_is_told_what_changed() {
+        let harness = Harness::with_finance("orch-folder-review");
+        harness.finance_task("FRK-1", Some("verifying"));
+        let folder = harness.finance_folder();
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "first books").expect("written");
+        std::fs::write(folder.join("old.xlsx"), "an old one").expect("written");
+        let task = "FRK-1".parse().expect("a task id");
+        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        // What the task did: changed the books, added a forecast, removed an old workbook.
+        std::fs::write(folder.join("books.xlsx"), "second books, longer").expect("written");
+        std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
+        std::fs::remove_file(folder.join("old.xlsx")).expect("removed");
+        let adapter = harness.recorded(vec![review_writes_note()]);
+
+        harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the review runs");
+
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert_eq!(
+            block(prompt, "changes").trim(),
+            "books.xlsx: changed, 20 bytes\nforecast.xlsx: new, 8 bytes\nold.xlsx: removed, it was 10 bytes"
+        );
+        assert!(!prompt.contains("The diff from"), "{prompt}");
+        assert!(prompt.contains("`farik_read_sheet`"), "{prompt}");
+        assert!(block(prompt, "results").contains("C1: passed"), "{prompt}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn assignment_copies_the_books_once() {
         let harness = Harness::with_finance("orch-folder-baseline");
         let folder = harness.project.repo.path.join(".farik/local/finance");
