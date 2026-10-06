@@ -97,6 +97,12 @@ pub struct Flags {
     pub device_verification_uri: Option<String>,
     /// The `interval` a device code is answered with, in seconds; none leaves it out.
     pub device_interval: Option<u64>,
+    /// How each device code's first polls are answered, in order, before its usual answers: true
+    /// is a gateway's 502 page that is not JSON, false is the usual answer.
+    pub device_bad_gateways: Vec<bool>,
+    /// Whether that 502 carries JSON with no `error` in it, as some gateways answer, in place of
+    /// a page.
+    pub device_gateway_json: bool,
 }
 
 impl Default for Flags {
@@ -128,6 +134,8 @@ impl Default for Flags {
             device_error: None,
             device_verification_uri: None,
             device_interval: Some(1),
+            device_bad_gateways: Vec::new(),
+            device_gateway_json: false,
         }
     }
 }
@@ -152,6 +160,8 @@ pub struct Recorded {
 struct Device {
     pending_left: u32,
     slowed: bool,
+    /// The polls still to be answered by the script of `Flags::device_bad_gateways`.
+    script: std::collections::VecDeque<bool>,
 }
 
 struct Code {
@@ -615,6 +625,7 @@ fn device_code(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Respo
         Device {
             pending_left: flags.device_pending,
             slowed: !flags.device_slow_down,
+            script: flags.device_bad_gateways.iter().copied().collect(),
         },
     );
     let number = code.trim_start_matches("dc-");
@@ -643,6 +654,17 @@ fn device_poll(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Respo
     let Some(device) = devices.get_mut(code) else {
         return answer(serde_json::json!({ "error": "incorrect_device_code" }));
     };
+    if device.script.pop_front() == Some(true) {
+        if flags.device_gateway_json {
+            return json(502, serde_json::json!({ "message": "Server Error" }));
+        }
+        return (
+            StatusCode::BAD_GATEWAY,
+            [(header::CONTENT_TYPE, "text/html")],
+            "<html><body><h1>502 Bad Gateway</h1></body></html>",
+        )
+            .into_response();
+    }
     if !device.slowed {
         device.slowed = true;
         return answer(serde_json::json!({ "error": "slow_down", "interval": 10 }));

@@ -493,16 +493,29 @@ impl Setup {
             ("device_code", device.code.expose()),
             ("grant_type", DEVICE_GRANT),
         ];
+        // Answers in a row that were not the service's: a gateway's page, a dropped connection.
+        let mut passing = 0_u32;
         loop {
             tokio::time::sleep(interval).await;
             self.guard.forget_status();
             let answer = self
                 .guard
                 .post_token_form(&self.token_endpoint, &form)
-                .await
-                .map_err(|_| failed_at(&self.guard, &host, "finish signing in"))?;
+                .await;
+            // A refused address is not a passing failure: asking again would be refused again.
+            if answer.is_err() && self.guard.refusal().is_some() {
+                return Err(failed_at(&self.guard, &host, "finish signing in"));
+            }
             // GitHub answers an error with status 200, so the body is read before the status.
-            let body: serde_json::Value = serde_json::from_slice(answer.body()).unwrap_or_default();
+            let body = answer.ok().as_ref().and_then(service_answer);
+            let Some(body) = body else {
+                passing += 1;
+                if passing >= PASSING_FAILURES {
+                    return Err(failed_at(&self.guard, &host, "finish signing in"));
+                }
+                continue;
+            };
+            passing = 0;
             match body["error"].as_str() {
                 Some("authorization_pending") => {}
                 Some("slow_down") => interval += Duration::from_secs(5),
@@ -572,6 +585,17 @@ impl Setup {
 
 /// The grant type of a device code's poll (RFC 8628).
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
+
+/// How many answers in a row that are not the service's end a device sign-in `Failed`.
+const PASSING_FAILURES: u32 = 3;
+
+/// What a poll's answer says, when it is the service's: a JSON object. A reply that is not one (a
+/// gateway's page) is not, nor is a server error that carries no `error` code; the poll asks again.
+fn service_answer(answer: &http::Response<Vec<u8>>) -> Option<serde_json::Value> {
+    let body: serde_json::Value = serde_json::from_slice(answer.body()).ok()?;
+    let coded = body.get("error").is_some();
+    (body.is_object() && (coded || !answer.status().is_server_error())).then_some(body)
+}
 
 impl SignInError {
     /// The reason as the sentence the tab and the page say, from the code alone.

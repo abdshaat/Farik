@@ -813,6 +813,15 @@ fn leaked(text: String) -> &'static str {
 /// A table of one Device entry, `Dev`, whose endpoints are `fixture`'s, for the servers at `host`.
 /// It is leaked, since a table is `'static`; a test's leak is small.
 fn dev_table(fixture: &Fixture, host: &'static str) -> &'static [RegisteredApp] {
+    dev_table_polling(fixture, host, format!("{}/token", fixture.origin))
+}
+
+/// As [`dev_table`], with the token endpoint at `token_endpoint`.
+fn dev_table_polling(
+    fixture: &Fixture,
+    host: &'static str,
+    token_endpoint: String,
+) -> &'static [RegisteredApp] {
     let origin = &fixture.origin;
     Box::leak(Box::new([RegisteredApp {
         id: "dev",
@@ -824,7 +833,7 @@ fn dev_table(fixture: &Fixture, host: &'static str) -> &'static [RegisteredApp] 
         },
         client_id: "dev-client",
         issuer: leaked(format!("{origin}/login/oauth")),
-        token_endpoint: leaked(format!("{origin}/token")),
+        token_endpoint: leaked(token_endpoint),
         revocation_endpoint: None,
         install_url: Some("https://github.com/apps/dev/installations/new"),
         settings_url: "https://github.com/settings/apps/authorizations",
@@ -964,6 +973,120 @@ async fn slows_down_when_asked() {
         let waited = pair[1].at.duration_since(pair[0].at);
         assert!(waited >= Duration::from_secs(6), "waited {waited:?}");
     }
+}
+
+#[tokio::test]
+async fn polls_again_after_a_gateway_page() {
+    tokio::time::pause();
+    let fixture = Fixture::start().await;
+    // A gateway's 502 page twice, which is not JSON and not GitHub's answer; then GitHub's.
+    fixture.set(|flags| flags.device_bad_gateways = vec![true, true]);
+    let table = dev_table(&fixture, "127.0.0.1");
+    let grant = device_sign_in(&fixture, table, &auto())
+        .await
+        .expect("signed in after two failures");
+    assert_eq!(grant.app.as_deref(), Some("dev"));
+    let polls = fixture.requests("/token");
+    assert_eq!(polls.len(), 3);
+    // Each try waits the interval, as any poll does.
+    for pair in polls.windows(2) {
+        let waited = pair[1].at.duration_since(pair[0].at);
+        assert!(waited >= Duration::from_secs(1), "waited {waited:?}");
+    }
+}
+
+#[tokio::test]
+async fn polls_again_after_a_server_error_with_no_code() {
+    tokio::time::pause();
+    let fixture = Fixture::start().await;
+    // A 502 whose JSON names no error, `{"message":"Server Error"}`, is a gateway's and not GitHub's.
+    fixture.set(|flags| {
+        flags.device_bad_gateways = vec![true, true];
+        flags.device_gateway_json = true;
+    });
+    let table = dev_table(&fixture, "127.0.0.1");
+    device_sign_in(&fixture, table, &auto())
+        .await
+        .expect("signed in after two failures");
+    assert_eq!(fixture.count("/token"), 3);
+}
+
+#[tokio::test]
+async fn a_refused_token_address_ends_the_sign_in_at_once() {
+    tokio::time::pause();
+    let fixture = Fixture::start().await;
+    // Plain http beyond this computer is refused before a request is made; asking again would be too.
+    let table = dev_table_polling(
+        &fixture,
+        "127.0.0.1",
+        "http://auth.example/token".to_string(),
+    );
+    let started = tokio::time::Instant::now();
+    let error = device_sign_in(&fixture, table, &auto())
+        .await
+        .expect_err("it ends");
+    assert!(
+        matches!(&error, SignInError::Failed(why) if why.contains("http://auth.example/token is not https")),
+        "{error:?}"
+    );
+    let waited = started.elapsed();
+    assert!(waited < Duration::from_secs(2), "ended after {waited:?}");
+}
+
+#[tokio::test]
+async fn ends_after_three_failures_in_a_row() {
+    tokio::time::pause();
+    let fixture = Fixture::start().await;
+    fixture.set(|flags| flags.device_bad_gateways = vec![true; 10]);
+    let table = dev_table(&fixture, "127.0.0.1");
+    let error = device_sign_in(&fixture, table, &auto())
+        .await
+        .expect_err("three gateway pages end the sign-in");
+    assert!(
+        matches!(&error, SignInError::Failed(why) if why.contains("502")),
+        "{error:?}"
+    );
+    assert_eq!(fixture.count("/token"), 3);
+}
+
+#[tokio::test]
+async fn an_answer_between_failures_starts_the_count_again() {
+    tokio::time::pause();
+    let fixture = Fixture::start().await;
+    // Two failures, a pending answer, two failures, then the approval: never three in a row.
+    fixture.set(|flags| {
+        flags.device_bad_gateways = vec![true, true, false, true, true];
+        flags.device_pending = 1;
+    });
+    let table = dev_table(&fixture, "127.0.0.1");
+    device_sign_in(&fixture, table, &auto())
+        .await
+        .expect("signed in");
+    assert_eq!(fixture.count("/token"), 6);
+}
+
+#[tokio::test]
+async fn a_service_that_cannot_be_reached_is_tried_three_times() {
+    tokio::time::pause();
+    let fixture = Fixture::start().await;
+    // Nothing listens at the token endpoint: each poll is refused at once.
+    let table = dev_table_polling(
+        &fixture,
+        "127.0.0.1",
+        "http://127.0.0.1:1/token".to_string(),
+    );
+    let started = tokio::time::Instant::now();
+    let error = device_sign_in(&fixture, table, &auto())
+        .await
+        .expect_err("it ends");
+    assert!(
+        matches!(&error, SignInError::Failed(why) if why.contains("could not be reached")),
+        "{error:?}"
+    );
+    // The first poll after the interval, then two more, each an interval on: not the first.
+    let waited = started.elapsed();
+    assert!(waited >= Duration::from_secs(3), "ended after {waited:?}");
+    assert!(waited < Duration::from_secs(5), "ended after {waited:?}");
 }
 
 #[tokio::test]
