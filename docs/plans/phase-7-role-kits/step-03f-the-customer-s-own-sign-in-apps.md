@@ -27,10 +27,35 @@ ADR 0043: until phase 15, every login is the customer's. After this step, a cust
   - GitHub: 20 characters, `Iv` then ASCII letters, digits or `.`; one starting `Ov` is an OAuth app's ("That is an OAuth app's client ID. Farik needs a GitHub App's, which starts with Iv."); any secret given is refused ("Your GitHub app needs no client secret. Leave it empty.").
   - Google: the id is digits, `-`, then 1 to 64 lower-case letters or digits, then `.apps.googleusercontent.com`; the secret is required and is `GOCSPX-` then 20 to 64 ASCII letters, digits, `-` or `_`.
   - Codes: `sign_in_app_unknown`, `sign_in_app_client_id`, `sign_in_app_secret`, each at its field.
-- **The how-to is data**, `how_to: &'static [HowToStep]`, so the web app and `farik sign-in-app how-to` say the same words; the boards (Task 1) fix them. GitHub's says: open `https://github.com/settings/apps/new`; a name only the customer uses (GitHub's app names are unique), such as "Farik for <your business>"; any homepage; Callback URL empty and "Request user authorization (OAuth) during installation" off; "Enable Device Flow" on; "Expire user authorization tokens" on; Webhook "Active" off; repository permissions Metadata, Contents, Issues and Pull requests each "Read-only", nothing else; "Only on this account"; create it, copy its Client ID, make no client secret; "Install App" on the repositories the agents may read. Google's says: create a project at `https://console.cloud.google.com/projectcreate`; enable the Google Ads API at `https://console.cloud.google.com/apis/library/googleads.googleapis.com`; in Google Auth Platform (`https://console.cloud.google.com/auth/overview`) the branding, the audience (External, or Internal for a Google Workspace account) and the scope `https://www.googleapis.com/auth/adwords`; "Publish app" (O1); a client of type "Desktop app", copying its Client ID and Client secret; and applying for Explorer access on the project's Google Ads API page, since Test access reaches test accounts only.
-- **Facts the readiness review checks** against GitHub's and Google's pages of its day, changing the plan where they differ: the two GitHub client id formats; Google's id suffix and the `GOCSPX-` prefix; the GitHub App settings named above and `https://github.com/settings/installations`; that a published unverified app's refresh tokens do not end after 7 days, the unverified-app screen it shows, and its user cap; the Internal audience; the Google Ads API's access levels for a new project.
+- **The how-to is data**, `how_to: &'static [HowToStep]`, so the web app and `farik sign-in-app how-to` say the same words, the boards' (Task 1), exactly as below; a step's link has its own words, then its address. Each step stands alone, with no "above" or "below", because the Settings card, the two dialogs and the command line all show it; GitHub's and Google's own labels are quoted exactly as they show them. Google's step 5 is O1's; GitHub's step 10 comes before O2's link.
+  - GitHub's:
+    1. On GitHub, signed in to your own account, start a new GitHub App. Link: "Open GitHub’s new app page", `https://github.com/settings/apps/new`.
+    2. “GitHub App name”: a name no one else on GitHub uses, such as “Farik for” and your business’s name.
+    3. “Homepage URL”: any address, such as your business’s website.
+    4. Leave “Callback URL” empty, and “Request user authorization (OAuth) during installation” off.
+    5. Turn on “Enable Device Flow”, and leave “Expire user authorization tokens” on.
+    6. Under “Webhook”, turn off “Active”.
+    7. Under “Repository permissions”, set “Contents”, “Issues” and “Pull requests” to “Read-only”. “Metadata” is already “Read-only”. Change nothing else.
+    8. Under “Where can this GitHub App be installed?”, choose “Only on this account”, then “Create GitHub App”.
+    9. On the page GitHub shows next, copy the “Client ID”. Make no client secret: Farik needs none.
+    10. Choose “Install App”, then “Install”, and pick the repositories your agents may read.
+  - Google's:
+    1. On Google Cloud, signed in to the Google account that manages your ads, create a project. Any name will do. Link: "Open Google Cloud’s new project page", `https://console.cloud.google.com/projectcreate`.
+    2. In that project, turn on the Google Ads API: choose “Enable”. Link: "Open the Google Ads API’s page", `https://console.cloud.google.com/apis/library/googleads.googleapis.com`.
+    3. Open Google Auth Platform and choose “Get started”. Give your app a name and your email. For its audience, choose “External”, or “Internal” if your business uses Google Workspace. Link: "Open Google Auth Platform", `https://console.cloud.google.com/auth/overview`.
+    4. Under “Data Access”, add the scope https://www.googleapis.com/auth/adwords, and save.
+    5. If you chose “External”: under “Audience”, choose “Publish app”, so you need not sign in again every 7 days. When you sign in, Google warns that it has not verified your app. The app is yours, so go on.
+    6. Under “Clients”, choose “Create client”, with “Desktop app” as its type and any name. Copy its “Client ID” and its “Client secret”: Google shows the secret only once.
+    7. On your project’s Google Ads API page, apply for Explorer access. A new project starts with Test access, which reaches test accounts only.
+- **Facts the readiness review checks** against GitHub's and Google's pages of its day, changing the plan where they differ: the two GitHub client id formats; Google's id suffix and the `GOCSPX-` prefix; the GitHub App settings and labels the how-to quotes, and `https://github.com/settings/installations` with its “Configure”; that a published unverified app's refresh tokens do not end after 7 days, the unverified-app screen it shows, and its user cap; the Internal audience; the Google Auth Platform labels the how-to quotes (“Get started”, “Data Access”, “Audience”, “Publish app”, “Clients”, “Create client”, “Desktop app”) and that a new client's secret is shown only once; the Google Ads API's access levels for a new project.
 - **`farik_connector_client` keeps refusing** `client_id` and `callback_port` on the pair, since the customer's app lives on the computer, not in the team file (ADR 0043); its sentence becomes "farik_connector_client: Farik's own connector signs in with your own app for its service, which you give Farik in Settings, not in the team file".
-- **Screens** (Task 1's boards): a "Sign-in apps" section on Settings after "Saved teams"; one card, `SignInAppCard`, with the provider's how-to, its fields and Save, shown by that section, by `ConnectorAdd` and by `KitConnect` on `sign_in_app_missing`, where Save is "Save and sign in" and then asks `connector.sign_in` again; AgentEdit's words for `app_changed`.
+- **Screens**, in the words of Task 1's boards (`SignInApps.dc.html`, `PhoneSignInApps.dc.html`):
+  - A "Sign-in apps" section on Settings after "Saved teams": "Farik has no app of its own at GitHub or Google, so it signs your agents in with apps you make there, once for every project on this computer."; a row per provider ("Signs your agents in to GitHub." or "… to Google Ads.", "Not set up" with "Set up", or "Set up" with "Change" and "Remove"); under them, where they are kept.
+  - One card, `SignInAppCard`: the provider's how-to, each link opening a new tab; "Client ID" ("Starts with Iv." or "Ends with .apps.googleusercontent.com."); for Google, "Client secret", a password field never filled in ("Starts with GOCSPX-. Farik keeps it on this computer and never shows it again."); a refusal under its field. Settings shows it in the row's place, titled "Set up your GitHub app" or "Change your Google app", Change adding "Saving replaces the app Farik has now. Agents signed in with it will need to sign in again.", with Save and Cancel.
+  - `ConnectorAdd` and `KitConnect`, on `sign_in_app_missing`, show the card in the sign-in button's place, led by "GitHub lets Farik sign in only with a GitHub app of your own. Make it once, and every agent on this computer can sign in with it." (Google's alike), with "Save and sign in", which saves and then asks `connector.sign_in` again: GitHub's answer shows 03b's code; for Google the same click opens the sign-in tab, as `KitConnect`'s sign-in does (a tab opened in the click, its `opener` cleared, sent to the answer's `authorize_url`, closed on a refusal). `ConnectorAdd` keeps "Use a key instead".
+  - Remove asks in the row, as Saved teams does: "Remove your Google app? Agents signed in with it will need to sign in again." and "Farik forgets it on this computer. The app stays in your Google Cloud project until you delete it there.", with "Remove it" and "Keep it".
+  - `AgentEdit`'s row for `app_changed`: "You changed your GitHub app. Sign in again to use it." with "Sign in again".
+  - 03b's private-repository line (O2): "To let {name} read private repositories, choose them for your app on {provider}." with the link "Choose repositories on {provider}" to `install_url`, in place of `addInstallLine` and `addInstallLink`.
 
 Answered by the founder on 2026-10-06, both as recommended:
 - **O1, Google's publishing status.** The how-to tells the customer to publish their app for their own use, so their sign-in does not end every 7 days; they then see Google's unverified-app warning on their own consent screen. The alternative, leaving it in Testing with themselves as test user, means signing in again weekly. Recommendation: publish.
@@ -41,7 +66,7 @@ Answered by the founder on 2026-10-06, both as recommended:
 ```
 docs/design/mockups/SignInApps.dc.html, PhoneSignInApps.dc.html, canvas.json     Task 1
 crates/core/src/team.rs, docs/schemas/team.schema.json                          modifies: farik_connector_client's words (Task 2)
-crates/runtime/src/registered_apps.rs                                            modifies: Provider, PROVIDERS, HowToStep, RegisteredApp, check_app, the lookups (Task 3)
+crates/runtime/src/registered_apps.rs                                            modifies: Provider, PROVIDERS, HowToStep, HowToLink, RegisteredApp, check_app, the lookups (Task 3)
 crates/runtime/src/{sign_in.rs,daemon.rs,daemon/signed_in.rs,daemon/team.rs,orchestrator/session.rs}, crates/runtime/tests/fixture_oauth.rs, crates/cli/src/{lib.rs,connector.rs}, crates/cli/tests/connector.rs   modifies: what Task 3's types force; AppMissing and the refresh (Task 4)
 crates/runtime/src/sign_in_apps.rs, lib.rs                                        creates: the store (Task 5)
 crates/runtime/src/{daemon.rs,daemon/signed_in.rs,daemon/team.rs}, crates/cli/src/{lib.rs,start.rs,connector.rs}   modifies: the store in place of set_registered_apps (Task 5)
@@ -59,7 +84,8 @@ Produces:
 
 ```rust
 // farik-runtime, registered_apps.rs (Task 3)
-pub struct HowToStep { pub text: &'static str, pub link: Option<&'static str> }
+pub struct HowToLink { pub text: &'static str, pub url: &'static str }      // the link's own words, and its address
+pub struct HowToStep { pub text: &'static str, pub link: Option<HowToLink> }
 pub struct Provider { pub id: &'static str, pub name: &'static str, pub host: Option<&'static str>,
     pub farik_connector: Option<&'static str>, pub flow: AppFlow, pub scopes: &'static [&'static str],
     pub issuer: &'static str, pub token_endpoint: &'static str, pub revocation_endpoint: Option<&'static str>,
@@ -98,15 +124,15 @@ pub(crate) struct SignedIn { /* as before */ pub app_changed: bool }
 // `sign_in_apps: Arc<dyn SignInAppStore>` (MemoryApps in `new`, StateFolderApps in `main`)
 ```
 
-Wire (`snake_case`): `sign_in_apps.list {} → { providers: [{ id, name, set, needs_secret, how_to: [{ text, link? }] }] }`; `sign_in_app.save { provider, client_id, client_secret? } → {}`; `sign_in_app.remove { provider } → {}`; `connector.sign_in`'s refusal item for `sign_in_app_missing` gains `provider`; `team.get`'s connector row gains `app_changed?` (true only).
+Wire (`snake_case`): `sign_in_apps.list {} → { providers: [{ id, name, set, needs_secret, how_to: [{ text, link?: { text, url } }] }] }`; `sign_in_app.save { provider, client_id, client_secret? } → {}`; `sign_in_app.remove { provider } → {}`; `connector.sign_in`'s refusal item for `sign_in_app_missing` gains `provider`; `team.get`'s connector row gains `app_changed?` (true only).
 
 ## Tasks
 
 ### Task 1: The sign-in app screens, mocked up
 
-A Sonnet agent draws these on the canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf, the Connectors page), each at desktop and phone width, in the canvas's tokens, and copies them to `docs/design/mockups/`:
+An Opus agent draws these on the canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf, the Connectors page), each at desktop and phone width, in the canvas's tokens, and copies them to `docs/design/mockups/`:
 
-- **Settings, "Sign-in apps"**: GitHub "Not set up" with "Set up"; Google "Set up" with "Change" and "Remove"; a line saying why: Farik signs in to these services with apps of the customer's own.
+- **Settings, "Sign-in apps"**: GitHub "Not set up" with "Set up"; Google "Set up" with "Change" and "Remove"; a line saying why: "Farik has no app of its own at GitHub or Google, so it signs your agents in with apps you make there, once for every project on this computer."
 - **GitHub's card**: its how-to steps with "Open GitHub's new app page", the "Client ID" field, Save; and the refusal under the field for an OAuth app's id.
 - **Google's card**: its how-to steps with their links, "Client ID", "Client secret" (a password field), Save.
 - **`ConnectorAdd`** for `https://api.githubcopilot.com/mcp/` with no GitHub app: GitHub's card in place of the sign-in button, "Save and sign in", and "Use a key instead".
@@ -133,7 +159,7 @@ Files: `registered_apps.rs`, and what the new types force elsewhere (File map), 
 - `the_providers_table_holds_github_and_google`: `PROVIDERS` is exactly `github` then `google`, each fact as 03b's and 08e's entries have it, with Decisions' changes (GitHub's `install_url`, `needs_secret`); every address `https`; each has a non-empty `how_to` whose first step has a link. RED.
 - `github_s_how_to_names_every_setting` and `google_s_how_to_names_every_setting`: the steps' text, joined, names each setting and link Decisions list for it. RED each.
 - `checks_a_github_client_id`: `Iv23liAbCdEfGh123456` and `Iv1.0123456789abcdef` pass, the latter with spaces and a line end around it, trimmed; an `Ov…` id gives the OAuth-app sentence; empty, 19 and 21 characters, a space inside and a non-ASCII letter give `ClientId`; any secret gives `Secret`. RED.
-- `checks_a_google_client`: `123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com` with `GOCSPX-` and 28 characters passes; no suffix, a capital, no digits before `-`, a missing secret, a secret without the prefix, with a space, and of 72 characters after the prefix are each refused at their field. RED.
+- `checks_a_google_client`: a well-shaped id (twelve digits, a dash, 32 lowercase letters and digits, `.apps.googleusercontent.com`) with a secret of `GOCSPX-` and 28 characters passes, both built at run time from their parts so that no literal in the repository matches GitHub's secret scanning, which refuses the push of a Google-shaped client id or secret even when it is fake; no suffix, a capital, no digits before `-`, a missing secret, a secret without the prefix, with a space, and of 72 characters after the prefix are each refused at their field. RED.
 - `a_registered_app_does_not_print_its_secret` (08e's, changed): `format!("{app:?}")` of a Google app holds `[redacted]` and not the secret. Guard.
 - 03b's `matches_github_by_its_exact_host`, `matches_a_loopback_fixture_over_http`, `an_entry_without_a_host_matches_no_address` and `matches_a_farik_connector_by_its_exact_pair` run over customer apps of test providers; `provider_for` and `provider_for_farik_connector` get the same cases. RED for the two new functions.
 
@@ -182,7 +208,7 @@ Files: `daemon/sign_in_apps.rs` (`METHODS`, `QUERIES`, as `daemon/templates.rs`)
 
 Files: `cli/src/lib.rs` (the subcommand), `cli/src/sign_in_app.rs`, `cli/src/connector.rs` (`start_signing` answers `AppMissing` for the pair as the daemon does; `refused` words it), `cli/tests/sign_in_app.rs` (through `run_with`, with `CliIo`'s `MemoryApps` and the test providers).
 
-- `lists_and_explains`: `farik sign-in-app list` prints `github  GitHub  not set up` and `google  Google  not set up`; `farik sign-in-app how-to github` prints the steps numbered from 1, each link on the line after its step. RED.
+- `lists_and_explains`: `farik sign-in-app list` prints `github  GitHub  not set up` and `google  Google  not set up`; `farik sign-in-app how-to github` prints the steps numbered from 1, each link's words and address on the line after its step. RED.
 - `sets_and_removes`: `set github --client-id <id>` prints `Saved your GitHub app.`; `set google --client-id <id>` reads the secret from one line of standard input and prints `Saved your Google app.`; a refused shape prints the sentence and exits 1; `remove google` prints `Removed your Google app. Agents signed in with it will need to sign in again.`; no output holds the secret. RED.
 - `farik_connect_says_how_to_add_the_app`: `farik connect` to the `dev` address with no app exits 1 with `Farik signs in to Dev with an app of your own. Run "farik sign-in-app how-to dev", then "farik sign-in-app set dev --client-id <id>".` RED.
 
