@@ -1,5 +1,5 @@
 import { Button, Dialog, TextArea } from "@farik/ui";
-import { Fragment, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
@@ -115,222 +115,40 @@ export function MarketingPlan() {
 	].filter((one): one is string => one !== false);
 
 	return (
-		<div className={styles.page}>
-			<Link to="/">{t("backToToday")}</Link>
-			<Header plan={plan} name={name} now={now} />
-			<section className={own.letter} aria-labelledby="signed">
-				<p id="signed" className={styles.muted}>
-					{t("marketingSigned", { name })}
-				</p>
-				<p>{plan.summary}</p>
-			</section>
-			{proposed && (
-				<section className={styles.section} aria-labelledby="allows">
-					<h2 id="allows">{t("marketingAllowsTitle", { name })}</h2>
-					<ul className={own.allows}>
-						{plan.posts.length > 0 && (
-							<li>
-								{plan.posts.length === 1
-									? t("marketingAllowsPostsOne")
-									: t("marketingAllowsPosts", { n: plan.posts.length })}
-							</li>
-						)}
-						{ads > 0 && (
-							<li>
-								{ads === 1
-									? t("marketingAllowsAdsOne", {
-											amount: cash(plan.budget.googleAds),
-										})
-									: t("marketingAllowsAds", {
-											amount: cash(plan.budget.googleAds),
-											n: ads,
-										})}
-							</li>
-						)}
-						<li>{t("marketingAllowsNothing")}</li>
-						<li>{t("marketingAllowsEnd")}</li>
-					</ul>
-				</section>
-			)}
-			<div className={styles.section}>
-				<h2 id="budget">{t("marketingBudget")}</h2>
-				<p className={styles.muted}>
-					{t(ads > 0 ? "marketingBudgetIn" : "marketingBudgetInPlain", {
-						currency: currencyWords(plan.currency),
-					})}
-				</p>
-				<section
-					className={own.scroll}
-					aria-labelledby="budget"
-					// biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll box must take focus to scroll by keyboard
-					tabIndex={0}
-				>
-					<table
-						className={own.budget}
-						aria-label={t("marketingBudgetCaption")}
-					>
-						<thead>
-							<tr>
-								<th scope="col">{t("marketingColChannel")}</th>
-								<th scope="col">{t("marketingColDates")}</th>
-								<th scope="col" className={own.number}>
-									{t("marketingColBudget")}
-								</th>
-							</tr>
-						</thead>
-						<tbody>
-							{ads > 0 && (
-								<>
-									<tr>
-										<td>
-											<strong>{t("marketingGoogleAds")}</strong>
-											<span className={own.sub}>
-												{ads === 1
-													? t("marketingCampaignOne")
-													: t("marketingCampaigns", { n: ads })}
-											</span>
-										</td>
-										<td>
-											{shortRange(
-												plan.campaigns.map((c) => c.startsOn).sort()[0] ?? "",
-												plan.campaigns
-													.map((c) => c.endsOn)
-													.sort()
-													.at(-1) ?? "",
-											)}
-										</td>
-										<td className={own.number}>
-											{cash(plan.budget.googleAds)}
-										</td>
-									</tr>
-									{plan.campaigns.map((campaign) => (
-										<tr key={campaign.key} className={own.campaign}>
-											<td>
-												{campaign.name}
-												<span className={own.sub}>{campaign.goal}</span>
-											</td>
-											<td>{shortRange(campaign.startsOn, campaign.endsOn)}</td>
-											<td className={own.number}>{cash(campaign.budget)}</td>
-										</tr>
-									))}
-								</>
-							)}
-							{channels.map((channel) => {
-								const days = plan.posts
-									.filter((post) => post.channel === channel)
-									.map((post) => post.on)
-									.sort();
-								return (
-									<tr key={channel}>
-										<td>
-											<strong>{channelName(channel)}</strong>
-											<span className={own.sub}>{postsWord(days.length)}</span>
-										</td>
-										<td>{shortRange(days[0] ?? "", days.at(-1) ?? "")}</td>
-										<td className={own.number}>{t("marketingNoCost")}</td>
-									</tr>
-								);
+		<div className={own.page}>
+			<div className={own.layout}>
+				<div className={own.head}>
+					<Link to="/">{t("backToToday")}</Link>
+					<Header plan={plan} name={name} now={now} />
+				</div>
+				<aside className={own.side} aria-labelledby="about">
+					<h2 id="about" className={own.aboutTitle}>
+						{t("planAbout")}
+					</h2>
+					<dl className={own.facts}>
+						<Fact term={t("marketingFactPlan")} extra>
+							{plan.plan}
+						</Fact>
+						<Fact term={t("marketingFactFrom")} extra>
+							{t("marketingFactFromValue", { name })}
+							<Link to={`/tasks/${plan.taskId}`}>{plan.taskId}</Link>
+						</Fact>
+						<Fact term={t("marketingFactRuns")}>
+							{t("marketingFactRunsValue", {
+								from: longDay(plan.startsOn),
+								to: longDay(plan.endsOn),
+								year: plan.endsOn.slice(0, 4),
+								length: runs(plan.startsOn, plan.endsOn),
 							})}
-						</tbody>
-						<tfoot>
-							<tr>
-								<th scope="row" colSpan={2}>
-									{t("marketingTotal")}
-								</th>
-								<td className={own.number}>
-									{t("marketingTotalAmount", {
-										amount: cash(plan.budget.total),
-										currency: plan.currency,
-									})}
-								</td>
-							</tr>
-						</tfoot>
-					</table>
-				</section>
-			</div>
-			{(proposed || live) && plan.posts.length > 0 && (
-				<section className={styles.section} aria-labelledby="calendar">
-					<h2 id="calendar">{t("marketingCalendar")}</h2>
-					<p className={styles.muted}>
-						{t(
-							plan.posts.length === 1
-								? "marketingCalendarLeadOne"
-								: "marketingCalendarLead",
-							{
-								n: plan.posts.length,
-								channels: listed(channels.map(channelName)),
-								name,
-							},
-						)}
-					</p>
-					{weeks(plan.startsOn, plan.endsOn, plan.posts).map((week) => (
-						<Fragment key={week.n}>
-							<h3 id={`week-${week.n}`} className={own.week}>
-								{t("marketingWeek", { n: week.n, range: week.range })}
-							</h3>
-							<ul aria-labelledby={`week-${week.n}`} className={own.posts}>
-								{week.slots.map((post) => (
-									<li key={post.key}>
-										<time dateTime={post.on}>{shortDay(post.on)}</time>
-										<span className={own.channel}>
-											{channelName(post.channel)}
-										</span>
-										<span>{post.topic}</span>
-									</li>
-								))}
-							</ul>
-						</Fragment>
-					))}
-				</section>
-			)}
-			{proposed && plan.measures.length > 0 && (
-				<section className={styles.section}>
-					<h2 id="measures">{t("marketingMeasures", { name })}</h2>
-					<ul aria-labelledby="measures">
-						{plan.measures.map((line) => (
-							<li key={line}>{line}</li>
-						))}
-					</ul>
-				</section>
-			)}
-			{proposed && (
-				<section className={styles.section} aria-labelledby="whole">
-					<h2 id="whole">{t("marketingWhole", { name })}</h2>
-					<p className={styles.muted}>{t("marketingWholeHint", { name })}</p>
-					{/* What the agent wrote, as text: React shows it as typed, never as markup. */}
-					<pre className={own.text}>{plan.text}</pre>
-				</section>
-			)}
-			<section className={styles.section} aria-labelledby="about">
-				<h2 id="about">{t("planAbout")}</h2>
-				<dl className={own.facts}>
-					<dt>{t("marketingFactPlan")}</dt>
-					<dd>{plan.plan}</dd>
-					<dt>{t("marketingFactFrom")}</dt>
-					<dd>
-						{t("marketingFactFromValue", { name })}
-						<Link to={`/tasks/${plan.taskId}`}>{plan.taskId}</Link>
-					</dd>
-					<dt>{t("marketingFactRuns")}</dt>
-					<dd>
-						{t("marketingFactRunsValue", {
-							from: longDay(plan.startsOn),
-							to: longDay(plan.endsOn),
-							year: plan.endsOn.slice(0, 4),
-							length: runs(plan.startsOn, plan.endsOn),
-						})}
-					</dd>
-					<dt>{t("marketingFactBudget")}</dt>
-					<dd>
-						{t("marketingTotalAmount", {
-							amount: cash(plan.budget.total),
-							currency: plan.currency,
-						})}
-					</dd>
-					{ads > 0 && (
-						<>
-							<dt>{t("marketingFactAds")}</dt>
-							<dd>
+						</Fact>
+						<Fact term={t("marketingFactBudget")}>
+							{t("marketingTotalAmount", {
+								amount: cash(plan.budget.total),
+								currency: plan.currency,
+							})}
+						</Fact>
+						{ads > 0 && (
+							<Fact term={t("marketingFactAds")}>
 								{plan.googleAdsAccount
 									? t("marketingFactAdsValue", {
 											campaigns:
@@ -342,33 +160,30 @@ export function MarketingPlan() {
 									: ads === 1
 										? t("marketingCampaignOne")
 										: t("marketingCampaigns", { n: ads })}
-							</dd>
-						</>
-					)}
-					{plan.posts.length > 0 && (
-						<>
-							<dt>{t("marketingFactPosts")}</dt>
-							<dd>{`${plan.posts.length}: ${breakdown}`}</dd>
-						</>
-					)}
-					<dt>{t("marketingFactProposed")}</dt>
-					<dd>{when(plan.proposedAt)}</dd>
-					{plan.decided && (
-						<>
-							<dt>
-								{t(
+							</Fact>
+						)}
+						{plan.posts.length > 0 && (
+							<Fact term={t("marketingFactPosts")}>
+								{`${plan.posts.length}: ${breakdown}`}
+							</Fact>
+						)}
+						<Fact term={t("marketingFactProposed")} extra>
+							{when(plan.proposedAt)}
+						</Fact>
+						{plan.decided && (
+							<Fact
+								term={t(
 									plan.decided.decision === "approved"
 										? "marketingFactApproved"
 										: "marketingFactSentBack",
 								)}
-							</dt>
-							<dd>{t("marketingByYou", { at: when(plan.decided.at) })}</dd>
-						</>
-					)}
-					{plan.ended && (
-						<>
-							<dt>{t("marketingFactEnded")}</dt>
-							<dd>
+								extra
+							>
+								{t("marketingByYou", { at: when(plan.decided.at) })}
+							</Fact>
+						)}
+						{plan.ended && (
+							<Fact term={t("marketingFactEnded")} extra>
 								{plan.ended.why === "by_owner"
 									? t("marketingByYou", { at: when(plan.ended.at) })
 									: t(
@@ -377,11 +192,205 @@ export function MarketingPlan() {
 												: "marketingReplacedFact",
 											{ day: longDay(plan.ended.at) },
 										)}
-							</dd>
-						</>
+							</Fact>
+						)}
+					</dl>
+				</aside>
+				<div className={own.main}>
+					<section className={own.letter} aria-labelledby="signed">
+						<p id="signed" className={styles.muted}>
+							{t("marketingSigned", { name })}
+						</p>
+						<p>{plan.summary}</p>
+					</section>
+					{proposed && (
+						<section className={styles.section} aria-labelledby="allows">
+							<h2 id="allows">{t("marketingAllowsTitle", { name })}</h2>
+							<ul className={own.allows}>
+								{plan.posts.length > 0 && (
+									<li>
+										{plan.posts.length === 1
+											? t("marketingAllowsPostsOne")
+											: t("marketingAllowsPosts", { n: plan.posts.length })}
+									</li>
+								)}
+								{ads > 0 && (
+									<li>
+										{ads === 1
+											? t("marketingAllowsAdsOne", {
+													amount: cash(plan.budget.googleAds),
+												})
+											: t("marketingAllowsAds", {
+													amount: cash(plan.budget.googleAds),
+													n: ads,
+												})}
+									</li>
+								)}
+								<li>{t("marketingAllowsNothing")}</li>
+								<li>{t("marketingAllowsEnd")}</li>
+							</ul>
+						</section>
 					)}
-				</dl>
-			</section>
+					<div className={styles.section}>
+						<h2 id="budget">{t("marketingBudget")}</h2>
+						<p className={styles.muted}>
+							{t(ads > 0 ? "marketingBudgetIn" : "marketingBudgetInPlain", {
+								currency: currencyWords(plan.currency),
+							})}
+						</p>
+						<section
+							className={own.scroll}
+							aria-labelledby="budget"
+							// biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll box must take focus to scroll by keyboard
+							tabIndex={0}
+						>
+							<table
+								className={own.budget}
+								aria-label={t("marketingBudgetCaption")}
+							>
+								<thead>
+									<tr>
+										<th scope="col">{t("marketingColChannel")}</th>
+										<th scope="col">{t("marketingColDates")}</th>
+										<th scope="col" className={own.number}>
+											{t("marketingColBudget")}
+										</th>
+									</tr>
+								</thead>
+								<tbody>
+									{ads > 0 && (
+										<>
+											<tr>
+												<td>
+													<strong>{t("marketingGoogleAds")}</strong>
+													<span className={own.sub}>
+														{ads === 1
+															? t("marketingCampaignOne")
+															: t("marketingCampaigns", { n: ads })}
+													</span>
+												</td>
+												<td>
+													{shortRange(
+														plan.campaigns.map((c) => c.startsOn).sort()[0] ??
+															"",
+														plan.campaigns
+															.map((c) => c.endsOn)
+															.sort()
+															.at(-1) ?? "",
+													)}
+												</td>
+												<td className={own.number}>
+													{cash(plan.budget.googleAds)}
+												</td>
+											</tr>
+											{plan.campaigns.map((campaign) => (
+												<tr key={campaign.key} className={own.campaign}>
+													<td>
+														{campaign.name}
+														<span className={own.sub}>{campaign.goal}</span>
+													</td>
+													<td>
+														{shortRange(campaign.startsOn, campaign.endsOn)}
+													</td>
+													<td className={own.number}>
+														{cash(campaign.budget)}
+													</td>
+												</tr>
+											))}
+										</>
+									)}
+									{channels.map((channel) => {
+										const days = plan.posts
+											.filter((post) => post.channel === channel)
+											.map((post) => post.on)
+											.sort();
+										return (
+											<tr key={channel}>
+												<td>
+													<strong>{channelName(channel)}</strong>
+													<span className={own.sub}>
+														{postsWord(days.length)}
+													</span>
+												</td>
+												<td>{shortRange(days[0] ?? "", days.at(-1) ?? "")}</td>
+												<td className={own.number}>{t("marketingNoCost")}</td>
+											</tr>
+										);
+									})}
+								</tbody>
+								<tfoot>
+									<tr>
+										<th scope="row" colSpan={2}>
+											{t("marketingTotal")}
+										</th>
+										<td className={own.number}>
+											{t("marketingTotalAmount", {
+												amount: cash(plan.budget.total),
+												currency: plan.currency,
+											})}
+										</td>
+									</tr>
+								</tfoot>
+							</table>
+						</section>
+					</div>
+					{(proposed || live) && plan.posts.length > 0 && (
+						<section className={styles.section} aria-labelledby="calendar">
+							<h2 id="calendar">{t("marketingCalendar")}</h2>
+							<p className={styles.muted}>
+								{t(
+									plan.posts.length === 1
+										? "marketingCalendarLeadOne"
+										: "marketingCalendarLead",
+									{
+										n: plan.posts.length,
+										channels: listed(channels.map(channelName)),
+										name,
+									},
+								)}
+							</p>
+							{weeks(plan.startsOn, plan.endsOn, plan.posts).map((week) => (
+								<Fragment key={week.n}>
+									<h3 id={`week-${week.n}`} className={own.week}>
+										{t("marketingWeek", { n: week.n, range: week.range })}
+									</h3>
+									<ul aria-labelledby={`week-${week.n}`} className={own.posts}>
+										{week.slots.map((post) => (
+											<li key={post.key}>
+												<time dateTime={post.on}>{shortDay(post.on)}</time>
+												<span className={own.channel}>
+													{channelName(post.channel)}
+												</span>
+												<span>{post.topic}</span>
+											</li>
+										))}
+									</ul>
+								</Fragment>
+							))}
+						</section>
+					)}
+					{proposed && plan.measures.length > 0 && (
+						<section className={styles.section}>
+							<h2 id="measures">{t("marketingMeasures", { name })}</h2>
+							<ul aria-labelledby="measures">
+								{plan.measures.map((line) => (
+									<li key={line}>{line}</li>
+								))}
+							</ul>
+						</section>
+					)}
+					{proposed && (
+						<section className={styles.section} aria-labelledby="whole">
+							<h2 id="whole">{t("marketingWhole", { name })}</h2>
+							<p className={styles.muted}>
+								{t("marketingWholeHint", { name })}
+							</p>
+							{/* What the agent wrote, as text: React shows it as typed, never as markup. */}
+							<pre className={own.text}>{plan.text}</pre>
+						</section>
+					)}
+				</div>
+			</div>
 			{decide.refusal && (
 				<p role="alert" className={styles.alert}>
 					{decide.refusal}
@@ -446,6 +455,28 @@ export function MarketingPlan() {
 					}}
 				/>
 			)}
+		</div>
+	);
+}
+
+/**
+ * One fact of the side column. On a phone only the plan's own figures show, ahead of the
+ * summary; the `extra` ones, which say where the plan came from and what became of it, are for
+ * a wide screen, as the phone's mockup draws it.
+ */
+function Fact({
+	term,
+	extra,
+	children,
+}: {
+	term: string;
+	extra?: boolean;
+	children: ReactNode;
+}) {
+	return (
+		<div className={extra ? own.extra : own.fact}>
+			<dt>{term}</dt>
+			<dd>{children}</dd>
 		</div>
 	);
 }

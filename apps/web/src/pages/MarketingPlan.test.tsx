@@ -154,8 +154,14 @@ describe("marketing plan page", () => {
 				.map((li) => li.textContent),
 		).toEqual(PLAN.measures);
 
-		// About the plan: where it came from and what it covers.
-		const about = screen.getByRole("region", { name: "About this plan" });
+		// About the plan: where it came from and what it covers, in a side column on a wide
+		// screen, and ahead of the summary on a phone, where the page is one column.
+		const about = screen.getByRole("complementary", {
+			name: "About this plan",
+		});
+		expect(
+			about.compareDocumentPosition(letter) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 		for (const text of [
 			"MP-3",
 			"Monday 12 October to Sunday 22 November 2026: 6 weeks",

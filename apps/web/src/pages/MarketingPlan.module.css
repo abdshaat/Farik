@@ -1,3 +1,76 @@
+/* The page and its side column. One column on a phone, in the order the phone's mockup draws it:
+the title, the plan's facts, then the summary and the rest. From 1024 px the facts sit beside the
+rest, as the task's page has its cost beside it. */
+.page {
+	display: flex;
+	flex-direction: column;
+	gap: var(--farik-space-6);
+	min-width: 0;
+	max-width: 66rem;
+}
+
+.layout {
+	display: grid;
+	/* A wide child must not widen the column past a phone's screen. */
+	grid-template-columns: minmax(0, 1fr);
+	grid-template-areas:
+		"head"
+		"side"
+		"main";
+	gap: var(--farik-space-6);
+}
+
+.head,
+.main {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: var(--farik-space-6);
+	align-content: start;
+}
+
+.head {
+	grid-area: head;
+}
+
+.main {
+	grid-area: main;
+}
+
+.side {
+	grid-area: side;
+	display: grid;
+	gap: var(--farik-space-3);
+	min-width: 0;
+}
+
+@media (min-width: 1024px) {
+	.layout {
+		grid-template-columns: minmax(0, 1fr) 20rem;
+		grid-template-areas:
+			"head side"
+			"main side";
+		grid-template-rows: auto 1fr;
+		column-gap: var(--farik-space-7);
+		align-items: start;
+	}
+}
+
+/* The side column's heading is for a wide screen; a phone's facts have none, and the heading
+stays there for a screen reader. */
+.aboutTitle {
+	margin: 0;
+}
+
+@media not (min-width: 1024px) {
+	.aboutTitle {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+	}
+}
+
 .letter {
 	display: grid;
 	gap: var(--farik-space-2);
@@ -183,6 +256,18 @@
 	grid-template-columns: max-content minmax(0, 1fr);
 	gap: var(--farik-space-1) var(--farik-space-4);
 	margin: 0;
+}
+
+/* A fact's term and its value are two cells of the list's grid, whatever wraps them. */
+.fact,
+.extra {
+	display: contents;
+}
+
+@media not (min-width: 1024px) {
+	.extra {
+		display: none;
+	}
 }
 
 .facts dt {
