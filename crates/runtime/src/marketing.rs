@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use chrono::{SecondsFormat, Utc};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use farik_core::marketing::{EndReason, PlanRecord, PostDetails, plans_to_end};
 use farik_protocol::event::{EventBody, EventIds, FarikEvent, new_event};
 use farik_store::marketing::{
@@ -17,7 +17,7 @@ use farik_store::marketing::{
 use serde_json::{Map, Value, json};
 
 use crate::daemon::own_calls::call_as;
-use crate::orchestrator::hand_over::is_too_late;
+use crate::orchestrator::hand_over::{hand_over_time, is_too_late};
 use crate::orchestrator::{CommandError, CommandReport, OrchestratorDeps};
 use crate::tools::ToolDeps;
 
@@ -547,10 +547,105 @@ pub fn list_row(plan: &MarketingPlan, state: PlanState) -> Value {
     })
 }
 
-/// One marketing plan whole, as `marketing_plan.get` words it: the proposal, its state, the owner's
-/// decision with their words, and its end with the owner's note and the plan that replaced it.
+/// How far back Today looks for posts that did not go out.
+const DID_NOT_GO_OUT_FOR: Duration = Duration::hours(24);
+
+/// A time as the wire words it: RFC 3339, with a `Z` for UTC.
+fn wire_time<Tz: chrono::TimeZone>(time: &DateTime<Tz>) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    time.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+}
+
+/// One post as `social_posts.list` words a row: the daemon's answer and the command line's `--json`
+/// are one shape.
 #[must_use]
-pub fn whole(plan: &MarketingPlan, state: PlanState) -> Value {
+pub fn post_row(post: &SocialPost) -> Value {
+    let mut row = json!({
+        "post": post.post,
+        "agent_id": post.agent_id,
+        "channel": post.channel.as_str(),
+        "text": post.text,
+        "media": post.media.iter().map(|media| json!({
+            "url": media.url,
+            "kind": if media.video { "video" } else { "image" },
+        })).collect::<Vec<_>>(),
+        "at": wire_time(&post.at),
+        "hands_over_at": wire_time(&hand_over_time(post)),
+        "state": post.state.as_str(),
+    });
+    for (name, value) in [
+        ("plan", post.plan.as_deref()),
+        ("slot", post.slot.as_deref()),
+        ("approved_by", post.approved_by.as_deref()),
+        ("missed_why", post.missed_why.as_deref()),
+        ("reason", post.reason.as_deref()),
+    ] {
+        if let Some(value) = value {
+            row[name] = json!(value);
+        }
+    }
+    row
+}
+
+/// What Today shows of the posts, as `social_posts.list` answers it: every post scheduled or sent
+/// whose time is still ahead, soonest first, then every post missed or failed in the last 24 hours,
+/// the latest first.
+#[must_use]
+pub fn going_out(posts: &[SocialPost], now: DateTime<Utc>) -> Vec<Value> {
+    let mut ahead: Vec<&SocialPost> = posts
+        .iter()
+        .filter(|post| {
+            matches!(post.state, PostState::Scheduled | PostState::Sent)
+                && post.at.with_timezone(&Utc) > now
+        })
+        .collect();
+    ahead.sort_by_key(|post| (post.at.with_timezone(&Utc), post.post));
+    let mut did_not: Vec<&SocialPost> = posts
+        .iter()
+        .filter(|post| {
+            matches!(post.state, PostState::Missed | PostState::Failed)
+                && post.state_at > now - DID_NOT_GO_OUT_FOR
+        })
+        .collect();
+    did_not.sort_by_key(|post| std::cmp::Reverse((post.state_at, post.post)));
+    ahead.into_iter().chain(did_not).map(post_row).collect()
+}
+
+/// The posts written for the plan `plan`'s slots, oldest first, as `marketing_plan.get` lists them.
+fn written_posts(plan: &str, posts: &[SocialPost]) -> Vec<Value> {
+    posts
+        .iter()
+        .filter(|post| post.plan.as_deref() == Some(plan))
+        .map(|post| {
+            let mut row = json!({
+                "post": post.post,
+                "slot": post.slot,
+                "text": post.text,
+                "at": wire_time(&post.at),
+                "state": post.state.as_str(),
+                "state_at": wire_time(&post.state_at),
+            });
+            for (name, value) in [
+                ("stopped_by", post.stopped_by.as_deref()),
+                ("missed_why", post.missed_why.as_deref()),
+            ] {
+                if let Some(value) = value {
+                    row[name] = json!(value);
+                }
+            }
+            row
+        })
+        .collect()
+}
+
+/// One marketing plan whole, as `marketing_plan.get` words it: the proposal, its state, the owner's
+/// decision with their words, its end with the owner's note and the plan that replaced it, and the
+/// posts written for it. `posts` in it are the plan's slots, `written_posts` what was written for
+/// them, taken from `written`, every post of the project.
+#[must_use]
+pub fn whole(plan: &MarketingPlan, state: PlanState, written: &[SocialPost]) -> Value {
     let proposal = &plan.proposal;
     let time = |at: &chrono::DateTime<chrono::Utc>| {
         at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
@@ -604,6 +699,7 @@ pub fn whole(plan: &MarketingPlan, state: PlanState) -> Value {
             "on": post.on.to_string(),
             "topic": post.topic,
         })).collect::<Vec<_>>(),
+        "written_posts": written_posts(&plan.record.id, written),
         "measures": proposal.measures,
         "google_ads_account": proposal.google_ads_account,
         "replaces": proposal.replaces,

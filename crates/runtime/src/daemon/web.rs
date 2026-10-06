@@ -545,7 +545,7 @@ async fn push(
 /// A JSON-RPC error: its code and its sentence, and for invalid params what the schema found.
 #[derive(Debug)]
 pub(super) struct Failure {
-    code: i64,
+    pub(super) code: i64,
     message: String,
     pub(super) data: Option<Value>,
 }
@@ -563,7 +563,7 @@ impl Failure {
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
 const UNKNOWN_METHOD: i64 = -32601;
-const INVALID_PARAMS: i64 = -32602;
+pub(super) const INVALID_PARAMS: i64 = -32602;
 pub(super) const INTERNAL_ERROR: i64 = -32603;
 pub(super) const UNKNOWN_QUERY: i64 = -32001;
 pub(super) const NOT_FOUND: i64 = -32002;

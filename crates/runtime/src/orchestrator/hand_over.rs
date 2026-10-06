@@ -65,7 +65,7 @@ pub(crate) fn is_too_late(post: &SocialPost, now: DateTime<Utc>) -> bool {
 
 /// When Farik hands the post over: an hour before its time, or, for a post the owner allowed
 /// later than that, when they allowed it.
-fn hand_over_time(post: &SocialPost) -> DateTime<Utc> {
+pub(crate) fn hand_over_time(post: &SocialPost) -> DateTime<Utc> {
     let hour_before = post.at.with_timezone(&Utc) - HAND_OVER_BEFORE;
     post.decided_at
         .map_or(hour_before, |decided| decided.max(hour_before))

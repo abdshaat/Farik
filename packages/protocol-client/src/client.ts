@@ -50,7 +50,8 @@ export type MethodName =
 	| "connector.allowances"
 	| "connector.disconnect"
 	| "connector.sign_in"
-	| "connector.sign_in_status";
+	| "connector.sign_in_status"
+	| "social_post.media";
 export type Status = "connecting" | "open" | "closed";
 
 /** The part of the browser `WebSocket` the client uses. */

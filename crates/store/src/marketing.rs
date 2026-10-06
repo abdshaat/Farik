@@ -410,6 +410,46 @@ fn media_pairs(media: &[farik_protocol::event::SocialPostMedia]) -> Vec<(String,
         .collect()
 }
 
+/// What happened to a post, as the activity lines tell it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostMoveKind {
+    /// The agent scheduled it in the plan.
+    Wrote,
+    /// The owner allowed a request.
+    Allowed,
+    /// Farik handed it to Buffer.
+    Sent,
+    /// Buffer would not take it.
+    Failed,
+    /// Its time came and it was not sent.
+    Missed,
+    /// The owner stopped it.
+    Stopped,
+    /// The owner did not allow a request.
+    Declined,
+    /// It was stopped with its plan.
+    PlanEnded,
+}
+
+/// One thing that happened to a post that counted, with the post as it was written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostMove {
+    /// The sequence number of the event.
+    pub seq: u64,
+    /// When it was recorded.
+    pub recorded_at: DateTime<Utc>,
+    /// What it was.
+    pub kind: PostMoveKind,
+    /// The post's number.
+    pub post: u64,
+    /// The agent that wrote the post.
+    pub agent_id: String,
+    /// The network.
+    pub channel: PostChannel,
+    /// When the post goes out, with the offset it was written in.
+    pub at: DateTime<FixedOffset>,
+}
+
 /// Every post the log holds, oldest first. An agent's session makes a post (`requested`, or
 /// `scheduled` in the plan) and nothing else about it: the owner's allowance, stop and decline, and
 /// Farik's hand-over, count only when the envelope names no agent and no session, as for a plan's
@@ -419,11 +459,25 @@ fn media_pairs(media: &[farik_protocol::event::SocialPostMedia]) -> Vec<(String,
 /// # Errors
 ///
 /// What the log refused.
+pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
+    Ok(fold_posts(log)?.0)
+}
+
+/// What happened to the posts, oldest first, each as the fold counted it: an event it ignored
+/// moved nothing and is not here, and a request is not here until it is allowed or not.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn post_moves(log: &EventLog) -> Result<Vec<PostMove>, StoreError> {
+    Ok(fold_posts(log)?.1)
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "one arm per kind of event, side by side"
 )]
-pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
+fn fold_posts(log: &EventLog) -> Result<(Vec<SocialPost>, Vec<PostMove>), StoreError> {
     let events = log.read(&EventQuery {
         kinds: vec![
             EventKind::SocialPostScheduled,
@@ -436,6 +490,7 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
         ..EventQuery::default()
     })?;
     let mut posts: Vec<SocialPost> = Vec::new();
+    let mut trail: Vec<PostMove> = Vec::new();
     for event in &events {
         let ids = &event.envelope.ids;
         let at = event.envelope.recorded_at;
@@ -445,7 +500,7 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
         let is_not_an_agents = ids.agent_id.is_none() && ids.session_id.is_none();
         let mut moves = |post: u64,
                          from: &[PostState],
-                         to: PostState,
+                         (to, kind): (PostState, PostMoveKind),
                          change: &mut dyn FnMut(&mut SocialPost)| {
             if let Some(found) = posts
                 .iter_mut()
@@ -455,6 +510,15 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
                 found.state_at = at;
                 found.state_seq = seq;
                 change(found);
+                trail.push(PostMove {
+                    seq,
+                    recorded_at: at,
+                    kind,
+                    post,
+                    agent_id: found.agent_id.clone(),
+                    channel: found.channel,
+                    at: found.at,
+                });
             }
         };
         match &event.body {
@@ -483,7 +547,7 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
                         moves(
                             request,
                             &[PostState::Requested],
-                            PostState::Scheduled,
+                            (PostState::Scheduled, PostMoveKind::Allowed),
                             &mut |post| {
                                 post.approved_by = Some("owner".to_string());
                                 post.decided_at = Some(at);
@@ -508,6 +572,15 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
                             post.plan = body.plan.as_ref().map(|plan| plan.as_str().to_string());
                             post.slot = body.slot.as_ref().map(|slot| slot.as_str().to_string());
                             post.approved_by = Some("plan".to_string());
+                            trail.push(PostMove {
+                                seq,
+                                recorded_at: at,
+                                kind: PostMoveKind::Wrote,
+                                post: post.post,
+                                agent_id: post.agent_id.clone(),
+                                channel: post.channel,
+                                at: post.at,
+                            });
                             posts.push(post);
                         }
                     }
@@ -519,7 +592,7 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
                     moves(
                         post,
                         &[PostState::Scheduled],
-                        PostState::Sent,
+                        (PostState::Sent, PostMoveKind::Sent),
                         &mut |found| {
                             found.buffer_post = Some(body.buffer_post.as_str().to_string());
                         },
@@ -532,13 +605,13 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
                     SocialPostStoppedBodyBy::Owner => &[PostState::Scheduled, PostState::Sent],
                     SocialPostStoppedBodyBy::PlanEnded => &[PostState::Scheduled],
                 };
-                let by = match body.by {
-                    SocialPostStoppedBodyBy::Declined => "declined",
-                    SocialPostStoppedBodyBy::Owner => "owner",
-                    SocialPostStoppedBodyBy::PlanEnded => "plan_ended",
+                let (by, kind) = match body.by {
+                    SocialPostStoppedBodyBy::Declined => ("declined", PostMoveKind::Declined),
+                    SocialPostStoppedBodyBy::Owner => ("owner", PostMoveKind::Stopped),
+                    SocialPostStoppedBodyBy::PlanEnded => ("plan_ended", PostMoveKind::PlanEnded),
                 };
                 if let Some(post) = number_of(&body.post) {
-                    moves(post, from, PostState::Stopped, &mut |found| {
+                    moves(post, from, (PostState::Stopped, kind), &mut |found| {
                         found.stopped_by = Some(by.to_string());
                         found.taken_back = body.taken_back == Some(true);
                         found.note = body.note.clone().filter(|note| !note.trim().is_empty());
@@ -552,9 +625,14 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
                     SocialPostMissedBodyWhy::Paused => (&[PostState::Scheduled], "paused"),
                 };
                 if let Some(post) = number_of(&body.post) {
-                    moves(post, from, PostState::Missed, &mut |found| {
-                        found.missed_why = Some(why.to_string());
-                    });
+                    moves(
+                        post,
+                        from,
+                        (PostState::Missed, PostMoveKind::Missed),
+                        &mut |found| {
+                            found.missed_why = Some(why.to_string());
+                        },
+                    );
                 }
             }
             EventBody::SocialPostFailed(body) if is_not_an_agents => {
@@ -562,7 +640,7 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
                     moves(
                         post,
                         &[PostState::Scheduled],
-                        PostState::Failed,
+                        (PostState::Failed, PostMoveKind::Failed),
                         &mut |found| {
                             found.reason = Some(body.reason.as_str().to_string());
                         },
@@ -572,7 +650,7 @@ pub fn social_posts(log: &EventLog) -> Result<Vec<SocialPost>, StoreError> {
             _ => {}
         }
     }
-    Ok(posts)
+    Ok((posts, trail))
 }
 
 #[cfg(test)]

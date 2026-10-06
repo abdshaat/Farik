@@ -248,12 +248,14 @@ fn check_address(address: IpAddr, on_this_computer: bool) -> Result<(), ToolErro
     }
 }
 
-/// What the address answered, headers only: the status, the content type without its parameters,
-/// and the length when it said.
+/// What the address answered: the status, the content type without its parameters, the length when
+/// it said, and the response itself, whose body nobody has read.
 struct Answer {
+    host: String,
     status: reqwest::StatusCode,
     content_type: String,
     length: Option<u64>,
+    response: reqwest::Response,
 }
 
 /// Asks `url` for its headers, with the client every check of a picture uses: no redirect, no proxy,
@@ -277,6 +279,7 @@ async fn ask(url: &Url) -> Result<Answer, ToolError> {
         .await
         .map_err(|_| refused(format!("{host} did not answer, or is not a public address")))?;
     Ok(Answer {
+        host,
         status: response.status(),
         content_type: response
             .headers()
@@ -291,21 +294,18 @@ async fn ask(url: &Url) -> Result<Answer, ToolError> {
             .get(reqwest::header::CONTENT_LENGTH)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse().ok()),
+        response,
     })
 }
 
-/// Whether the address `address` answers with a picture or a clip of the `kind` the agent said:
-/// the rules of [`media_url_allowed`], then a request for its headers, which must be a success
-/// with an image (PNG, JPEG, GIF or WebP, never SVG) or a video, of no more than 20 MiB for a
-/// picture and a gigabyte for a clip when it says how big it is.
-///
-/// # Errors
-///
-/// `media_url_refused`, saying what is wrong with the address or what it answered.
-pub(crate) async fn media_answers(address: &str, kind: MediaKind) -> Result<(), ToolError> {
+/// The answer of `address` when it is a picture or a clip of the `kind` the agent said: the rules
+/// of [`media_url_allowed`], then a request, whose answer must be a success with an image (PNG,
+/// JPEG, GIF or WebP, never SVG) or a video, of no more than 20 MiB for a picture and a gigabyte
+/// for a clip when it says how big it is. Nobody has read the body.
+async fn answer_for(address: &str, kind: MediaKind) -> Result<Answer, ToolError> {
     let url = media_url_allowed(address)?;
-    let host = url.host_str().unwrap_or_default().to_string();
     let answer = ask(&url).await?;
+    let host = answer.host.clone();
     if !answer.status.is_success() {
         return Err(refused(format!("{host} did not give the file")));
     }
@@ -335,7 +335,46 @@ pub(crate) async fn media_answers(address: &str, kind: MediaKind) -> Result<(), 
             most / (1024 * 1024)
         )));
     }
-    Ok(())
+    Ok(answer)
+}
+
+/// Whether the address `address` answers with a picture or a clip of the `kind` the agent said
+/// (see `answer_for`), asking for its headers alone.
+///
+/// # Errors
+///
+/// `media_url_refused`, saying what is wrong with the address or what it answered.
+pub(crate) async fn media_answers(address: &str, kind: MediaKind) -> Result<(), ToolError> {
+    answer_for(address, kind).await.map(|_| ())
+}
+
+/// The picture at `address`, for Today to show: its content type and its bytes, read from a
+/// connection of the same kind `media_answers` makes and cut off at 20 MiB, whether or not the
+/// address said how big it is.
+///
+/// # Errors
+///
+/// `media_url_refused`, saying what is wrong with the address, what it answered, or that it is too
+/// big.
+pub(crate) async fn fetch_picture(address: &str) -> Result<(String, Vec<u8>), ToolError> {
+    let mut answer = answer_for(address, MediaKind::Image).await?;
+    let host = answer.host.clone();
+    let mut body = Vec::new();
+    while let Some(chunk) = answer
+        .response
+        .chunk()
+        .await
+        .map_err(|_| refused(format!("{host} stopped answering")))?
+    {
+        if (body.len() + chunk.len()) as u64 > MOST_IMAGE_BYTES {
+            return Err(refused(format!(
+                "the file at {host} is over {} MiB",
+                MOST_IMAGE_BYTES / (1024 * 1024)
+            )));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok((answer.content_type, body))
 }
 
 /// A server of pictures for the tests of every module that checks a post's.
@@ -351,7 +390,8 @@ pub(crate) mod fixtures {
 
     /// A server of pictures on this computer: its address, and how many requests it has had.
     /// It answers `/ok.png`, `/ok.jpg`, `/clip.mp4` and, as pictures that are not, `/page`,
-    /// `/pic.svg`, `/gone.png`, `/moved.png` and `/huge.png`.
+    /// `/pic.svg`, `/gone.png`, `/moved.png`, `/huge.png` (21 MiB, whose size it says) and
+    /// `/chunked.png` (21 MiB, whose size it does not say).
     pub(crate) async fn serving() -> (String, Arc<AtomicUsize>) {
         let big = vec![0_u8; 21 * 1024 * 1024];
         let asked = Arc::new(AtomicUsize::new(0));
@@ -392,6 +432,21 @@ pub(crate) mod fixtures {
                 get(|| async { (StatusCode::FOUND, [(header::LOCATION, "/ok.png")]) }),
             )
             .route(
+                "/chunked.png",
+                get(|| async {
+                    let chunks = futures_util::stream::iter((0..21).map(|_| {
+                        Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(vec![
+                            0_u8;
+                            1024 * 1024
+                        ]))
+                    }));
+                    (
+                        [(header::CONTENT_TYPE, "image/png")],
+                        axum::body::Body::from_stream(chunks),
+                    )
+                }),
+            )
+            .route(
                 "/huge.png",
                 get(move || {
                     let big = big.clone();
@@ -419,7 +474,10 @@ mod tests {
     use std::net::SocketAddr;
 
     use super::fixtures::serving;
-    use super::{LoopbackAllowed, MediaKind, ask, keep_public, media_answers, media_url_allowed};
+    use super::{
+        LoopbackAllowed, MediaKind, ask, fetch_picture, keep_public, media_answers,
+        media_url_allowed,
+    };
     use crate::tools::ToolError;
 
     fn reason_of(error: ToolError) -> String {
@@ -552,6 +610,49 @@ mod tests {
             );
             assert!(reason.contains(said), "{path}: {reason}");
         }
+    }
+
+    #[tokio::test]
+    async fn fetches_a_picture_up_to_its_bound() {
+        let _here = LoopbackAllowed::new();
+        let (origin, asked) = serving().await;
+
+        let (media_type, bytes) = fetch_picture(&format!("{origin}/ok.png"))
+            .await
+            .expect("a picture");
+        assert_eq!(media_type, "image/png");
+        assert_eq!(bytes, [0x89, b'P', b'N', b'G']);
+        let (media_type, _) = fetch_picture(&format!("{origin}/ok.jpg"))
+            .await
+            .expect("a picture");
+        assert_eq!(media_type, "image/jpeg", "without its parameters");
+
+        for (path, said) in [
+            ("clip.mp4", "video/mp4"),
+            ("pic.svg", "svg"),
+            ("page", "text/html"),
+            ("gone.png", "did not give the file"),
+            ("moved.png", "did not give the file"),
+            ("huge.png", "over 20 MiB"),
+            ("chunked.png", "over 20 MiB"),
+        ] {
+            let reason = reason_of(
+                fetch_picture(&format!("{origin}/{path}"))
+                    .await
+                    .expect_err(path),
+            );
+            assert!(
+                reason.starts_with("media_url_refused: ") && reason.contains(said),
+                "{path}: {reason}"
+            );
+        }
+        let before = asked.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(fetch_picture("https://10.0.0.5/a.png").await.is_err());
+        assert_eq!(
+            asked.load(std::sync::atomic::Ordering::SeqCst),
+            before,
+            "an address that is not public is not asked"
+        );
     }
 
     #[tokio::test]

@@ -21,7 +21,7 @@ use farik_protocol::event::{
 use farik_store::EventQuery;
 use farik_store::activity::{ActivityState, activity, moved_since};
 use farik_store::diff::diff_of;
-use farik_store::marketing::marketing_plans;
+use farik_store::marketing::{marketing_plans, social_posts};
 use farik_store::requests::{
     RequestError, TOO_SHORT, contract_write, file_request, placeholder_budget_usd,
     request_from_text, summary_of,
@@ -32,14 +32,15 @@ use serde_json::{Value, json};
 use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
 use crate::cost::extra_tries;
-use crate::marketing::{list_row, states_today, whole};
+use crate::marketing::{going_out, list_row, states_today, whole};
 use crate::tools::ToolDeps;
 use crate::tools::contracts::changed_fields;
 use crate::tools::design::ReviewState;
+use crate::tools::media::fetch_picture;
 use crate::transitions::last_move_into;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 2] = ["request.file", "contract.save"];
+pub(super) const METHODS: [&str; 3] = ["request.file", "contract.save", "social_post.media"];
 
 /// Who the human is in the log.
 const HUMAN: &str = "human";
@@ -210,6 +211,9 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
         }
         "marketing_plan.list" => marketing_plan_list(deps),
         "marketing_plan.get" => marketing_plan_get(deps, params["plan"].as_str().unwrap_or("")),
+        "social_posts.list" => Ok(json!({
+            "posts": going_out(&social_posts(&deps.log).map_err(|e| internal(&e))?, deps.clock.now())
+        })),
         "sprint.current" => sprint_current(deps),
         "backlog.summary" => backlog_summary(deps, &team()?),
         "questions.list" => questions(deps, params["task_id"].as_str()),
@@ -271,11 +275,12 @@ fn marketing_plan_list(deps: &ToolDeps) -> Result<Value, Failure> {
 fn marketing_plan_get(deps: &ToolDeps, id: &str) -> Result<Value, Failure> {
     let plans = marketing_plans(&deps.log).map_err(|e| internal(&e))?;
     let states = states_today(&plans, deps.clock.now().date_naive());
+    let posts = social_posts(&deps.log).map_err(|e| internal(&e))?;
     plans
         .iter()
         .zip(states)
         .find(|(plan, _)| plan.record.id == id)
-        .map(|(plan, state)| whole(plan, state))
+        .map(|(plan, state)| whole(plan, state, &posts))
         .ok_or_else(|| Failure::new(NOT_FOUND, format!("there is no marketing plan {id}")))
 }
 
@@ -543,6 +548,9 @@ pub(super) async fn call(
     let Some(deps) = state.deps().cloned() else {
         return Err(Failure::new(super::web::NO_PROJECT, super::NO_PROJECT));
     };
+    if method == "social_post.media" {
+        return post_picture(&deps, params).await;
+    }
     if method == "request.file" {
         let text = params["text"].as_str().unwrap_or_default().to_string();
         let link = params["from_chat_message"].as_u64();
@@ -551,6 +559,32 @@ pub(super) async fn call(
         return Ok(filed);
     }
     save(state, &deps, params).await
+}
+
+/// `social_post.media`: one picture of a post, fetched here since the browser may not load pictures
+/// from other sites. `not_found` for an unknown post or picture, for a clip, and for an address
+/// that is not public, is gone, is not a picture of a kind Farik shows, or is too big.
+async fn post_picture(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
+    use base64::Engine as _;
+
+    let nothing = || Failure::new(NOT_FOUND, "there is no picture to show");
+    let number = params["post"].as_u64().unwrap_or_default();
+    let index = usize::try_from(params["index"].as_u64().unwrap_or(u64::MAX)).unwrap_or(usize::MAX);
+    let post = social_posts(&deps.log)
+        .map_err(|e| internal(&e))?
+        .into_iter()
+        .find(|post| post.post == number)
+        .ok_or_else(nothing)?;
+    let picture = post
+        .media
+        .get(index)
+        .filter(|media| !media.video)
+        .ok_or_else(nothing)?;
+    let (media_type, bytes) = fetch_picture(&picture.url).await.map_err(|_| nothing())?;
+    Ok(json!({
+        "media_type": media_type,
+        "base64": base64::engine::general_purpose::STANDARD.encode(bytes),
+    }))
 }
 
 /// `work`, which reads and writes the store, run where it cannot hold up the daemon's worker.
@@ -819,6 +853,11 @@ pub(super) mod tests {
         let reply = rpc(state, method, params);
         conforms(&reply["result"], definition, &reply);
         reply["result"].clone()
+    }
+
+    /// Checks `value` against `definition` of the RPC schema.
+    fn conforms_to(value: &Value, definition: &str) {
+        conforms(value, definition, value);
     }
 
     pub(crate) fn conforms(value: &Value, definition: &str, reply: &Value) {
@@ -1097,6 +1136,399 @@ pub(super) mod tests {
             &json!({ "post": post, "by": "declined" }),
         );
         assert_eq!(waiting(), json!([]), "gone once decided");
+    }
+
+    /// Kai's harness, with a task FRK-1 she works on.
+    fn kai_working(name: &str) -> Harness {
+        let harness = Harness::new(name, |wire| {
+            crate::tools::fixtures::with_the_marketing_specialist(wire);
+            wire["agents"][3]["display_name"] = json!("Kai");
+        });
+        harness.in_progress("FRK-1", "kai", "pm");
+        harness
+    }
+
+    /// Kai schedules a post in plan MP-1, recorded at `when`; answers its number.
+    fn kai_wrote(
+        harness: &Harness,
+        when: chrono::DateTime<chrono::Utc>,
+        (slot, going_out): (&str, &str),
+        media: &Value,
+    ) -> u64 {
+        harness
+            .project
+            .record_by(
+                Some("kai"),
+                when,
+                "FRK-1",
+                "social_post.scheduled",
+                &json!({
+                    "channel": "instagram", "buffer_channel": "chan-1",
+                    "text": format!("Post for {slot}"), "media": media,
+                    "at": going_out, "approved_by": "plan", "plan": "MP-1", "slot": slot,
+                }),
+            )
+            .envelope
+            .seq
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "a post in every state, then the list"
+    )]
+    fn social_posts_list_answers_what_goes_out() {
+        let harness = kai_working("gates-posts-list");
+        let one = json!([{ "url": "https://example.com/a.png", "kind": "image" }]);
+        let hours = |hours: i64| at() + chrono::Duration::hours(hours);
+        let then = |when: chrono::DateTime<chrono::Utc>, task: &str, kind: &str, body: Value| {
+            harness.project.record_at(when, task, kind, &body)
+        };
+
+        // A failure of more than a day ago, and one of this morning.
+        let old = kai_wrote(
+            &harness,
+            hours(-26),
+            ("post-0", "2026-09-21T09:00:00Z"),
+            &one,
+        );
+        then(
+            hours(-25),
+            "",
+            "social_post.failed",
+            json!({ "post": old, "reason": "Long ago." }),
+        );
+        let failed = kai_wrote(
+            &harness,
+            hours(-5),
+            ("post-1", "2026-09-22T08:00:00Z"),
+            &one,
+        );
+        then(
+            hours(-2),
+            "",
+            "social_post.failed",
+            json!({ "post": failed, "reason": "Buffer did not take it: \u{201c}No\u{201d}" }),
+        );
+        // Going out: later today in another offset (18:00 UTC), already with Buffer (14:00 UTC).
+        // The strings sort the other way round.
+        let later = kai_wrote(
+            &harness,
+            at(),
+            ("post-2", "2026-09-22T13:00:00-05:00"),
+            &one,
+        );
+        let sent = kai_wrote(
+            &harness,
+            at(),
+            ("post-3", "2026-09-22T16:00:00+02:00"),
+            &one,
+        );
+        then(
+            at(),
+            "",
+            "social_post.sent",
+            json!({ "post": sent, "buffer_post": "buf-1" }),
+        );
+        // A request the owner allowed at once: 12:30 UTC.
+        let request = harness
+            .project
+            .record_by(
+                Some("kai"),
+                at(),
+                "FRK-1",
+                "social_post.requested",
+                &json!({
+                    "channel": "x", "buffer_channel": "chan-2", "text": "Outside the plan.",
+                    "media": [], "at": "2026-09-22T12:30:00Z",
+                }),
+            )
+            .envelope
+            .seq;
+        then(
+            at(),
+            "FRK-1",
+            "social_post.scheduled",
+            json!({
+                "post": request, "channel": "x", "buffer_channel": "chan-2",
+                "text": "Outside the plan.", "media": [], "at": "2026-09-22T12:30:00Z",
+                "approved_by": "owner",
+            }),
+        );
+        // What is not listed: a post whose time has passed, one stopped, one still asked about.
+        kai_wrote(&harness, at(), ("post-4", "2026-09-22T11:00:00Z"), &one);
+        let stopped = kai_wrote(&harness, at(), ("post-5", "2026-09-22T20:00:00Z"), &one);
+        then(
+            at(),
+            "",
+            "social_post.stopped",
+            json!({ "post": stopped, "by": "owner" }),
+        );
+        harness.project.record_by(
+            Some("kai"),
+            at(),
+            "FRK-1",
+            "social_post.requested",
+            &json!({
+                "channel": "x", "buffer_channel": "chan-2", "text": "Waiting.",
+                "media": [], "at": "2026-09-23T12:30:00Z",
+            }),
+        );
+        // Missed just now.
+        let missed = kai_wrote(&harness, at(), ("post-6", "2026-09-22T12:40:00Z"), &one);
+        then(
+            at(),
+            "",
+            "social_post.missed",
+            json!({ "post": missed, "why": "paused" }),
+        );
+
+        let listed = query(
+            &harness.daemon,
+            "social_posts.list",
+            &json!({}),
+            "socialPostsListResult",
+        );
+
+        let rows = listed["posts"].as_array().expect("a list");
+        let numbers: Vec<u64> = rows
+            .iter()
+            .map(|row| row["post"].as_u64().expect("n"))
+            .collect();
+        assert_eq!(
+            numbers,
+            [request, sent, later, missed, failed],
+            "going out soonest first, then what did not go out, the latest first: {listed}"
+        );
+        assert_eq!(
+            rows[0],
+            json!({
+                "post": request, "agent_id": "kai", "channel": "x", "text": "Outside the plan.",
+                "media": [], "at": "2026-09-22T12:30:00Z",
+                "hands_over_at": "2026-09-22T12:00:00Z", "state": "scheduled",
+                "approved_by": "owner",
+            }),
+            "an allowed request is handed over when it was allowed, no later than its hour"
+        );
+        assert_eq!(
+            rows[1],
+            json!({
+                "post": sent, "agent_id": "kai", "channel": "instagram", "text": "Post for post-3",
+                "media": one, "at": "2026-09-22T16:00:00+02:00",
+                "hands_over_at": "2026-09-22T13:00:00Z", "state": "sent",
+                "plan": "MP-1", "slot": "post-3", "approved_by": "plan",
+            })
+        );
+        assert_eq!(rows[3]["state"], "missed");
+        assert_eq!(rows[3]["missed_why"], "paused");
+        assert!(rows[3].get("reason").is_none(), "{}", rows[3]);
+        assert_eq!(rows[4]["state"], "failed");
+        assert_eq!(
+            rows[4]["reason"],
+            "Buffer did not take it: \u{201c}No\u{201d}"
+        );
+        assert!(rows[4].get("missed_why").is_none(), "{}", rows[4]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_plan_page_lists_its_posts() {
+        let harness = kai_working("gates-plan-posts");
+        harness
+            .project
+            .plan_proposed("FRK-1", "MP-1", "2026-09-22", "2026-10-20");
+        harness.project.plan_approved("FRK-1", "MP-1", "");
+        let none = json!([]);
+        let then = |kind: &str, body: Value| harness.project.record("", kind, &body);
+
+        // Slot post-1 failed first and was written again and sent; post-2 was stopped by the
+        // owner, post-3 missed, and post-4 stopped with the plan.
+        let failed = kai_wrote(&harness, at(), ("post-1", "2026-09-23T09:00:00Z"), &none);
+        then(
+            "social_post.failed",
+            json!({ "post": failed, "reason": "No." }),
+        );
+        let sent = kai_wrote(&harness, at(), ("post-1", "2026-09-23T10:00:00Z"), &none);
+        then(
+            "social_post.sent",
+            json!({ "post": sent, "buffer_post": "buf-1" }),
+        );
+        let stopped = kai_wrote(&harness, at(), ("post-2", "2026-09-24T09:00:00Z"), &none);
+        then(
+            "social_post.stopped",
+            json!({ "post": stopped, "by": "owner" }),
+        );
+        let missed = kai_wrote(&harness, at(), ("post-3", "2026-09-25T09:00:00Z"), &none);
+        then(
+            "social_post.missed",
+            json!({ "post": missed, "why": "not_running" }),
+        );
+        let ended = kai_wrote(&harness, at(), ("post-4", "2026-09-26T09:00:00Z"), &none);
+        then(
+            "social_post.stopped",
+            json!({ "post": ended, "by": "plan_ended" }),
+        );
+        // Not this plan's: a post of another plan.
+        harness.project.record_by(
+            Some("kai"),
+            at(),
+            "FRK-1",
+            "social_post.scheduled",
+            &json!({
+                "channel": "x", "buffer_channel": "chan-1", "text": "Elsewhere.", "media": [],
+                "at": "2026-09-27T09:00:00Z", "approved_by": "plan", "plan": "MP-2",
+                "slot": "post-1",
+            }),
+        );
+
+        let plan = query(
+            &harness.daemon,
+            "marketing_plan.get",
+            &json!({ "plan": "MP-1" }),
+            "marketingPlanGetResult",
+        );
+
+        let written: Vec<(u64, &str, &str)> = plan["written_posts"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|post| {
+                (
+                    post["post"].as_u64().expect("a number"),
+                    post["slot"].as_str().expect("a slot"),
+                    post["state"].as_str().expect("a state"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            written,
+            [
+                (failed, "post-1", "failed"),
+                (sent, "post-1", "sent"),
+                (stopped, "post-2", "stopped"),
+                (missed, "post-3", "missed"),
+                (ended, "post-4", "stopped"),
+            ],
+            "this plan's posts, oldest first: {plan}"
+        );
+        let posts = &plan["written_posts"];
+        assert_eq!(
+            posts[1],
+            json!({
+                "post": sent, "slot": "post-1", "text": "Post for post-1",
+                "at": "2026-09-23T10:00:00Z", "state": "sent",
+                "state_at": at().to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+            })
+        );
+        assert_eq!(posts[2]["stopped_by"], "owner");
+        assert_eq!(posts[3]["missed_why"], "not_running");
+        assert_eq!(posts[4]["stopped_by"], "plan_ended");
+        assert!(posts[1].get("stopped_by").is_none(), "{}", posts[1]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_daemon_fetches_a_post_s_picture() {
+        use base64::Engine as _;
+
+        let _here = crate::tools::media::LoopbackAllowed::new();
+        let harness = kai_working("gates-post-media");
+        let (pictures, asked) = crate::tools::media::fixtures::serving().await;
+        let at_pictures =
+            |path: &str, kind: &str| json!({ "url": format!("{pictures}/{path}"), "kind": kind });
+        let four = kai_wrote(
+            &harness,
+            at(),
+            ("post-1", "2026-09-22T20:00:00Z"),
+            &json!([
+                at_pictures("ok.png", "image"),
+                at_pictures("clip.mp4", "video"),
+                { "url": "https://10.0.0.5/a.png", "kind": "image" },
+                at_pictures("pic.svg", "image"),
+            ]),
+        );
+        let gone = kai_wrote(
+            &harness,
+            at(),
+            ("post-2", "2026-09-22T21:00:00Z"),
+            &json!([
+                at_pictures("gone.png", "image"),
+                at_pictures("huge.png", "image")
+            ]),
+        );
+        let fetch = async |post: u64, index: u64| {
+            let params = json!({ "post": post, "index": index });
+            super::call(&harness.daemon, "social_post.media", &params).await
+        };
+        let not_found = async |post: u64, index: u64| {
+            let failure = fetch(post, index).await.expect_err("nothing to show");
+            assert_eq!(
+                failure.code,
+                crate::daemon::web::NOT_FOUND,
+                "{post}/{index}"
+            );
+        };
+
+        let picture = fetch(four, 0).await.expect("a picture");
+        conforms_to(&picture, "socialPostMediaResult");
+        assert_eq!(
+            picture,
+            json!({
+                "media_type": "image/png",
+                "base64": base64::engine::general_purpose::STANDARD
+                    .encode([0x89, b'P', b'N', b'G']),
+            })
+        );
+
+        let before = asked.load(std::sync::atomic::Ordering::SeqCst);
+        not_found(four, 1).await; // a clip is opened in a tab, not fetched
+        not_found(four, 2).await; // an address that is not public
+        not_found(four, 4).await; // past the list
+        not_found(999, 0).await; // no such post
+        assert_eq!(
+            asked.load(std::sync::atomic::Ordering::SeqCst),
+            before,
+            "none of these reached the picture server"
+        );
+        not_found(four, 3).await; // an SVG is not a picture
+        not_found(gone, 0).await; // an address that no longer opens
+        not_found(gone, 1).await; // one over the bound
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_picture_method_is_one_the_schema_knows() {
+        let harness = kai_working("gates-post-media-rpc");
+        let clip = kai_wrote(
+            &harness,
+            at(),
+            ("post-1", "2026-09-22T20:00:00Z"),
+            &json!([{ "url": "https://example.com/c.mp4", "kind": "video" }]),
+        );
+        let ask = |params: Value| rpc(&harness.daemon, "social_post.media", &params);
+
+        // A clip is not fetched: asked over the wire, it is `not_found`, and so is no such post.
+        assert_eq!(
+            ask(json!({ "post": clip, "index": 0 }))["error"]["code"],
+            crate::daemon::web::NOT_FOUND
+        );
+        assert_eq!(
+            ask(json!({ "post": 999, "index": 0 }))["error"]["code"],
+            crate::daemon::web::NOT_FOUND
+        );
+        // The params are the schema's: no post number 0, and no fifth picture.
+        for params in [
+            json!({ "post": 0, "index": 0 }),
+            json!({ "post": clip, "index": 4 }),
+            json!({ "post": clip }),
+        ] {
+            assert_eq!(
+                ask(params.clone())["error"]["code"],
+                crate::daemon::web::INVALID_PARAMS,
+                "{params}"
+            );
+        }
     }
 
     #[test]
