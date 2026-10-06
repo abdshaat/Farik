@@ -1,6 +1,6 @@
 # Phase 7, step 03: Signing in to a service
 
-Status: executed 2026-10-02; the landing review waits
+Status: executed 2026-10-02; reviewed 2026-10-06 (a fresh landing review with step 03b's, one fix report)
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6.7, 8.2, 8.5, 8.6; F9
 Depends on: step 01 of this phase (committed; the custom connector, `ConnectorEntry`, `ConnectorSecrets`, the launch route and the headers helper, `spec_sha256`), step 02 (committed; nothing of it is consumed, it lands first)
@@ -322,3 +322,4 @@ The pull request lists every new dependency with its licence from `cargo tree -e
 - **A service that offers no sign-in, with no key typed, lists its tools on the first Next** (`connector_add_lists_at_once_when_nothing_is_offered_or_needed`). A header that holds a `{KEY}` cannot be on the page at that point, so nothing guards for it.
 - **Later hardening (not now):** when the authorization endpoint's host differs from the issuer's, name that host on the "Sign in with" button, so that a service whose metadata names an honest authorization page with its own token endpoint cannot pass as its issuer. `connector.sign_in` would answer it as `authorize_host`. It adds no refusal. A malicious-server mix-up is defended only by `iss` until then, as the specification accepts.
 - `a_live_session_calls_a_signed_in_connector` has not run: it needs the founder's credential (see Verification).
+- **The second landing review (2026-10-06, a fresh session, with step 03b's, one fix report)** found no critical gap in this step. It changed this step's sign-in in two places, both recorded in step 03b's notes and in spec 6.7: `connector.sign_in_cancel { attempt }` ends an attempt when the person cancels, so a yes given after Cancel is never kept, and a failed device poll is tried again before it ends the sign-in.
