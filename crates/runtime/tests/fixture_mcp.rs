@@ -68,6 +68,7 @@ fn stdio_server(test: &str, script: &str, credential_keys: &[&str]) -> CustomSer
         transport: CustomTransport::Stdio {
             command: "sh".to_string(),
             args: vec![path.display().to_string()],
+            oauth: None,
         },
         credential_keys: credential_keys.iter().map(ToString::to_string).collect(),
         tools: BTreeMap::new(),

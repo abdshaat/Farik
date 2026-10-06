@@ -265,6 +265,7 @@ fn shape(transport: &str) -> Shape {
                 "command",
                 "args",
                 "credential_keys",
+                "oauth",
                 "tools",
                 "allowances",
                 "title",
@@ -1454,7 +1455,7 @@ mod tests {
     #[test]
     fn osv_is_farik_s_own_server_and_only_reads() {
         let (server, _) = service(Role::Architect, "osv");
-        let CustomTransport::Stdio { command, args } = &server.transport else {
+        let CustomTransport::Stdio { command, args, .. } = &server.transport else {
             panic!("osv is stdio");
         };
         assert_eq!(command, "farik");
@@ -2457,6 +2458,36 @@ mod tests {
     #[test]
     fn accepts_farik_by_its_bare_name() {
         parse(&stdio("farik", &["connector", "osv"])).expect("Farik's own OSV server loads");
+    }
+
+    #[test]
+    fn the_kit_takes_oauth_on_its_farik_connector() {
+        let signing_in = |command: &str, args: &[&str]| {
+            let mut value = stdio(command, args);
+            value["connectors"][0]["oauth"] = json!({ "scopes": ["a"] });
+            value
+        };
+        let kit = parse(&signing_in("farik", &["connector", "osv"]))
+            .expect("Farik's own connector may sign in");
+        let KitConnector::Server { entry, .. } = &kit.connectors[0] else {
+            panic!("a server");
+        };
+        let server = custom_server(entry).expect("a custom server");
+        assert_eq!(
+            server.oauth().map(|settings| settings.scopes.clone()),
+            Some(vec!["a".to_string()])
+        );
+        refused(
+            &signing_in("npx", &["x@1.0.0"]),
+            "/connectors/0/oauth",
+            "oauth_on_stdio",
+        );
+        // The word is still held to Farik's own connectors.
+        refused(
+            &signing_in("farik", &["connector", "other"]),
+            "/connectors/0/args",
+            "package_not_pinned",
+        );
     }
 
     #[test]

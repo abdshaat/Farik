@@ -410,7 +410,9 @@ fn oauth_errors(server: &McpServerWire) -> Vec<(String, String)> {
         return Vec::new();
     };
     let mut refused = Vec::new();
-    if server.transport == Some(McpServerTransport::Stdio) {
+    let stdio = server.transport == Some(McpServerTransport::Stdio);
+    let own = stdio && names_farik_connector(server);
+    if stdio && !own {
         refused.push((
             "oauth".to_string(),
             "oauth_on_stdio: a connector Farik starts has no sign-in; give it a key.".to_string(),
@@ -436,7 +438,21 @@ fn oauth_errors(server: &McpServerWire) -> Vec<(String, String)> {
             ));
         }
     }
-    if oauth.callback_port.is_some() && oauth.client_id.is_none() {
+    if own {
+        // The app's id and port are Farik's own, in the table of the program that signs in.
+        for (given, field) in [
+            (oauth.client_id.is_some(), "client_id"),
+            (oauth.callback_port.is_some(), "callback_port"),
+        ] {
+            if given {
+                refused.push((
+                    format!("oauth/{field}"),
+                    "farik_connector_client: Farik's own connector signs in with Farik's own app"
+                        .to_string(),
+                ));
+            }
+        }
+    } else if oauth.callback_port.is_some() && oauth.client_id.is_none() {
         refused.push((
             "oauth/callback_port".to_string(),
             "callback_port_without_client: the port belongs to a client the service registered \
@@ -445,6 +461,26 @@ fn oauth_errors(server: &McpServerWire) -> Vec<(String, String)> {
         ));
     }
     refused
+}
+
+/// Whether a `stdio` entry is, in shape, Farik's own connector (ADR 0038): the command `farik`
+/// and exactly `connector` and a word of the shape a connector's name has. Which words are Farik's
+/// connectors is the kit loader's to hold (this crate does not know them).
+fn names_farik_connector(server: &McpServerWire) -> bool {
+    let args: Vec<&str> = server.args.iter().map(|arg| arg.as_str()).collect();
+    server.command.as_deref().map(String::as_str) == Some("farik")
+        && matches!(args.as_slice(), ["connector", word] if is_connector_word(word))
+}
+
+/// Whether `word` matches `^[a-z][a-z0-9-]{0,39}$`.
+fn is_connector_word(word: &str) -> bool {
+    let mut letters = word.chars();
+    word.len() <= 40
+        && letters
+            .next()
+            .is_some_and(|first| first.is_ascii_lowercase())
+        && letters
+            .all(|letter| letter.is_ascii_lowercase() || letter.is_ascii_digit() || letter == '-')
 }
 
 /// An entry's refusals for a value the committed team file must not hold: a key in its
@@ -723,6 +759,18 @@ pub struct CustomServer {
     pub allowances: BTreeMap<String, u32>,
 }
 
+impl CustomServer {
+    /// How it signs in, when it does: either transport's.
+    #[must_use]
+    pub fn oauth(&self) -> Option<&OAuthSettings> {
+        match &self.transport {
+            CustomTransport::Http { oauth, .. } | CustomTransport::Stdio { oauth, .. } => {
+                oauth.as_ref()
+            }
+        }
+    }
+}
+
 /// How a custom connector is started or reached.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CustomTransport {
@@ -732,6 +780,9 @@ pub enum CustomTransport {
         command: String,
         /// Its arguments.
         args: Vec<String>,
+        /// Present when the connector is Farik's own and signs in with Farik's own app
+        /// (ADR 0033, ADR 0038): `farik connector <name>` alone may.
+        oauth: Option<OAuthSettings>,
     },
     /// A web address, spoken to over streamable HTTP.
     Http {
@@ -772,6 +823,17 @@ pub fn custom_server(server: &McpServerWire) -> Option<CustomServer> {
     if server.source == McpServerSource::Builtin {
         return None;
     }
+    let oauth = server.oauth.as_ref().map(|oauth| OAuthSettings {
+        client_id: oauth.client_id.as_ref().map(|id| id.as_str().to_string()),
+        callback_port: oauth
+            .callback_port
+            .and_then(|port| u16::try_from(port).ok()),
+        scopes: oauth
+            .scopes
+            .iter()
+            .map(|scope| scope.as_str().to_string())
+            .collect(),
+    });
     let transport = match server.transport? {
         McpServerTransport::Stdio => CustomTransport::Stdio {
             command: server.command.as_deref()?.clone(),
@@ -780,6 +842,7 @@ pub fn custom_server(server: &McpServerWire) -> Option<CustomServer> {
                 .iter()
                 .map(|arg| arg.as_str().to_string())
                 .collect(),
+            oauth,
         },
         McpServerTransport::Http => CustomTransport::Http {
             url: server.url.as_deref()?.clone(),
@@ -788,17 +851,7 @@ pub fn custom_server(server: &McpServerWire) -> Option<CustomServer> {
                 .iter()
                 .map(|(name, value)| (name.as_str().to_string(), value.as_str().to_string()))
                 .collect(),
-            oauth: server.oauth.as_ref().map(|oauth| OAuthSettings {
-                client_id: oauth.client_id.as_ref().map(|id| id.as_str().to_string()),
-                callback_port: oauth
-                    .callback_port
-                    .and_then(|port| u16::try_from(port).ok()),
-                scopes: oauth
-                    .scopes
-                    .iter()
-                    .map(|scope| scope.as_str().to_string())
-                    .collect(),
-            }),
+            oauth,
         },
     };
     Some(CustomServer {
@@ -857,8 +910,18 @@ pub fn canonical_json(value: &Value) -> String {
 #[must_use]
 pub fn spec_sha256(server: &CustomServer) -> String {
     let mut definition = match &server.transport {
-        CustomTransport::Stdio { command, args } => {
-            serde_json::json!({ "transport": "stdio", "command": command, "args": args })
+        CustomTransport::Stdio {
+            command,
+            args,
+            oauth,
+        } => {
+            let mut definition =
+                serde_json::json!({ "transport": "stdio", "command": command, "args": args });
+            if let Some(oauth) = oauth {
+                // Only when there is one, so every hash kept for a stdio entry stands.
+                definition["oauth"] = oauth_json(oauth);
+            }
+            definition
         }
         CustomTransport::Http {
             url,
@@ -2229,6 +2292,7 @@ mod tests {
                     transport: CustomTransport::Stdio {
                         command: "npx".to_string(),
                         args: vec!["-y".to_string(), "@example/github-mcp".to_string()],
+                        oauth: None,
                     },
                     credential_keys: vec!["GITHUB_TOKEN".to_string()],
                     tools: BTreeMap::from([
@@ -2268,6 +2332,7 @@ mod tests {
                 transport: CustomTransport::Stdio {
                     command: "npx".to_string(),
                     args: Vec::new(),
+                    oauth: None,
                 },
                 credential_keys: Vec::new(),
                 tools: BTreeMap::new(),
@@ -2888,6 +2953,137 @@ mod tests {
                     && message.starts_with("oauth_with_keys: ")),
             "{found:?}"
         );
+    }
+
+    /// Farik's own connector as a team file or a kit spells it: `farik connector <word>`.
+    fn a_farik_connector(word: &str, oauth: Value) -> Value {
+        let mut server = json!({
+            "name": "osv",
+            "source": "custom",
+            "transport": "stdio",
+            "command": "farik",
+            "args": ["connector", word],
+            "tools": { "query_package": "network" }
+        });
+        server["oauth"] = oauth;
+        server
+    }
+
+    #[test]
+    fn the_farik_connector_may_sign_in() {
+        let wire = with_servers(json!([a_farik_connector(
+            "osv",
+            json!({ "scopes": ["a"] })
+        )]));
+        let server = the_custom_servers(&wire)
+            .remove(0)
+            .expect("a custom server");
+        let settings = server.oauth().expect("signs in");
+        assert_eq!(settings.scopes, ["a".to_string()]);
+        assert_eq!(settings.client_id, None);
+        // The word is held to Farik's own connectors by the kit loader; here it is its shape alone.
+        for word in ["a", "osv-2", &format!("a{}", "b".repeat(39))] {
+            let wire = with_servers(json!([a_farik_connector(word, json!({}))]));
+            assert!(validate_team(&wire).is_ok(), "{word}");
+        }
+    }
+
+    /// A guard: every refusal here is the one `oauth_on_stdio` already gave.
+    #[test]
+    fn another_stdio_server_may_not() {
+        let at = "/agents/0/mcp_servers/0/oauth";
+        let long = "x".repeat(41);
+        let cases: [(&str, Vec<&str>); 11] = [
+            ("npx", vec!["x@1.0.0"]),
+            ("farik", vec!["serve"]),
+            ("farik", vec!["connector", "a", "b"]),
+            ("farik", vec!["connector"]),
+            ("farik", vec!["connector", "Osv"]),
+            ("farik", vec!["connector", "1x"]),
+            ("farik", vec!["connector", "a_b"]),
+            ("farik", vec!["connector", &long]),
+            ("farik", vec!["other", "osv"]),
+            ("FARIK", vec!["connector", "osv"]),
+            ("/usr/bin/farik", vec!["connector", "osv"]),
+        ];
+        for (command, args) in cases {
+            let mut server = a_farik_connector("osv", json!({}));
+            server["command"] = json!(command);
+            server["args"] = json!(args);
+            let found = refusals(&with_servers(json!([server])));
+            assert!(
+                found
+                    .iter()
+                    .any(|(path, message)| path == at && message.starts_with("oauth_on_stdio: ")),
+                "{command} {args:?}: {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_farik_connector_takes_no_client_of_its_own() {
+        let at = |field: &str| format!("/agents/0/mcp_servers/0/oauth/{field}");
+        let said = |oauth: Value| {
+            let found = refusals(&with_servers(json!([a_farik_connector("osv", oauth)])));
+            found
+                .into_iter()
+                .map(|(path, message)| {
+                    let code = message.split(':').next().unwrap_or_default().to_string();
+                    (path, code)
+                })
+                .collect::<Vec<_>>()
+        };
+        let own = "farik_connector_client".to_string();
+        assert_eq!(
+            said(json!({ "client_id": "abc" })),
+            [(at("client_id"), own.clone())]
+        );
+        assert_eq!(
+            said(json!({ "callback_port": 33418 })),
+            [(at("callback_port"), own.clone())],
+            "a port alone is not also a port without a client"
+        );
+        assert_eq!(
+            said(json!({ "client_id": "abc", "callback_port": 33418 })),
+            [(at("client_id"), own.clone()), (at("callback_port"), own)]
+        );
+        let found = refusals(&with_servers(json!([a_farik_connector(
+            "osv",
+            json!({ "client_id": "abc" })
+        )])));
+        assert_eq!(
+            found[0].1,
+            "farik_connector_client: Farik's own connector signs in with Farik's own app"
+        );
+    }
+
+    /// A guard: `oauth_with_keys` holds for Farik's own connector as for any entry.
+    #[test]
+    fn the_farik_connector_that_signs_in_takes_no_keys() {
+        let mut server = a_farik_connector("osv", json!({}));
+        server["credential_keys"] = json!(["API_KEY"]);
+        let found = refusals(&with_servers(json!([server])));
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].0, "/agents/0/mcp_servers/0/credential_keys");
+        assert!(found[0].1.starts_with("oauth_with_keys: "), "{found:?}");
+    }
+
+    #[test]
+    fn a_stdio_server_without_oauth_keeps_its_hash() {
+        let hash = |wire: Value| {
+            let wire: super::McpServerWire = serde_json::from_value(wire).expect("a server");
+            spec_sha256(&custom_server(&wire).expect("a custom server"))
+        };
+        assert_eq!(
+            hash(a_stdio_server()),
+            "c3c30eb616cf2233482301743c31c3b5ad89e31e5dd1089ad4a17147be76ad96",
+            "recorded before a stdio entry could say oauth"
+        );
+        let mut signs_in = a_stdio_server();
+        signs_in["oauth"] = json!({});
+        assert_ne!(hash(signs_in.clone()), hash(a_stdio_server()));
+        signs_in["oauth"] = json!({ "scopes": ["a"] });
+        assert_ne!(hash(signs_in), hash(a_stdio_server()));
     }
 
     fn stdio_with_oauth() -> Value {

@@ -620,7 +620,7 @@ pub fn launch_spec(
     server: &CustomServer,
     entry: &ConnectorEntry,
 ) -> Result<LaunchSpec, ConnectorError> {
-    let CustomTransport::Stdio { command, args } = &server.transport else {
+    let CustomTransport::Stdio { command, args, .. } = &server.transport else {
         return Err(ConnectorError::Failed(format!(
             "{} is reached at a web address, not started",
             server.name
@@ -795,7 +795,7 @@ pub fn own_program(
     own: Option<&std::path::Path>,
 ) -> Result<PathBuf, &'static str> {
     match &server.transport {
-        CustomTransport::Stdio { command, args } => own_program_for(command, args, own),
+        CustomTransport::Stdio { command, args, .. } => own_program_for(command, args, own),
         CustomTransport::Http { .. } => Ok(PathBuf::new()),
     }
 }
@@ -956,7 +956,7 @@ async fn connect(
     };
     let plain = |what: &str| ConnectorError::Failed(format!("{} {what}", server.name));
     match &server.transport {
-        CustomTransport::Stdio { command, args } => {
+        CustomTransport::Stdio { command, args, .. } => {
             let mut process = tokio::process::Command::new(program(command, args, farik));
             // rmcp kills the server when the transport is dropped, as on the timeout of its
             // callers; this is the same promise again, should rmcp stop keeping it.
@@ -1032,6 +1032,7 @@ mod tests {
             transport: CustomTransport::Stdio {
                 command: "farik".to_string(),
                 args: vec!["connector".to_string(), "osv".to_string()],
+                oauth: None,
             },
             ..stdio(&[])
         };
@@ -1512,6 +1513,7 @@ mod tests {
             transport: CustomTransport::Stdio {
                 command: "github-mcp".to_string(),
                 args: vec!["stdio".to_string()],
+                oauth: None,
             },
             credential_keys: credential_keys.iter().map(ToString::to_string).collect(),
             tools: BTreeMap::new(),

@@ -3005,6 +3005,7 @@ mod tests {
             transport: CustomTransport::Stdio {
                 command: "sh".to_string(),
                 args: Vec::new(),
+                oauth: None,
             },
             credential_keys: Vec::new(),
             tools: [("make".to_string(), ConnectorTag::ExternalEffect)].into(),

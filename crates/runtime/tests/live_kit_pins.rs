@@ -58,7 +58,7 @@ async fn live_kit_pins_hold() {
             let mut wire = entry.clone();
             wire.source = McpServerSource::Kit;
             let server = custom_server(&wire).expect("a kit entry");
-            if let CustomTransport::Stdio { command, args } = &server.transport
+            if let CustomTransport::Stdio { command, args, .. } = &server.transport
                 && is_farik_connector(command, args)
             {
                 eprintln!(
