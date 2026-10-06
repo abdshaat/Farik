@@ -1199,3 +1199,100 @@ async fn an_unmatched_host_runs_step_03() {
     assert_eq!(fixture.count("/register"), 1);
     assert_eq!(fixture.count("/device/code"), 0);
 }
+
+// ---- Refreshing a grant made with one of Farik's own apps (phase 7 step 03b) ----
+
+/// A grant made with `Dev`'s device flow, which the fixture honours, expiring in a minute.
+fn dev_grant(fixture: &Fixture, now: chrono::DateTime<Utc>) -> OAuthGrant {
+    OAuthGrant {
+        client_id: "dev-client".to_string(),
+        revocation_endpoint: None,
+        app: Some("dev".to_string()),
+        ..kept(fixture, now, Some(MINUTE))
+    }
+}
+
+#[tokio::test]
+async fn refreshes_a_device_grant_without_resource_or_secret() {
+    let fixture = Fixture::start().await;
+    let now = Utc::now();
+    let grant = dev_grant(&fixture, now);
+    let fresh = refreshed(
+        &grant,
+        now,
+        Duration::from_secs(600),
+        Duration::from_secs(3),
+    )
+    .await
+    .expect("refreshed")
+    .expect("it was due");
+    assert_ne!(fresh.access_token.expose(), grant.access_token.expose());
+    assert_eq!(
+        fresh.app.as_deref(),
+        Some("dev"),
+        "the grant stays the app's"
+    );
+    let asked = &fixture.requests("/token")[0];
+    assert_eq!(asked.form["client_id"], "dev-client");
+    assert_eq!(asked.form["grant_type"], "refresh_token");
+    assert_eq!(
+        asked.form["refresh_token"],
+        grant.refresh_token.as_ref().expect("one").expose()
+    );
+    assert!(!asked.form.contains_key("resource"), "{:?}", asked.form);
+    assert!(
+        !asked.form.contains_key("client_secret"),
+        "{:?}",
+        asked.form
+    );
+    assert_eq!(
+        asked.headers.get("accept").map(String::as_str),
+        Some("application/json")
+    );
+}
+
+#[tokio::test]
+async fn a_github_refresh_refused_at_200_lapses() {
+    let now = Utc::now();
+    for error in ["bad_refresh_token", "incorrect_client_credentials"] {
+        let fixture = Fixture::start().await;
+        fixture.set(|flags| flags.refresh_error = Some((200, error.to_string())));
+        // Of Farik's app, and of a service's own: the codes are read for every grant.
+        for grant in [dev_grant(&fixture, now), kept(&fixture, now, Some(MINUTE))] {
+            let outcome = refreshed(
+                &grant,
+                now,
+                Duration::from_secs(600),
+                Duration::from_secs(3),
+            )
+            .await;
+            assert_eq!(
+                outcome,
+                Err(SignInError::Lapsed),
+                "{error}, app {:?}",
+                grant.app
+            );
+        }
+    }
+    let fixture = Fixture::start().await;
+    fixture.set(|flags| flags.refresh_error = Some((200, "something_else".to_string())));
+    let outcome = refreshed(
+        &dev_grant(&fixture, now),
+        now,
+        Duration::from_secs(600),
+        Duration::from_secs(3),
+    )
+    .await;
+    assert!(
+        matches!(outcome, Err(SignInError::Failed(_))),
+        "{outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_grant_without_revocation_is_not_revoked() {
+    let fixture = Fixture::start().await;
+    let grant = dev_grant(&fixture, Utc::now());
+    revoke(&grant).await;
+    assert!(fixture.seen().is_empty(), "no request was made");
+}

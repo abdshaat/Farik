@@ -1061,16 +1061,27 @@ const UNKNOWN_EXPIRY_TRUST: chrono::Duration = chrono::Duration::minutes(50);
 /// How long asking a service to forget a grant may take.
 const REVOKE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// The `error` codes that mean the service ended the sign-in.
-const ENDED: [&str; 3] = ["invalid_grant", "invalid_client", "unauthorized_client"];
+/// The `error` codes that mean the service ended the sign-in; the last two are GitHub's.
+const ENDED: [&str; 5] = [
+    "invalid_grant",
+    "invalid_client",
+    "unauthorized_client",
+    "bad_refresh_token",
+    "incorrect_client_credentials",
+];
 
 /// The grant refreshed, when it will not last `valid_for` more from `now`: `Ok(None)` when it
 /// will. A grant with no refresh token is `Ok(None)` while its access token holds, and lapses once
 /// it has expired. The rotated refresh token is the answer's; one left out keeps the old.
 ///
+/// A grant of one of Farik's own apps (`app` set) is refreshed with no `resource` and no client
+/// secret. Every grant is asked for JSON, and an `error` in the answer is read whatever its status,
+/// since GitHub answers one with status 200.
+///
 /// # Errors
-/// `Lapsed` when the service ended the sign-in (`invalid_grant`, `invalid_client` or
-/// `unauthorized_client`); `Failed` for anything else, including `timeout` passing.
+/// `Lapsed` when the service ended the sign-in (`invalid_grant`, `invalid_client`,
+/// `unauthorized_client`, `bad_refresh_token` or `incorrect_client_credentials`); `Failed` for
+/// anything else, including `timeout` passing.
 pub async fn refreshed(
     grant: &OAuthGrant,
     now: DateTime<Utc>,
@@ -1098,13 +1109,15 @@ pub async fn refreshed(
     };
     let host = host_of(&grant.token_endpoint);
     let guard = Guarded::new()?;
-    let form = [
+    let mut form = vec![
         ("grant_type", "refresh_token"),
         ("refresh_token", refresh.expose()),
         ("client_id", grant.client_id.as_str()),
-        ("resource", grant.resource.as_str()),
     ];
-    let asking = guard.post_form(&grant.token_endpoint, &form);
+    if grant.app.is_none() {
+        form.push(("resource", grant.resource.as_str()));
+    }
+    let asking = guard.post_token_form(&grant.token_endpoint, &form);
     let answer = match tokio::time::timeout(timeout, asking).await {
         Err(_) => {
             return Err(SignInError::Failed(format!(
@@ -1273,6 +1286,33 @@ mod tests {
         let read = OAuthGrant::from_json(&grant.to_json()).expect("a grant");
         assert_eq!(read, grant);
         assert_eq!(read.app.as_deref(), Some("github"));
+    }
+
+    /// What step 03 kept has no `app`: it reads as a grant of a client the service registered or the
+    /// user gave, and its refresh still sends `resource` (`refresh_sends_the_kept_resource`, whose
+    /// grant has `app: None`, is the same through `refreshed`).
+    #[test]
+    fn a_stored_grant_reads_without_app() {
+        let mut stored = OAuthGrant {
+            issuer: "https://auth.example".to_string(),
+            resource: "https://mcp.example/mcp".to_string(),
+            client_id: "client-1".to_string(),
+            token_endpoint: "https://auth.example/token".to_string(),
+            revocation_endpoint: Some("https://auth.example/revoke".to_string()),
+            access_token: Secret::new("access".to_string()),
+            refresh_token: Some(Secret::new("refresh".to_string())),
+            issued_at: "2026-10-02T10:00:00Z".parse().expect("a time"),
+            expires_at: None,
+            scopes: vec!["read".to_string()],
+            lapsed: false,
+            app: None,
+        }
+        .to_json();
+        // Step 03's form has no `app` key at all.
+        stored.as_object_mut().expect("an object").remove("app");
+        let grant = OAuthGrant::from_json(&stored).expect("a grant");
+        assert_eq!(grant.app, None);
+        assert_eq!(grant.client_id, "client-1");
     }
 
     /// rmcp refuses metadata without an issuer before Farik's own check runs, so the check is
