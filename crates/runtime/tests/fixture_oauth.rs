@@ -1913,6 +1913,36 @@ async fn refreshes_with_the_secret_and_without_resource() {
     );
 }
 
+/// The secret goes to the entry's own token endpoint (SPEC 8.6), never to the address a kept grant
+/// names: a grant file is the user's to edit, and what it says must not decide where Farik's
+/// client secret is sent.
+#[tokio::test]
+async fn refreshes_an_app_s_grant_at_the_entry_s_token_endpoint() {
+    let fixture = google_fixture().await;
+    let table = google_table(&fixture);
+    let now = Utc::now();
+    let grant = OAuthGrant {
+        token_endpoint: "https://127.0.0.1:1/token".to_string(),
+        ..google_grant(&fixture, now)
+    };
+    let fresh = refreshed(
+        &grant,
+        table,
+        now,
+        Duration::from_secs(600),
+        Duration::from_secs(3),
+    )
+    .await
+    .expect("it was refreshed at the entry's endpoint")
+    .expect("it was due");
+    assert_ne!(fresh.access_token.expose(), grant.access_token.expose());
+    assert_eq!(
+        fixture.requests("/token").len(),
+        1,
+        "the fixture saw exactly one refresh"
+    );
+}
+
 #[tokio::test]
 async fn a_grant_of_an_app_the_table_lacks_lapses() {
     let fixture = google_fixture().await;

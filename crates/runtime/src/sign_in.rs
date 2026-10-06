@@ -1309,7 +1309,9 @@ const ENDED: [&str; 5] = [
 /// it has expired. The rotated refresh token is the answer's; one left out keeps the old.
 ///
 /// A grant of one of Farik's own apps (`app` set) is refreshed with no `resource`, and with the
-/// client secret its entry of `apps` has, if it has one; a grant whose app `apps` lacks has lapsed.
+/// client secret its entry of `apps` has, if it has one, at that entry's token endpoint and never
+/// at the one the kept grant names, since the secret goes only where Farik's table says; a grant
+/// whose app `apps` lacks has lapsed.
 /// Every grant is asked for JSON, and an `error` in the answer is read whatever its status, since
 /// GitHub answers one with status 200.
 ///
@@ -1352,7 +1354,8 @@ pub async fn refreshed(
             Ok(None)
         };
     };
-    let host = host_of(&grant.token_endpoint);
+    let endpoint = app.map_or(grant.token_endpoint.as_str(), |app| app.token_endpoint);
+    let host = host_of(endpoint);
     let guard = Guarded::new()?;
     let mut form = vec![
         ("grant_type", "refresh_token"),
@@ -1369,7 +1372,7 @@ pub async fn refreshed(
             }
         }
     }
-    let asking = guard.post_token_form(&grant.token_endpoint, &form);
+    let asking = guard.post_token_form(endpoint, &form);
     let answer = match tokio::time::timeout(timeout, asking).await {
         Err(_) => {
             return Err(SignInError::Failed(format!(
