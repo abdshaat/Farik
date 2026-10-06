@@ -5395,12 +5395,15 @@ pub(super) mod tests {
         Box::leak(Box::new([RegisteredApp {
             id: "dev",
             name: "Dev",
-            host: "127.0.0.1",
+            host: Some("127.0.0.1"),
+            farik_connector: None,
             flow: AppFlow::Device {
                 device_endpoint: leaked(format!("{origin}/device/code")),
                 verification_uri: leaked(format!("{origin}/login/device")),
             },
             client_id: "dev-client",
+            client_secret: None,
+            scopes: &[],
             issuer: leaked(format!("{origin}/login/oauth")),
             token_endpoint: leaked(format!("{origin}/token")),
             revocation_endpoint: None,

@@ -826,12 +826,15 @@ fn dev_table_polling(
     Box::leak(Box::new([RegisteredApp {
         id: "dev",
         name: "Dev",
-        host,
+        host: Some(host),
+        farik_connector: None,
         flow: AppFlow::Device {
             device_endpoint: leaked(format!("{origin}/device/code")),
             verification_uri: leaked(format!("{origin}/login/device")),
         },
         client_id: "dev-client",
+        client_secret: None,
+        scopes: &[],
         issuer: leaked(format!("{origin}/login/oauth")),
         token_endpoint: leaked(token_endpoint),
         revocation_endpoint: None,

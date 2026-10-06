@@ -24,12 +24,21 @@ pub struct RegisteredApp {
     pub id: &'static str,
     /// What the screens call it.
     pub name: &'static str,
-    /// The one host it serves, by the server's address and never by what the server's metadata says.
-    pub host: &'static str,
+    /// The one host it serves, by the server's address and never by what the server's metadata
+    /// says; none for an app that signs in for one of Farik's own connectors, whose server is no
+    /// address.
+    pub host: Option<&'static str>,
+    /// The one of Farik's own connectors (`farik connector <name>`) it signs in for, if it does.
+    pub farik_connector: Option<&'static str>,
     /// How a user signs in to it.
     pub flow: AppFlow,
-    /// The app's public client id; no secret is shipped.
+    /// The app's client id, which is public.
     pub client_id: &'static str,
+    /// The client secret a service insists on for a client it calls public, sent on the exchange
+    /// and on each refresh and never kept in a grant (ADR 0035). It protects nothing.
+    pub client_secret: Option<&'static str>,
+    /// The only scopes the app asks for.
+    pub scopes: &'static [&'static str],
     /// Who the service says it is.
     pub issuer: &'static str,
     /// Where tokens are asked for and refreshed.
@@ -58,7 +67,26 @@ pub fn app_for<'a>(apps: &'a [RegisteredApp], url: &str) -> Option<&'a Registere
         _ => false,
     };
     let host = url.host_str().filter(|_| served)?;
-    apps.iter().find(|app| app.host.eq_ignore_ascii_case(host))
+    apps.iter().find(|app| {
+        app.host
+            .is_some_and(|served| served.eq_ignore_ascii_case(host))
+    })
+}
+
+/// The app of `apps` that signs in for the connector `command` and `args` start, when they are,
+/// exactly, `farik connector <name>` for one of Farik's own connectors and the app's is `<name>`.
+#[must_use]
+pub fn app_for_farik_connector<'a>(
+    apps: &'a [RegisteredApp],
+    command: &str,
+    args: &[String],
+) -> Option<&'a RegisteredApp> {
+    if !farik_roles::is_farik_connector(command, args) {
+        return None;
+    }
+    let connector = args.get(1)?;
+    apps.iter()
+        .find(|app| app.farik_connector == Some(connector.as_str()))
 }
 
 /// Whether `url` names this computer, which is the only place Farik talks to over `http`.
@@ -79,12 +107,15 @@ mod tests {
     const GITHUB_SHAPED: RegisteredApp = RegisteredApp {
         id: "github",
         name: "GitHub",
-        host: "api.githubcopilot.com",
+        host: Some("api.githubcopilot.com"),
+        farik_connector: None,
         flow: AppFlow::Device {
             device_endpoint: "https://auth.example/device/code",
             verification_uri: "https://auth.example/device",
         },
         client_id: "the-apps-client-id",
+        client_secret: None,
+        scopes: &[],
         issuer: "https://auth.example/oauth",
         token_endpoint: "https://auth.example/oauth/access_token",
         revocation_endpoint: None,
@@ -94,9 +125,26 @@ mod tests {
 
     fn serving(host: &'static str) -> RegisteredApp {
         RegisteredApp {
-            host,
+            host: Some(host),
             ..GITHUB_SHAPED
         }
+    }
+
+    /// An entry that signs in for one of Farik's own connectors, whose server answers no address.
+    fn signing_in_for(connector: &'static str, id: &'static str) -> RegisteredApp {
+        RegisteredApp {
+            id,
+            host: None,
+            farik_connector: Some(connector),
+            client_secret: Some("a-secret"),
+            scopes: &["a-scope"],
+            issuer: "https://accounts.example",
+            ..GITHUB_SHAPED
+        }
+    }
+
+    fn words(list: &[&str]) -> Vec<String> {
+        list.iter().map(|word| (*word).to_string()).collect()
     }
 
     #[test]
@@ -145,5 +193,55 @@ mod tests {
     #[test]
     fn the_shipped_table_is_empty_until_the_founder_registers() {
         assert!(REGISTERED_APPS.is_empty());
+    }
+
+    #[test]
+    fn matches_a_farik_connector_by_its_exact_pair() {
+        // The entry for the word, not the table's first, nor one whose word it begins.
+        let table = [
+            signing_in_for("ads", "for-ads"),
+            signing_in_for("osv-2", "for-osv-2"),
+            signing_in_for("osv", "for-osv"),
+        ];
+        let found = |command: &str, args: &[&str]| {
+            app_for_farik_connector(&table, command, &words(args)).map(|app| app.id)
+        };
+        assert_eq!(found("farik", &["connector", "osv"]), Some("for-osv"));
+        for (command, args) in [
+            ("farik", vec!["connector", "osv", "x"]),
+            // `ads` is not one of Farik's own connectors, so its entry is never answered.
+            ("farik", vec!["connector", "ads"]),
+            ("farik-osv", vec!["connector", "osv"]),
+            ("/usr/bin/farik", vec!["connector", "osv"]),
+            ("FARIK", vec!["connector", "osv"]),
+            ("npx", vec!["connector", "osv"]),
+            ("farik", vec!["osv"]),
+        ] {
+            assert_eq!(found(command, &args), None, "{command} {args:?}");
+        }
+    }
+
+    #[test]
+    fn an_entry_without_a_host_matches_no_address() {
+        let table = [signing_in_for("osv", "for-osv")];
+        for url in [
+            "https://api.githubcopilot.com/mcp/",
+            "https://accounts.example/mcp",
+            "https://accounts.example:443/",
+            "http://127.0.0.1:4000/mcp",
+            "http://localhost:4000/mcp",
+        ] {
+            assert!(app_for(&table, url).is_none(), "{url}");
+        }
+    }
+
+    /// A guard: the table holds no entry for a Farik connector until step 08e's Task 6.
+    #[test]
+    fn the_shipped_table_has_no_google_yet() {
+        assert!(
+            REGISTERED_APPS
+                .iter()
+                .all(|app| app.farik_connector.is_none())
+        );
     }
 }
