@@ -606,6 +606,43 @@ mod tests {
             .await,
             Err(OwnCallError::Tool("Channel not found".to_string()))
         );
+
+        // A service over its rate limit does not answer the call: it turns it away with an HTTP
+        // 429 and its words in the body, which are its words all the same, cut as any are.
+        let answer = |status: u16, body: String| {
+            fixture.set(|flags| {
+                flags
+                    .tool_answers
+                    .insert("get_channel".to_string(), ToolAnswer::Http(status, body));
+            });
+        };
+        let call = || {
+            call_as(
+                &harness.daemon,
+                "kai",
+                "buffer",
+                "get_channel",
+                arguments("c"),
+            )
+        };
+        answer(
+            429,
+            "Too many requests. Retry after 60 seconds.".to_string(),
+        );
+        assert_eq!(
+            call().await,
+            Err(OwnCallError::Tool(
+                "Too many requests. Retry after 60 seconds.".to_string()
+            ))
+        );
+        answer(429, "w".repeat(2_000));
+        assert_eq!(call().await, Err(OwnCallError::Tool("w".repeat(500))));
+        // Any other turned-away call says nothing of what the service means: it is not reached.
+        answer(500, "Internal trouble".to_string());
+        assert!(
+            matches!(call().await, Err(OwnCallError::Failed(_))),
+            "a 500 is not the service's words"
+        );
     }
 
     #[tokio::test(start_paused = true)]

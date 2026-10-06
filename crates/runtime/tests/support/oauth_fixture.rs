@@ -49,6 +49,10 @@ pub enum ToolAnswer {
     Json(serde_json::Value),
     /// A result marked as an error, with this text.
     Error(String),
+    /// No MCP result at all: the HTTP answer of a service that turns the call away, with this
+    /// status, a `Retry-After` of sixty seconds and this body (a service over its rate limit
+    /// answers `429` so).
+    Http(u16, String),
 }
 
 /// The ways this server can differ from a well-behaved one.
@@ -191,6 +195,12 @@ impl ServerHandler for Tools {
                 Some(ToolAnswer::Error(text)) => {
                     rmcp::model::CallToolResult::error(vec![rmcp::model::ContentBlock::text(text)])
                 }
+                // Answered before the call reached this handler, by `front`.
+                Some(ToolAnswer::Http(..)) => {
+                    rmcp::model::CallToolResult::success(vec![rmcp::model::ContentBlock::text(
+                        "whoami-ok",
+                    )])
+                }
             };
             Ok(result.into())
         }
@@ -319,11 +329,47 @@ async fn front(State(shared): State<Arc<Shared>>, request: Request, next: Next) 
             }
             return response;
         }
+        if let Some(turned_away) = turns_away(&shared, &flags, &recorded.body) {
+            return turned_away;
+        }
         return next
             .run(Request::from_parts(parts, Body::from(bytes)))
             .await;
     }
     route(&shared, &flags, &recorded).await
+}
+
+/// The HTTP answer of a `tools/call` whose tool is set to `ToolAnswer::Http`, which is recorded as
+/// a call of that tool all the same.
+fn turns_away(shared: &Shared, flags: &Flags, body: &str) -> Option<Response> {
+    let call: serde_json::Value = serde_json::from_str(body).ok()?;
+    if call["method"] != "tools/call" {
+        return None;
+    }
+    let name = call["params"]["name"].as_str()?;
+    let Some(ToolAnswer::Http(status, words)) = flags.tool_answers.get(name) else {
+        return None;
+    };
+    let arguments = call["params"]["arguments"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    shared
+        .calls
+        .lock()
+        .expect("calls")
+        .push((name.to_string(), arguments));
+    Some(
+        (
+            StatusCode::from_u16(*status).expect("a status"),
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::RETRY_AFTER, "60"),
+            ],
+            words.clone(),
+        )
+            .into_response(),
+    )
 }
 
 async fn route(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Response {

@@ -878,15 +878,42 @@ pub async fn call_tool(
         match answered {
             Ok(result) => read_result(&result),
             Err(rmcp::service::ServiceError::McpError(error)) => Err(tool_error(&error.message)),
-            Err(_) => Err(ConnectorError::Failed(format!(
-                "{} did not answer the call",
-                server.name
-            ))),
+            Err(error) => Err(match rate_limit_words(&error) {
+                Some(words) => tool_error(&words),
+                None => ConnectorError::Failed(format!("{} did not answer the call", server.name)),
+            }),
         }
     };
     tokio::time::timeout(LISTING_TIMEOUT, call)
         .await
         .unwrap_or(Err(ConnectorError::Timeout))
+}
+
+/// What a service said when it turned the call away for its rate limit, with an HTTP 429 and its
+/// words in the body, which is not an MCP result and so reaches rmcp as a failure of the
+/// transport, naming the status and the body. Any other HTTP failure says nothing of what the
+/// service means, and is none.
+fn rate_limit_words(error: &rmcp::service::ServiceError) -> Option<String> {
+    use rmcp::transport::streamable_http_client::StreamableHttpError;
+
+    let rmcp::service::ServiceError::TransportSend(sent) = error else {
+        return None;
+    };
+    let Some(StreamableHttpError::UnexpectedServerResponse(said)) = sent
+        .error
+        .downcast_ref::<StreamableHttpError<reqwest::Error>>()
+    else {
+        return None;
+    };
+    let status = reqwest::StatusCode::TOO_MANY_REQUESTS;
+    let body = said
+        .strip_prefix(format!("HTTP {status}: ").as_str())?
+        .trim();
+    Some(if body.is_empty() {
+        format!("HTTP {status}")
+    } else {
+        body.to_string()
+    })
 }
 
 /// A [`ConnectorError::ToolError`] of the service's own `words`, cut.

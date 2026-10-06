@@ -616,10 +616,10 @@ mod tests {
             format!("Buffer did not take it: \u{201c}{kept}\u{201d}")
         );
 
-        // Over its rate limit, Buffer's words are kept the same way.
-        answers(ToolAnswer::Error(
-            "Rate limit exceeded (429). Retry after 60 seconds.".to_string(),
-        ));
+        // Over its rate limit, Buffer does not answer the call at all: it turns it away with an
+        // HTTP 429, a `Retry-After` and its words in the body, which are kept the same way.
+        let limit = r#"{"error":"rate_limited","message":"Slow down. Retry after 60 seconds."}"#;
+        answers(ToolAnswer::Http(429, limit.to_string()));
         let limited = post("post-2", 58);
         handing.hands_over().await;
         assert_eq!(
@@ -629,7 +629,7 @@ mod tests {
         );
         assert_eq!(
             failed(limited),
-            "Buffer did not take it: \u{201c}Rate limit exceeded (429). Retry after 60 seconds.\u{201d}"
+            format!("Buffer did not take it: \u{201c}{limit}\u{201d}")
         );
 
         // An answer with no id for the post.
