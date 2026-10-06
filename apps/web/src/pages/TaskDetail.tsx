@@ -2,7 +2,7 @@ import { Button, DiffView, StatusWord } from "@farik/ui";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useQuery } from "../app/store.ts";
-import { movedWords, statusWord } from "../app/words.ts";
+import { movedWords, roleWord, statusWord } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { DesignReview, type Recorded, type Review } from "./DesignReview.tsx";
@@ -19,7 +19,7 @@ import {
 import own from "./PlanPage.module.css";
 import { type Contract, day } from "./PlanPage.tsx";
 import styles from "./pages.module.css";
-import type { Team } from "./setup/TeamSetup.tsx";
+import type { Agent, Team } from "./setup/TeamSetup.tsx";
 import page from "./TaskDetail.module.css";
 
 /** The contract fields this page reads beyond the plan pages'. */
@@ -35,7 +35,14 @@ type Event = HistoryEvent & {
 	body: HistoryEvent["body"] & Partial<Record<(typeof ACTORS)[number], string>>;
 };
 type Check = { criterionId: string; passed: boolean };
-type Diff = { diff: string; files: string[]; added: number; removed: number };
+type Diff = {
+	diff: string;
+	files: string[];
+	added: number;
+	removed: number;
+	/** A task in its role's private folder: no diff, only the names of what changed. */
+	privateFolder?: boolean;
+};
 type Waiting = { taskId: string; kind: string };
 type Activity = {
 	agentId: string;
@@ -521,7 +528,21 @@ export function TaskDetail() {
 				</dl>
 			</>
 		),
-		changes: (
+		changes: diff.privateFolder ? (
+			<>
+				<h2>{t("tabChanges")}</h2>
+				<p>
+					{t("privateChanges", {
+						role: roleWord(contract.assigneeRole as Agent["role"]),
+					})}
+				</p>
+				<ul>
+					{diff.files.map((file) => (
+						<li key={file}>{file}</li>
+					))}
+				</ul>
+			</>
+		) : (
 			<>
 				<h2>{t("tabChanges")}</h2>
 				<p>

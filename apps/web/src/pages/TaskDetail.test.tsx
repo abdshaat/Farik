@@ -113,6 +113,43 @@ describe("task detail", () => {
 		vi.useRealTimers();
 	});
 
+	it("a_finance_tasks_changes_tab_says_where_its_books_are", async () => {
+		// A task in a private folder has no branch and no diff: the page says where its changes are.
+		await opened(
+			{
+				...CONTRACT,
+				assignee_role: "finance_specialist",
+				reviewer_role: "product_manager",
+			},
+			[],
+			{
+				"task.diff": {
+					diff: "",
+					files: ["books.xlsx", "2026/forecast.xlsx"],
+					added: 0,
+					removed: 0,
+					private_folder: true,
+				},
+			},
+		);
+		fireEvent.click(await screen.findByRole("tab", { name: "Code changes" }));
+		const panel = screen.getByRole("tabpanel");
+		expect(
+			within(panel).getByText(
+				"This task changed the Finance Specialist’s private files, which are not shown in the browser. Its reviewer read each changed file beside the copy taken when the task started.",
+			),
+		).toBeTruthy();
+		const files = within(panel).getAllByRole("listitem");
+		expect(files.map((file) => file.textContent)).toEqual([
+			"books.xlsx",
+			"2026/forecast.xlsx",
+		]);
+		// No branch, no size, no diff.
+		expect(within(panel).queryByText(/on the branch/)).toBeNull();
+		expect(within(panel).queryByText(/\+0/)).toBeNull();
+		expect(within(panel).queryByRole("region")).toBeNull();
+	});
+
 	it("shows_the_five_tabs", async () => {
 		const { container } = await opened(CONTRACT, [], {
 			"task.history": {

@@ -160,6 +160,38 @@ describe("acceptance gate", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("a_finance_tasks_gate_says_where_its_books_are", async () => {
+		await openedGate(
+			"/tasks/FRK-1/accept",
+			GATE,
+			{
+				...TASK,
+				assignee_role: "finance_specialist",
+				reviewer_role: "product_manager",
+			},
+			undefined,
+			{
+				"task.diff": {
+					diff: "",
+					files: ["books.xlsx", "forecast.xlsx"],
+					added: 0,
+					removed: 0,
+					private_folder: true,
+				},
+			},
+		);
+		expect(
+			await screen.findByText(
+				"This task changed the Finance Specialist’s private files, which are not shown in the browser. Its reviewer read each changed file beside the copy taken when the task started.",
+			),
+		).toBeTruthy();
+		expect(
+			screen.getAllByRole("listitem").map((item) => item.textContent),
+		).toEqual(expect.arrayContaining(["books.xlsx", "forecast.xlsx"]));
+		// There is no diff to unfold.
+		expect(screen.queryByRole("button", { name: /code changes/ })).toBeNull();
+	});
+
 	it("says_one_changed_file_in_the_singular", async () => {
 		await openedGate("/tasks/FRK-1/accept", GATE, TASK, undefined, {
 			"task.diff": { diff: "", files: ["done.txt"], added: 1, removed: 0 },
