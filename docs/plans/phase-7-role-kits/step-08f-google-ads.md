@@ -135,6 +135,7 @@ One commit: every construction of `SessionConnector` (`session.rs:215`, `session
 - `a_write_inside_the_plan_reaches_google_and_records_the_campaign`: `marketing_campaign.created` with the budget's kind and amount. RED.
 - `reads_run_without_a_plan`: `report` and `list_accounts` answer with no plan active. RED.
 - `a_lapsed_sign_in_says_sign_in_again`. RED.
+- Carried from step 08e's landing review: mutation 18 (`call_as`'s `definition.oauth().is_some()` read, `daemon/own_calls.rs:109`, made `Http` alone) survived because `OWN_CALLS` lists Buffer's tools alone, so no call reaches a signed-in `stdio` connector. This task either tests `call_as` with a signed-in `stdio` connector, in a test that fails under that mutation, or records in Execution notes that `ads_calls.rs` bypasses `call_as`, so that the read has no caller to test.
 
 - [ ] `feat(runtime): run Google Ads calls in the daemon, behind a session's ticket`
 
