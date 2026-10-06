@@ -848,6 +848,17 @@ mod tests {
             );
         }
         let texts = marketing_skill_texts();
+        // Stop works until the post's time, not only until Farik hands it to Buffer.
+        let running = texts
+            .iter()
+            .find(|(skill, _)| skill == "running-social-channels")
+            .map(|(_, text)| flatten(text))
+            .expect("the posting skill");
+        assert!(
+            running.contains("The owner may stop it until the post's time"),
+            "{running}"
+        );
+        assert!(!running.contains("stop it until then"), "{running}");
         for name in [
             "keeping-a-content-calendar",
             "making-images-and-video",
