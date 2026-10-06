@@ -1,6 +1,6 @@
 # Phase 7, step 04: Skills per agent
 
-Status: draft
+Status: executed 2026-10-02 (every task ticked; the status line was left at draft until 2026-10-06); the landing review waits.
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6, 6.7, 8.2, 8.3, 8.5, 8.6; F9
 Depends on: step 01 of this phase (committed; `canonical_json`, `here_or_sent`'s use for a team-file change, `local_project_id`), step 03 (planned; it lands first in plan order and nothing of it is consumed, but it touches the same files, `team.schema.json`, `core/team.rs`, `daemon/team.rs` and the event and command schemas, so rebase onto it knowingly), phase 6 (merged in #19)

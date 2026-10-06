@@ -1,6 +1,6 @@
 # Phase 7, step 05: Kit format and loader
 
-Status: draft
+Status: executed 2026-10-02; reviewed 2026-10-02 (one landing review, its fixes recorded in the Execution notes; the status line was left at draft until 2026-10-06).
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 6.7, 5.6, 8.1, 8.2, 8.5; F9
 Depends on: steps 01, 02, 03, 03b, 04 and 04b of this phase (committed on this branch; the branch was at 8cf2122 at the readiness review, two test-port fixes and this plan after dc8f41f), phase 6 (merged in #19)
