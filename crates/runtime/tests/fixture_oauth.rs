@@ -986,6 +986,11 @@ async fn device_flow_reports_denied_and_expired() {
             expected,
             "{error}"
         );
+        assert_eq!(
+            fixture.count("/token"),
+            1,
+            "{error} ends the sign-in at once"
+        );
     }
 
     // Ten minutes of waiting is the sign-in's window, whatever the service says.
