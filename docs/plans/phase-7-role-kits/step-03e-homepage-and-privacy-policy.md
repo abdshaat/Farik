@@ -1,7 +1,8 @@
 # Phase 7, step 03e: A homepage and a privacy policy
 
 Status: deferred by the founder, 2026-10-02: Slack is a later step ("Connecting slack is a later step keep it simple for now"; "Write the slack integeration plan in the last phase"). Reviewed and folded; lands as phase 15 step 04, in its Slack integration (project plan revisions 30 to 32), where it is reviewed for readiness again, moved and renumbered. Where it says phase 11 or phase 13 for Slack's listing, read phase 15 step 04; the website (phase 11 step 01) is live by then.
-Branch: `phase/14-premium` when taken up (written on `phase/7-role-kits`)
+Amended 2026-10-06 by ADR 0043: it waits for phase 15 itself, not only for the launch; the homepage and privacy policy it keeps also serve Google's verification of Farik's own Google app there.
+Branch: `phase/15-premium` when taken up (written on `phase/7-role-kits`; it said `phase/14-premium` before Premium became phase 15, ADR 0040)
 Spec: `docs/SPEC.md` 8.6
 Depends on: step 03c (committed and deployed before Task 4: `infra`, the hosted zone input, GitHub's OpenID Connect provider, the deploy role and the `infra` workflow). Independent of step 03d; either may run first.
 Readiness: fresh-session Opus reviewer, 2026-10-02: not ready, 3 Blocking, all folded with the founder's answers; no second round (ADR 0032)
