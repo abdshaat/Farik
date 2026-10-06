@@ -325,21 +325,31 @@ describe("marketing plan page", () => {
 		).toBeTruthy();
 		// Asking first: nothing is sent until it is confirmed.
 		expect(s.calls("command")).toHaveLength(0);
-		fireEvent.change(within(dialog).getByLabelText(/A note for Kai/), {
+		const note = within(dialog).getByLabelText(/A note for Kai/);
+		const end = within(dialog).getByRole("button", { name: "End the plan" });
+		// A note is optional, but more than the 600 characters the daemon takes cannot be sent.
+		expect((end as HTMLButtonElement).disabled).toBe(false);
+		fireEvent.change(note, { target: { value: "x".repeat(601) } });
+		expect(within(dialog).getByText("601 of 600")).toBeTruthy();
+		expect((end as HTMLButtonElement).disabled).toBe(true);
+		expect(s.calls("command")).toHaveLength(0);
+		fireEvent.change(note, { target: { value: "x".repeat(600) } });
+		expect(within(dialog).getByText("600 of 600")).toBeTruthy();
+		expect((end as HTMLButtonElement).disabled).toBe(false);
+		fireEvent.change(note, {
 			target: { value: "We close early for the refit." },
 		});
+		expect((end as HTMLButtonElement).disabled).toBe(false);
 		await expectNoAxeViolations(container);
-		fireEvent.click(
-			within(dialog).getByRole("button", { name: "End the plan" }),
-		);
-		const end = await sent(s);
-		expect(end.params).toEqual({
+		fireEvent.click(end);
+		const ending = await sent(s);
+		expect(ending.params).toEqual({
 			command: {
 				command: "marketing_plan_end",
 				body: { plan: "MP-3", note: "We close early for the refit." },
 			},
 		});
-		await s.reply(end, { said: "ended", events: [10] });
+		await s.reply(ending, { said: "ended", events: [10] });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
