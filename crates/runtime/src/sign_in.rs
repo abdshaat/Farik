@@ -1521,6 +1521,24 @@ mod tests {
         assert_eq!(fixed_port(&settings), None);
     }
 
+    /// The way back of a sign-in is a page on this computer for the browser to be sent to: a
+    /// listener on any other address would let another machine on the network answer for it.
+    #[tokio::test]
+    async fn listens_on_this_computer_alone() {
+        let settings = OAuthSettings {
+            client_id: None,
+            callback_port: None,
+            scopes: Vec::new(),
+        };
+        let (listeners, addr) = bind(&settings).await.expect("a free port");
+        assert!(addr.ip().is_loopback(), "the address given out");
+        assert!(!listeners.is_empty());
+        for listener in &listeners {
+            let at = listener.local_addr().expect("an address");
+            assert!(at.ip().is_loopback(), "a listener is on {}", at.ip());
+        }
+    }
+
     /// A grant made with one of Farik's own apps is told so after a restart: its refresh depends on it.
     #[test]
     fn a_grant_keeps_its_app_in_the_stored_form() {

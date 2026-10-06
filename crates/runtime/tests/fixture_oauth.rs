@@ -1508,7 +1508,13 @@ async fn signs_in_with_pkce_and_the_secret() {
     let sign_in = start_app_sign_in(&table[0], &[], Utc::now())
         .await
         .expect("the sign-in starts");
-    let port = sign_in.callback_addr().expect("a listener").port();
+    let listening = sign_in.callback_addr().expect("a listener");
+    assert!(
+        listening.ip().is_loopback(),
+        "the way back listens on this computer alone, not on {}",
+        listening.ip()
+    );
+    let port = listening.port();
     assert_eq!(sign_in.provider(), Some("Google test"));
     assert_eq!(sign_in.user_code(), None);
     assert_eq!(sign_in.install_url(), None);
