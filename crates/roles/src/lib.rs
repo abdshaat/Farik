@@ -669,6 +669,38 @@ mod tests {
         }
     }
 
+    /// Step 09b: the skill teaches the spending and workbook tools, and the three rules that keep
+    /// the books safe: read before writing, a value for anything a service or a receipt gave, and a
+    /// formula only for a total inside the workbook (Farik never computes one). The tool names are
+    /// held to tools Farik lists by `kit_skills_name_only_tools_farik_lists` in the runtime.
+    #[test]
+    fn the_books_skill_names_the_spending_and_sheet_tools() {
+        let definition = loaded(Role::FinanceSpecialist);
+        let skill = definition.skills[0]
+            .body
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        for tool in [
+            "`farik_read_costs`",
+            "`farik_read_sheet`",
+            "`farik_write_sheet`",
+        ] {
+            assert!(skill.contains(tool), "the skill lost {tool}: {skill}");
+        }
+        for phrase in [
+            "read a workbook before you write it",
+            "as a value, never as a formula",
+            "farik never computes a formula",
+        ] {
+            assert!(
+                skill.contains(phrase),
+                "the skill lost \"{phrase}\": {skill}"
+            );
+        }
+    }
+
     /// ADR 0042: the Marketing Specialist owns the brand kit, the brand persona, the marketing plan
     /// and the social presence. It posts, advertises and spends only as the owner's approved plan
     /// says or after the owner allows that one call, and the prompt carries every `forbidden` line

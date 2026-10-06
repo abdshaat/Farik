@@ -16,6 +16,7 @@ use farik_core::governor::transition_table::TransitionActor;
 use farik_core::pricing::Usage;
 use farik_core::team::{
     Agent, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team, custom_server,
+    private_folder,
 };
 use farik_protocol::event::{
     AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
@@ -800,6 +801,12 @@ const CHAT_REPLY_TOOL: &str = "farik_chat_reply";
 /// session about a task alone (ADR 0042).
 const PROPOSE_MARKETING_PLAN_TOOL: &str = "farik_propose_marketing_plan";
 
+/// The Finance Specialist's tools (step 09b, `docs/SPEC.md` 6.6): the team's AI spending, and a
+/// private folder's workbooks, which `farik_write_sheet` writes and `farik_read_sheet` reads.
+const READ_COSTS_TOOL: &str = "farik_read_costs";
+const READ_SHEET_TOOL: &str = "farik_read_sheet";
+const WRITE_SHEET_TOOL: &str = "farik_write_sheet";
+
 /// The Farik tools a read-only session is not offered: the command runner, which has no
 /// executor there, and the git writes, which only the assignee may make.
 const NOT_FOR_READ_ONLY: [&str; 3] = ["farik_exec", "farik_git_commit", "farik_git_push"];
@@ -829,6 +836,26 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                 || (ask.agent.role == RoleWire::MarketingSpecialist
                     && ask.purpose == SessionPurpose::Implement
                     && ask.contract.is_some())
+        })
+        // The books are the Finance Specialist's: it reads the costs and the workbooks in any
+        // session and writes a workbook in the implement session of a task; a verify session
+        // about a task of a role with a private folder reads that folder's workbooks, as its
+        // reviewer and the Product Manager accepting it do (step 09b).
+        .filter(|tool| match tool.name {
+            READ_COSTS_TOOL => ask.agent.role == RoleWire::FinanceSpecialist,
+            WRITE_SHEET_TOOL => {
+                ask.agent.role == RoleWire::FinanceSpecialist
+                    && ask.purpose == SessionPurpose::Implement
+                    && ask.contract.is_some()
+            }
+            READ_SHEET_TOOL => {
+                ask.agent.role == RoleWire::FinanceSpecialist
+                    || (ask.purpose == SessionPurpose::Verify
+                        && ask.contract.is_some_and(|contract| {
+                            private_folder(contract.assignee_role).is_some()
+                        }))
+            }
+            _ => true,
         })
         // The design review's answer is its session's alone, which lists it.
         .filter(|tool| tool.name != RECORD_DESIGN_REVIEW_TOOL || ask.tools.is_some())
@@ -1917,6 +1944,100 @@ mod tests {
                 !offered(who, purpose, about),
                 "{who} {purpose:?} about {} is offered the plan",
                 about.is_some()
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_the_sheet_tools_to_the_finance_specialist_alone() {
+        use crate::tools::fixtures::{with_the_finance_specialist, with_the_marketing_specialist};
+        let harness = Harness::new("session-sheet-offer", |wire| {
+            with_the_finance_specialist(wire);
+            with_the_marketing_specialist(wire);
+        });
+        // A finance task `fin` holds and `pm` reviews, and a Developer's task.
+        harness.file("FRK-1", "ready", |wire| {
+            wire["assignee_role"] = json!("finance_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+        });
+        harness.project.moved(
+            "FRK-1",
+            "ready",
+            "assigned",
+            &json!({ "assignee": "fin", "reviewer": "pm" }),
+        );
+        harness.in_progress("FRK-2", "dev-a", "dev-b");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let read = |task: &str| {
+            deps.tools
+                .files
+                .read_contract(&task.parse().expect("an id"))
+                .expect("the contract")
+        };
+        let (finance, developers) = (read("FRK-1"), read("FRK-2"));
+        let sheet_tools = ["farik_read_costs", "farik_read_sheet", "farik_write_sheet"];
+        let offered = |who: &str, purpose: SessionPurpose, about| {
+            let mut ask = asked(deps, agent(&team, who), purpose, about);
+            ask.read_only = purpose == SessionPurpose::Verify;
+            let given = session_spec(deps, &team, &ask)
+                .expect("the spec")
+                .farik_tools;
+            sheet_tools
+                .into_iter()
+                .filter(|tool| given.iter().any(|one| one == tool))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            offered("fin", SessionPurpose::Implement, Some(&finance)),
+            sheet_tools,
+            "its own task's implement session is offered the three"
+        );
+        for (what, purpose, about) in [
+            ("a chat", SessionPurpose::Chat, None),
+            ("a conversation", SessionPurpose::Conversation, None),
+            (
+                "an implement session about no task",
+                SessionPurpose::Implement,
+                None,
+            ),
+            (
+                "a verify session",
+                SessionPurpose::Verify,
+                Some(&developers),
+            ),
+        ] {
+            assert_eq!(
+                offered("fin", purpose, about),
+                ["farik_read_costs", "farik_read_sheet"],
+                "{what}: costs and sheets are read in any session, and written in none"
+            );
+        }
+        // The reviewer reads a finance task's workbook, and the Product Manager at its accept.
+        for who in ["pm", "dev-b"] {
+            assert_eq!(
+                offered(who, SessionPurpose::Verify, Some(&finance)),
+                ["farik_read_sheet"],
+                "{who}"
+            );
+        }
+        for (who, purpose, about) in [
+            ("pm", SessionPurpose::Verify, Some(&developers)),
+            ("pm", SessionPurpose::Plan, Some(&finance)),
+            ("pm", SessionPurpose::Chat, None),
+            ("dev-a", SessionPurpose::Implement, Some(&developers)),
+            ("dev-a", SessionPurpose::Implement, Some(&finance)),
+            ("dev-a", SessionPurpose::Chat, None),
+            ("kai", SessionPurpose::Implement, Some(&finance)),
+            ("kai", SessionPurpose::Chat, None),
+        ] {
+            assert_eq!(
+                offered(who, purpose, about),
+                Vec::<&str>::new(),
+                "{who} {purpose:?}"
             );
         }
     }
