@@ -4252,7 +4252,7 @@
       }
     },
     "connectorServer": {
-      "description": "A service as the user connects it, before its tools are labelled: either a custom MCP server, an mcp_servers entry of team.schema.json without tools (name, transport, and command and args, or url and headers, credential_keys, and oauth for a web address the user signs in to; source, when given, is custom), held to validate_team as the agent's entry; or a service of the agent's role's kit, { name, source: kit }, a form of its own that carries nothing else, so a browser cannot send fields the kit decides (ADR 0036).",
+      "description": "A service as the user connects it, before its tools are labelled: either a custom MCP server, an mcp_servers entry of team.schema.json without tools (name, transport, and command and args, or url and headers, credential_keys, and oauth for a web address the user signs in to, or for Farik's own connector, the stdio entry `farik connector <name>`, which Farik signs in with its own app (ADR 0033's amendment of 2026-10-06); source, when given, is custom), held to validate_team as the agent's entry; or a service of the agent's role's kit, { name, source: kit }, a form of its own that carries nothing else, so a browser cannot send fields the kit decides (ADR 0036).",
       "oneOf": [
         {
           "type": "object",

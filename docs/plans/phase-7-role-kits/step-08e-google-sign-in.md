@@ -1,6 +1,6 @@
 # Phase 7, step 08e: Signing in with Google, for Google Ads
 
-Status: ready (to execute after step 03b's Tasks 1 to 6 land)
+Status: executed 2026-10-06; the landing review waits; the founder's Google Cloud project, consent screen and build-time secret wait.
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.7, 8.6; F9
 Depends on: step 03b of this phase, Tasks 1 to 6, each committed and landing-reviewed on this branch (committed as `326d2ee`, landing-reviewed through its fixes at `38f7859`) before this step's Task 1 starts; 03b's Task 7 (the GitHub App) is not needed. This step creates none of `registered_apps.rs`, `OAuthGrant.app`, the `provider` wire or AgentEdit's provider wording; it changes 03b's as Task 2 says. Before Task 1, the executor re-reads every file:line here against the code 03b landed and records corrections in Execution notes (not a second review). Also: step 03 (the loopback sign-in, `OAuthGrant`, `refreshed`, `refreshed_entry`); step 07 (Farik's own connectors, ADR 0038); phase 6 (merged in #19)
@@ -159,7 +159,7 @@ The executor's check runs without the variable. The founder runs the one with it
 
 `docs/SPEC.md` 6.7 (around line 600): "An `http` server may be signed in to" names Farik's own connector too; "`validate_team` refuses `oauth` on a `stdio` server" names the pair's exception and `farik_connector_client`; "A client secret is never taken: Farik is a public client." becomes: Farik takes no client secret from a team file or a user, and sends only the one its own Google app's build carries; Google's app, its one scope, no `resource`, `iss` required, Testing's seven-day sign-ins and the warning page. 8.6: the secret is not confidential, is set at build time and is in no file; the grant never leaves the daemon; no revocation. The revision line. `docs/schemas/rpc.schema.json`'s `connectorServer` description (around line 4244, "oauth for a web address") names Farik's own connector. ADR 0033: amended, `oauth` on Farik's own connector. ADR 0035: amended, no `resource` and no Google host on the Farik-connector route, and "ships in Farik" becomes "ships in the binary, set at build time". `docs/design/role-kits.md` (the Signing-in row for `google-ads`, route 2). Project plan row 08e, and phase 11's launch dependencies (Decisions' last item).
 
-- [ ] `docs(spec): record signing in with Google for Google Ads`
+- [x] `docs(spec): record signing in with Google for Google Ads`
 
 ## Verification
 
@@ -240,3 +240,5 @@ FARIK_GOOGLE_CLIENT_SECRET=<the secret> cargo test -p farik-runtime --lib regist
 ```
 
 The founder's actions (Decisions) are not done: the Google Cloud project, the consent screen, the client of type "Desktop app" and its id, the build-time secret and the Explorer application. The Google Ads API access level granted is to be recorded here.
+
+Task 7: SPEC revision 0.59 (the latest was 0.58). 6.7: the first paragraph says Farik's own connector may sign in, names the exception to `oauth_on_stdio` and `farik_connector_client`, and no longer says a client secret is never taken (Farik takes none from a team file or a user, and sends the one its own Google app's build carries); the 0.58 paragraph names the table's new fields; a new paragraph records the loopback sign-in, the scopes check, `iss`, the exchange's three refusals, the grant, the refresh with the table, Testing's seven days, Remove, the attempt's binding to the whole transport and what the launch route, the session setup and the command line do. 8.6: the 0.58 paragraph says GitHub's needs no secret and Google's is the exception, and a new paragraph says the secret is not confidential, is set at build time, is in no file and is printed nowhere, that the grant never leaves the daemon, and that there is no revocation. `rpc.schema.json`'s `connectorServer` description names Farik's own connector. ADR 0033 and ADR 0035 gain "Amendment of 2026-10-06" sections and header lines, and ADR 0035's two sentences ("ships in Farik", `resource` is sent) are corrected in place with the date. `docs/design/role-kits.md` has a Signing-in row for Google Ads (route 2). The project plan's row 08e says what was built, and phase 11's Decisions carry the launch dependencies. Nothing here adds an event, a command or an RPC method.

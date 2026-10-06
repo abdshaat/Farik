@@ -2,6 +2,7 @@
 
 Date: 2026-10-02
 Status: accepted
+Amended 2026-10-06 by phase 7 step 08e: a `stdio` entry that is Farik's own connector may carry `oauth`. See "Amendment of 2026-10-06".
 
 ## Context
 
@@ -26,3 +27,12 @@ After phase 7 step 01 an http connector takes pasted keys only. Most services th
 - Any local process can bind a port and receive a code; PKCE makes it useless without the verifier, which stays in the attempt's memory.
 - `reqwest` and `oauth2` come in through `rmcp`'s `auth` feature; `reqwest` is a direct dependency of `farik-runtime` at the version `rmcp` locks.
 - Services with neither registration nor a client id (GitHub, Slack, Google) sign in only with a `client_id` a kit or the user supplies (ADR 0035).
+
+## Amendment of 2026-10-06
+
+Made by phase 7 step 08e (ADR 0042 pulls Google's sign-in forward for Farik's own Google Ads connection).
+
+**`oauth` may be on Farik's own connector.** The text above says an `http` server may sign in and `validate_team` refuses `oauth` on a `stdio` one. One `stdio` entry is exempt: Farik's own connector, the exact pair `farik connector <name>` (ADR 0038), whose `<name>` the kit loader holds to the names Farik ships. Its sign-in is Farik's own app's, from the table of registered apps (ADR 0035, route 2), so the entry takes no `client_id` or `callback_port` of its own (`farik_connector_client`); every other rule holds (no keys beside it, `oauth_with_keys`), and `spec_sha256` holds `oauth` for a `stdio` entry only when present, so every hash kept stands. The connector never receives the sign-in: the grant stays in the daemon and `farik connect`'s own process, and the launch route answers the connector's command with an empty environment.
+
+**The loopback flow is Farik's own requests for this route.** "One function over `rmcp`'s `auth` feature" holds for a server at an address. For Farik's own connector there is no server whose metadata to discover, so Farik builds the authorization address, checks `state` and `iss`, and makes the exchange and the refresh itself, with `oauth2`'s PKCE and `state` generators, over the same https-or-loopback client and the same listener. Rejected: an `http` entry at a Google host, which would hand the access token to a server process.
+
