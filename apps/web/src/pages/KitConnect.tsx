@@ -4,18 +4,38 @@ import { useConnection } from "../app/connection.tsx";
 import { refusalsOf } from "../app/refusals.ts";
 import { t } from "../strings/t.ts";
 import { AllowanceFields, listed, numberOf, offersOf } from "./allowances.tsx";
-import { hostOf, type Tag } from "./ConnectorAdd.tsx";
+import { CodeCard, hostOf, SigningIn, type Tag } from "./ConnectorAdd.tsx";
 import styles from "./pages.module.css";
 import type { KitService } from "./Team.tsx";
 
 /** How often the page asks whether the user has said yes. */
 const POLL_MS = 2000;
+/** One of Farik's own apps signing the user in by a code (phase 7 step 03b): its name and the code to type. */
+type AppCode = { provider: string; userCode: string };
 /** How signing in to the service stands. */
 type SignIn =
 	| { kind: "asking" }
-	| { kind: "offered"; attempt: string; address: string; issuer: string }
-	| { kind: "waiting"; attempt: string; address: string; issuer: string }
-	| { kind: "signed"; attempt: string; address: string; issuer: string }
+	| {
+			kind: "offered";
+			attempt: string;
+			address: string;
+			issuer: string;
+			app?: AppCode;
+	  }
+	| {
+			kind: "waiting";
+			attempt: string;
+			address: string;
+			issuer: string;
+			app?: AppCode;
+	  }
+	| {
+			kind: "signed";
+			attempt: string;
+			address: string;
+			issuer: string;
+			app?: AppCode;
+	  }
 	| { kind: "failed"; code: string };
 
 /** The code a daemon sentence leads with, as `code: words`. */
@@ -137,13 +157,25 @@ export function KitConnect({
 				const answer = (await client.call("connector.sign_in", {
 					agent,
 					server,
-				})) as { attempt: string; authorizeUrl: string; issuer: string };
+				})) as {
+					attempt: string;
+					authorizeUrl: string;
+					issuer: string;
+					provider?: string;
+					userCode?: string;
+				};
 				if (live)
 					setSign({
 						kind: "offered",
 						attempt: answer.attempt,
 						address: answer.authorizeUrl,
 						issuer: answer.issuer,
+						...(answer.userCode && {
+							app: {
+								provider: answer.provider ?? service.title,
+								userCode: answer.userCode,
+							},
+						}),
 					});
 			} catch (e) {
 				if (live) {
@@ -297,22 +329,35 @@ export function KitConnect({
 					{signsIn ? (
 						<>
 							{sign.kind === "offered" && (
-								<span>
-									<Button
-										kind="primary"
-										onClick={() => {
-											window.open(sign.address, "_blank", "noopener");
-											setSign({ ...sign, kind: "waiting" });
-										}}
-									>
-										{t("kitSignIn", fill)}
-									</Button>
-								</span>
+								<SigningIn app={Boolean(sign.app)}>
+									<span>
+										<Button
+											kind="primary"
+											onClick={() => {
+												// A code is typed on a page the user opens from the next board.
+												if (!sign.app)
+													window.open(sign.address, "_blank", "noopener");
+												setSign({ ...sign, kind: "waiting" });
+											}}
+										>
+											{t("kitSignIn", fill)}
+										</Button>
+									</span>
+									<p className={styles.muted}>
+										{sign.app
+											? t("addSignInCodeNote", { provider: sign.app.provider })
+											: t("kitSignInNote", fill)}
+									</p>
+								</SigningIn>
 							)}
-							{sign.kind === "offered" && (
-								<p className={styles.muted}>{t("kitSignInNote", fill)}</p>
+							{sign.kind === "waiting" && sign.app && (
+								<CodeCard
+									provider={sign.app.provider}
+									userCode={sign.app.userCode}
+									address={sign.address}
+								/>
 							)}
-							{sign.kind === "waiting" && (
+							{sign.kind === "waiting" && !sign.app && (
 								<>
 									<p role="status">{t("kitWaiting", fill)}</p>
 									<span>

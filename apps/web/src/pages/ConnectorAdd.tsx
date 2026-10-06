@@ -45,7 +45,13 @@ export function hostOf(url: string | undefined): string {
 }
 
 /** The card the boards draw around one of Farik's own apps signing the user in; no card for a service that signs in by itself. */
-function SigningIn({ app, children }: { app: boolean; children: ReactNode }) {
+export function SigningIn({
+	app,
+	children,
+}: {
+	app: boolean;
+	children: ReactNode;
+}) {
 	if (!app) return children;
 	return (
 		<section aria-label={t("addSigningIn")} className={styles.card}>
@@ -62,6 +68,44 @@ export function pageOf(address: string): string {
 	} catch {
 		return address;
 	}
+}
+
+/** Copies the code the user types, where the browser lets a page write to the clipboard. */
+function copy(code: string) {
+	void navigator.clipboard?.writeText(code).catch(() => {});
+}
+
+/**
+ * The board that shows the code one of Farik's own apps signs the user in with (phase 7 step 03b),
+ * and where to type it. Neither button runs until pressed: the page opens in the click itself, so
+ * a pop-up blocker lets it through.
+ */
+export function CodeCard({
+	provider,
+	userCode,
+	address,
+}: {
+	provider: string;
+	userCode: string;
+	address: string;
+}) {
+	return (
+		<SigningIn app>
+			<p>{t("addCodeLead", { provider })}</p>
+			<p className={styles.userCode}>{userCode}</p>
+			<p>{t("addCodeWarning")}</p>
+			<div className={styles.codeActions}>
+				<Button onClick={() => copy(userCode)}>{t("addCodeCopy")}</Button>
+				<Button
+					kind="primary"
+					onClick={() => window.open(address, "_blank", "noopener")}
+				>
+					{t("addCodeOpen", { page: pageOf(address) })}
+				</Button>
+			</div>
+			<p role="status">{t("addCodeWaiting", { provider })}</p>
+		</SigningIn>
+	);
 }
 
 /** The app a sign-in's answer names, when it names one. */
@@ -527,10 +571,6 @@ export function ConnectorAdd({
 	const issuerHost = "issuer" in sign ? hostOf(sign.issuer) : "";
 	/** Who signs the user in: one of Farik's own apps by name, else the issuer's host. */
 	const signer = "app" in sign && sign.app ? sign.app.provider : issuerHost;
-	/** Copies the code the user types, where the browser lets a page write to the clipboard. */
-	const copy = (code: string) => {
-		void navigator.clipboard?.writeText(code).catch(() => {});
-	};
 	const title =
 		again || step > 0 ? t("addTitleNamed", fill) : t("addTitle", { name });
 	const usable = tools.filter((x) => x.usable);
@@ -653,25 +693,11 @@ export function ConnectorAdd({
 							{!secretInUrl &&
 								sign.kind === "waiting" &&
 								sign.app?.userCode && (
-									<SigningIn app>
-										<p>{t("addCodeLead", { provider: sign.app.provider })}</p>
-										<p className={styles.userCode}>{sign.app.userCode}</p>
-										<p>{t("addCodeWarning")}</p>
-										<div className={styles.codeActions}>
-											<Button onClick={() => copy(sign.app?.userCode ?? "")}>
-												{t("addCodeCopy")}
-											</Button>
-											<Button
-												kind="primary"
-												onClick={() => openPage(sign.address)}
-											>
-												{t("addCodeOpen", { page: pageOf(sign.address) })}
-											</Button>
-										</div>
-										<p role="status">
-											{t("addCodeWaiting", { provider: sign.app.provider })}
-										</p>
-									</SigningIn>
+									<CodeCard
+										provider={sign.app.provider}
+										userCode={sign.app.userCode}
+										address={sign.address}
+									/>
 								)}
 							{!secretInUrl &&
 								sign.kind === "waiting" &&

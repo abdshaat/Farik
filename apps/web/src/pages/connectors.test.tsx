@@ -2068,6 +2068,68 @@ describe("signing in with one of Farik's own apps", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("connector_add_from_a_kit_shows_the_code_when_the_service_signs_in_by_one", async () => {
+		const open = vi.spyOn(window, "open").mockReturnValue(null);
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", {
+			value: { writeText },
+			configurable: true,
+		});
+		const service = { ...KIT_LINEAR, name: "github", title: "GitHub" };
+		const { s } = await openedWithKit([service], [], []);
+		fireEvent.click(
+			within(kitRow("GitHub")).getByRole("button", { name: "Connect GitHub" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Connect GitHub to Theo",
+		});
+		const asked = await sent(s, "connector.sign_in");
+		await s.reply(asked, GITHUB_OFFER);
+		const button = await within(dialog).findByRole("button", {
+			name: "Sign in with GitHub",
+		});
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		fireEvent.click(button);
+		// The code is typed on a page the next board opens, so the button opens nothing.
+		expect(open).not.toHaveBeenCalled();
+		expect(within(dialog).getByText("Enter this code on GitHub:")).toBeTruthy();
+		expect(within(dialog).getByText("WDJB-MJHT")).toBeTruthy();
+		expect(within(dialog).getByText(en.addCodeWarning)).toBeTruthy();
+		expect(
+			within(dialog).getByRole("button", { name: "Copy the code" }),
+		).toBeTruthy();
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Copy the code" }),
+		);
+		expect(writeText).toHaveBeenCalledWith("WDJB-MJHT");
+		expect(open).not.toHaveBeenCalled();
+		fireEvent.click(
+			within(dialog).getByRole("button", {
+				name: "Open github.com/login/device",
+			}),
+		);
+		expect(open).toHaveBeenCalledTimes(1);
+		expect(open).toHaveBeenCalledWith(
+			"https://github.com/login/device",
+			"_blank",
+			"noopener",
+		);
+		// Saying yes on GitHub connects, as it does for any kit service that signs in.
+		await act(() => vi.advanceTimersByTimeAsync(2100));
+		const status = s.calls("connector.sign_in_status")[0] as NonNullable<
+			ReturnType<FakeSocket["calls"]>[number]
+		>;
+		await s.reply(status, { state: "signed_in" });
+		vi.useRealTimers();
+		const connect = await sent(s, "connector.connect");
+		expect(connect.params).toEqual({
+			agent: "theo",
+			server: { name: "github", source: "kit" },
+			attempt: ATTEMPT,
+			tags: {},
+		});
+	});
+
 	it("connector_add_says_why_a_github_sign_in_failed", async () => {
 		const { s, dialog, asked } = await askedToSignIn(GITHUB_ADDRESS);
 		await s.reply(asked, GITHUB_OFFER);
