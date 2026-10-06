@@ -39,7 +39,7 @@ dates. If no ad account is connected, propose none.
 
 ## 6. Propose it and end your turn
 
-Propose the plan with the tool Farik gives you for it: a title, a summary, the full text, its
+Propose the plan with `farik_propose_marketing_plan`: a title, a summary, the full text, its
 dates (at most 92 days), the currency, the budget, the campaigns, the post slots and the measures.
 Farik checks the numbers and the dates and answers every fault at once, so fix them all. When it
 accepts the plan, end your turn: the owner's decision starts your next session. Do not ask for

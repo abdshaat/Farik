@@ -440,7 +440,7 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                  (SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_records \
                                   WHERE cost_records.task_id = task_projections.task_id), \
                                  assignee_id, reviewer_id, iteration, awaiting_integration, \
-                                 (open_questions > 0 OR open_approvals > 0), \
+                                 (open_questions > 0 OR open_approvals > 0 OR open_plans > 0), \
                                  awaiting_approval, verifications, \
                                  rejections, interventions, sprint, \
                                  left_for_the_backlog \
@@ -643,7 +643,8 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::EscalationRaised(_)
         | EventBody::ToolApprovalRequested(_)
         | EventBody::ToolApprovalGranted(_)
-        | EventBody::ToolApprovalRefused(_) => apply_waiting(transaction, &id, &event.body, seq),
+        | EventBody::ToolApprovalRefused(_)
+        | EventBody::MarketingPlanProposed(_) => apply_waiting(transaction, &id, &event.body, seq),
         EventBody::DriftDetected(_)
         | EventBody::PullRequestOpened(_)
         | EventBody::ProjectScanned(_)
@@ -691,7 +692,10 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::SkillAdded(_)
         | EventBody::SkillChanged(_)
         | EventBody::SkillRemoved(_)
-        | EventBody::SkillConfirmed(_) => Ok(()),
+        | EventBody::SkillConfirmed(_)
+        | EventBody::MarketingPlanApproved(_)
+        | EventBody::MarketingPlanReturned(_)
+        | EventBody::MarketingPlanEnded(_) => Ok(()),
     }
 }
 
@@ -741,7 +745,8 @@ fn apply_move(
 }
 
 /// The columns that say what the board waits on the human for: an open question (5.7), an open
-/// approval of a connector's call (ADR 0031), and an approval of a contract (5.16 item 2).
+/// approval of a connector's call (ADR 0031), an open marketing plan (ADR 0042), and an approval
+/// of a contract (5.16 item 2).
 fn apply_waiting(
     transaction: &Transaction<'_>,
     id: &str,
@@ -772,6 +777,12 @@ fn apply_waiting(
             transaction,
             "UPDATE task_projections SET open_approvals = max(0, open_approvals - 1),
                  updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::MarketingPlanProposed(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_plans = open_plans + 1, updated_seq = ?2
              WHERE task_id = ?1",
             (id, seq),
         ),
@@ -1360,7 +1371,7 @@ mod tests {
         );
         assert_eq!(
             migrations::known_versions(),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
         );
     }
 
@@ -1707,6 +1718,27 @@ mod tests {
         );
         record(&log, &projections, &answer(&second));
         assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+    }
+
+    #[test]
+    fn waits_on_the_human_while_a_marketing_plan_is_proposed() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+        record(
+            &log,
+            &projections,
+            &about(EventKind::MarketingPlanProposed, "FRK-1"),
+        );
+        assert!(
+            row_of(&projections, "FRK-1").waiting_on_human,
+            "the proposing task waits on the owner"
+        );
+        assert!(
+            !row_of(&projections, "FRK-2").waiting_on_human,
+            "no other task does"
+        );
     }
 
     #[test]

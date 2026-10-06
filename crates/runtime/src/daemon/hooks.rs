@@ -23,7 +23,7 @@ use super::{DaemonError, DaemonState, SessionRegistration};
 use crate::allowances::allowance_period;
 use crate::tools::design::design_plan_gate;
 use crate::tools::refusal::Refusal;
-use crate::tools::{ToolDeps, ToolError, tool_descriptors};
+use crate::tools::{ToolDeps, ToolError, paths_of, tool_descriptors};
 
 /// What Claude Code sends a hook on its standard input, the fields Farik reads.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -307,7 +307,8 @@ fn judge_call(
     team: &Team,
 ) -> Result<(), String> {
     let (tier, paths) = match request.tool_name.strip_prefix(FARIK_PREFIX) {
-        // A Farik tool is asked with no paths here: `call_tool` asks again with its real ones.
+        // A Farik tool is asked with the paths its input names, as `call_tool` asks again: a
+        // `write_workspace` call with none is refused.
         Some(name) => match tool_descriptors().iter().find(|tool| tool.name == name) {
             Some(_) if !registration.farik_tools.iter().any(|given| given == name) => {
                 return Err(Refusal::ToolNotInSession {
@@ -315,7 +316,7 @@ fn judge_call(
                 }
                 .reason());
             }
-            Some(tool) => (tool.tier, Vec::new()),
+            Some(tool) => (tool.tier, paths_of(name, &request.tool_input)),
             None => return Err(not_allowed(&request.tool_name)),
         },
         None => match builtin_tool_tier(&request.tool_name) {
@@ -1159,6 +1160,40 @@ mod tests {
             &daemon.state,
         );
         assert!(read.allow, "{read:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn judges_a_farik_tool_that_writes_by_the_path_it_will_write() {
+        // A write_workspace tool of Farik's names the file it writes (here, a plan in the plans
+        // folder), so the hook checks that path against the contract as `call_tool` does, instead
+        // of finding the call names none.
+        let daemon = TestDaemon::new("hook-farik-write", |_| {});
+        let outside = decide_pre_tool_use(
+            &daemon.dev_call("mcp__farik__farik_propose_marketing_plan", &json!({})),
+            &daemon.state,
+        );
+        denied_for(&outside, "path_outside_allowed");
+        daemon
+            .project
+            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+                wire["allowed_paths"] = json!(["docs/marketing/**"]);
+            });
+        daemon.register(
+            "session-docs",
+            "dev-a",
+            Some("FRK-2"),
+            DEFAULT_SESSION_LIMITS,
+        );
+        let inside = decide_pre_tool_use(
+            &daemon.call(
+                "session-docs",
+                "mcp__farik__farik_propose_marketing_plan",
+                &json!({}),
+            ),
+            &daemon.state,
+        );
+        assert!(inside.allow, "{inside:?}");
     }
 
     #[test]

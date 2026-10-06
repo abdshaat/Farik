@@ -796,6 +796,10 @@ pub(super) const CHECK_PAGE_TOOL: &str = "farik_check_page";
 /// The one tool that writes in a chat, offered in a chat session alone.
 const CHAT_REPLY_TOOL: &str = "farik_chat_reply";
 
+/// The tool that proposes a marketing plan, offered in the Marketing Specialist's implement
+/// session about a task alone (ADR 0042).
+const PROPOSE_MARKETING_PLAN_TOOL: &str = "farik_propose_marketing_plan";
+
 /// The Farik tools a read-only session is not offered: the command runner, which has no
 /// executor there, and the git writes, which only the assignee may make.
 const NOT_FOR_READ_ONLY: [&str; 3] = ["farik_exec", "farik_git_commit", "farik_git_push"];
@@ -819,6 +823,13 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
         .filter(|tool| checks_pages || tool.name != CHECK_PAGE_TOOL)
         // A chat's reply is its session's alone (ADR 0026).
         .filter(|tool| tool.name != CHAT_REPLY_TOOL || ask.purpose == SessionPurpose::Chat)
+        // A marketing plan is proposed by the Marketing Specialist, working on a task (ADR 0042).
+        .filter(|tool| {
+            tool.name != PROPOSE_MARKETING_PLAN_TOOL
+                || (ask.agent.role == RoleWire::MarketingSpecialist
+                    && ask.purpose == SessionPurpose::Implement
+                    && ask.contract.is_some())
+        })
         // The design review's answer is its session's alone, which lists it.
         .filter(|tool| tool.name != RECORD_DESIGN_REVIEW_TOOL || ask.tools.is_some())
         .filter(|tool| ask.only_tool.is_none_or(|only| tool.name == only))
@@ -1859,6 +1870,54 @@ mod tests {
             in_reply_to: None,
             thread: None,
             initial_prompt: String::new(),
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_the_plan_only_to_the_marketing_specialist_implementing_a_task() {
+        let harness = Harness::new("session-plan-offer", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(farik_core::team::fixtures::an_agent_wire(
+                    "kai",
+                    "marketing_specialist",
+                ));
+        });
+        harness.in_progress("FRK-1", "kai", "pm");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("an id"))
+            .expect("the contract");
+        let offered = |who: &str, purpose: SessionPurpose, about| {
+            let mut ask = asked(deps, agent(&team, who), purpose, about);
+            ask.read_only = purpose == SessionPurpose::Verify;
+            session_spec(deps, &team, &ask)
+                .expect("the spec")
+                .farik_tools
+                .iter()
+                .any(|tool| tool == "farik_propose_marketing_plan")
+        };
+
+        assert!(offered("kai", SessionPurpose::Implement, Some(&contract)));
+        for (who, purpose, about) in [
+            ("kai", SessionPurpose::Verify, Some(&contract)),
+            ("kai", SessionPurpose::Chat, None),
+            ("kai", SessionPurpose::Conversation, None),
+            ("kai", SessionPurpose::Implement, None),
+            ("dev-a", SessionPurpose::Implement, Some(&contract)),
+            ("pm", SessionPurpose::Implement, Some(&contract)),
+        ] {
+            assert!(
+                !offered(who, purpose, about),
+                "{who} {purpose:?} about {} is offered the plan",
+                about.is_some()
+            );
         }
     }
 

@@ -157,6 +157,49 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::SprintPlanned
         | EventKind::SprintEnded
         | EventKind::RetroAppended => a_sprint_body_wire(kind),
+        EventKind::MarketingPlanProposed
+        | EventKind::MarketingPlanApproved
+        | EventKind::MarketingPlanReturned
+        | EventKind::MarketingPlanEnded => a_marketing_plan_body_wire(kind),
+    }
+}
+
+/// A `marketing_plan.` body: Kai's two-week plan MP-1 with one campaign and one post, or the
+/// owner's decision on it, or its end by the owner.
+fn a_marketing_plan_body_wire(kind: EventKind) -> Value {
+    match kind {
+        EventKind::MarketingPlanProposed => json!({
+            "plan": "MP-1",
+            "title": "Spring launch",
+            "summary": "Two weeks of posts and one small search campaign.",
+            "text": "x".repeat(300),
+            "starts_on": "2026-11-02",
+            "ends_on": "2026-11-15",
+            "currency": "USD",
+            "budget": { "total": "2000.00", "google_ads": "1000" },
+            "campaigns": [{
+                "key": "search-launch",
+                "channel": "google_ads",
+                "name": "Launch search",
+                "goal": "Bring people to the shop",
+                "budget": "800.50",
+                "starts_on": "2026-11-03",
+                "ends_on": "2026-11-14"
+            }],
+            "posts": [{
+                "key": "post-1",
+                "channel": "instagram",
+                "on": "2026-11-04",
+                "topic": "Opening day"
+            }],
+            "measures": ["New customers who say they found us online"],
+            "proposed_by": "kai"
+        }),
+        EventKind::MarketingPlanApproved => json!({ "plan": "MP-1", "note": "" }),
+        EventKind::MarketingPlanReturned => {
+            json!({ "plan": "MP-1", "reason": "Start with half the budget." })
+        }
+        _ => json!({ "plan": "MP-1", "why": "by_owner" }),
     }
 }
 

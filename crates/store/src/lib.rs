@@ -13,6 +13,8 @@ pub mod event_log;
 pub mod files;
 /// The repository Farik works in.
 pub mod git;
+/// The marketing plans the log holds.
+pub mod marketing;
 /// The harness metrics, from the projections.
 pub mod metrics;
 /// The database's shape, as SQL applied in order.

@@ -23,18 +23,22 @@ pub use crate::generated::event::{
     DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody, DriftDetectedBody,
     DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
     EscalationResolvedBody, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer,
-    MemoryWrittenBody, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody,
-    PreviewPreparedBody, PreviewStartedBody, ProductDocWrittenBody, ProjectScannedBody,
-    ProposedRequest, PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody,
-    QuestionChoice, ReasonBody, RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody,
-    ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
-    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SkillPinnedBody,
-    SkillRemovedBody, SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody,
-    SprintStartedBody, TaskCreatedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
-    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy,
-    TeamPausedBodyReason, TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody,
-    ToolApprovalRequestedBody, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
-    TransitionRefusedBody, TransitionRefusedBodyRefusal, Violation,
+    MarketingPlanApprovedBody, MarketingPlanBudget, MarketingPlanCampaign,
+    MarketingPlanCampaignChannel, MarketingPlanEndedBody, MarketingPlanEndedBodyWhy,
+    MarketingPlanPost, MarketingPlanPostChannel, MarketingPlanProposedBody,
+    MarketingPlanReturnedBody, MemoryWrittenBody, MessagePostedBody, NoteWrittenBody,
+    NoteWrittenBodyKind, PageCheckedBody, PreviewPreparedBody, PreviewStartedBody,
+    ProductDocWrittenBody, ProjectScannedBody, ProposedRequest, PullRequestOpenedBody,
+    QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody, RequestTriagedBody,
+    RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody, SessionEndedBody,
+    SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
+    SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody, SprintEndedBody,
+    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
+    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
+    TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody, ToolApprovalRequestedBody,
+    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
+    TransitionRefusedBodyRefusal, Violation,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
@@ -161,6 +165,10 @@ fn body_def_name(kind: EventKind) -> &'static str {
             "skillPinnedBody"
         }
         EventKind::SkillRemoved => "skillRemovedBody",
+        EventKind::MarketingPlanProposed => "marketingPlanProposedBody",
+        EventKind::MarketingPlanApproved => "marketingPlanApprovedBody",
+        EventKind::MarketingPlanReturned => "marketingPlanReturnedBody",
+        EventKind::MarketingPlanEnded => "marketingPlanEndedBody",
     }
 }
 
@@ -201,6 +209,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::ToolApprovalRequested
             | EventKind::ToolApprovalGranted
             | EventKind::ToolApprovalRefused
+            | EventKind::MarketingPlanProposed
+            | EventKind::MarketingPlanApproved
+            | EventKind::MarketingPlanReturned
     )
 }
 
@@ -218,7 +229,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// names the Designer and the session, and `preview.prepared`, `preview.started` and
 /// `preview.stopped`, which record what Farik itself did with the task's preview. Nor the two
 /// `connector.` kinds: only the human connects a server, and `agent` names whose it is, not who
-/// acted.
+/// acted. `marketing_plan.proposed` names the Marketing Specialist in `proposed_by`; the other
+/// three `marketing_plan.` kinds name no one in the body: the owner decided or ended a plan, or
+/// Farik ended one by its dates, and their envelope names no agent and no session.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -247,6 +260,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::MemoryWritten(body) => Some(("written_by", &mut body.written_by)),
         EventBody::DecisionWritten(body) => Some(("written_by", &mut body.written_by)),
         EventBody::ChatMessagePosted(body) => Some(("author", &mut body.author)),
+        EventBody::MarketingPlanProposed(body) => Some(("proposed_by", &mut body.proposed_by)),
         EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::CostRecorded(_)
@@ -281,13 +295,16 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::SkillAdded(_)
         | EventBody::SkillChanged(_)
         | EventBody::SkillRemoved(_)
-        | EventBody::SkillConfirmed(_) => None,
+        | EventBody::SkillConfirmed(_)
+        | EventBody::MarketingPlanApproved(_)
+        | EventBody::MarketingPlanReturned(_)
+        | EventBody::MarketingPlanEnded(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 61] = [
+pub const EVERY_KIND: [EventKind; 65] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -349,6 +366,10 @@ pub const EVERY_KIND: [EventKind; 61] = [
     EventKind::SkillChanged,
     EventKind::SkillRemoved,
     EventKind::SkillConfirmed,
+    EventKind::MarketingPlanProposed,
+    EventKind::MarketingPlanApproved,
+    EventKind::MarketingPlanReturned,
+    EventKind::MarketingPlanEnded,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -571,6 +592,18 @@ pub enum EventBody {
     /// The human confirmed a skill's folder on this computer.
     #[serde(rename = "skill.confirmed")]
     SkillConfirmed(SkillPinnedBody),
+    /// The Marketing Specialist proposed a marketing plan.
+    #[serde(rename = "marketing_plan.proposed")]
+    MarketingPlanProposed(MarketingPlanProposedBody),
+    /// The owner approved a marketing plan.
+    #[serde(rename = "marketing_plan.approved")]
+    MarketingPlanApproved(MarketingPlanApprovedBody),
+    /// The owner sent a marketing plan back.
+    #[serde(rename = "marketing_plan.returned")]
+    MarketingPlanReturned(MarketingPlanReturnedBody),
+    /// An approved marketing plan ended.
+    #[serde(rename = "marketing_plan.ended")]
+    MarketingPlanEnded(MarketingPlanEndedBody),
 }
 
 impl EventBody {
@@ -639,6 +672,10 @@ impl EventBody {
             Self::SkillChanged(_) => EventKind::SkillChanged,
             Self::SkillRemoved(_) => EventKind::SkillRemoved,
             Self::SkillConfirmed(_) => EventKind::SkillConfirmed,
+            Self::MarketingPlanProposed(_) => EventKind::MarketingPlanProposed,
+            Self::MarketingPlanApproved(_) => EventKind::MarketingPlanApproved,
+            Self::MarketingPlanReturned(_) => EventKind::MarketingPlanReturned,
+            Self::MarketingPlanEnded(_) => EventKind::MarketingPlanEnded,
         }
     }
 }
@@ -1525,8 +1562,35 @@ mod tests {
     }
 
     #[test]
+    fn reads_an_approved_plan_only_with_its_note() {
+        // `{ "plan": "MP-1" }` alone is also a valid design plan, and the schema's choice of bodies
+        // must match exactly one, so the owner's approval always carries its note, empty when they
+        // added nothing.
+        let mut bare = an_event_wire(EventKind::MarketingPlanApproved);
+        bare["body"] = json!({ "plan": "MP-1" });
+        let errors = refusal(&bare);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body");
+        assert!(
+            errors[0]
+                .message
+                .starts_with("a marketing_plan.approved event does not carry this body"),
+            "{}",
+            errors[0].message
+        );
+        let mut design = an_event_wire(EventKind::DesignPlanProposed);
+        design["body"] = json!({ "plan": "MP-1" });
+        event_from_value(&design).expect("the same body is a design plan's");
+
+        let mut noted = an_event_wire(EventKind::MarketingPlanApproved);
+        noted["body"]["note"] = json!("Start small");
+        let event = event_from_value(&noted).expect("an approval with a note");
+        assert_eq!(event_to_value(&event), noted);
+    }
+
+    #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 61);
+        assert_eq!(EVERY_KIND.len(), 65);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

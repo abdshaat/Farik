@@ -66,6 +66,49 @@ pub enum PostChannel {
     Mastodon,
 }
 
+impl PostChannel {
+    /// The eleven, in the order the plan lists them.
+    pub const ALL: [Self; 11] = [
+        Self::Instagram,
+        Self::X,
+        Self::Facebook,
+        Self::Linkedin,
+        Self::Threads,
+        Self::Bluesky,
+        Self::Tiktok,
+        Self::Pinterest,
+        Self::Youtube,
+        Self::GoogleBusiness,
+        Self::Mastodon,
+    ];
+
+    /// The wire's word for it.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Instagram => "instagram",
+            Self::X => "x",
+            Self::Facebook => "facebook",
+            Self::Linkedin => "linkedin",
+            Self::Threads => "threads",
+            Self::Bluesky => "bluesky",
+            Self::Tiktok => "tiktok",
+            Self::Pinterest => "pinterest",
+            Self::Youtube => "youtube",
+            Self::GoogleBusiness => "google_business",
+            Self::Mastodon => "mastodon",
+        }
+    }
+
+    /// The channel a wire word names, when it names one.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|channel| channel.as_str() == text)
+    }
+}
+
 /// One paid campaign of a plan, on Google Ads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanCampaign {
@@ -898,6 +941,43 @@ mod tests {
                 ("marketing_plan_post", "posts[0].topic".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn names_the_eleven_channels_as_the_wire_does() {
+        let words: Vec<&str> = PostChannel::ALL
+            .iter()
+            .map(|channel| channel.as_str())
+            .collect();
+        assert_eq!(
+            words,
+            [
+                "instagram",
+                "x",
+                "facebook",
+                "linkedin",
+                "threads",
+                "bluesky",
+                "tiktok",
+                "pinterest",
+                "youtube",
+                "google_business",
+                "mastodon",
+            ]
+        );
+        for channel in PostChannel::ALL {
+            assert_eq!(PostChannel::parse(channel.as_str()), Some(channel));
+        }
+        for word in [
+            "",
+            "Instagram",
+            "twitter",
+            "google_ads",
+            "google-business",
+            " x",
+        ] {
+            assert_eq!(PostChannel::parse(word), None, "{word:?}");
+        }
     }
 
     #[test]

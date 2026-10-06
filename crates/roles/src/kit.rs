@@ -1168,6 +1168,25 @@ mod tests {
         }
     }
 
+    /// `writing-the-marketing-plan` names the tool that proposes the plan, from the commit that
+    /// gives the Marketing Specialist the tool; `kit_skills_name_only_tools_farik_lists` (in the
+    /// runtime) holds the name to a tool Farik lists.
+    #[test]
+    fn the_plan_skill_names_the_tool_that_proposes_it() {
+        let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
+        let skill = kit
+            .skills
+            .iter()
+            .find(|skill| skill.name == "writing-the-marketing-plan")
+            .expect("the plan skill");
+        let text = &skill.session_files["SKILL.md"];
+        assert!(text.contains("`farik_propose_marketing_plan`"), "{text}");
+        assert!(
+            !text.contains("the tool Farik gives you"),
+            "the placeholder is gone"
+        );
+    }
+
     /// A role's service's server, its copy and its tags, by name.
     fn service(role: Role, name: &str) -> (CustomServer, SetupCopy) {
         let kit = load_kit(role).expect("a shipped kit");

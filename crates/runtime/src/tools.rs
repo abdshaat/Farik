@@ -35,6 +35,7 @@ mod exec;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod git;
+mod marketing;
 mod memory;
 mod reading;
 pub(crate) mod refusal;
@@ -165,7 +166,7 @@ fn tool<Input: JsonSchema>(
 }
 
 static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
-    use PermissionTier::{Execute, GitLocal, GitRemote, Read};
+    use PermissionTier::{Execute, GitLocal, GitRemote, Read, WriteWorkspace};
     vec![
         tool::<reading::ReadTaskInput>(
             "farik_read_task",
@@ -322,6 +323,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             GitRemote,
             "Push the task branch to origin.",
         ),
+        tool::<marketing::ProposeMarketingPlanInput>(
+            "farik_propose_marketing_plan",
+            WriteWorkspace,
+            "End your session with a marketing plan for the owner to approve: its dates, budget by channel and campaign, post slots and measures. Farik checks it, writes its text to docs/marketing/plans/ and the owner decides; end your turn after proposing.",
+        ),
     ]
 });
 
@@ -417,6 +423,7 @@ pub async fn call_tool(
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
         "farik_git_commit" => git::commit(&call, &parse(input)?),
         "farik_git_push" => nothing_in(input).and_then(|()| git::push(&call)),
+        "farik_propose_marketing_plan" => marketing::propose_plan(&call, &parse(input)?),
         _ => Err(ToolError::Failed {
             detail: format!("{name} is listed and has no handler"),
         }),
@@ -424,10 +431,12 @@ pub async fn call_tool(
 }
 
 /// The paths a call touches, for the permission check: `.farik/product/<path>` for a product
-/// document and the named paths of a commit; nothing for every other tool. Read leniently, since
-/// the input is parsed strictly afterwards.
-fn paths_of(name: &str, input: &Value) -> Vec<String> {
+/// document, the named paths of a commit, and the plans folder for a marketing plan (its number
+/// is not taken yet, so the check is of the folder; the tool asks again with the file's own path);
+/// nothing for every other tool. Read leniently, since the input is parsed strictly afterwards.
+pub(crate) fn paths_of(name: &str, input: &Value) -> Vec<String> {
     match name {
+        "farik_propose_marketing_plan" => vec![marketing::plan_file(0)],
         "farik_write_product_doc" => input
             .get("path")
             .and_then(Value::as_str)
@@ -630,6 +639,7 @@ mod tests {
             "farik_git_diff",
             "farik_git_commit",
             "farik_git_push",
+            "farik_propose_marketing_plan",
         ];
         assert_eq!(names, expected);
         let tier = |name: &str| {
@@ -643,6 +653,10 @@ mod tests {
         assert_eq!(tier("farik_git_diff"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_commit"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_push"), Some(PermissionTier::GitRemote));
+        assert_eq!(
+            tier("farik_propose_marketing_plan"),
+            Some(PermissionTier::WriteWorkspace)
+        );
         for tool in &tools[..26] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }

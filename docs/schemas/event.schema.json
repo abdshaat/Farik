@@ -117,7 +117,11 @@
         "skill.added",
         "skill.changed",
         "skill.removed",
-        "skill.confirmed"
+        "skill.confirmed",
+        "marketing_plan.proposed",
+        "marketing_plan.approved",
+        "marketing_plan.returned",
+        "marketing_plan.ended"
       ]
     },
     "eventBodyWire": {
@@ -178,7 +182,11 @@
         { "$ref": "#/$defs/toolApprovalRequestedBody" },
         { "$ref": "#/$defs/toolApprovalDecidedBody" },
         { "$ref": "#/$defs/skillPinnedBody" },
-        { "$ref": "#/$defs/skillRemovedBody" }
+        { "$ref": "#/$defs/skillRemovedBody" },
+        { "$ref": "#/$defs/marketingPlanProposedBody" },
+        { "$ref": "#/$defs/marketingPlanApprovedBody" },
+        { "$ref": "#/$defs/marketingPlanReturnedBody" },
+        { "$ref": "#/$defs/marketingPlanEndedBody" }
       ]
     },
     "contractSummary": {
@@ -927,6 +935,117 @@
         "level": { "type": "string", "enum": ["team", "agent"] },
         "agent": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "marketingPlanId": {
+      "type": "string",
+      "pattern": "^MP-[0-9]{1,6}$",
+      "description": "A marketing plan's id, MP-<n>: one more than the highest the log and the project's plan files hold."
+    },
+    "marketingPlanAmount": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,2})?$",
+      "description": "An amount of money in the plan's currency as a decimal string, at most two decimals. Compared in hundredths, never as a float."
+    },
+    "marketingPlanBudget": {
+      "title": "Marketing Plan Budget",
+      "description": "What a plan may spend: total in all, and google_ads of it on Google Ads.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "google_ads"],
+      "properties": {
+        "total": { "$ref": "#/$defs/marketingPlanAmount" },
+        "google_ads": { "$ref": "#/$defs/marketingPlanAmount" }
+      }
+    },
+    "marketingPlanCampaign": {
+      "title": "Marketing Plan Campaign",
+      "description": "One paid campaign of a plan: key is unique across the plan's campaigns and posts, and its dates fall inside the plan's.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "channel", "name", "goal", "budget", "starts_on", "ends_on"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 },
+        "channel": { "type": "string", "enum": ["google_ads"] },
+        "name": { "type": "string" },
+        "goal": { "type": "string" },
+        "budget": { "$ref": "#/$defs/marketingPlanAmount" },
+        "starts_on": { "type": "string", "format": "date" },
+        "ends_on": { "type": "string", "format": "date" }
+      }
+    },
+    "marketingPlanPost": {
+      "title": "Marketing Plan Post",
+      "description": "One post slot of a plan: a channel, a day and a topic. key is unique across the plan's campaigns and posts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "channel", "on", "topic"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 },
+        "channel": {
+          "type": "string",
+          "enum": ["instagram", "x", "facebook", "linkedin", "threads", "bluesky", "tiktok", "pinterest", "youtube", "google_business", "mastodon"]
+        },
+        "on": { "type": "string", "format": "date" },
+        "topic": { "type": "string" }
+      }
+    },
+    "marketingPlanProposedBody": {
+      "title": "Marketing Plan Proposed Body",
+      "description": "The Marketing Specialist proposed a marketing plan through farik_propose_marketing_plan (docs/SPEC.md 6.5; ADR 0042): plan is its id, MP-<n>; text is the plan in full, which Farik also wrote to docs/marketing/plans/<plan>.md in the task's worktree; starts_on and ends_on are UTC dates, at most 92 days apart, both counted; budget.google_ads is at most budget.total and the campaigns' budgets add up to at most budget.google_ads; google_ads_account is present exactly when campaigns is not empty; replaces names an approved plan this one supersedes. The envelope names the task, the agent and the session; the task waits on the owner until a marketing_plan.approved or marketing_plan.returned of the plan.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "title", "summary", "text", "starts_on", "ends_on", "currency", "budget", "campaigns", "posts", "measures", "proposed_by"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "text": { "type": "string" },
+        "starts_on": { "type": "string", "format": "date" },
+        "ends_on": { "type": "string", "format": "date" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "budget": { "$ref": "#/$defs/marketingPlanBudget" },
+        "campaigns": { "type": "array", "maxItems": 10, "items": { "$ref": "#/$defs/marketingPlanCampaign" } },
+        "posts": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/marketingPlanPost" } },
+        "measures": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "type": "string" } },
+        "google_ads_account": { "type": "string", "pattern": "^[0-9]{3}-[0-9]{3}-[0-9]{4}$" },
+        "replaces": { "$ref": "#/$defs/marketingPlanId" },
+        "proposed_by": { "type": "string" }
+      }
+    },
+    "marketingPlanApprovedBody": {
+      "title": "Marketing Plan Approved Body",
+      "description": "The owner approved a marketing plan (docs/SPEC.md 6.5; ADR 0042): plan is its id, and note is what the owner added, empty when they added nothing. note is always present, so that this body is never also a valid design_plan.proposed body, whose only property is plan. The envelope names the proposing task and no agent and no session: only the owner decides, under ask and auto alike.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "note"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "note": { "type": "string" }
+      }
+    },
+    "marketingPlanReturnedBody": {
+      "title": "Marketing Plan Returned Body",
+      "description": "The owner sent a marketing plan back (docs/SPEC.md 6.5; ADR 0042): reason is the owner's own words, which the task's next session reads as the owner's, not as untrusted text. The envelope names the proposing task and no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "reason"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "reason": { "type": "string" }
+      }
+    },
+    "marketingPlanEndedBody": {
+      "title": "Marketing Plan Ended Body",
+      "description": "An approved marketing plan ended (docs/SPEC.md 6.5; ADR 0042): why is replaced (a newer approved plan took its place, named by replaced_by), by_owner (the owner ended it, with note when they said why) or expired (its ends_on passed). About no one contract, so the envelope names no task, and no agent and no session: Farik or the owner ended it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "why"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "why": { "type": "string", "enum": ["replaced", "by_owner", "expired"] },
+        "replaced_by": { "$ref": "#/$defs/marketingPlanId" },
+        "note": { "type": "string" }
       }
     },
     "connectorTag": {
