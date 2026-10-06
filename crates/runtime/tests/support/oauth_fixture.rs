@@ -87,6 +87,16 @@ pub struct Flags {
     /// What each tool answers when called, by name; a tool with no answer here answers
     /// `whoami-ok`.
     pub tool_answers: BTreeMap<String, ToolAnswer>,
+    /// How many polls of each device code answer `authorization_pending` before it is approved.
+    pub device_pending: u32,
+    /// Whether a device code's first poll answers `slow_down`, once.
+    pub device_slow_down: bool,
+    /// What every poll answers instead of approval, when set (`access_denied`, `expired_token`).
+    pub device_error: Option<String>,
+    /// The `verification_uri` a device code is answered with, when not the fixture's own.
+    pub device_verification_uri: Option<String>,
+    /// The `interval` a device code is answered with, in seconds; none leaves it out.
+    pub device_interval: Option<u64>,
 }
 
 impl Default for Flags {
@@ -113,6 +123,11 @@ impl Default for Flags {
             no_expiry: false,
             echo_authorization: true,
             tool_answers: BTreeMap::new(),
+            device_pending: 0,
+            device_slow_down: false,
+            device_error: None,
+            device_verification_uri: None,
+            device_interval: Some(1),
         }
     }
 }
@@ -126,6 +141,17 @@ pub struct Recorded {
     pub body: String,
     pub form: BTreeMap<String, String>,
     pub authorization: Option<String>,
+    /// Every header, its name in lower case.
+    pub headers: BTreeMap<String, String>,
+    /// When the server saw it, on the clock the test runs on (paused, when the test paused it).
+    pub at: tokio::time::Instant,
+}
+
+/// A device code the server issued: how many polls are still to answer `authorization_pending`,
+/// and whether `slow_down` was answered yet.
+struct Device {
+    pending_left: u32,
+    slowed: bool,
 }
 
 struct Code {
@@ -142,6 +168,7 @@ struct Shared {
     access: Mutex<HashSet<String>>,
     refresh: Mutex<HashSet<String>>,
     clients: Mutex<HashMap<String, Vec<String>>>,
+    devices: Mutex<HashMap<String, Device>>,
     counter: AtomicU64,
     held: tokio::sync::watch::Sender<HashSet<String>>,
     /// Every `tools/call`: the tool and the arguments it carried, in order.
@@ -300,6 +327,14 @@ async fn front(State(shared): State<Arc<Shared>>, request: Request, next: Next) 
             .get(header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
             .map(ToString::to_string),
+        headers: parts
+            .headers
+            .iter()
+            .filter_map(|(name, value)| {
+                Some((name.as_str().to_string(), value.to_str().ok()?.to_string()))
+            })
+            .collect(),
+        at: tokio::time::Instant::now(),
     };
     shared
         .requests
@@ -471,6 +506,7 @@ async fn route(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Respo
             )
         }
         ("GET", "/authorize") => authorize(shared, flags, request),
+        ("POST", "/device/code") => device_code(shared, flags, request),
         ("POST", "/token") => {
             shared.wait_if_held("token").await;
             token(shared, flags, request)
@@ -533,6 +569,108 @@ fn authorize(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Respons
     (StatusCode::FOUND, [(header::LOCATION, target.to_string())]).into_response()
 }
 
+/// The grant type of a device code's poll (RFC 8628).
+const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
+
+/// An answer as a device-flow service gives it: always status 200, as GitHub does for an error
+/// too, JSON when the request asked for it with `Accept: application/json` and form-encoded when
+/// it did not.
+fn device_answer(request: &Recorded, value: serde_json::Value) -> Response {
+    let asked_for_json = request
+        .headers
+        .get("accept")
+        .is_some_and(|accept| accept.contains("application/json"));
+    if asked_for_json {
+        return json(200, value);
+    }
+    let mut encoded = reqwest::Url::parse("http://x/").expect("a base address");
+    if let Some(fields) = value.as_object() {
+        let mut pairs = encoded.query_pairs_mut();
+        for (name, field) in fields {
+            match field {
+                serde_json::Value::String(text) => pairs.append_pair(name, text),
+                other => pairs.append_pair(name, &other.to_string()),
+            };
+        }
+    }
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/x-www-form-urlencoded")],
+        encoded.query().unwrap_or_default().to_string(),
+    )
+        .into_response()
+}
+
+/// `POST /device/code`: a new device code, `dc-<n>`, to be polled every second.
+fn device_code(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Response {
+    if !request.form.contains_key("client_id") {
+        return device_answer(
+            request,
+            serde_json::json!({ "error": "incorrect_client_credentials" }),
+        );
+    }
+    let code = shared.next("dc");
+    shared.devices.lock().expect("devices").insert(
+        code.clone(),
+        Device {
+            pending_left: flags.device_pending,
+            slowed: !flags.device_slow_down,
+        },
+    );
+    let number = code.trim_start_matches("dc-");
+    let mut answer = serde_json::json!({
+        "device_code": code,
+        "user_code": format!("WDJB-{number:0>4}"),
+        "verification_uri": flags
+            .device_verification_uri
+            .clone()
+            .unwrap_or_else(|| format!("{}/login/device", shared.origin)),
+        "expires_in": 900,
+    });
+    if let Some(interval) = flags.device_interval {
+        answer["interval"] = interval.into();
+    }
+    device_answer(request, answer)
+}
+
+/// A poll of a device code at `/token`: pending, slowed down once, refused, or approved.
+fn device_poll(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Response {
+    let answer = |value| device_answer(request, value);
+    let Some(code) = request.form.get("device_code") else {
+        return answer(serde_json::json!({ "error": "incorrect_device_code" }));
+    };
+    let mut devices = shared.devices.lock().expect("devices");
+    let Some(device) = devices.get_mut(code) else {
+        return answer(serde_json::json!({ "error": "incorrect_device_code" }));
+    };
+    if !device.slowed {
+        device.slowed = true;
+        return answer(serde_json::json!({ "error": "slow_down", "interval": 10 }));
+    }
+    if let Some(error) = &flags.device_error {
+        return answer(serde_json::json!({ "error": error }));
+    }
+    if device.pending_left > 0 {
+        device.pending_left -= 1;
+        return answer(serde_json::json!({ "error": "authorization_pending" }));
+    }
+    devices.remove(code);
+    drop(devices);
+    let (access, refresh) = shared.mint();
+    let mut approved = serde_json::json!({
+        "access_token": access,
+        "token_type": "bearer",
+        // A GitHub App's answer has none; a service that names one is not believed.
+        "scope": "read",
+        "refresh_token": refresh,
+        "refresh_token_expires_in": 15_811_200,
+    });
+    if !flags.no_expiry {
+        approved["expires_in"] = flags.expires_in.into();
+    }
+    answer(approved)
+}
+
 fn token(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Response {
     let form = &request.form;
     let grant = form.get("grant_type").map(String::as_str);
@@ -557,6 +695,7 @@ fn token(shared: &Arc<Shared>, flags: &Flags, request: &Recorded) -> Response {
             }
             shared.mint()
         }
+        Some(DEVICE_GRANT) => return device_poll(shared, flags, request),
         Some("refresh_token") => {
             if let Some((status, error)) = &flags.refresh_error {
                 return json(*status, serde_json::json!({ "error": error }));
@@ -610,6 +749,7 @@ impl Fixture {
             access: Mutex::new(HashSet::new()),
             refresh: Mutex::new(HashSet::new()),
             clients: Mutex::new(HashMap::new()),
+            devices: Mutex::new(HashMap::new()),
             counter: AtomicU64::new(0),
             held,
             calls: Mutex::new(Vec::new()),
@@ -673,6 +813,11 @@ impl Fixture {
 
     pub fn count(&self, path: &str) -> usize {
         self.requests(path).len()
+    }
+
+    /// Every request the server saw, in order.
+    pub fn seen(&self) -> Vec<Recorded> {
+        self.shared.requests.lock().expect("requests").clone()
     }
 
     /// The arguments each `tools/call` of `tool` carried, in order.

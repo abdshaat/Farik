@@ -5119,6 +5119,7 @@ pub(super) mod tests {
                         expires_at: Some(now - chrono::Duration::minutes(1)),
                         scopes: Vec::new(),
                         lapsed: false,
+                        app: None,
                     }),
                 },
             )

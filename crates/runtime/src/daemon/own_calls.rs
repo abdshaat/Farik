@@ -247,6 +247,7 @@ pub(crate) mod fixtures {
             expires_at: Some(now + expires_in),
             scopes: Vec::new(),
             lapsed: false,
+            app: None,
         };
         store
             .save(

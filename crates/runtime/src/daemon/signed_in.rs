@@ -8,6 +8,7 @@ use farik_core::team::{CustomServer, CustomTransport, OAuthSettings};
 use crate::claude::Secret;
 use crate::connectors::{ConnectorEntry, ConnectorSecrets, SecretAt, confirmed_entry};
 use crate::credential::CredentialError;
+use crate::registered_apps::REGISTERED_APPS;
 use crate::sign_in::{OAuthGrant, SIGN_IN_WINDOW, SignInError, refreshed, revoke, start_sign_in};
 
 use super::DaemonState;
@@ -336,7 +337,7 @@ impl DaemonState {
         for task in ended {
             let _ = task.await;
         }
-        let sign_in = start_sign_in(url, oauth, chrono::Utc::now())
+        let sign_in = start_sign_in(url, oauth, REGISTERED_APPS, chrono::Utc::now())
             .await
             .map_err(|error| refusal_of(&error))?;
         let id = random_hex()

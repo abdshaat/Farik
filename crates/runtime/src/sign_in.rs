@@ -19,6 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::claude::Secret;
+use crate::registered_apps::{AppFlow, RegisteredApp, app_for};
 
 /// How long the user has to say yes on the service's page.
 pub const SIGN_IN_WINDOW: Duration = Duration::from_secs(600);
@@ -50,6 +51,9 @@ pub struct OAuthGrant {
     pub scopes: Vec<String>,
     /// Whether the service ended the sign-in.
     pub lapsed: bool,
+    /// The id of the app of Farik's own this grant was made with (`RegisteredApp::id`), when it
+    /// was; none for a client the user gave or the service registered.
+    pub app: Option<String>,
 }
 
 impl fmt::Debug for OAuthGrant {
@@ -63,6 +67,7 @@ impl fmt::Debug for OAuthGrant {
             .field("refresh_token", &self.refresh_token.as_ref().map(|_| "***"))
             .field("expires_at", &self.expires_at)
             .field("lapsed", &self.lapsed)
+            .field("app", &self.app)
             .finish_non_exhaustive()
     }
 }
@@ -220,6 +225,23 @@ impl Guarded {
         self.send(request, false).await
     }
 
+    /// [`Guarded::post_form`] to a device or token endpoint, which is asked for JSON: GitHub
+    /// otherwise answers form-encoded.
+    pub(crate) async fn post_token_form(
+        &self,
+        url: &str,
+        pairs: &[(&str, &str)],
+    ) -> Result<http::Response<Vec<u8>>, OAuthHttpClientError> {
+        let request = self
+            .stop
+            .post(url)
+            .header(http::header::ACCEPT, "application/json")
+            .form(pairs)
+            .build()
+            .map_err(OAuthHttpClientError::from)?;
+        self.send(request, false).await
+    }
+
     /// What was refused as not https, if anything.
     pub(crate) fn refusal(&self) -> Option<String> {
         self.refused
@@ -272,21 +294,48 @@ fn host_of(url: &str) -> String {
         .unwrap_or_else(|| "the service".to_string())
 }
 
-/// A sign-in under way: a page to send the user to, and a listener for the way back.
+/// A sign-in under way: a page to send the user to, and what Farik waits for after: a listener
+/// for the way back, or, for one of Farik's own apps, the service saying yes to a code.
 pub struct SignIn {
+    way: Way,
+    setup: Setup,
+}
+
+/// How Farik learns the user said yes.
+enum Way {
+    /// Step 03's: the service sends the browser back to a listener on this computer.
+    Redirect(Box<Redirect>),
+    /// The device flow (RFC 8628): the user types a code on the service's page and Farik polls.
+    Device(Device),
+}
+
+/// What the way back of a redirect sign-in needs.
+struct Redirect {
     listeners: Vec<TcpListener>,
     addr: SocketAddr,
     session: AuthorizationSession,
+    iss_promised: bool,
+    state: String,
+    requested_scopes: Vec<String>,
+}
+
+/// What polling a device code needs. The code never leaves Farik: the user types the other one.
+struct Device {
+    code: Secret,
+    user_code: String,
+    interval: Duration,
+}
+
+/// What a sign-in makes its grant from, whichever way it goes.
+struct Setup {
     guard: Arc<Guarded>,
     authorize_url: String,
     issuer: String,
-    iss_promised: bool,
-    state: String,
     resource: String,
     client_id: String,
-    requested_scopes: Vec<String>,
     token_endpoint: String,
     revocation_endpoint: Option<String>,
+    app: Option<RegisteredApp>,
     started: tokio::time::Instant,
     started_at: DateTime<Utc>,
 }
@@ -295,8 +344,8 @@ impl fmt::Debug for SignIn {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("SignIn")
-            .field("issuer", &self.issuer)
-            .field("addr", &self.addr)
+            .field("issuer", &self.setup.issuer)
+            .field("addr", &self.callback_addr())
             .finish_non_exhaustive()
     }
 }
@@ -305,35 +354,76 @@ impl SignIn {
     /// The service's page, which the user opens.
     #[must_use]
     pub fn authorize_url(&self) -> &str {
-        &self.authorize_url
+        &self.setup.authorize_url
     }
 
     /// The service's issuer.
     #[must_use]
     pub fn issuer(&self) -> &str {
-        &self.issuer
+        &self.setup.issuer
     }
 
-    /// Where the listener is.
+    /// Where the listener is; none for the device flow, which has none.
     #[must_use]
-    pub fn callback_addr(&self) -> SocketAddr {
-        self.addr
+    pub fn callback_addr(&self) -> Option<SocketAddr> {
+        match &self.way {
+            Way::Redirect(redirect) => Some(redirect.addr),
+            Way::Device(_) => None,
+        }
     }
 
-    /// Waits for the way back, up to ten minutes from the start, and makes the grant. The
-    /// listener answers the one callback that carries this attempt's `state`, tells the user in
-    /// the tab how it went, and closes.
+    /// The code the user types on the service's page; only the device flow has one.
+    #[must_use]
+    pub fn user_code(&self) -> Option<&str> {
+        match &self.way {
+            Way::Device(device) => Some(&device.user_code),
+            Way::Redirect(_) => None,
+        }
+    }
+
+    /// What Farik's own app for the service is called, when one is signing in.
+    #[must_use]
+    pub fn provider(&self) -> Option<&str> {
+        self.setup.app.as_ref().map(|app| app.name)
+    }
+
+    /// Where the user installs Farik's own app on what an agent is to read, when it must be.
+    #[must_use]
+    pub fn install_url(&self) -> Option<&str> {
+        self.setup.app.as_ref().and_then(|app| app.install_url)
+    }
+
+    /// Waits for the user, up to ten minutes from the start, and makes the grant. A redirect
+    /// sign-in's listener answers the one callback that carries this attempt's `state`, tells the
+    /// user in the tab how it went, and closes; a device sign-in polls the service from here, so
+    /// that dropping this future ends it.
     ///
     /// # Errors
     /// Why the sign-in did not happen.
-    pub async fn finish(mut self) -> Result<OAuthGrant, SignInError> {
-        let deadline = self.started + SIGN_IN_WINDOW;
-        let listeners = std::mem::take(&mut self.listeners);
-        let waiting = wait_for_callback(listeners, &self.state);
+    pub async fn finish(self) -> Result<OAuthGrant, SignInError> {
+        let SignIn { way, setup } = self;
+        let deadline = setup.started + SIGN_IN_WINDOW;
+        match way {
+            Way::Redirect(redirect) => setup.finish_redirect(*redirect, deadline).await,
+            Way::Device(device) => tokio::time::timeout_at(deadline, setup.poll(&device))
+                .await
+                .map_err(|_| SignInError::TimedOut)?,
+        }
+    }
+}
+
+impl Setup {
+    async fn finish_redirect(
+        &self,
+        mut redirect: Redirect,
+        deadline: tokio::time::Instant,
+    ) -> Result<OAuthGrant, SignInError> {
+        let listeners = std::mem::take(&mut redirect.listeners);
+        let waiting = wait_for_callback(listeners, &redirect.state);
         let (mut stream, params) = tokio::time::timeout_at(deadline, waiting)
             .await
             .map_err(|_| SignInError::TimedOut)??;
-        let outcome = self.complete(&params).await;
+        let outcome = self.complete(&redirect, &params).await;
         let host = host_of(&self.issuer);
         let (status, headline, rest) = match &outcome {
             Ok(_) => (
@@ -354,12 +444,17 @@ impl SignIn {
         outcome
     }
 
-    async fn complete(&self, params: &HashMap<String, String>) -> Result<OAuthGrant, SignInError> {
+    async fn complete(
+        &self,
+        redirect: &Redirect,
+        params: &HashMap<String, String>,
+    ) -> Result<OAuthGrant, SignInError> {
         let host = host_of(&self.issuer);
         let iss = params.get("iss").map(String::as_str);
         if let Some(error) = params.get("error") {
             // RFC 9207: an error carrying another issuer is not acted on, nor shown.
-            if iss.is_some_and(|iss| iss != self.issuer) || (iss.is_none() && self.iss_promised) {
+            if iss.is_some_and(|iss| iss != self.issuer) || (iss.is_none() && redirect.iss_promised)
+            {
                 return Err(SignInError::Mismatch);
             }
             return Err(if error == "access_denied" {
@@ -372,9 +467,9 @@ impl SignIn {
             .get("code")
             .ok_or_else(|| SignInError::Failed(format!("{host} answered without a code")))?;
         self.guard.forget_status();
-        let token = self
+        let token = redirect
             .session
-            .handle_callback_with_issuer(code, &self.state, iss)
+            .handle_callback_with_issuer(code, &redirect.state, iss)
             .await
             .map_err(|error| match error {
                 AuthError::AuthorizationServerMismatch { .. }
@@ -386,6 +481,58 @@ impl SignIn {
             })?;
         let token = serde_json::to_value(&token)
             .map_err(|_| SignInError::Failed(format!("{host} sent a token Farik cannot read")))?;
+        self.grant_from(&token, &redirect.requested_scopes)
+    }
+
+    /// Polls the service for the device code until it says yes or no; the caller bounds the time.
+    async fn poll(&self, device: &Device) -> Result<OAuthGrant, SignInError> {
+        let host = host_of(&self.token_endpoint);
+        let mut interval = device.interval;
+        let form = [
+            ("client_id", self.client_id.as_str()),
+            ("device_code", device.code.expose()),
+            ("grant_type", DEVICE_GRANT),
+        ];
+        loop {
+            tokio::time::sleep(interval).await;
+            self.guard.forget_status();
+            let answer = self
+                .guard
+                .post_token_form(&self.token_endpoint, &form)
+                .await
+                .map_err(|_| failed_at(&self.guard, &host, "finish signing in"))?;
+            // GitHub answers an error with status 200, so the body is read before the status.
+            let body: serde_json::Value = serde_json::from_slice(answer.body()).unwrap_or_default();
+            match body["error"].as_str() {
+                Some("authorization_pending") => {}
+                Some("slow_down") => interval += Duration::from_secs(5),
+                Some("access_denied") => {
+                    return Err(SignInError::Denied("access_denied".to_string()));
+                }
+                Some("expired_token") => return Err(SignInError::TimedOut),
+                Some(_) => {
+                    return Err(SignInError::Failed(format!(
+                        "{host} refused the sign-in{}",
+                        self.guard.status_note()
+                    )));
+                }
+                None => {
+                    let mut grant = self.grant_from(&body, &[])?;
+                    // A GitHub App's rights are set on the app, not asked for.
+                    grant.scopes.clear();
+                    return Ok(grant);
+                }
+            }
+        }
+    }
+
+    /// The grant a service's token answer makes.
+    fn grant_from(
+        &self,
+        token: &serde_json::Value,
+        requested_scopes: &[String],
+    ) -> Result<OAuthGrant, SignInError> {
+        let host = host_of(&self.issuer);
         let unreadable = || SignInError::Failed(format!("{host} sent a token Farik cannot read"));
         if !token["token_type"]
             .as_str()
@@ -401,7 +548,7 @@ impl SignIn {
             .and_then(|seconds| i64::try_from(seconds).ok())
             .map(|seconds| issued_at + chrono::Duration::seconds(seconds));
         let scopes = token["scope"].as_str().map_or_else(
-            || self.requested_scopes.clone(),
+            || requested_scopes.to_vec(),
             |scope| scope.split_whitespace().map(ToString::to_string).collect(),
         );
         Ok(OAuthGrant {
@@ -418,9 +565,13 @@ impl SignIn {
             expires_at,
             scopes,
             lapsed: false,
+            app: self.app.map(|app| app.id.to_string()),
         })
     }
 }
+
+/// The grant type of a device code's poll (RFC 8628).
+const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
 impl SignInError {
     /// The reason as the sentence the tab and the page say, from the code alone.
@@ -709,16 +860,20 @@ fn check_metadata(
     Ok(())
 }
 
-/// Finds out how `url` signs a user in, registers, binds the listener and makes the address.
+/// Starts signing a user in to the server at `url`. If `apps` has one of Farik's own apps for the
+/// server's address (and the team file gives no client of its own), the user signs in with it;
+/// otherwise the server's sign-in is found out, a client registered, the listener bound and the
+/// address made, as step 03 does. A client id of one of `apps` is used only for its own servers.
 ///
 /// # Errors
-/// Why signing in is not possible.
+/// Why signing in is not possible, among them an app's client id on another server's address.
 pub async fn start_sign_in(
     url: &str,
     settings: &OAuthSettings,
+    apps: &[RegisteredApp],
     now: DateTime<Utc>,
 ) -> Result<SignIn, SignInError> {
-    tokio::time::timeout(SIGN_IN_START, start(url, settings, now))
+    tokio::time::timeout(SIGN_IN_START, start(url, settings, apps, now))
         .await
         .map_err(|_| {
             SignInError::Failed(format!(
@@ -730,6 +885,95 @@ pub async fn start_sign_in(
 }
 
 async fn start(
+    url: &str,
+    settings: &OAuthSettings,
+    apps: &[RegisteredApp],
+    now: DateTime<Utc>,
+) -> Result<SignIn, SignInError> {
+    let serving = app_for(apps, url);
+    let given = settings.client_id.as_deref();
+    // Farik's client ids are for Farik's own apps' servers: another address is refused before any
+    // request is made.
+    if let Some(app) = apps.iter().find(|app| given == Some(app.client_id))
+        && serving.is_none_or(|serving| serving.id != app.id)
+    {
+        return Err(SignInError::Failed(format!(
+            "this sign-in is only for {}'s own servers",
+            app.name
+        )));
+    }
+    match serving {
+        Some(app) if given.is_none_or(|given| given == app.client_id) => {
+            start_device(app, url, now).await
+        }
+        _ => start_redirect(url, settings, now).await,
+    }
+}
+
+/// The device flow (RFC 8628) with one of Farik's own apps: asks the service for a code.
+async fn start_device(
+    app: &RegisteredApp,
+    url: &str,
+    now: DateTime<Utc>,
+) -> Result<SignIn, SignInError> {
+    let AppFlow::Device {
+        device_endpoint,
+        verification_uri,
+    } = app.flow;
+    let guard = Guarded::new()?;
+    let host = host_of(device_endpoint);
+    // No `scope`: what a GitHub App may do is set on the app.
+    let answer = guard
+        .post_token_form(device_endpoint, &[("client_id", app.client_id)])
+        .await
+        .map_err(|_| failed_at(&guard, &host, "ask for a sign-in code"))?;
+    let body: serde_json::Value = serde_json::from_slice(answer.body()).unwrap_or_default();
+    if body.get("error").is_some() || !answer.status().is_success() {
+        return Err(SignInError::Failed(format!(
+            "{host} refused to start the sign-in{}",
+            guard.status_note()
+        )));
+    }
+    let text = |name: &str| body[name].as_str().map(ToString::to_string);
+    let (Some(device_code), Some(user_code), Some(page)) = (
+        text("device_code"),
+        text("user_code"),
+        text("verification_uri"),
+    ) else {
+        return Err(SignInError::Failed(format!(
+            "{host} sent a sign-in code Farik cannot read"
+        )));
+    };
+    // The page the user is sent to, and told to type a code on, is the table's and no other.
+    if page != verification_uri {
+        return Err(SignInError::Failed(format!(
+            "{host} named a sign-in page Farik does not use"
+        )));
+    }
+    // RFC 8628's default is five seconds; never a busy loop.
+    let interval = Duration::from_secs(body["interval"].as_u64().unwrap_or(5).max(1));
+    Ok(SignIn {
+        way: Way::Device(Device {
+            code: Secret::new(device_code),
+            user_code,
+            interval,
+        }),
+        setup: Setup {
+            guard,
+            authorize_url: page,
+            issuer: app.issuer.to_string(),
+            resource: url.to_string(),
+            client_id: app.client_id.to_string(),
+            token_endpoint: app.token_endpoint.to_string(),
+            revocation_endpoint: app.revocation_endpoint.map(ToString::to_string),
+            app: Some(*app),
+            started: tokio::time::Instant::now(),
+            started_at: now,
+        },
+    })
+}
+
+async fn start_redirect(
     url: &str,
     settings: &OAuthSettings,
     now: DateTime<Utc>,
@@ -787,23 +1031,28 @@ async fn start(
         )));
     };
     Ok(SignIn {
-        listeners,
-        addr,
-        session,
-        guard,
-        authorize_url,
-        issuer,
-        iss_promised,
-        state,
-        resource,
-        client_id,
-        requested_scopes: field("scope")
-            .map(|scope| scope.split_whitespace().map(ToString::to_string).collect())
-            .unwrap_or_default(),
-        token_endpoint,
-        revocation_endpoint,
-        started: tokio::time::Instant::now(),
-        started_at: now,
+        way: Way::Redirect(Box::new(Redirect {
+            listeners,
+            addr,
+            session,
+            iss_promised,
+            state,
+            requested_scopes: field("scope")
+                .map(|scope| scope.split_whitespace().map(ToString::to_string).collect())
+                .unwrap_or_default(),
+        })),
+        setup: Setup {
+            guard,
+            authorize_url,
+            issuer,
+            resource,
+            client_id,
+            token_endpoint,
+            revocation_endpoint,
+            app: None,
+            started: tokio::time::Instant::now(),
+            started_at: now,
+        },
     })
 }
 
@@ -950,6 +1199,7 @@ impl OAuthGrant {
             "expires_at": self.expires_at.map(|at| at.to_rfc3339()),
             "scopes": self.scopes,
             "lapsed": self.lapsed,
+            "app": self.app,
         })
     }
 
@@ -978,6 +1228,7 @@ impl OAuthGrant {
                 .filter_map(|scope| scope.as_str().map(ToString::to_string))
                 .collect(),
             lapsed: value["lapsed"].as_bool().unwrap_or(false),
+            app: text("app"),
         })
     }
 }
@@ -1000,6 +1251,28 @@ mod tests {
         assert_eq!(fixed_port(&settings), Some(4000));
         settings.client_id = None;
         assert_eq!(fixed_port(&settings), None);
+    }
+
+    /// A grant made with one of Farik's own apps is told so after a restart: its refresh depends on it.
+    #[test]
+    fn a_grant_keeps_its_app_in_the_stored_form() {
+        let grant = OAuthGrant {
+            issuer: "https://auth.example/oauth".to_string(),
+            resource: "https://mcp.example/mcp/".to_string(),
+            client_id: "the-apps-client-id".to_string(),
+            token_endpoint: "https://auth.example/oauth/access_token".to_string(),
+            revocation_endpoint: None,
+            access_token: Secret::new("access".to_string()),
+            refresh_token: Some(Secret::new("refresh".to_string())),
+            issued_at: "2026-10-06T10:00:00Z".parse().expect("a time"),
+            expires_at: Some("2026-10-06T18:00:00Z".parse().expect("a time")),
+            scopes: Vec::new(),
+            lapsed: false,
+            app: Some("github".to_string()),
+        };
+        let read = OAuthGrant::from_json(&grant.to_json()).expect("a grant");
+        assert_eq!(read, grant);
+        assert_eq!(read.app.as_deref(), Some("github"));
     }
 
     /// rmcp refuses metadata without an issuer before Farik's own check runs, so the check is

@@ -596,6 +596,7 @@ fn a_live_session_calls_a_signed_in_connector() {
                 expires_at: Some(now + chrono::Duration::hours(2)),
                 scopes: Vec::new(),
                 lapsed: false,
+                app: None,
             })
         },
     );

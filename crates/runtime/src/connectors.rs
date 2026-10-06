@@ -1587,6 +1587,7 @@ mod tests {
                 expires_at: Some("2026-10-02T11:00:00Z".parse().expect("a time")),
                 scopes: vec!["read".to_string(), "offline_access".to_string()],
                 lapsed: false,
+                app: None,
             }),
         }
     }

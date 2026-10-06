@@ -3488,6 +3488,7 @@ mod tests {
             expires_at: Some(now + expires_in),
             scopes: Vec::new(),
             lapsed: false,
+            app: None,
         };
         let store = Arc::new(MemoryConnectorSecrets::default());
         let at = harness

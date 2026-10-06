@@ -15,6 +15,7 @@ use farik_runtime::connectors::{
 };
 use farik_runtime::credential::CredentialError;
 use farik_runtime::daemon::{custom_entry, kit_entry, labelled};
+use farik_runtime::registered_apps::REGISTERED_APPS;
 use farik_runtime::sign_in::{SignInError, revoke, start_sign_in};
 use serde_json::{Map, Value, json};
 
@@ -413,7 +414,12 @@ fn keep_sign_in(
         .map_err(|error| format!("{}: {}", server.name, folder_refusal(&error)))?;
     let runtime = runtime()?;
     let signing = runtime
-        .block_on(start_sign_in(url, settings, chrono::Utc::now()))
+        .block_on(start_sign_in(
+            url,
+            settings,
+            REGISTERED_APPS,
+            chrono::Utc::now(),
+        ))
         .map_err(|error| refused(&error, &host))?;
     // Prompts, not results: on stderr, so that `--json` leaves the output as the JSON alone.
     crate::say(
