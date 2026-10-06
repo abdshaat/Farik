@@ -87,18 +87,19 @@ impl fmt::Debug for RegisteredApp {
 /// token endpoint insists on it for a Desktop client in practice, and it protects nothing: it ships
 /// in every binary (ADR 0035's amendments). It is never committed, since GitHub's push protection
 /// blocks a Google OAuth client secret and reports one in a public repository to Google. A build
-/// without it has no Google entry, and signing in with Google there is `sign_in_not_supported`.
+/// without it, or with it empty (a repository secret that is not set expands to nothing), has no
+/// Google entry, and signing in with Google there is `sign_in_not_supported`.
 const GOOGLE_CLIENT_SECRET: Option<&str> = option_env!("FARIK_GOOGLE_CLIENT_SECRET");
 
-/// The client id of Farik's Google app, which is public. A placeholder until the founder
-/// registers the app in a Google Cloud project of their own (step 08e's founder's actions); with it
-/// Google refuses a sign-in `invalid_client`, which is what a build with the secret and no real id
-/// should do.
-const GOOGLE_CLIENT_ID: &str = "REGISTER-FARIK-WITH-GOOGLE-AND-PUT-ITS-CLIENT-ID-HERE";
+/// The client id of Farik's Google app, which is public: `None` until the founder registers the app
+/// in a Google Cloud project of their own and gives its id (step 08e's founder's actions), when it
+/// becomes `Some("<number>-<hash>.apps.googleusercontent.com")`. Without it no build has a Google
+/// entry, so a build with the secret cannot ship an id Google would refuse.
+const GOOGLE_CLIENT_ID: Option<&str> = None;
 
 /// Farik's Google app, which signs in for Farik's `google-ads` connector alone (ADR 0042) with
-/// the one scope it needs, `secret` being its client secret.
-const fn google(secret: &'static str) -> RegisteredApp {
+/// the one scope it needs, `id` and `secret` being its client id and client secret.
+const fn google(id: &'static str, secret: &'static str) -> RegisteredApp {
     RegisteredApp {
         id: "google",
         name: "Google",
@@ -107,7 +108,7 @@ const fn google(secret: &'static str) -> RegisteredApp {
         flow: AppFlow::Loopback {
             authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
         },
-        client_id: GOOGLE_CLIENT_ID,
+        client_id: id,
         client_secret: Some(secret),
         scopes: &["https://www.googleapis.com/auth/adwords"],
         issuer: "https://accounts.google.com",
@@ -120,11 +121,27 @@ const fn google(secret: &'static str) -> RegisteredApp {
     }
 }
 
-/// Every app Farik has registered: Google's, in a build that has its client secret.
-pub static REGISTERED_APPS: &[RegisteredApp] = match GOOGLE_CLIENT_SECRET {
-    Some(secret) => &[google(secret)],
-    None => &[],
-};
+/// Google's entry for a build with this client `id` and client `secret`: only when both are there
+/// and neither is empty. An entry with no id would only be refused by Google, and one built from an
+/// unset repository secret, which expands to nothing, would ship as if it worked.
+const fn shipped_google(
+    id: Option<&'static str>,
+    secret: Option<&'static str>,
+) -> Option<RegisteredApp> {
+    match (id, secret) {
+        (Some(id), Some(secret)) if !id.is_empty() && !secret.is_empty() => {
+            Some(google(id, secret))
+        }
+        _ => None,
+    }
+}
+
+/// Every app Farik has registered: Google's, in a build that has its client id and client secret.
+pub static REGISTERED_APPS: &[RegisteredApp] =
+    match shipped_google(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) {
+        Some(app) => &[app],
+        None => &[],
+    };
 
 /// The app of `apps` that serves the server at `url`, if one does.
 #[must_use]
@@ -312,7 +329,7 @@ mod tests {
 
     #[test]
     fn google_s_entry_is_for_google_ads_alone() {
-        let google = google("a-secret");
+        let google = google("an-id.apps.googleusercontent.com", "a-secret");
         assert_eq!(google.id, "google");
         assert_eq!(google.name, "Google");
         assert_eq!(google.host, None, "it serves no address");
@@ -323,7 +340,7 @@ mod tests {
                 authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth"
             }
         );
-        assert!(!google.client_id.is_empty());
+        assert_eq!(google.client_id, "an-id.apps.googleusercontent.com");
         assert_eq!(google.client_secret, Some("a-secret"));
         assert_eq!(google.scopes, ["https://www.googleapis.com/auth/adwords"]);
         assert_eq!(google.issuer, "https://accounts.google.com");
@@ -339,23 +356,36 @@ mod tests {
         );
     }
 
-    /// A build with `FARIK_GOOGLE_CLIENT_SECRET` ships Google's entry with that secret, and no
-    /// other entry for a connector of Farik's; a build without it ships no Google entry. Entries
-    /// for addresses (step 03b's GitHub) may come beside it. The secret is never printed, so each
-    /// assertion here says what it checks and prints no value.
+    /// Which client id and client secret, if any, the build ships Google's entry with: both must be
+    /// there, and the secret must not be empty. Decided here from the constants and not by
+    /// `shipped_google`, so the table's test does not repeat the code it checks.
+    fn builds_google() -> Option<(&'static str, &'static str)> {
+        GOOGLE_CLIENT_ID
+            .zip(GOOGLE_CLIENT_SECRET)
+            .filter(|(id, secret)| !id.is_empty() && !secret.is_empty())
+    }
+
+    /// A build with Farik's Google client id and `FARIK_GOOGLE_CLIENT_SECRET` ships Google's entry
+    /// with them, and no other entry for a connector of Farik's; a build without either ships no
+    /// Google entry. Entries for addresses (step 03b's GitHub) may come beside it. The secret is
+    /// never printed, so each assertion here says what it checks and prints no value.
     #[test]
     fn the_shipped_table_names_google_for_google_ads_only() {
         let google_entry = REGISTERED_APPS.iter().find(|app| app.id == "google");
-        let Some(secret) = GOOGLE_CLIENT_SECRET else {
+        let Some((id, secret)) = builds_google() else {
             assert!(
                 google_entry.is_none(),
-                "a build without Google's client secret has no Google entry"
+                "a build without Google's client id and client secret has no Google entry"
             );
             return;
         };
         assert!(
-            google_entry == Some(&google(secret)),
-            "the table has Google's entry with the build's secret"
+            id.ends_with(".apps.googleusercontent.com"),
+            "the client id is one Google gave an app"
+        );
+        assert!(
+            google_entry == Some(&google(id, secret)),
+            "the table has Google's entry with the build's client id and secret"
         );
         assert!(
             REGISTERED_APPS
@@ -366,10 +396,38 @@ mod tests {
         );
     }
 
+    /// Google's entry is shipped with a client id and a client secret that is not empty, and with
+    /// nothing less: an unset repository secret expands to an empty one, and a build with no id
+    /// has nothing Google would accept. The inputs are the decision's own, so the build's
+    /// environment does not matter.
+    #[test]
+    fn ships_google_only_with_a_client_id_and_a_secret() {
+        let id = "an-id.apps.googleusercontent.com";
+        assert!(
+            shipped_google(Some(id), Some("a-secret")) == Some(google(id, "a-secret")),
+            "an id and a secret give Google's entry"
+        );
+        let shipped_wrongly: Vec<&str> = [
+            (None, Some("a-secret"), "no client id"),
+            (Some(id), None, "no client secret"),
+            (Some(id), Some(""), "an empty client secret"),
+            (Some(""), Some("a-secret"), "an empty client id"),
+            (None, None, "neither"),
+        ]
+        .into_iter()
+        .filter(|(given_id, given_secret, _)| shipped_google(*given_id, *given_secret).is_some())
+        .map(|(_, _, why)| why)
+        .collect();
+        assert!(
+            shipped_wrongly.is_empty(),
+            "Google's entry was shipped with {shipped_wrongly:?}"
+        );
+    }
+
     /// A guard: a failing assertion must not print the secret.
     #[test]
     fn a_registered_app_does_not_print_its_secret() {
-        let shown = format!("{:?}", google("the-secret-never-shown"));
+        let shown = format!("{:?}", google("an-id", "the-secret-never-shown"));
         assert!(!shown.contains("the-secret-never-shown"), "{shown}");
         assert!(shown.contains("google-ads"), "the rest is shown: {shown}");
     }
@@ -414,10 +472,11 @@ mod tests {
         }
     }
 
-    /// A guard: a build without Google's client secret has no entry for a connector of Farik's.
+    /// A guard: a build without Google's client id or client secret has no entry for a connector of
+    /// Farik's. No client id is committed yet, so no build has one.
     #[test]
     fn the_shipped_table_has_no_google_yet() {
-        if GOOGLE_CLIENT_SECRET.is_none() {
+        if builds_google().is_none() {
             assert!(
                 REGISTERED_APPS
                     .iter()
