@@ -6,6 +6,7 @@ Amended 2026-09-29 by ADR 0023: phase numbers after 6 moved up by one.
 Amended 2026-09-30 by ADR 0025: phase numbers after 9 moved up by one; every kit must work on every supported engine; and every connector ships before the launch, which closes the question left open below.
 Amended 2026-09-30 by ADR 0026: the kits include a seventh, the UI/UX Designer's, whose skills and Playwright connector phase 6 steps 11 and 12 build first and phase 9 step 01 moves into its `kit.yaml`; phase 8 step 01 extends that connector base rather than starting one.
 Amended 2026-10-01 by ADR 0029: the role kits are phase 7, built on Claude before other engines, with the per-agent MCP and skills plumbing and the Finance Specialist pulled forward from the ecosystem, and the Milestone 0 and 1 runs as the phase's last step; engines and providers are phase 8, the rest of the ecosystem phase 9.
+Amended 2026-10-06 by ADR 0043: until phase 15, a connector's service is signed in to with the customer's own app or key, never a client id of Farik's, which closes the last question under Consequences.
 
 ## Context
 
@@ -49,4 +50,4 @@ Harder:
 - A tag is Farik's judgment about another company's tool. The drift test catches a changed list, not a same-name tool that gains a side effect, so every pin update re-reviews the tags by hand.
 - Six steps and some twenty services before the launch is real scope; whether every connector ships before `v0.1.0` is open for the founder.
 - Connectors pull in prompt-injection surface: everything a connector returns is untrusted content (spec 8.6), and a creative service's output is no exception.
-- Some connectors will need the service's own developer registration; which ones, and whether Farik ships a shared client id or the user brings their own key, is decided per connector in the step plans.
+- Some connectors will need the service's own developer registration; which ones, and whether Farik ships a shared client id or the user brings their own key, is decided per connector in the step plans. (Closed 2026-10-06 by ADR 0043: the user's own app or key until phase 15, which adds Farik's own apps as a default beside them.)

@@ -3,6 +3,7 @@
 Date: 2026-10-02
 Status: accepted
 Amended 2026-10-06 by phase 7 step 08e: a `stdio` entry that is Farik's own connector may carry `oauth`. See "Amendment of 2026-10-06".
+Amended 2026-10-06 by ADR 0043: until phase 15 the app a service's sign-in uses is the customer's own, never Farik's, and client metadata documents wait for phase 15. See "Amendment by ADR 0043".
 
 ## Context
 
@@ -14,7 +15,7 @@ After phase 7 step 01 an http connector takes pasted keys only. Most services th
 
 **The grant is kept per agent where the keys are** (ADR 0030): in the entry, in the keychain or the private file. The access token reaches a session as `Authorization: Bearer` from the headers helper, the only way a secret reaches Claude Code. No RPC answer, event, team file, `mcp.json` or log holds a token.
 
-**Registration, in order:** a `client_id` the team file names (a public client; Farik never takes a client secret), else dynamic registration (`client_name` "Farik", `application_type` native, `token_endpoint_auth_method` none), else refused. Client metadata documents are not built: they need a document at an https address Farik owns, so they wait for the site of the web launch.
+**Registration, in order:** a `client_id` the team file names (a public client; Farik never takes a client secret), else dynamic registration (`client_name` "Farik", `application_type` native, `token_endpoint_auth_method` none), else refused. Client metadata documents are not built: they need a document at an https address Farik owns, so they wait for the site of the web launch (amended 2026-10-06 by ADR 0043: for phase 15).
 
 **The redirect is `http://localhost:<port>/callback`.** The listener binds `127.0.0.1` (and `[::1]` where there is IPv6), never `0.0.0.0`, answers the first callback whose `state` is the attempt's, serves a page that quotes nothing the service sent, and closes. Services match a registered redirect exactly, and `localhost` is the name that works. The port is any free one with registration, or the client's registered one (33418 by default).
 
@@ -26,7 +27,7 @@ After phase 7 step 01 an http connector takes pasted keys only. Most services th
 - Each dynamic registration leaves a client at the service. Revoking on replace limits it; client metadata documents end it (the founder's question O1).
 - Any local process can bind a port and receive a code; PKCE makes it useless without the verifier, which stays in the attempt's memory.
 - `reqwest` and `oauth2` come in through `rmcp`'s `auth` feature; `reqwest` is a direct dependency of `farik-runtime` at the version `rmcp` locks.
-- Services with neither registration nor a client id (GitHub, Slack, Google) sign in only with a `client_id` a kit or the user supplies (ADR 0035).
+- Services with neither registration nor a client id (GitHub, Slack, Google) sign in only with a `client_id` a kit or the user supplies (ADR 0035); until phase 15, the customer's own app (ADR 0043).
 
 ## Amendment of 2026-10-06
 
@@ -36,3 +37,10 @@ Made by phase 7 step 08e (ADR 0042 pulls Google's sign-in forward for Farik's ow
 
 **The loopback flow is Farik's own requests for this route.** "One function over `rmcp`'s `auth` feature" holds for a server at an address. For Farik's own connector there is no server whose metadata to discover, so Farik builds the authorization address, checks `state` and `iss`, and makes the exchange and the refresh itself, with `oauth2`'s PKCE and `state` generators, over the same https-or-loopback client and the same listener. Rejected: an `http` entry at a Google host, which would hand the access token to a server process.
 
+## Amendment by ADR 0043
+
+Made 2026-10-06 (the founder: until phase 15, every login is the customer's).
+
+- **Farik's own connector signs in with the customer's app for its provider**, not with an app of Farik's. The amendment above says "Its sign-in is Farik's own app's, from the table of registered apps"; from phase 7 step 03f the table holds each provider's fixed facts, and the client id and secret are the ones the customer gave Farik in the machine's settings. The team file still takes no `client_id` or `callback_port` on that entry (`farik_connector_client`), because the customer's app is kept on the computer, not in the project; only the refusal's sentence changes.
+- **Client metadata documents** need a document at an address Farik owns, so they are phase 15's (step 03's O1), with Farik's own apps.
+- **Registration's order is unchanged**: a `client_id` the team file names, else dynamic registration, else refused. A `client_id` of a customer's sign-in app is used only for its own provider's servers, as step 03b's rule held for Farik's.
