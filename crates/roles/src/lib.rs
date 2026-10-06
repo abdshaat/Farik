@@ -701,6 +701,53 @@ mod tests {
         }
     }
 
+    /// Step 09c: the role works in its private folder, where nothing is committed, and finishes by
+    /// naming the workbooks it wrote; the one item of "How a session ends" that asks for
+    /// `verifying` is that one, not a second beside a plain one (step 09's landing review).
+    #[test]
+    fn keeping_the_books_says_where_to_work() {
+        let definition = loaded(Role::FinanceSpecialist);
+        let flatten = |text: &str| {
+            text.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        };
+        let prompt = flatten(&definition.system_prompt);
+        let skill = flatten(&definition.skills[0].body);
+        for (what, text) in [("prompt", &prompt), ("skill", &skill)] {
+            for phrase in [
+                "work in your private folder",
+                "nothing there is committed",
+                "`workbooks`",
+            ] {
+                assert!(
+                    text.contains(phrase),
+                    "the {what} lost \"{phrase}\": {text}"
+                );
+            }
+        }
+        for phrase in ["`baseline: true`", "`farik_read_sheet`", "beside the copy"] {
+            assert!(skill.contains(phrase), "the skill lost {phrase}: {skill}");
+        }
+        // One item of the prompt's ending asks for `verifying`, and it names the workbooks.
+        let ending = prompt
+            .split_once("## how a session ends")
+            .map(|(_, ending)| ending)
+            .expect("the prompt says how a session ends");
+        assert_eq!(ending.matches("request `verifying`").count(), 1, "{ending}");
+        let item = ending
+            .split_once("request `verifying`")
+            .map(|(_, rest)| {
+                rest.split("do not end a session")
+                    .next()
+                    .unwrap_or_default()
+            })
+            .expect("the item");
+        assert!(item.contains("`workbooks`"), "{item}");
+        assert!(item.contains("fix what it names and ask again"), "{item}");
+    }
+
     /// ADR 0042: the Marketing Specialist owns the brand kit, the brand persona, the marketing plan
     /// and the social presence. It posts, advertises and spends only as the owner's approved plan
     /// says or after the owner allows that one call, and the prompt carries every `forbidden` line
