@@ -139,9 +139,19 @@ fn is_a_name(part: &str) -> bool {
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || b" ._-".contains(&byte))
 }
 
+/// Whether `at` is a link itself, which is not followed; `false` when nothing is there.
+fn is_a_link(at: &Path) -> Result<bool, ToolError> {
+    match fs::symlink_metadata(at) {
+        Ok(metadata) => Ok(metadata.file_type().is_symlink()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(failed(error)),
+    }
+}
+
 /// The workbook at `path`, relative to the private folder `folder` of the project at `root`, with
-/// every rule of the folder line checked: the path's shape, and that no part of it is a link, so
-/// that it lies in the folder after links are resolved.
+/// every rule of the folder line checked: the path's shape; that none of the folder's parts below
+/// `root`, and none of the path's, is a link; and that what is there, resolved, lies in the folder
+/// as it lies under the resolved `root`.
 ///
 /// # Errors
 ///
@@ -167,31 +177,32 @@ pub(crate) fn private_path(root: &Path, folder: &str, path: &str) -> Result<Path
     {
         return Err(bad("is not a workbook: it ends in `.xlsx`, in lower case"));
     }
-    let folder = root.join(folder);
-    let mut at = folder.clone();
-    for part in parts {
+    // From the project root down, through the folder and then the path: no link anywhere.
+    let in_the_folder = folder.split('/').count();
+    let mut at = root.to_path_buf();
+    for (index, part) in folder.split('/').chain(parts.iter().copied()).enumerate() {
         at.push(part);
-        match fs::symlink_metadata(&at) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(bad("is, or passes through, a link"));
-            }
-            Err(error) if error.kind() != ErrorKind::NotFound => return Err(failed(error)),
-            _ => {}
+        if is_a_link(&at)? {
+            return Err(bad(if index < in_the_folder {
+                "lies in a folder that is, or lies below, a link"
+            } else {
+                "is, or passes through, a link"
+            }));
         }
     }
-    // The deepest part there is, resolved, is in the folder, resolved.
-    if let Ok(resolved_folder) = fs::canonicalize(&folder) {
-        let mut existing = at.as_path();
-        while !existing.exists() {
-            match existing.parent() {
-                Some(parent) => existing = parent,
-                None => break,
-            }
+    // The deepest part there is, resolved, lies in the folder, or above it while the folder is not
+    // made yet, as the folder lies under the resolved root.
+    let resolved_folder = fs::canonicalize(root).map_err(failed)?.join(folder);
+    let mut existing = at.as_path();
+    while !existing.exists() {
+        match existing.parent() {
+            Some(parent) => existing = parent,
+            None => break,
         }
-        let resolved = fs::canonicalize(existing).map_err(failed)?;
-        if !resolved.starts_with(&resolved_folder) {
-            return Err(bad("is outside the folder"));
-        }
+    }
+    let resolved = fs::canonicalize(existing).map_err(failed)?;
+    if !(resolved.starts_with(&resolved_folder) || resolved_folder.starts_with(&resolved)) {
+        return Err(bad("is outside the folder"));
     }
     Ok(at)
 }
@@ -466,6 +477,15 @@ fn keep_previous(folder: &Path, path: &Path, now: DateTime<Utc>) -> Result<(), T
         .join("__");
     let stamp = now.format("%Y%m%dT%H%M%SZ");
     let history = folder.join(".history");
+    if is_a_link(&history)? {
+        return Err(refused(
+            "private_path_refused",
+            format!(
+                "{} is a link, and previous versions are kept only in the folder",
+                history.display()
+            ),
+        ));
+    }
     private_folder_at(&history).map_err(failed)?;
     let mut previous = File::open(path).map_err(failed)?;
     for attempt in 0..1_000 {
@@ -823,7 +843,7 @@ mod tests {
     use calamine::{Data, DataType as _, Reader, Xlsx, open_workbook};
     use serde_json::{Value, json};
 
-    use super::formula_reaches_outside;
+    use super::{formula_reaches_outside, private_path};
     use crate::session::SessionPurpose;
     use crate::tools::ToolError;
     use crate::tools::fixtures::{
@@ -1209,6 +1229,105 @@ mod tests {
         );
         assert!(!project.repo.path.join(".farik/local/books.xlsx").exists());
         assert!(!folder(&project).join(".history").exists());
+
+        // A link inside the folder to a folder inside it is a link all the same.
+        let inner = folder(&project).join("inner");
+        fs::create_dir_all(&inner).expect("a folder inside");
+        symlink(&inner, folder(&project).join("alias")).expect("a link inside the folder");
+        let reason = refusal_of(write(
+            &project,
+            &one_sheet("alias/x.xlsx", &json!([["a", 1]])),
+        ));
+        assert!(reason.starts_with("private_path_refused: "), "{reason}");
+        assert_eq!(files_under(&inner), Vec::<String>::new());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_link_at_or_above_the_folder() {
+        // The folder itself a link to a folder outside it.
+        let project = a_finance_project("sheets-folder-is-a-link");
+        let outside = project.repo.path.join("outside");
+        fs::create_dir_all(&outside).expect("a folder outside");
+        symlink(&outside, folder(&project)).expect("a link out");
+
+        let reason = refusal_of(write(
+            &project,
+            &one_sheet("books.xlsx", &json!([["a", 1]])),
+        ));
+
+        assert!(reason.starts_with("private_path_refused: "), "{reason}");
+        assert_eq!(
+            files_under(&outside),
+            Vec::<String>::new(),
+            "nothing is written outside"
+        );
+        let reason = refusal_of(read(&project, "fin", &json!({ "path": "books.xlsx" })));
+        assert!(
+            reason.starts_with("private_path_refused: "),
+            "read: {reason}"
+        );
+
+        // A part above the folder a link, on a root of its own: the folder is not made yet.
+        let root = project.repo.path.join("another-root");
+        fs::create_dir_all(&root).expect("a root");
+        let finance = ".farik/local/finance";
+        assert!(private_path(&root, finance, "books.xlsx").is_ok());
+        for linked in [".farik", ".farik/local"] {
+            let root = project.repo.path.join(format!("root-{}", linked.len()));
+            let link = root.join(linked);
+            fs::create_dir_all(link.parent().expect("a parent")).expect("the parent");
+            fs::create_dir_all(outside.join("finance")).expect("a folder outside");
+            symlink(
+                if linked == ".farik" {
+                    outside.clone()
+                } else {
+                    outside.join("finance")
+                },
+                &link,
+            )
+            .expect("a link out");
+
+            let reason = refusal_of(
+                private_path(&root, finance, "books.xlsx").map(|path| json!(path.to_str())),
+            );
+
+            assert!(
+                reason.starts_with("private_path_refused: "),
+                "{linked}: {reason}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_history_that_is_a_link() {
+        let project = a_finance_project("sheets-history-is-a-link");
+        write(&project, &one_sheet("books.xlsx", &json!([["one", 1]]))).expect("the first write");
+        let outside = project.repo.path.join("outside");
+        fs::create_dir_all(&outside).expect("a folder outside");
+        symlink(&outside, folder(&project).join(".history")).expect("a link out");
+
+        let reason = refusal_of(write(
+            &project,
+            &one_sheet("books.xlsx", &json!([["two", 2]])),
+        ));
+
+        assert!(reason.starts_with("private_path_refused: "), "{reason}");
+        assert_eq!(
+            files_under(&outside),
+            Vec::<String>::new(),
+            "no previous version lands outside the folder"
+        );
+        assert_eq!(
+            cell(
+                &mut open(&folder(&project).join("books.xlsx")),
+                "Books",
+                (1, 0)
+            ),
+            Data::String("one".to_string()),
+            "and the target is as it was"
+        );
     }
 
     #[test]
