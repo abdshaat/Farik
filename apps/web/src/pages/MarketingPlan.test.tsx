@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
 	cleanup,
@@ -193,6 +195,24 @@ describe("marketing plan page", () => {
 		expect(screen.queryByRole("heading", { name: "What I found" })).toBeNull();
 		expect(within(budget).getByText(GOAL)).toBeTruthy();
 		await expectNoAxeViolations(container);
+	});
+
+	it("keeps_the_decision_bar_above_the_phones_tab_bar", () => {
+		// jsdom has no layout, so the rule is read from the style sheets: the shell's narrow layout
+		// says how tall its sticky tab bar is, and the page's own sticky bar rests above it.
+		const css = (file: string) =>
+			readFileSync(join(import.meta.dirname, file), "utf8").replace(
+				/\s+/g,
+				" ",
+			);
+		expect(css("MarketingPlan.module.css")).toMatch(
+			/\.bar \{[^}]*position: sticky;[^}]*bottom: var\(--farik-shell-bar-height, 0\);/,
+		);
+		const shell = css("../shell/Shell.module.css");
+		expect(shell).toMatch(/\.narrow \{[^}]*--farik-shell-bar-height: [^;]+;/);
+		expect(shell).toMatch(
+			/\.bar \{[^}]*height: var\(--farik-shell-bar-height\);/,
+		);
 	});
 
 	it("approve_sends_the_decision", async () => {

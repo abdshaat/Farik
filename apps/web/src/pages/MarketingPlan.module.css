@@ -290,10 +290,11 @@ stays there for a screen reader. */
 	overflow-wrap: anywhere;
 }
 
-/* The decision stays in view as the page scrolls. */
+/* The decision stays in view as the page scrolls: at the bottom of the screen, or, on a phone,
+just above the shell's own bar of places. */
 .bar {
 	position: sticky;
-	bottom: 0;
+	bottom: var(--farik-shell-bar-height, 0);
 	display: grid;
 	gap: var(--farik-space-2);
 	padding: var(--farik-space-3) var(--farik-space-4);

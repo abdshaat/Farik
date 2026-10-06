@@ -16,7 +16,15 @@ content alone fills the window, rather than a rail beside it too wide for a phon
 	}
 }
 
+/* On a phone the places are a sticky bar at the bottom, as tall as it says here, so that a page's
+own sticky bar can rest above it: `bottom: var(--farik-shell-bar-height, 0)`. Its padding twice,
+each place's twice, and one line of text. */
 .narrow {
+	--farik-shell-bar-height: calc(
+		var(--farik-space-2) *
+		4 +
+		var(--farik-type-body-line-height)
+	);
 	display: grid;
 	grid-template-rows: auto 1fr auto;
 	min-height: 100vh;
@@ -187,6 +195,8 @@ It holds the calm green under reduced motion. */
 .bar {
 	position: sticky;
 	bottom: 0;
+	box-sizing: border-box;
+	height: var(--farik-shell-bar-height);
 	background: var(--farik-color-band);
 }
 
