@@ -1237,5 +1237,32 @@ mod tests {
             PostState::Requested,
             "a request is not ended with a plan"
         );
+
+        // A post the owner stopped stays stopped when a `sent` follows, and holds no Buffer id.
+        let taken = kai_wrote(&log, EventKind::SocialPostScheduled, 15, |_| {});
+        then(
+            &log,
+            EventKind::SocialPostStopped,
+            15,
+            json!({ "post": taken, "by": "owner" }),
+        );
+        then(
+            &log,
+            EventKind::SocialPostSent,
+            16,
+            json!({ "post": taken, "buffer_post": "late" }),
+        );
+        let posts = social_posts(&log).expect("the posts fold");
+        let stopped = posts
+            .iter()
+            .find(|post| post.post == taken)
+            .expect("the post");
+        assert_eq!(
+            stopped.state,
+            PostState::Stopped,
+            "a sent does not undo a stop"
+        );
+        assert_eq!(stopped.state_at, at(15));
+        assert_eq!(stopped.buffer_post, None, "a stopped post was never sent");
     }
 }
