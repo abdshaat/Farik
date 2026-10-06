@@ -2,6 +2,8 @@
 //! used only for the servers whose address the table names, so that a token from Farik's app is
 //! never sent to a host the app does not serve.
 
+use std::fmt;
+
 use url::{Host, Url};
 
 /// How a registered app signs a user in.
@@ -25,7 +27,7 @@ pub enum AppFlow {
 }
 
 /// One app Farik has registered with a service.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct RegisteredApp {
     /// What a kept grant names it by.
     pub id: &'static str,
@@ -58,8 +60,71 @@ pub struct RegisteredApp {
     pub settings_url: &'static str,
 }
 
-/// Every app Farik has registered. Empty until the founder registers the first.
-pub static REGISTERED_APPS: &[RegisteredApp] = &[];
+impl fmt::Debug for RegisteredApp {
+    /// Everything but the client secret, which no assertion message or log may print.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RegisteredApp")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("host", &self.host)
+            .field("farik_connector", &self.farik_connector)
+            .field("flow", &self.flow)
+            .field("client_id", &self.client_id)
+            .field("client_secret", &self.client_secret.map(|_| "***"))
+            .field("scopes", &self.scopes)
+            .field("issuer", &self.issuer)
+            .field("token_endpoint", &self.token_endpoint)
+            .field("revocation_endpoint", &self.revocation_endpoint)
+            .field("install_url", &self.install_url)
+            .field("settings_url", &self.settings_url)
+            .finish()
+    }
+}
+
+/// The client secret of Farik's Google app, set when Farik is built (`FARIK_GOOGLE_CLIENT_SECRET`),
+/// by the founder for builds of their own and from a repository secret for release builds. Google's
+/// token endpoint insists on it for a Desktop client in practice, and it protects nothing: it ships
+/// in every binary (ADR 0035's amendments). It is never committed, since GitHub's push protection
+/// blocks a Google OAuth client secret and reports one in a public repository to Google. A build
+/// without it has no Google entry, and signing in with Google there is `sign_in_not_supported`.
+const GOOGLE_CLIENT_SECRET: Option<&str> = option_env!("FARIK_GOOGLE_CLIENT_SECRET");
+
+/// The client id of Farik's Google app, which is public. A placeholder until the founder
+/// registers the app in a Google Cloud project of their own (step 08e's founder's actions); with it
+/// Google refuses a sign-in `invalid_client`, which is what a build with the secret and no real id
+/// should do.
+const GOOGLE_CLIENT_ID: &str = "REGISTER-FARIK-WITH-GOOGLE-AND-PUT-ITS-CLIENT-ID-HERE";
+
+/// Farik's Google app, which signs in for Farik's `google-ads` connector alone (ADR 0042) with
+/// the one scope it needs, `secret` being its client secret.
+const fn google(secret: &'static str) -> RegisteredApp {
+    RegisteredApp {
+        id: "google",
+        name: "Google",
+        host: None,
+        farik_connector: Some("google-ads"),
+        flow: AppFlow::Loopback {
+            authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+        },
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: Some(secret),
+        scopes: &["https://www.googleapis.com/auth/adwords"],
+        issuer: "https://accounts.google.com",
+        token_endpoint: "https://oauth2.googleapis.com/token",
+        // Google's revocation ends every grant of the project for that account, every agent's at
+        // once, so Remove deletes the local grant only and points to Google's settings.
+        revocation_endpoint: None,
+        install_url: None,
+        settings_url: "https://myaccount.google.com/connections",
+    }
+}
+
+/// Every app Farik has registered: Google's, in a build that has its client secret.
+pub static REGISTERED_APPS: &[RegisteredApp] = match GOOGLE_CLIENT_SECRET {
+    Some(secret) => &[google(secret)],
+    None => &[],
+};
 
 /// The app of `apps` that serves the server at `url`, if one does.
 #[must_use]
@@ -238,9 +303,73 @@ mod tests {
         assert!(app_for(&table, "http://10.0.0.1:4000/mcp").is_none());
     }
 
+    /// Until the founder registers Farik's GitHub App (step 03b's Task 7), no entry serves an
+    /// address.
     #[test]
-    fn the_shipped_table_is_empty_until_the_founder_registers() {
-        assert!(REGISTERED_APPS.is_empty());
+    fn the_shipped_table_serves_no_address_yet() {
+        assert!(REGISTERED_APPS.iter().all(|app| app.host.is_none()));
+    }
+
+    #[test]
+    fn google_s_entry_is_for_google_ads_alone() {
+        let google = google("a-secret");
+        assert_eq!(google.id, "google");
+        assert_eq!(google.name, "Google");
+        assert_eq!(google.host, None, "it serves no address");
+        assert_eq!(google.farik_connector, Some("google-ads"));
+        assert_eq!(
+            google.flow,
+            AppFlow::Loopback {
+                authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth"
+            }
+        );
+        assert!(!google.client_id.is_empty());
+        assert_eq!(google.client_secret, Some("a-secret"));
+        assert_eq!(google.scopes, ["https://www.googleapis.com/auth/adwords"]);
+        assert_eq!(google.issuer, "https://accounts.google.com");
+        assert_eq!(google.token_endpoint, "https://oauth2.googleapis.com/token");
+        assert_eq!(
+            google.revocation_endpoint, None,
+            "Google's revocation ends every grant"
+        );
+        assert_eq!(google.install_url, None);
+        assert_eq!(
+            google.settings_url,
+            "https://myaccount.google.com/connections"
+        );
+    }
+
+    /// A build with `FARIK_GOOGLE_CLIENT_SECRET` ships Google's entry with that secret and no other
+    /// entry for a connector of Farik's; a build without it ships none. The secret is never
+    /// printed, so each assertion here says what it checks and prints no value.
+    #[test]
+    fn the_shipped_table_names_google_for_google_ads_only() {
+        let Some(secret) = GOOGLE_CLIENT_SECRET else {
+            assert!(
+                REGISTERED_APPS.is_empty(),
+                "a build without Google's client secret has no Google entry"
+            );
+            return;
+        };
+        assert!(
+            REGISTERED_APPS == [google(secret)],
+            "the table is Google's entry with the build's secret and nothing else"
+        );
+        assert!(
+            REGISTERED_APPS
+                .iter()
+                .filter(|app| app.farik_connector.is_some())
+                .all(|app| app.id == "google" && app.farik_connector == Some("google-ads")),
+            "no other entry has a connector of Farik's"
+        );
+    }
+
+    /// A guard: a failing assertion must not print the secret.
+    #[test]
+    fn a_registered_app_does_not_print_its_secret() {
+        let shown = format!("{:?}", google("the-secret-never-shown"));
+        assert!(!shown.contains("the-secret-never-shown"), "{shown}");
+        assert!(shown.contains("google-ads"), "the rest is shown: {shown}");
     }
 
     #[test]
@@ -283,13 +412,15 @@ mod tests {
         }
     }
 
-    /// A guard: the table holds no entry for a Farik connector until step 08e's Task 6.
+    /// A guard: a build without Google's client secret has no entry for a connector of Farik's.
     #[test]
     fn the_shipped_table_has_no_google_yet() {
-        assert!(
-            REGISTERED_APPS
-                .iter()
-                .all(|app| app.farik_connector.is_none())
-        );
+        if GOOGLE_CLIENT_SECRET.is_none() {
+            assert!(
+                REGISTERED_APPS
+                    .iter()
+                    .all(|app| app.farik_connector.is_none())
+            );
+        }
     }
 }
