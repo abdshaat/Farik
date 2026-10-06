@@ -41,6 +41,9 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
             "Only the Marketing Specialist changes the brand kit and the marketing plans, and this plan lets someone else."
         }
         ReadinessRule::NoFarikPaths => "The plan reaches into Farik's own files.",
+        ReadinessRule::PrivateFolderTask => {
+            "A finance task works only in the private folder: no commands, no tests, no text searched in a workbook, and no parent epic."
+        }
         ReadinessRule::BudgetWithinTeamMax => {
             "The plan costs more than your team allows for one task."
         }
@@ -64,7 +67,7 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 22] = [
+    const EVERY_RULE: [ReadinessRule; 23] = [
         IntentPresent,
         SummaryPresent,
         CriteriaPresent,
@@ -80,6 +83,7 @@ mod tests {
         DocumentPathsOnly,
         MarketingPathsOwned,
         NoFarikPaths,
+        PrivateFolderTask,
         BudgetWithinTeamMax,
         NoParentForEpic,
         ParentInProgress,
@@ -107,6 +111,7 @@ mod tests {
             | DocumentPathsOnly
             | MarketingPathsOwned
             | NoFarikPaths
+            | PrivateFolderTask
             | BudgetWithinTeamMax
             | NoParentForEpic
             | ParentInProgress

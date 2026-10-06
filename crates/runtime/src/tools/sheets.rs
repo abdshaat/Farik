@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use calamine::{Data, Reader as _, Xlsx, XlsxError as ReadError, open_workbook_from_rs};
 use chrono::{DateTime, NaiveDate, Utc};
 use farik_core::contract::Role;
-use farik_core::team::private_folder;
+use farik_core::team::{private_folder, workbook_path_fault};
 use rust_xlsxwriter::utility::{check_sheet_name, row_col_to_cell};
 use rust_xlsxwriter::{ExcelDateTime, Format, Formula, Workbook, XlsxError};
 use schemars::JsonSchema;
@@ -36,11 +36,6 @@ const MOST_CELLS: usize = 100;
 const MOST_TEXT: usize = 32_767;
 /// The most bytes a workbook file is, written or read.
 const MOST_BYTES: usize = 10 * 1024 * 1024;
-/// The most characters of a path, and of one part of it.
-const MOST_PATH: usize = 200;
-const MOST_PART: usize = 100;
-/// The most parts a path has: two folders and the file.
-const MOST_PARTS: usize = 3;
 
 /// `farik_write_sheet`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -128,17 +123,6 @@ fn sheet_refused(detail: impl Into<String>) -> ToolError {
     refused("sheet_refused", detail)
 }
 
-/// Whether `part` is a name a path may have: 1 to 100 characters of letters, digits, spaces, `.`,
-/// `_` and `-`, starting with a letter or a digit, so that `.history` and `..` are not names.
-fn is_a_name(part: &str) -> bool {
-    let mut bytes = part.bytes();
-    part.len() <= MOST_PART
-        && bytes
-            .next()
-            .is_some_and(|first| first.is_ascii_alphanumeric())
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || b" ._-".contains(&byte))
-}
-
 /// Whether `at` is a link itself, which is not followed; `false` when nothing is there.
 fn is_a_link(at: &Path) -> Result<bool, ToolError> {
     match fs::symlink_metadata(at) {
@@ -158,25 +142,10 @@ fn is_a_link(at: &Path) -> Result<bool, ToolError> {
 /// `private_path_refused`, saying which rule.
 pub(crate) fn private_path(root: &Path, folder: &str, path: &str) -> Result<PathBuf, ToolError> {
     let bad = |why: &str| refused("private_path_refused", format!("{path:?} {why}"));
+    if let Some(why) = workbook_path_fault(path) {
+        return Err(bad(&why));
+    }
     let parts: Vec<&str> = path.split('/').collect();
-    if path.is_empty() || path.chars().count() > MOST_PATH || parts.len() > MOST_PARTS {
-        return Err(bad(&format!(
-            "is not a path of 1 to {MOST_PATH} characters and at most {MOST_PARTS} parts"
-        )));
-    }
-    if !parts.iter().all(|part| is_a_name(part)) {
-        return Err(bad(
-            "has a part that is not a name: each part is letters, digits, spaces, `.`, `_` and \
-             `-`, starting with a letter or a digit",
-        ));
-    }
-    if parts
-        .last()
-        .and_then(|last| last.strip_suffix(".xlsx"))
-        .is_none()
-    {
-        return Err(bad("is not a workbook: it ends in `.xlsx`, in lower case"));
-    }
     // From the project root down, through the folder and then the path: no link anywhere.
     let in_the_folder = folder.split('/').count();
     let mut at = root.to_path_buf();

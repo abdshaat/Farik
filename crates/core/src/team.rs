@@ -10,7 +10,9 @@ use jsonschema::Validator;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-use crate::contract::{named, pointer, repeated_ids, with_integers_normalised};
+use crate::contract::{
+    TaskContract, TaskKind, named, pointer, repeated_ids, with_integers_normalised,
+};
 use crate::governor::permissions::{ConnectorTag, PermissionTier, default_tiers};
 use crate::governor::team_rules::TeamRules;
 
@@ -111,6 +113,69 @@ pub fn private_folder(role: Role) -> Option<&'static str> {
         Role::FinanceSpecialist => Some(".farik/local/finance"),
         _ => None,
     }
+}
+
+/// The private folder a task works in (`docs/SPEC.md` 6.6): that of its assignee's role, for a task
+/// and not for an epic, whose `assignee_role` names no one who works in it.
+#[must_use]
+pub fn task_private_folder(contract: &TaskContract) -> Option<&'static str> {
+    (contract.kind == TaskKind::Task)
+        .then(|| private_folder(contract.assignee_role))
+        .flatten()
+}
+
+/// The most characters a path to a workbook in a private folder has.
+const MOST_WORKBOOK_PATH: usize = 200;
+/// The most characters one part of such a path has.
+const MOST_WORKBOOK_PART: usize = 100;
+/// The most parts such a path has: two folders and the file.
+const MOST_WORKBOOK_PARTS: usize = 3;
+
+/// Whether `part` is a name a workbook's path may have: 1 to 100 characters of letters, digits,
+/// spaces, `.`, `_` and `-`, starting with a letter or a digit, so that `.history` and `..` are
+/// not names.
+fn is_a_workbook_name(part: &str) -> bool {
+    let mut bytes = part.bytes();
+    part.len() <= MOST_WORKBOOK_PART
+        && bytes
+            .next()
+            .is_some_and(|first| first.is_ascii_alphanumeric())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || b" ._-".contains(&byte))
+}
+
+/// Why `path` is not the path of a workbook in a private folder (`docs/SPEC.md` 6.6), or `None`
+/// when it is one: 1 to 200 characters in at most 3 parts joined by `/`, each a name (letters,
+/// digits, spaces, `.`, `_` and `-`, starting with a letter or a digit), the last ending in `.xlsx`
+/// in lower case. The path is relative to the folder: a path that starts at the project's root, or
+/// at `.history`, is not one. The file system is not asked; the tools add that no part is a link
+/// and that the path resolves inside the folder.
+#[must_use]
+pub fn workbook_path_fault(path: &str) -> Option<String> {
+    let parts: Vec<&str> = path.split('/').collect();
+    if path.is_empty()
+        || path.chars().count() > MOST_WORKBOOK_PATH
+        || parts.len() > MOST_WORKBOOK_PARTS
+    {
+        return Some(format!(
+            "is not a path of 1 to {MOST_WORKBOOK_PATH} characters and at most \
+             {MOST_WORKBOOK_PARTS} parts"
+        ));
+    }
+    if !parts.iter().all(|part| is_a_workbook_name(part)) {
+        return Some(
+            "has a part that is not a name: each part is letters, digits, spaces, `.`, `_` and \
+             `-`, starting with a letter or a digit"
+                .to_string(),
+        );
+    }
+    if parts
+        .last()
+        .and_then(|last| last.strip_suffix(".xlsx"))
+        .is_none()
+    {
+        return Some("is not a workbook: it ends in `.xlsx`, in lower case".to_string());
+    }
+    None
 }
 
 /// Checks a value against `docs/schemas/team.schema.json` and, when it conforms, returns the typed
@@ -1229,9 +1294,11 @@ mod tests {
         AgentStatus, HumanAcceptsContracts, Integration, JudgeChoice, JudgmentPolicy,
         JudgmentRequired, PermissionTier, PermissionTierWire, Preview, Role, RoleWire,
         SMALL_ENOUGH_QUESTION, Team, TeamPermissions, TeamPolicy, changes_code, defaults,
-        plain_role, private_folder, validate_team,
+        plain_role, private_folder, task_private_folder, validate_team, workbook_path_fault,
     };
     use super::{CustomServer, CustomTransport, canonical_json, custom_server, spec_sha256};
+    use crate::contract::fixtures::a_contract_wire;
+    use crate::contract::validate_contract;
     use crate::governor::permissions::ConnectorTag;
     use crate::governor::team_rules::{
         DEFAULT_DOCUMENT_PATHS, DEFAULT_PROTECTED_PATHS, DEFAULT_UI_PATHS, TeamRules,
@@ -2206,6 +2273,76 @@ mod tests {
         ] {
             assert_eq!(private_folder(role), None, "{role}");
         }
+    }
+
+    #[test]
+    fn names_what_is_wrong_with_a_workbook_path() {
+        for path in [
+            "books.xlsx",
+            "2026/pricing.xlsx",
+            "a b/c-d_e.f.xlsx",
+            "Q1.2026/books.xlsx",
+        ] {
+            assert_eq!(workbook_path_fault(path), None, "{path}");
+        }
+        let long = format!("{}/{}.xlsx", "a".repeat(99), "b".repeat(95));
+        assert_eq!(long.chars().count(), 200);
+        assert_eq!(
+            workbook_path_fault(&long),
+            None,
+            "200 characters is the most"
+        );
+        let too_long = format!("{}/{}.xlsx", "a".repeat(99), "b".repeat(96));
+        let part_too_long = format!("{}.xlsx", "a".repeat(100));
+        for (path, said) in [
+            (
+                "",
+                "is not a path of 1 to 200 characters and at most 3 parts",
+            ),
+            (
+                &too_long,
+                "is not a path of 1 to 200 characters and at most 3 parts",
+            ),
+            (
+                "a/b/c/d.xlsx",
+                "is not a path of 1 to 200 characters and at most 3 parts",
+            ),
+            ("../books.xlsx", "has a part that is not a name"),
+            ("/tmp/x.xlsx", "has a part that is not a name"),
+            (".history/x.xlsx", "has a part that is not a name"),
+            (
+                ".farik/local/finance/books.xlsx",
+                "is not a path of 1 to 200 characters and at most 3 parts",
+            ),
+            (".farik/books.xlsx", "has a part that is not a name"),
+            ("a//b.xlsx", "has a part that is not a name"),
+            (&part_too_long, "has a part that is not a name"),
+            (
+                "x.xlsm",
+                "is not a workbook: it ends in `.xlsx`, in lower case",
+            ),
+            (
+                "x.XLSX",
+                "is not a workbook: it ends in `.xlsx`, in lower case",
+            ),
+            (
+                "books",
+                "is not a workbook: it ends in `.xlsx`, in lower case",
+            ),
+        ] {
+            let fault = workbook_path_fault(path).unwrap_or_default();
+            assert!(fault.starts_with(said), "{path:?}: {fault}");
+        }
+    }
+
+    #[test]
+    fn finds_the_folder_of_a_task_not_of_an_epic() {
+        let mut contract = validate_contract(&a_contract_wire()).expect("a contract");
+        assert_eq!(task_private_folder(&contract), None);
+        contract.assignee_role = Role::FinanceSpecialist;
+        assert_eq!(task_private_folder(&contract), Some(".farik/local/finance"));
+        contract.kind = crate::contract::TaskKind::Epic;
+        assert_eq!(task_private_folder(&contract), None);
     }
 
     #[test]
