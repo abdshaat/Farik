@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
 	act,
@@ -1168,6 +1170,35 @@ describe("signing in to a service", () => {
 		expect(params.attempt).toBeUndefined();
 		expect(params.server.oauth).toBeUndefined();
 		expect(s.calls("connector.sign_in")).toHaveLength(1);
+	});
+
+	it("connector_add_keeps_the_boards_width_and_a_phone_footer_order", async () => {
+		const { s, dialog, asked } = await askedToSignIn(GITHUB_ADDRESS);
+		await s.reply(asked, GITHUB_OFFER);
+		await within(dialog).findByRole("button", {
+			name: "Sign in with GitHub",
+		});
+		// The boards draw this dialog 760 px wide from the first state to the last, so it does not
+		// grow when the code card appears.
+		expect(dialog.hasAttribute("data-wide")).toBe(true);
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Sign in with GitHub" }),
+		);
+		await within(dialog).findByText("WDJB-MJHT");
+		expect(dialog.hasAttribute("data-wide")).toBe(true);
+		// On a phone the sign-in's footer puts Cancel above Next, each the full width, as board 3
+		// draws; jsdom lays nothing out, so the rule is read from the source.
+		const footer = within(dialog)
+			.getByRole("button", { name: "Cancel" })
+			.closest("div") as HTMLElement;
+		expect(footer.className).toContain("signInActions");
+		const css = readFileSync(
+			join(import.meta.dirname, "pages.module.css"),
+			"utf8",
+		);
+		const phone = css.slice(css.indexOf(".signInActions"));
+		expect(phone).toContain("flex-direction: column-reverse");
+		expect(phone).toMatch(/\.signInActions\s*>\s*button\s*{[^}]*width:\s*100%/);
 	});
 
 	it("connector_add_ends_the_sign_in_when_cancelled", async () => {

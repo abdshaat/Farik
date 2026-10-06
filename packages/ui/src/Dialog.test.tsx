@@ -124,4 +124,30 @@ describe("Dialog", () => {
 		expect(phone).toContain("height: 100dvh");
 		expect(phone).toContain(".dialog[data-fills-phone] .body");
 	});
+
+	it("keeps a wide width of its own, whatever it holds, only when it asks to", async () => {
+		const { container, rerender } = render(
+			<Dialog open title="Add" onClose={() => {}}>
+				<p>Short</p>
+			</Dialog>,
+		);
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.hasAttribute("data-wide")).toBe(false);
+		rerender(
+			<Dialog open wide title="Add" onClose={() => {}}>
+				<p>Short</p>
+			</Dialog>,
+		);
+		expect(dialog.hasAttribute("data-wide")).toBe(true);
+		await expectNoAxeViolations(container);
+		// jsdom lays nothing out, so the rule that the attribute selects is read from the source:
+		// a width, not a maximum that the content decides under.
+		const css = readFileSync(
+			join(import.meta.dirname, "Dialog.module.css"),
+			"utf8",
+		);
+		const wide = css.slice(css.indexOf(".dialog[data-wide]"));
+		expect(wide).toMatch(/width:\s*min\(760px,/);
+		expect(wide).toContain("box-sizing: border-box");
+	});
 });

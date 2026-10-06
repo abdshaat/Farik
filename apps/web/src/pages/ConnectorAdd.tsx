@@ -366,6 +366,9 @@ export function ConnectorAdd({
 	};
 	const urlHost = hostOf(url.trim());
 	const signedIn = http && sign.kind === "signedIn";
+	/** The service's sign-in is on the page, as the boards draw it, with their footer on a phone. */
+	const signing =
+		http && ["offered", "waiting", "signedIn", "failed"].includes(sign.kind);
 	const ready =
 		server.trim() &&
 		(http ? url.trim() : command.trim()) &&
@@ -601,7 +604,7 @@ export function ConnectorAdd({
 		setKeys(keys.map((old, j) => (j === i ? { ...old, ...k } : old)));
 
 	return (
-		<Dialog open title={title} onClose={leave}>
+		<Dialog open wide title={title} onClose={leave}>
 			<Stepper
 				steps={[t("addStepStart"), t("addStepLabel"), t("addStepDone")]}
 				current={step}
@@ -915,7 +918,9 @@ export function ConnectorAdd({
 							{refused.other}
 						</p>
 					)}
-					<div className={styles.actions}>
+					<div
+						className={`${styles.actions} ${signing ? styles.signInActions : ""}`}
+					>
 						{(showsKeys || sign.kind === "signedIn") && (
 							<Button
 								kind="primary"

@@ -9,6 +9,7 @@ export function Dialog({
 	children,
 	actions,
 	fillsPhone,
+	wide,
 }: {
 	open: boolean;
 	title: string;
@@ -17,6 +18,8 @@ export function Dialog({
 	actions?: ReactNode;
 	/** At 480px and below, fill the screen and pin `actions` at the bottom. */
 	fillsPhone?: boolean;
+	/** A width of its own, 760 px where the screen has the room, whatever the dialog holds, so it does not grow as its states change. */
+	wide?: boolean;
 }) {
 	const ref = useRef<HTMLDialogElement>(null);
 	const titleId = useId();
@@ -43,6 +46,7 @@ export function Dialog({
 			className={styles.dialog}
 			aria-labelledby={titleId}
 			data-fills-phone={fillsPhone ? "" : undefined}
+			data-wide={wide ? "" : undefined}
 			// The browser can close a modal itself (a form, a close request);
 			// tell the parent so its state does not drift.
 			onClose={() => open && onClose()}

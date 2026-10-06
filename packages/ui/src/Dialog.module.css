@@ -10,6 +10,16 @@
 		var(--farik-type-body-line-height) var(--farik-type-body-family);
 }
 
+/* A dialog the boards draw at a fixed width keeps it, so that it does not grow as its content
+   does. On a phone it is as wide as any other dialog, which is how the phone boards draw it. */
+@media (min-width: 40rem) {
+	.dialog[data-wide] {
+		box-sizing: border-box;
+		width: min(760px, calc(100vw - 2 * var(--farik-space-4)));
+		max-width: none;
+	}
+}
+
 .dialog::backdrop {
 	background: color-mix(in srgb, var(--farik-color-ink) 40%, transparent);
 }

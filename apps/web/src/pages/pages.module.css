@@ -176,6 +176,19 @@
 	gap: var(--farik-space-3);
 }
 
+/* Where a sign-in shows, a phone's footer puts Cancel above Next, each the full width (phase 7
+   step 03b, board 3); the buttons come Next first, which a larger screen keeps. */
+@media (max-width: 40rem) {
+	.signInActions {
+		flex-direction: column-reverse;
+		align-items: stretch;
+	}
+
+	.signInActions > button {
+		width: 100%;
+	}
+}
+
 .field {
 	display: grid;
 	gap: var(--farik-space-1);
