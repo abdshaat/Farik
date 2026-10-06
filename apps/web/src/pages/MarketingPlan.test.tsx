@@ -590,7 +590,7 @@ describe("a plan's posts", () => {
 			"Missed the team was paused",
 		);
 		expect(slot("Meet the bakers").textContent).toContain(
-			"Missed Farik was not running",
+			"Missed Farik could not hand it to Buffer before its time.",
 		);
 		expect(slot("A rainy week ahead").textContent).toContain(
 			"Going out today at 18:00",

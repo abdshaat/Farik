@@ -1849,7 +1849,7 @@ export const en = {
 	planSlotAt: "at {time}",
 	planSlotOn: "on {day}",
 	planSlotWhenEnded: "when the plan ended",
-	planSlotNotRunning: "Farik was not running",
+	planSlotNotRunning: "Farik could not hand it to Buffer before its time.",
 	planSlotPaused: "the team was paused",
 	planSlotFailedBefore: "An earlier post for this day failed at {time}.",
 	marketingEndNotSent: "Its {n} posts not yet sent will not go out.",
