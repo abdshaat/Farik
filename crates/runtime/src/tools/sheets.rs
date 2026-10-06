@@ -1341,6 +1341,14 @@ mod tests {
         chat_of_the_task.purpose = SessionPurpose::Chat;
         let mut verifying = project.context("fin", Some("FRK-1"));
         verifying.purpose = SessionPurpose::Verify;
+        // The Marketing Specialist is the assignee of FRK-4, so only its role keeps it out.
+        project.filed("FRK-4", "assigned", "task", None);
+        project.moved(
+            "FRK-4",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "kai", "reviewer": "pm" }),
+        );
         for (who, context) in [
             ("a chat", chat),
             ("a chat about the task", chat_of_the_task),
@@ -1356,6 +1364,10 @@ mod tests {
             (
                 "the Marketing Specialist",
                 project.context("kai", Some("FRK-1")),
+            ),
+            (
+                "the Marketing Specialist in its own task",
+                project.context("kai", Some("FRK-4")),
             ),
             ("the Product Manager", project.context("pm", Some("FRK-1"))),
         ] {
