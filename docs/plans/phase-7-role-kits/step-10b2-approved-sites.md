@@ -5,6 +5,7 @@ Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 5.6, 5.7, 6.10, 8.2, 8.5, 8.6; F9
 Depends on: step 10b of this phase (the role, `Role::ProcurementSpecialist`, its folder `crates/roles/roles/procurement_specialist/` and tools; `TOOLS` with 30 read-tier entries and `daemon/mcp.rs`'s count at 37, which this step's numbers assume); step 08c (a task waiting for the owner: `open_plans`, migration 0013, `human_message`'s owner decisions, `farik_request_transition`'s refusal while a plan waits); step 05 (the kit loader, `load_kit`, the pattern for a shipped file held to its schema); step 02 (decisions only on `POST /command` and the browser's RPC, `decide_tool_call`'s one lock, `waiting.list` rows); phase 6 step 12 (the preview's `url` check, `check_urls` in `crates/core/src/governor/permissions.rs`); phase 6 (merged in #19)
 Readiness confirmed by: not yet
+Mockups approved by: the founder, 2026-10-07, as drawn ("Approved, We will improve the Ui/ UX later"): `docs/design/mockups/TodaySiteRequest.dc.html`, `PhoneSiteRequest.dc.html`, `AgentSites.dc.html`, `PhoneAgentSites.dc.html`
 Decided by the founder, 2026-10-07, in conversation (step 10b's readiness review): asked whether to accept and record that the agent reads untrusted sellers' pages while `network` lets it fetch any address, "or restrict its web access (it may only browse addresses you approve)?", the founder answered "Restrict its web access". ADR 0039 is amended the same day.
 Decided by the founder, 2026-10-07, in conversation (this plan's O1 to O3): how long an approval lasts, "Until you remove it"; whether the owner may add a site the agent never asked for, "We will compile a list of approved websites prior to launch and add it as farik approved websites. The user may add more if he chooses to"; whether the role starts with any site allowed, "Choose trusted shops across different products categories." ADR 0039's amendment records them.
 
@@ -116,7 +117,7 @@ A test after Task 2 that needs one of Farik's sites takes it from `farik_sites()
 
 Files: `TodaySiteRequest.dc.html`, `PhoneSiteRequest.dc.html` (Today's gate: two requests of one task, one an `xn--` name, each with "Allow" and "Don't allow" and the line naming Farik's approved sites; the dialog of each, one with a note), `AgentSites.dc.html`, `PhoneAgentSites.dc.html` (the Procurement Specialist's page, "Sites it may read": Farik's approved sites by category, two categories open, one shop turned off; "Sites you allowed" with three sites, Remove and its question, "Add a site" with a page's address pasted and the site it keeps), `canvas.json`. The founder approves them before Task 8; the approval, with its date and canvas version, is written into this plan's Execution notes in the same commit.
 
-- [ ] `docs(design): mock up asking for a site and the approved sites`
+- [x] `docs(design): mock up asking for a site and the approved sites`
 
 ### Task 1: What a site is
 

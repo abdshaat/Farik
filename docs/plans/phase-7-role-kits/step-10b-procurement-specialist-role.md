@@ -5,6 +5,7 @@ Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 1, 5.3, 5.4, 5.6, 6.6, 6.10, 8.5, 8.6; F1
 Depends on: step 10 of this phase, its Tasks 1 to 5 committed (089cc4a..07933e1) and its landing review run (lands after fixes; the fixes in progress); steps 09, 09b and 09c (the folder's rules keyed by `private_folder(role)`, `farik_read_sheet`, `farik_write_sheet`); steps 05 to 07b (kits); phase 6 (merged in #19)
 Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-07 (one round, ADR 0032): not ready, 5 Blocking and the Should items, all folded below with the founder's answers; no second round
+Mockups approved by: the founder, 2026-10-07, as drawn ("Approved, We will improve the Ui/ UX later"): `docs/design/mockups/SetupTeamMoreRoles.dc.html`, `PhoneSetupTeamMoreRoles.dc.html`
 Decided by the founder, 2026-10-07, in conversation: (1) the agent reads untrusted sellers' pages while holding quotes, and `network` lets it fetch any address, so a page could steer it to send them out ("Restrict its web access"): it may fetch only the sites the owner approved, which step 10b2 builds before the role is used (ADR 0039, amended 2026-10-07); (2) it is not offered `farik_read_costs` ("No"): the team's AI costs stay the Finance Specialist's.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). The role is split in seven: this step is the role and its folder; 10b2 the approved sites; 10c purchase orders and renewals; 10d its kit; 10e data pipeline requests; 10f contacting sellers; 10g Farik's `recalls` and `ebay` servers. Line numbers are at 07933e1; step 10's fixes may move them, so the names are what count.
@@ -79,7 +80,7 @@ pub(super) fn write_evaluation(call: &Call<'_>, input: &WriteEvaluationInput) ->
 
 Files: `SetupTeamMoreRoles.dc.html`, `PhoneSetupTeamMoreRoles.dc.html`, `canvas.json`: setup's team step with the "More roles" list, the Finance Specialist and the Procurement Specialist unticked, each with its picture, name and job line, on desk and phone; then the Procurement Specialist ticked, a saved team that holds one, the start from scratch, and both ticked with the six, refused on "Continue". The founder's approval, with its date and canvas version, is written into this plan's Execution notes in the same commit.
 
-- [ ] `docs(design): mock up the Procurement Specialist in the team builder`
+- [x] `docs(design): mock up the Procurement Specialist in the team builder`
 
 ### Task 1: The role exists
 
