@@ -9,6 +9,7 @@ use farik_core::governor::permissions::{
     AgentGrants, ApprovalKey, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext,
     ToolCallRequest, ToolDescriptor, evaluate_connector_call, evaluate_tool_call, input_sha256,
 };
+use farik_core::governor::sites::{WebAccess, check_site_urls, site_of};
 use farik_core::marketing::active_plan;
 use farik_core::team::{AgentStatus, Team};
 use farik_protocol::event::{
@@ -23,8 +24,10 @@ use serde_json::{Value, json};
 
 use super::{DaemonError, DaemonState, SessionRegistration};
 use crate::allowances::allowance_period;
+use crate::session::SessionPurpose;
 use crate::tools::design::design_plan_gate;
 use crate::tools::refusal::Refusal;
+use crate::tools::sites::{approved_set, shown};
 use crate::tools::{ToolDeps, ToolError, paths_of, tool_descriptors};
 
 /// What Claude Code sends a hook on its standard input, the fields Farik reads.
@@ -86,6 +89,9 @@ const RECORD_LIMIT_BYTES: usize = 4_096;
 const CUT_MARKER: &str = "[cut at 4 KiB]";
 /// Claude Code's tool for loading a skill.
 const SKILL_TOOL: &str = "Skill";
+/// Claude Code's tool for reading a page, which a session held to approved sites may point only at
+/// one.
+const FETCH_TOOL: &str = "WebFetch";
 /// The prefix Claude Code gives the tools of Farik's own MCP server.
 const FARIK_PREFIX: &str = "mcp__farik__";
 /// The largest integer a JSON number holds exactly, and the schema's ceiling for one.
@@ -117,8 +123,9 @@ pub fn builtin_tool_tier(tool: &str) -> Option<PermissionTier> {
 /// `Skill` call that is not `farik:<name>` of one of the session's skills (`skill_not_in_session`); a
 /// tool that is neither Farik's nor a built-in with a tier (`tool_not_allowed`); a Farik tool the
 /// session was not given (`tool_not_in_session`); a built-in's path
-/// outside the session's worktree (`path_outside_workspace`); and whatever `evaluate_tool_call`
-/// refuses. A decision the log cannot record is a deny (`record_failed`). Only an allowed call
+/// outside the session's worktree (`path_outside_workspace`); whatever `evaluate_tool_call`
+/// refuses; and, for a session held to approved sites, a `WebFetch` of any other site
+/// (`site_not_approved`). A decision the log cannot record is a deny (`record_failed`). Only an allowed call
 /// counts towards the limit, and the count is checked and raised under one lock, because Claude
 /// Code runs read tools in parallel.
 #[must_use]
@@ -364,7 +371,74 @@ fn judge_call(
         },
     )
     .map_err(|refusal| Refusal::Tool(refusal).reason())?;
-    plan_gate(deps, team, registration, tier)
+    plan_gate(deps, team, registration, tier)?;
+    // A held session's page read, after its tier: Claude Code's own direct fetch follows a
+    // redirect only to the same site, so what it reads next is judged again (spec 8.6).
+    if registration.web == WebAccess::ApprovedSites && request.tool_name == FETCH_TOOL {
+        judge_fetch(&request.tool_input, registration, deps)?;
+    }
+    Ok(())
+}
+
+/// How a session held to approved sites is told to get another: in the implement session of a
+/// task, the one that can wait for the owner, it asks with `farik_request_sites`; no other can.
+fn how_to_ask(registration: &SessionRegistration) -> &'static str {
+    if registration.purpose == SessionPurpose::Implement && registration.task_id.is_some() {
+        "ask with farik_request_sites, then end your turn"
+    } else {
+        "you can ask for it only while working on a task"
+    }
+}
+
+/// The sites a held session may read now, from the log at this call: Farik's, and the owner's.
+/// A log that cannot be read denies.
+fn approved_now(deps: &ToolDeps) -> Result<BTreeSet<String>, String> {
+    approved_set(&deps.log).map_err(|error| format!("sites_unreadable: {error}"))
+}
+
+/// A held session's `WebFetch`: its `url` must be a string on an approved site.
+fn judge_fetch(
+    input: &Value,
+    registration: &SessionRegistration,
+    deps: &ToolDeps,
+) -> Result<(), String> {
+    let approved = approved_now(deps)?;
+    let address = input.get("url");
+    match address
+        .and_then(Value::as_str)
+        .map(|text| (text, site_of(text)))
+    {
+        Some((_, Ok(site))) if approved.contains(&site) => Ok(()),
+        Some((_, Ok(site))) => Err(format!(
+            "site_not_approved: {site} is not a site the owner allowed; {}",
+            how_to_ask(registration)
+        )),
+        Some((text, Err(_))) => Err(format!(
+            "site_not_approved: {} is not an https address on a named site",
+            shown(text)
+        )),
+        None => Err(format!(
+            "site_not_approved: {} is not an https address on a named site",
+            address.map_or_else(|| "no url".to_string(), |value| shown(&value.to_string()))
+        )),
+    }
+}
+
+/// A held session's connector call: every field named `url` or `urls` must name an approved site,
+/// whatever the connector, its tool and its tag.
+fn judge_sites_of_call(
+    input: &Value,
+    registration: &SessionRegistration,
+    deps: &ToolDeps,
+) -> Result<(), String> {
+    let approved = approved_now(deps)?;
+    check_site_urls(input, &approved).map_err(|refusal| {
+        format!(
+            "site_not_approved: {} is not on a site the owner allowed; {}",
+            shown(&refusal.address),
+            how_to_ask(registration)
+        )
+    })
 }
 
 /// Whether a `Skill` call names one of the session's skills as `farik:<name>` and holds nothing
@@ -477,7 +551,9 @@ fn connector_of(
 
 /// Whether a connector's call may go ahead, and the grant or allowance it uses, by
 /// `evaluate_connector_call` (5.6): no tier is asked, and `preauthorized_external_tools` is never
-/// consulted. An `external_effect` call meets the Designer's plan gate first, then the human's open
+/// consulted. A session held to approved sites has its call's `url` and `urls` fields judged
+/// against the approved sites first (`site_not_approved`, or `sites_unreadable` when the log cannot
+/// be read), before the connector or the tool is looked at (6.10, 8.6). An `external_effect` call meets the Designer's plan gate first, then the human's open
 /// grant for it is looked up, then, with none, the agent's calls of the tool this period are
 /// counted against its allowance; with neither, it asks (ADR 0031, ADR 0037). The caller holds the
 /// sessions lock, so the count and the call it allows are one step.
@@ -491,6 +567,11 @@ fn judge_connector(
     let Some((server, tool)) = connector_tool(&request.tool_name) else {
         return Err(Denial::from(not_allowed(&request.tool_name)));
     };
+    // A held session's addresses come first, whatever else would refuse the call, so that a call
+    // naming a site that is not approved asks for nothing and uses no grant or allowance.
+    if registration.web == WebAccess::ApprovedSites {
+        judge_sites_of_call(&request.tool_input, registration, deps).map_err(Denial::from)?;
+    }
     let connector = registration
         .connectors
         .iter()
@@ -1419,6 +1500,7 @@ mod tests {
         std::fs::write(plugin.join(".claude-plugin/plugin.json"), "{}").expect("a file");
         daemon.state.register_session(SessionRegistration {
             session_id: session.to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             purpose,
@@ -1556,6 +1638,7 @@ mod tests {
         std::fs::write(daemon.worktree.join("x"), "another task's").expect("written");
         daemon.state.register_session(SessionRegistration {
             session_id: "session-folder".to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("FRK-2".parse().expect("a task id")),
             purpose: crate::session::SessionPurpose::Implement,
@@ -1650,6 +1733,7 @@ mod tests {
         std::fs::write(finance.join("books.xlsx"), "books").expect("written");
         daemon.state.register_session(SessionRegistration {
             session_id: "session-procurement".to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("FRK-2".parse().expect("a task id")),
             purpose: crate::session::SessionPurpose::Implement,
@@ -1815,6 +1899,7 @@ mod tests {
         let definition = farik_roles::builtin_connector("playwright").expect("shipped");
         daemon.state.register_session(SessionRegistration {
             session_id: "session-browser".to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("FRK-1".parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
@@ -1955,6 +2040,7 @@ mod tests {
 
         daemon.state.register_session(SessionRegistration {
             session_id: session.to_string(),
+            web: daemon.web_of(agent),
             agent_id: agent.to_string(),
             task_id: Some(task.parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
@@ -2361,6 +2447,7 @@ mod tests {
 
         daemon.state.register_session(SessionRegistration {
             session_id: session.to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "kai".to_string(),
             task_id: Some("FRK-1".parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
@@ -3166,5 +3253,456 @@ mod tests {
             serde_json::to_value(&allow).expect("serialises"),
             shape("allow", "allowed")
         );
+    }
+
+    /// The fixture's team with the Procurement Specialist `proc` and the Marketing Specialist
+    /// `kai` as well, written to the project.
+    fn with_buyers(name: &str) -> TestDaemon {
+        use crate::tools::fixtures::{
+            with_the_marketing_specialist, with_the_procurement_specialist,
+        };
+
+        let daemon = TestDaemon::new(name, |_| {});
+        let team = a_team_of_three(|wire| {
+            with_the_procurement_specialist(wire);
+            with_the_marketing_specialist(wire);
+        });
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&team)
+            .expect("the team is written");
+        daemon
+    }
+
+    /// `session` of `agent`, on FRK-1 or on no task, registered as a session of `purpose`.
+    fn browsing(
+        daemon: &TestDaemon,
+        session: &str,
+        agent: &str,
+        task: Option<&str>,
+        purpose: crate::session::SessionPurpose,
+    ) {
+        daemon.register(session, agent, task, DEFAULT_SESSION_LIMITS);
+        daemon
+            .state
+            .sessions()
+            .get_mut(session)
+            .expect("registered")
+            .registration
+            .purpose = purpose;
+    }
+
+    /// `session`'s `WebFetch` of `address`.
+    fn fetch(daemon: &TestDaemon, session: &str, address: &str) -> HookDecision {
+        decide_pre_tool_use(
+            &daemon.call(
+                session,
+                "WebFetch",
+                &json!({ "url": address, "prompt": "Read the prices." }),
+            ),
+            &daemon.state,
+        )
+    }
+
+    /// One of Farik's own hosts, from the shipped list, so that the launch review edits the YAML
+    /// alone.
+    fn a_farik_host() -> String {
+        farik_roles::sites::farik_sites()[0].host.clone()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_farik_site_is_open_from_the_start() {
+        use crate::session::SessionPurpose::Implement;
+
+        let daemon = with_buyers("hook-sites-farik");
+        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        let farik = a_farik_host();
+
+        for address in [
+            format!("https://www.{farik}/"),
+            format!("https://{farik}/x?y=1"),
+        ] {
+            let allowed = fetch(&daemon, "session-proc", &address);
+            assert!(allowed.allow, "{address}: {allowed:?}");
+        }
+        denied_for(
+            &fetch(&daemon, "session-proc", "https://shop.example/"),
+            "site_not_approved",
+        );
+        assert!(
+            daemon.events(EventKind::SiteApproved).is_empty(),
+            "no site event was needed"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn procurement_fetches_only_approved_sites() {
+        use crate::session::SessionPurpose::Implement;
+
+        let daemon = with_buyers("hook-sites-approved");
+        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        daemon
+            .project
+            .record("", "site.approved", &json!({ "host": "shop.example" }));
+
+        for address in ["https://www.shop.example/prices", "https://shop.example/"] {
+            let allowed = fetch(&daemon, "session-proc", address);
+            assert!(allowed.allow, "{address}: {allowed:?}");
+        }
+        let other = fetch(&daemon, "session-proc", "https://other.example/");
+        denied_for(&other, "site_not_approved");
+        assert!(
+            other
+                .reason
+                .contains("other.example is not a site the owner allowed")
+                && other
+                    .reason
+                    .ends_with("ask with farik_request_sites, then end your turn"),
+            "{other:?}"
+        );
+        assert_eq!(
+            daemon.state.stop_reason("session-proc"),
+            None,
+            "the session goes on"
+        );
+        // What is not exactly the site is not the site.
+        for address in [
+            "http://shop.example/",
+            "https://shop.example:8443/",
+            "https://user:pass@shop.example/",
+            "https://sub.shop.example/",
+            "https://shop.example.evil.net/",
+            "https://evilshop.example/",
+            "https://127.0.0.1/",
+            "shop.example",
+            "",
+        ] {
+            let denied = fetch(&daemon, "session-proc", address);
+            denied_for(&denied, "site_not_approved");
+        }
+        let unnamed = fetch(&daemon, "session-proc", "http://a.com/");
+        assert!(
+            unnamed
+                .reason
+                .contains("http://a.com/ is not an https address on a named site"),
+            "{unnamed:?}"
+        );
+        for input in [json!({ "prompt": "no address" }), json!({ "url": 7 })] {
+            let decision = decide_pre_tool_use(
+                &daemon.call("session-proc", "WebFetch", &input),
+                &daemon.state,
+            );
+            denied_for(&decision, "site_not_approved");
+        }
+        // An agent's own event approves nothing.
+        daemon.project.record_by(
+            Some("proc"),
+            at(),
+            "FRK-1",
+            "site.approved",
+            &json!({ "host": "agent.example" }),
+        );
+        denied_for(
+            &fetch(&daemon, "session-proc", "https://agent.example/"),
+            "site_not_approved",
+        );
+        // A removal takes effect at the next call.
+        daemon
+            .project
+            .record("", "site.removed", &json!({ "host": "shop.example" }));
+        denied_for(
+            &fetch(&daemon, "session-proc", "https://shop.example/prices"),
+            "site_not_approved",
+        );
+        // So does turning off one of Farik's, and turning it on again.
+        let farik = a_farik_host();
+        assert!(fetch(&daemon, "session-proc", &format!("https://{farik}/")).allow);
+        daemon
+            .project
+            .record("", "site.removed", &json!({ "host": farik }));
+        denied_for(
+            &fetch(&daemon, "session-proc", &format!("https://{farik}/")),
+            "site_not_approved",
+        );
+        daemon
+            .project
+            .record("", "site.approved", &json!({ "host": farik }));
+        assert!(fetch(&daemon, "session-proc", &format!("https://{farik}/")).allow);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_conversation_is_held_too() {
+        use crate::session::SessionPurpose::{Conversation, Implement};
+
+        let daemon = with_buyers("hook-sites-conversation");
+        // A mention in the channel: a conversation about no task, which holds `network`.
+        browsing(&daemon, "session-chat", "proc", None, Conversation);
+        let denied = fetch(&daemon, "session-chat", "https://shop.example/");
+        denied_for(&denied, "site_not_approved");
+        assert!(
+            denied
+                .reason
+                .ends_with("you can ask for it only while working on a task"),
+            "{denied:?}"
+        );
+        assert!(
+            fetch(
+                &daemon,
+                "session-chat",
+                &format!("https://{}/", a_farik_host())
+            )
+            .allow
+        );
+        // An implement session about no task cannot wait for the owner either.
+        browsing(&daemon, "session-no-task", "proc", None, Implement);
+        assert!(
+            fetch(&daemon, "session-no-task", "https://shop.example/")
+                .reason
+                .ends_with("you can ask for it only while working on a task")
+        );
+        // A conversation about a task is not the session that can wait for the owner.
+        browsing(
+            &daemon,
+            "session-about",
+            "proc",
+            Some("FRK-1"),
+            Conversation,
+        );
+        assert!(
+            fetch(&daemon, "session-about", "https://shop.example/")
+                .reason
+                .ends_with("you can ask for it only while working on a task")
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn other_roles_fetch_as_before() {
+        use crate::session::SessionPurpose::Implement;
+
+        // A guard: the Marketing Specialist holds `network` and no list of sites.
+        let daemon = with_buyers("hook-sites-others");
+        browsing(&daemon, "session-kai", "kai", Some("FRK-1"), Implement);
+        for address in [
+            "https://shop.example/",
+            "https://anything.example/a?b=c",
+            "http://x.example/",
+        ] {
+            let allowed = fetch(&daemon, "session-kai", address);
+            assert!(allowed.allow, "{address}: {allowed:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn procurement_searches_freely() {
+        use crate::session::SessionPurpose::Implement;
+
+        // A guard: a search reaches the one service Claude Code uses, whatever the list holds.
+        let daemon = with_buyers("hook-sites-search");
+        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        let search = decide_pre_tool_use(
+            &daemon.call(
+                "session-proc",
+                "WebSearch",
+                &json!({ "query": "corrugated shipping boxes 12x9x6" }),
+            ),
+            &daemon.state,
+        );
+        assert!(search.allow, "{search:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_site_request_is_not_held_to_the_sites() {
+        use crate::session::SessionPurpose::Implement;
+
+        // A guard: `farik_request_sites` names the addresses it asks about, which are not yet
+        // approved, and a Farik tool is no connector.
+        let daemon = with_buyers("hook-sites-request");
+        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        let asked = decide_pre_tool_use(
+            &daemon.call(
+                "session-proc",
+                "mcp__farik__farik_request_sites",
+                &json!({ "sites": [{ "url": "https://new.example/", "why": "A maker." }] }),
+            ),
+            &daemon.state,
+        );
+        assert!(asked.allow, "{asked:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_connector_s_addresses_are_held_too() {
+        let daemon = with_buyers("hook-sites-connector");
+        let farik = a_farik_host();
+        let approved = format!("https://www.{farik}/boxes");
+        // A user's server given to the Procurement Specialist, and the same to a Developer.
+        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        registering(&daemon, "session-dev", "dev-a", "FRK-1", None, &[]);
+        let call = |session: &str, tool: &str, input: &Value| {
+            decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
+        };
+        let search = "mcp__github__search_issues";
+
+        denied_for(
+            &call(
+                "session-proc",
+                search,
+                &json!({ "url": "https://other.example/" }),
+            ),
+            "site_not_approved",
+        );
+        for input in [
+            json!({ "url": approved }),
+            json!({ "urls": [approved, format!("https://{farik}/")] }),
+            json!({ "q": "no address at all" }),
+            json!({ "deep": [{ "url": approved }] }),
+        ] {
+            let allowed = call("session-proc", search, &input);
+            assert!(allowed.allow, "{input}: {allowed:?}");
+        }
+        for input in [
+            json!({ "urls": [approved, "https://other.example/"] }),
+            json!({ "deep": [{ "url": "https://other.example/" }] }),
+            json!({ "url": 7 }),
+            json!({ "urls": "https://other.example/" }),
+        ] {
+            denied_for(&call("session-proc", search, &input), "site_not_approved");
+        }
+        let developers = call(
+            "session-dev",
+            search,
+            &json!({ "url": "https://other.example/" }),
+        );
+        assert!(
+            developers.allow,
+            "the same call of a Developer's: {developers:?}"
+        );
+
+        // A connector the session was not given, with an address that is not approved, is refused
+        // for the address first.
+        let not_given = call(
+            "session-proc",
+            "mcp__nowhere__fetch",
+            &json!({ "url": "https://other.example/" }),
+        );
+        denied_for(&not_given, "site_not_approved");
+        let given_nothing = call(
+            "session-proc",
+            "mcp__nowhere__fetch",
+            &json!({ "url": approved }),
+        );
+        denied_for(&given_nothing, "connector_not_in_session");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_external_call_to_an_unapproved_address_asks_for_nothing() {
+        let daemon = with_buyers("hook-sites-external");
+        let farik = a_farik_host();
+        let approved = format!("https://www.{farik}/boxes");
+        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        let call = |session: &str, tool: &str, input: &Value| {
+            decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
+        };
+
+        // An `external_effect` call to an address that is not approved is refused, not asked
+        // about, whether a grant matches it or an allowance remains.
+        let input = json!({ "title": "x", "url": "https://other.example/" });
+        let refused = call("session-proc", "mcp__github__create_issue", &input);
+        denied_for(&refused, "site_not_approved");
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+        // A grant for exactly this input, given by the owner to a session of the same agent that
+        // was not held, and a session of the held role that starts after it.
+        daemon.register(
+            "session-open",
+            "proc",
+            Some("FRK-1"),
+            DEFAULT_SESSION_LIMITS,
+        );
+        daemon
+            .state
+            .sessions()
+            .get_mut("session-open")
+            .expect("registered")
+            .registration
+            .web = farik_core::governor::sites::WebAccess::Open;
+        registering(&daemon, "session-asking", "proc", "FRK-1", None, &[]);
+        daemon
+            .state
+            .sessions()
+            .get_mut("session-asking")
+            .expect("registered")
+            .registration
+            .web = farik_core::governor::sites::WebAccess::Open;
+        let approval = asked(&daemon, "session-asking", &input);
+        grant(&daemon, approval);
+        registering(&daemon, "session-held", "proc", "FRK-1", Some(5), &[]);
+        let still_refused = call("session-held", "mcp__github__create_issue", &input);
+        denied_for(&still_refused, "site_not_approved");
+        assert_eq!(
+            daemon.events(EventKind::ToolApprovalRequested).len(),
+            1,
+            "nothing was asked for the refused call"
+        );
+        assert!(
+            daemon
+                .events(EventKind::ToolCalled)
+                .iter()
+                .all(|event| matches!(&event.body, EventBody::ToolCalled(body) if body.approval.is_none() && body.allowance.is_none())),
+            "no grant and no allowance was used"
+        );
+        // The same call to an approved address uses its allowance, which the refused one did not.
+        let allowed = call(
+            "session-held",
+            "mcp__github__create_issue",
+            &json!({ "title": "x", "url": approved }),
+        );
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(ran_inside(&daemon), Some(5));
+        let ran: Vec<_> = daemon
+            .events(EventKind::ToolCalled)
+            .into_iter()
+            .filter(|event| matches!(&event.body, EventBody::ToolCalled(body) if body.tool == "mcp__github__create_issue"))
+            .collect();
+        assert_eq!(ran.len(), 1, "only the call that ran was counted");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_log_that_cannot_be_read_denies() {
+        let daemon = with_buyers("hook-sites-unreadable");
+        let broken = daemon.with_a_log_that_cannot_be_read();
+        let deps = broken.deps().expect("a project");
+        let sessions = broken.sessions();
+        let session = sessions.get("session-proc").expect("registered");
+        for (tool, input) in [
+            (
+                "WebFetch",
+                json!({ "url": format!("https://{}/", a_farik_host()), "prompt": "read" }),
+            ),
+            (
+                "mcp__github__search_issues",
+                json!({ "url": format!("https://{}/", a_farik_host()) }),
+            ),
+        ] {
+            let request = daemon.call("session-proc", tool, &input);
+            let verdict = super::judge(&request, &session.registration, 0, deps, &broken);
+            let Err(denial) = verdict else {
+                panic!("{tool} is allowed while the sites cannot be read");
+            };
+            assert!(
+                denial.reason.starts_with("sites_unreadable: "),
+                "{tool}: {}",
+                denial.reason
+            );
+        }
     }
 }

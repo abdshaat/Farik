@@ -560,6 +560,7 @@ mod tests {
             .expect("the Designer joins");
         daemon.state.register_session(SessionRegistration {
             session_id: "session-iris".to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "iris".to_string(),
             task_id: Some("FRK-1".parse().expect("a task id")),
             cwd: daemon.worktree.clone(),

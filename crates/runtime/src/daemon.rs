@@ -20,6 +20,7 @@ use axum::{Extension, Json, Router};
 use farik_core::budget::SessionLimits;
 use farik_core::contract::TaskId;
 use farik_core::governor::permissions::{PermissionTier, SessionConnector};
+use farik_core::governor::sites::WebAccess;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio::net::TcpListener;
@@ -106,6 +107,10 @@ pub struct SessionRegistration {
     pub session_id: String,
     /// The agent the session is.
     pub agent_id: String,
+    /// How far the session's web reading reaches (5.6, 6.10): fixed when the session starts, from
+    /// its agent's role, as its connectors are. A session held to approved sites may `WebFetch`
+    /// and send a connector's `url` and `urls` only to a site the owner allowed or Farik ships.
+    pub web: WebAccess,
     /// The task it works on, when it works on one.
     pub task_id: Option<TaskId>,
     /// Why it runs, which decides what kind of message it posts.
@@ -1744,6 +1749,7 @@ mod tests {
         let executor: Arc<dyn Executor> = Arc::new(HostSandbox::new(daemon.worktree.clone()));
         daemon.state.register_session(SessionRegistration {
             session_id: "s-exec".to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("FRK-1".parse().expect("a task id")),
             cwd: daemon.worktree.clone(),
@@ -1967,6 +1973,7 @@ mod tests {
         for id in ["s-2", "s-1"] {
             state.register_session(SessionRegistration {
                 session_id: id.to_string(),
+                web: farik_core::governor::sites::WebAccess::Open,
                 agent_id: "dev-a".to_string(),
                 task_id: None,
                 cwd: daemon.worktree.clone(),
@@ -2198,6 +2205,7 @@ mod tests {
         daemon.state.set_connector_secrets(through(store));
         daemon.state.register_session(SessionRegistration {
             session_id: "session-custom".to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             purpose: SessionPurpose::Implement,
@@ -2546,6 +2554,7 @@ mod tests {
         daemon.state.set_connector_secrets(store);
         daemon.state.register_session(SessionRegistration {
             session_id: "session-signed".to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             purpose: SessionPurpose::Implement,

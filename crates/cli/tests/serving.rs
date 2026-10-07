@@ -511,6 +511,7 @@ fn told_at_listen<T: Send + 'static>(
                 // then is what a page asked first would be told.
                 daemon.register_session(SessionRegistration {
                     session_id: "probe".to_string(),
+                    web: farik_core::governor::sites::WebAccess::Open,
                     agent_id: "probe".to_string(),
                     task_id: None,
                     purpose: SessionPurpose::Triage,

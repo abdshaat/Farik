@@ -7874,6 +7874,59 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_a_procurement_session_held_to_approved_sites() {
+        // The registration's `web` is the agent's role, whatever the session's purpose: the hook
+        // judges a `WebFetch` of the role's implement session by the list, and a Developer's
+        // session, given `network`, by nothing.
+        let harness = Harness::with_procurement("orch-procurement-held");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let farik = farik_roles::sites::farik_sites()[0].host.clone();
+        let probe = Arc::new(HookProbe {
+            inner: harness.recorded(vec![reads_a_file()]),
+            daemon: Arc::clone(&harness.daemon),
+            calls: vec![
+                (
+                    "WebFetch",
+                    json!({ "url": "https://shop.example/", "prompt": "read" }),
+                ),
+                (
+                    "WebFetch",
+                    json!({ "url": format!("https://www.{farik}/"), "prompt": "read" }),
+                ),
+                ("WebSearch", json!({ "query": "corrugated boxes" })),
+            ],
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+
+        harness
+            .orchestrator(probe.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let seen = probe
+            .seen
+            .lock()
+            .expect("no test panics holding it")
+            .clone();
+        assert_eq!(seen.len(), 1, "one implement session: {seen:?}");
+        let verdicts: Vec<(&str, &str)> = seen[0]
+            .0
+            .iter()
+            .map(|(tool, verdict)| (tool.as_str(), verdict.as_str()))
+            .collect();
+        assert_eq!(
+            verdicts,
+            [
+                ("WebFetch", "site_not_approved"),
+                ("WebFetch", "allow"),
+                ("WebSearch", "allow"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn answers_through_the_recorded_transcript() {
         let harness = Harness::new("orch-chat-transcript", |_| {});
         let asked = chatted(
@@ -8057,6 +8110,7 @@ mod tests {
         let session_id = format!("session-{agent}-{purpose:?}");
         harness.daemon.register_session(SessionRegistration {
             session_id: session_id.clone(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: agent.to_string(),
             task_id: None,
             purpose,

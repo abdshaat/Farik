@@ -75,8 +75,8 @@ pub(crate) fn approved_set(log: &EventLog) -> Result<BTreeSet<String>, StoreErro
     approved_sites(log, &farik_hosts())
 }
 
-/// An address cut for an answer.
-fn shown(url: &str) -> String {
+/// An address cut for an answer or a refusal, so that what an agent wrote never fills the log.
+pub(crate) fn shown(url: &str) -> String {
     if url.chars().count() > SHOWN_URL {
         format!("{}...", url.chars().take(SHOWN_URL).collect::<String>())
     } else {

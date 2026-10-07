@@ -2679,6 +2679,7 @@ mod tests {
                 .daemon
                 .register_session(crate::daemon::SessionRegistration {
                     session_id: session.to_string(),
+                    web: farik_core::governor::sites::WebAccess::Open,
                     agent_id: agent.to_string(),
                     task_id: None,
                     purpose,

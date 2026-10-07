@@ -156,6 +156,7 @@ pub(super) async fn run_session(
     let (skills, skills_root) = skill_registration(deps, &spec);
     deps.daemon.register_session(SessionRegistration {
         session_id: spec.session_id.clone(),
+        web: web_access(role),
         agent_id: spec.agent_id.clone(),
         task_id: spec.task_id.clone(),
         purpose: ask.purpose,
