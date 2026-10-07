@@ -466,7 +466,9 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
     let mut answering: JoinSet<Value> = JoinSet::new();
     loop {
         tokio::select! {
-            // The daemon's close is heard first, and then the answers ready before new frames.
+            // A closing daemon is heard before anything else, so that no frame is taken on after
+            // it; and an answer that is ready goes out before the next frame is read, so that a
+            // page that sends fast is not answered behind its own frames.
             biased;
             () = cancel.cancelled() => {
                 // The answers under way are sent before the close, as one answered in turn was:
@@ -493,8 +495,8 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
                     Some(Ok(Message::Close(_)) | Err(_)) | None => return,
                     Some(Ok(_)) => continue,
                 };
-                let (id, subscription) = read_frame(text.as_str());
-                if subscription {
+                let (id, is_subscription) = read_frame(text.as_str());
+                if is_subscription {
                     let answer = answer(&state, text.as_str(), &mut sent).await;
                     if socket.send(Message::Text(answer.to_string().into())).await.is_err() {
                         return;
@@ -2634,6 +2636,107 @@ mod tests {
         }
         let note = next(&mut socket).await;
         assert_eq!(note["params"]["event"]["seq"], newest, "{note}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn streams_nothing_between_an_unsubscribe_and_the_next_subscribe() {
+        let daemon = TestDaemon::new("rpc-unsubscribed", |_| {});
+        let log = &daemon.project.deps.log;
+        let newest = paused_through(log);
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        let answer = call(&mut socket, 1, "subscribe", &json!({ "from_seq": newest })).await;
+        assert_eq!(answer["result"], json!({}), "{answer}");
+        let answer = call(&mut socket, 2, "unsubscribe", &json!({})).await;
+        assert_eq!(answer["result"], json!({}), "{answer}");
+        let missed = paused_through(log);
+        let status = json!({ "jsonrpc": "2.0", "id": 3, "method": "query",
+            "params": { "name": "serve.status", "params": {} } });
+        send_text(&mut socket, status.to_string()).await;
+        let again = json!({ "jsonrpc": "2.0", "id": 4, "method": "subscribe",
+            "params": { "from_seq": missed } });
+        send_text(&mut socket, again.to_string()).await;
+        let streamed = paused_through(log);
+
+        // The event appended while unsubscribed is never sent: the first one is past the new
+        // subscription's `from_seq`, whenever it comes beside the two answers.
+        let (mut answered, mut first) = (Vec::new(), None);
+        while answered.len() < 2 || first.is_none() {
+            let frame = next(&mut socket).await;
+            if frame["method"] == "event" {
+                first.get_or_insert(frame["params"]["event"]["seq"].clone());
+            } else {
+                answered.push(frame["id"].clone());
+            }
+        }
+        answered.sort_by_key(Value::as_u64);
+        assert_eq!(answered, [json!(3), json!(4)]);
+        assert_eq!(first, Some(json!(streamed)));
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::await_holding_lock,
+        reason = "the team's lock is held across the socket's close so that the save waits on it"
+    )]
+    async fn carries_out_a_request_whose_socket_closes_before_its_answer() {
+        let daemon = TestDaemon::new("rpc-carried-out", |_| {});
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+        let team = serde_json::to_value(
+            daemon
+                .project
+                .deps
+                .files
+                .read_team()
+                .expect("the team is read"),
+        )
+        .expect("the team is JSON");
+
+        // `team.save` waits on the team's lock, held here, and wakes the driver once it has saved.
+        let writing = daemon.state.team_writes();
+        let save = json!({ "jsonrpc": "2.0", "id": 1, "method": "team.save",
+            "params": { "team": team } });
+        send_text(&mut socket, save.to_string()).await;
+        socket.close(None).await.expect("the close is sent");
+        let closed = tokio::time::timeout(BOUND, async {
+            while let Some(Ok(_)) = socket.next().await {}
+        })
+        .await;
+        assert!(closed.is_ok(), "the daemon kept the socket");
+        let woken = daemon.state.wakes().notified();
+        drop(writing);
+        tokio::time::timeout(BOUND, woken)
+            .await
+            .expect("the save ran to its end after its socket closed");
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_request_whose_answer_panics_with_an_internal_error() {
+        let daemon = TestDaemon::new("rpc-panics", |_| {});
+        let fails: super::super::CommandHandler =
+            Arc::new(|_| panic!("a command handler that panics"));
+        assert!(daemon.state.set_command_handler(fails));
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        let pause = json!({ "command": { "command": "team_pause", "body": {} } });
+        let answer = call(&mut socket, 1, "command", &pause).await;
+        assert_eq!(answer["id"], 1, "{answer}");
+        assert_eq!(answer["error"]["code"], super::INTERNAL_ERROR, "{answer}");
+        // The socket still answers.
+        let status = json!({ "name": "serve.status", "params": {} });
+        let answer = call(&mut socket, 2, "query", &status).await;
+        assert!(answer.get("result").is_some(), "{answer}");
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
     }
