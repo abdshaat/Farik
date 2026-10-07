@@ -829,18 +829,14 @@ fn apply_waiting(
             (id, seq),
         ),
         // A site the owner added unasked answers no request, so it lowers nothing.
-        EventBody::SiteApproved(body) if body.request.is_some() => update(
-            transaction,
-            "UPDATE task_projections SET open_sites = max(0, open_sites - 1), updated_seq = ?2
-             WHERE task_id = ?1",
-            (id, seq),
-        ),
-        EventBody::SiteDeclined(_) => update(
-            transaction,
-            "UPDATE task_projections SET open_sites = max(0, open_sites - 1), updated_seq = ?2
-             WHERE task_id = ?1",
-            (id, seq),
-        ),
+        EventBody::SiteApproved(body) | EventBody::SiteDeclined(body) if body.request.is_some() => {
+            update(
+                transaction,
+                "UPDATE task_projections SET open_sites = max(0, open_sites - 1), updated_seq = ?2
+                 WHERE task_id = ?1",
+                (id, seq),
+            )
+        }
         EventBody::EscalationRaised(body) => {
             // The two reasons of the `ContractRequiresHuman` gate: the contract waits on an
             // approval the process asks for by design, which is no intervention (F17). Any other

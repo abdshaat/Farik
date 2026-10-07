@@ -9,6 +9,14 @@ use farik_protocol::event::{EventBody, EventKind, FarikEvent};
 
 use crate::{EventLog, EventQuery, StoreError};
 
+/// What the owner said in a decision, when they said anything.
+fn note_of(body: &farik_protocol::event::SiteDecisionBody) -> Option<String> {
+    body.note
+        .as_ref()
+        .map(|note| note.as_str().to_string())
+        .filter(|note| !note.is_empty())
+}
+
 /// Whether `event` was recorded by the owner: its envelope names no agent and no session, since
 /// only the owner decides which sites the team may read.
 fn is_the_owners(event: &FarikEvent) -> bool {
@@ -51,8 +59,11 @@ pub fn approved_sites(
 /// What the owner decided about a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SiteDecision {
-    /// The owner allowed the site.
-    Allowed,
+    /// The owner allowed the site, with their own words when they said any.
+    Allowed {
+        /// What the owner said, when they said anything.
+        note: Option<String>,
+    },
     /// The owner did not allow it, with their own words when they said any.
     Declined {
         /// What the owner said, when they said anything.
@@ -124,16 +135,26 @@ pub fn site_requests(log: &EventLog) -> Result<Vec<SiteRequest>, StoreError> {
             }
             EventBody::SiteApproved(body) if is_the_owners(event) => {
                 if let Some(request) = body.request {
-                    decide(&mut requests, request.get(), SiteDecision::Allowed);
+                    decide(
+                        &mut requests,
+                        request.get(),
+                        SiteDecision::Allowed {
+                            note: note_of(body),
+                        },
+                    );
                 }
             }
-            EventBody::SiteDeclined(body) if is_the_owners(event) => decide(
-                &mut requests,
-                body.request.get(),
-                SiteDecision::Declined {
-                    note: Some(body.note.to_string()).filter(|note| !note.is_empty()),
-                },
-            ),
+            EventBody::SiteDeclined(body) if is_the_owners(event) => {
+                if let Some(request) = body.request {
+                    decide(
+                        &mut requests,
+                        request.get(),
+                        SiteDecision::Declined {
+                            note: note_of(body),
+                        },
+                    );
+                }
+            }
             _ => {}
         }
     }
@@ -168,7 +189,7 @@ pub fn declined_sites(log: &EventLog, task: &TaskId) -> Result<Vec<DeclinedSite>
                 declined.retain(|site| site.host != body.host.as_str());
                 declined.push(DeclinedSite {
                     host: body.host.to_string(),
-                    note: Some(body.note.to_string()).filter(|note| !note.is_empty()),
+                    note: note_of(body),
                 });
             }
             EventBody::SiteApproved(body) => {

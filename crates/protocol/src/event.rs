@@ -49,8 +49,8 @@ pub use crate::generated::event::{
 };
 /// The channel's vocabularies, named for what they are rather than for the body they sit in.
 pub use crate::generated::event::{MessagePostedBodyKind as MessageKind, Thread};
-/// The bodies of the four `site.` kinds: an approval and a removal share one.
-pub use crate::generated::event::{SiteDeclinedBody, SiteHostBody, SiteRequestedBody};
+/// The bodies of the four `site.` kinds: an approval, a decline and a removal share one.
+pub use crate::generated::event::{SiteDecisionBody, SiteRequestedBody};
 /// The bodies of the six `social_post.` kinds, with the vocabularies they repeat.
 pub use crate::generated::event::{
     SocialPostChannel, SocialPostDetails, SocialPostFailedBody, SocialPostMedia,
@@ -187,8 +187,9 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::SocialPostFailed => "socialPostFailedBody",
         EventKind::MarketingCampaignCreated => "marketingCampaignCreatedBody",
         EventKind::SiteRequested => "siteRequestedBody",
-        EventKind::SiteApproved | EventKind::SiteRemoved => "siteHostBody",
-        EventKind::SiteDeclined => "siteDeclinedBody",
+        EventKind::SiteApproved | EventKind::SiteDeclined | EventKind::SiteRemoved => {
+            "siteDecisionBody"
+        }
     }
 }
 
@@ -681,13 +682,13 @@ pub enum EventBody {
     SiteRequested(SiteRequestedBody),
     /// The owner allowed a site, for a request or unasked.
     #[serde(rename = "site.approved")]
-    SiteApproved(SiteHostBody),
+    SiteApproved(SiteDecisionBody),
     /// The owner did not allow a site an agent asked for.
     #[serde(rename = "site.declined")]
-    SiteDeclined(SiteDeclinedBody),
+    SiteDeclined(SiteDecisionBody),
     /// The owner took a site away: one they allowed, or one of Farik's.
     #[serde(rename = "site.removed")]
-    SiteRemoved(SiteHostBody),
+    SiteRemoved(SiteDecisionBody),
 }
 
 impl EventBody {
@@ -903,6 +904,12 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
             message: format!("a {} event does not carry this body: {error}", wire.kind),
         }]
     })?;
+    if let Some(fault) = site_fault(&body) {
+        return Err(vec![ValidationError {
+            path: "/body".to_string(),
+            message: format!("a {} event does not carry this body: {fault}", wire.kind),
+        }]);
+    }
     if let Some((field, actor)) = attribution(&mut body) {
         let named = actor.trim();
         if named.is_empty() {
@@ -916,6 +923,24 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
         *actor = named.to_string();
     }
     Ok(FarikEvent { envelope, body })
+}
+
+/// What is wrong with a `site.` event's body for its kind, which the schema cannot say because the
+/// three kinds that decide a site share one shape: a decline names the request it declines, a
+/// removal names its host and nothing else, and the owner's note goes with a request.
+fn site_fault(body: &EventBody) -> Option<&'static str> {
+    match body {
+        EventBody::SiteDeclined(body) if body.request.is_none() => {
+            Some("a decline names the request it declines")
+        }
+        EventBody::SiteRemoved(body) if body.request.is_some() || body.note.is_some() => {
+            Some("a removal names its host alone")
+        }
+        EventBody::SiteApproved(body) if body.note.is_some() && body.request.is_none() => {
+            Some("a note goes with the request it answers")
+        }
+        _ => None,
+    }
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
@@ -1114,8 +1139,13 @@ mod tests {
                         EventKind::DesignPlanReturned,
                         EventKind::PreviewStopped,
                     ],
-                    // `{ "host": ... }` alone is both an added site and a removed one.
-                    &[EventKind::SiteApproved, EventKind::SiteRemoved],
+                    // `{ "host": ... }` alone is an added site and a removed one, and an
+                    // approval and a decline of a request have the same fields.
+                    &[
+                        EventKind::SiteApproved,
+                        EventKind::SiteDeclined,
+                        EventKind::SiteRemoved,
+                    ],
                 ];
                 if other == kind
                     || shared
@@ -1774,13 +1804,8 @@ mod tests {
             wire["body"] = body;
             wire
         };
-        // A decline always carries its note, empty when the owner said nothing: `{ request, host }`
-        // alone is also an approval's body, and the schema's choice of bodies must match exactly one.
+        // What the schema refuses, at a path under the body.
         for (kind, body) in [
-            (
-                EventKind::SiteDeclined,
-                json!({ "request": 7, "host": "shop.example" }),
-            ),
             (
                 EventKind::SiteDeclined,
                 json!({ "request": 7, "host": "shop.example", "note": "x".repeat(601) }),
@@ -1809,16 +1834,73 @@ mod tests {
                 "{kind} {body}: {errors:?}"
             );
         }
+        // What the three kinds that share a body each refuse of it: a decline names its request,
+        // a removal names its host alone, and a note goes with a request.
+        for (kind, body) in [
+            (EventKind::SiteDeclined, json!({ "host": "shop.example" })),
+            (
+                EventKind::SiteDeclined,
+                json!({ "host": "shop.example", "note": "No." }),
+            ),
+            (
+                EventKind::SiteRemoved,
+                json!({ "host": "shop.example", "request": 7 }),
+            ),
+            (
+                EventKind::SiteRemoved,
+                json!({ "host": "shop.example", "note": "No." }),
+            ),
+            (
+                EventKind::SiteApproved,
+                json!({ "host": "shop.example", "note": "Go on." }),
+            ),
+        ] {
+            let errors = refusal(&wire(kind, body.clone()));
+            assert_eq!(errors.len(), 1, "{kind} {body}");
+            assert_eq!(errors[0].path, "/body", "{kind} {body}");
+            assert!(
+                errors[0]
+                    .message
+                    .starts_with(&format!("a {kind} event does not carry this body")),
+                "{}",
+                errors[0].message
+            );
+        }
+        // What they read.
+        for (kind, body) in [
+            (
+                EventKind::SiteDeclined,
+                json!({ "request": 7, "host": "shop.example" }),
+            ),
+            (
+                EventKind::SiteDeclined,
+                json!({ "request": 7, "host": "shop.example", "note": "No." }),
+            ),
+            (EventKind::SiteApproved, json!({ "host": "shop.example" })),
+            (
+                EventKind::SiteApproved,
+                json!({ "host": "shop.example", "request": 7, "note": "Go on." }),
+            ),
+            (EventKind::SiteRemoved, json!({ "host": "shop.example" })),
+        ] {
+            let input = wire(kind, body.clone());
+            let event = event_from_value(&input)
+                .unwrap_or_else(|errors| panic!("{kind} {body}: {errors:?}"));
+            assert_eq!(event_to_value(&event), input, "{kind} {body}");
+        }
         let declined = event_from_value(&wire(
             EventKind::SiteDeclined,
-            json!({ "request": 7, "host": "shop.example", "note": "" }),
+            json!({ "request": 7, "host": "shop.example", "note": "No." }),
         ))
-        .expect("a decline with no words");
+        .expect("a decline with words");
         let EventBody::SiteDeclined(body) = declined.body else {
             panic!("a site.declined event carries a site.declined body");
         };
-        assert_eq!(body.request.get(), 7);
-        assert_eq!(body.note.to_string(), "");
+        assert_eq!(body.request.map(std::num::NonZeroU64::get), Some(7));
+        assert_eq!(
+            body.note.map(|note| note.to_string()).as_deref(),
+            Some("No.")
+        );
     }
 
     #[test]

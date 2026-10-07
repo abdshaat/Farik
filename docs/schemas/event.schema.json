@@ -206,8 +206,7 @@
         { "$ref": "#/$defs/socialPostFailedBody" },
         { "$ref": "#/$defs/marketingCampaignCreatedBody" },
         { "$ref": "#/$defs/siteRequestedBody" },
-        { "$ref": "#/$defs/siteHostBody" },
-        { "$ref": "#/$defs/siteDeclinedBody" }
+        { "$ref": "#/$defs/siteDecisionBody" }
       ]
     },
     "contractSummary": {
@@ -1232,26 +1231,15 @@
         "why": { "type": "string", "minLength": 1, "maxLength": 300, "pattern": "^[^\\r\\n]+$" }
       }
     },
-    "siteHostBody": {
-      "title": "Site Host Body",
-      "description": "The owner allowed a site (site.approved) or took one away (site.removed) (docs/SPEC.md 6.10; ADR 0039): host is the site in its ASCII form. An approval that answers a request names it in request, the sequence number of its site.requested, and is on that request's task; one the owner added unasked names none and no task. A removal names no request and no task, whether the site was an owner's own or one of Farik's. Both bodies are `{ host }` alone when nothing else applies, so they share one shape. The envelope names no agent and no session: only the owner decides.",
+    "siteDecisionBody": {
+      "title": "Site Decision Body",
+      "description": "What the owner decided about a site (docs/SPEC.md 6.10; ADR 0039), the body of site.approved, site.declined and site.removed: host is the site in its ASCII form; request, the sequence number of a site.requested, is on an approval that answers a request and on every decline, whose task is on the envelope too; note is the owner's own words, which the task's next session reads as the owner's. A site the owner added unasked is a site.approved of its host alone, with no task; a removal, of one the owner allowed or of one of Farik's, names its host alone, with no task. The three kinds share one shape since `{ host }`, `{ host, request }` and `{ request, host, note }` fit more than one of them, and the schema's choice of bodies must match exactly one; the reader holds each kind to its own: site.declined names its request, site.removed names its host alone, and a note goes with a request. The envelope names no agent and no session: only the owner decides.",
       "type": "object",
       "additionalProperties": false,
       "required": ["host"],
       "properties": {
         "host": { "type": "string", "minLength": 1, "maxLength": 253 },
-        "request": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
-      }
-    },
-    "siteDeclinedBody": {
-      "title": "Site Declined Body",
-      "description": "The owner did not allow a site an agent asked for (docs/SPEC.md 6.10; ADR 0039): request is the sequence number of its site.requested, whose task is on this event's envelope too, host the site, and note the owner's own words, empty when they said nothing. note is always present, so that this body is never also a valid site.approved body, which has the same two fields without it. The envelope names no agent and no session: only the owner decides.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["request", "host", "note"],
-      "properties": {
         "request": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
-        "host": { "type": "string", "minLength": 1, "maxLength": 253 },
         "note": { "type": "string", "maxLength": 600 }
       }
     },

@@ -172,7 +172,11 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "url": "https://www.shop.example/boxes?size=12x9x6",
             "why": "It sells the corrugated boxes the task asks about."
         }),
-        EventKind::SiteApproved => json!({ "host": "shop.example", "request": 7 }),
+        EventKind::SiteApproved => json!({
+            "host": "shop.example",
+            "request": 7,
+            "note": "Go on, and keep the quotes."
+        }),
         EventKind::SiteDeclined => json!({
             "request": 7,
             "host": "shop.example",
