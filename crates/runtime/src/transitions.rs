@@ -1913,20 +1913,24 @@ mod tests {
         })
     }
 
+    /// `wire` made a Finance Specialist's task in its folder, reviewed by the Product Manager and
+    /// ended by its books.
+    fn as_a_finance_task(wire: &mut Value) {
+        wire["assignee_role"] = json!("finance_specialist");
+        wire["reviewer_role"] = json!("product_manager");
+        wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+        wire["exit_criteria"] = json!([{
+            "id": "C1",
+            "text": "The books exist.",
+            "satisfies": ["R1"],
+            "verification": { "method": "artifact", "path": "books.xlsx" }
+        }]);
+    }
+
     /// Files `task` as a Finance Specialist's task in its folder, reviewed by the Product Manager,
     /// `ready`; and, when `held` names a status, assigned to `fin-1` and moved on to it.
     fn a_finance_task(project: &Project, task: &str, held: Option<&str>) {
-        project.file(task, |wire| {
-            wire["assignee_role"] = json!("finance_specialist");
-            wire["reviewer_role"] = json!("product_manager");
-            wire["allowed_paths"] = json!([".farik/local/finance/**"]);
-            wire["exit_criteria"] = json!([{
-                "id": "C1",
-                "text": "The books exist.",
-                "satisfies": ["R1"],
-                "verification": { "method": "artifact", "path": "books.xlsx" }
-            }]);
-        });
+        project.file(task, as_a_finance_task);
         project.created(task, "ready");
         let Some(held) = held else { return };
         let people = json!({ "assignee": "fin-1", "reviewer": "maya" });
@@ -3936,6 +3940,57 @@ mod tests {
             ),
             TransitionOutcome::Moved(_)
         ));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn holds_a_finance_tasks_changes_to_its_allowed_paths() {
+        // The folder's changes are the Definition of Done's diff (5.4): a task allowed the books
+        // alone is refused acceptance for a forecast it added, and accepted for the books.
+        let project = Project::new("folder-allowed", a_finance_team(), at(12));
+        a_finance_task(&project, "FRK-1", Some("in_progress"));
+        project.file("FRK-1", |wire| {
+            as_a_finance_task(wire);
+            wire["allowed_paths"] = json!([".farik/local/finance/books.xlsx"]);
+        });
+        let folder = project.repo.path.join(".farik/local/finance");
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
+        std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "fin-1");
+        note(&project, "FRK-1", "review", "maya");
+        project.moved(
+            "FRK-1",
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "fin-1", "reviewer": "maya" }),
+            at(11),
+        );
+
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+
+        let TransitionOutcome::Refused(refusal) = outcome else {
+            panic!("a forecast outside the allowed paths: {outcome:?}");
+        };
+        let details = super::refusal_details(&refusal);
+        assert!(
+            details.iter().any(|detail| detail.contains(
+                "the diff changes .farik/local/finance/forecast.xlsx outside the contract's \
+                 allowed paths .farik/local/finance/books.xlsx"
+            )),
+            "{details:?}"
+        );
+        // Without the forecast, the books alone are within what it may change.
+        std::fs::remove_file(folder.join("forecast.xlsx")).expect("removed");
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
     }
 
     #[test]
