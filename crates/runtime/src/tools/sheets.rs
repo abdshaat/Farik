@@ -486,13 +486,17 @@ fn history_name(relative: &Path) -> String {
         .replace('/', "%2F")
 }
 
-/// Copies the workbook at `path` to `.history/<name>.<UTC yyyymmddThhmmssZ>.xlsx`, `<name>` being
-/// its path in the folder as [`history_name`] writes it, with `-<n>` before the extension when that
-/// name is taken.
+/// Copies the file at `path` to `.history/<name>.<UTC yyyymmddThhmmssZ>.<extension>`, `<name>`
+/// being its path in the folder as [`history_name`] writes it and `<extension>` its own (`xlsx` for
+/// a workbook, `md` for a note), with `-<n>` before the extension when that name is taken.
 fn keep_previous(folder: &Path, path: &Path, now: DateTime<Utc>) -> Result<(), ToolError> {
     let relative = path
         .strip_prefix(folder)
         .map_err(|_| failed(format!("{} is not in {}", path.display(), folder.display())))?;
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .ok_or_else(|| failed(format!("{} has no extension to keep", path.display())))?;
     let flat = history_name(relative);
     let stamp = now.format("%Y%m%dT%H%M%SZ");
     let history = folder.join(".history");
@@ -509,9 +513,9 @@ fn keep_previous(folder: &Path, path: &Path, now: DateTime<Utc>) -> Result<(), T
     let mut previous = File::open(path).map_err(failed)?;
     for attempt in 0..1_000 {
         let name = if attempt == 0 {
-            format!("{flat}.{stamp}.xlsx")
+            format!("{flat}.{stamp}.{extension}")
         } else {
-            format!("{flat}.{stamp}-{attempt}.xlsx")
+            format!("{flat}.{stamp}-{attempt}.{extension}")
         };
         match create_private(&history.join(name)) {
             Ok(mut copy) => {
@@ -561,6 +565,31 @@ pub(crate) fn write_workbook(
             ),
         ));
     }
+    let replaced = store_file(folder, path, &bytes, now)?;
+    Ok(WrittenWorkbook {
+        sheets: sheets
+            .iter()
+            .map(|sheet| (sheet.name.clone(), sheet.rows.len()))
+            .collect(),
+        replaced,
+    })
+}
+
+/// Stores `bytes` at `path`, a path in `folder` that [`private_path`] passed, and answers whether a
+/// file was there already. The folders above `path` are made private when they are not there. A
+/// file that is there is copied under `.history/` first. The new file is written beside the target
+/// and renamed over it, so that a reader never sees half a file.
+///
+/// # Errors
+///
+/// `private_path_refused` for a target that is not a file; `Failed` when a folder or a file cannot
+/// be written. Nothing is written for a refusal.
+pub(super) fn store_file(
+    folder: &Path,
+    path: &Path,
+    bytes: &[u8],
+    now: DateTime<Utc>,
+) -> Result<bool, ToolError> {
     let replaced = match fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => true,
         Ok(_) => {
@@ -585,7 +614,7 @@ pub(crate) fn write_workbook(
     let written = (|| {
         let _ = fs::remove_file(&temporary);
         let mut file = create_private(&temporary)?;
-        file.write_all(&bytes)?;
+        file.write_all(bytes)?;
         file.sync_all()?;
         fs::rename(&temporary, path)
     })();
@@ -593,13 +622,7 @@ pub(crate) fn write_workbook(
         let _ = fs::remove_file(&temporary);
         return Err(failed(error));
     }
-    Ok(WrittenWorkbook {
-        sheets: sheets
-            .iter()
-            .map(|sheet| (sheet.name.clone(), sheet.rows.len()))
-            .collect(),
-        replaced,
-    })
+    Ok(replaced)
 }
 
 /// The folder a `farik_write_sheet` call writes in: that of the caller's own role, in its
@@ -610,18 +633,34 @@ fn folder_to_write(call: &Call<'_>) -> Result<&'static str, ToolError> {
     let folder = private_folder(call.role()).ok_or_else(|| {
         refuse("the Finance Specialist and the Procurement Specialist write a workbook")
     })?;
+    in_its_own_implement_session(call, "a workbook", &refuse)?;
+    Ok(folder)
+}
+
+/// Refuses a call that is not in the implement session of a task its agent is the assignee of, so
+/// that a chat or a conversation never writes a role's private files and a task's baseline holds
+/// (6.6). `what` is what the tool writes, and `refuse` makes the refusal of the words it is given.
+///
+/// # Errors
+///
+/// What `refuse` makes, or `Failed` when the board cannot be read.
+pub(super) fn in_its_own_implement_session(
+    call: &Call<'_>,
+    what: &str,
+    refuse: &dyn Fn(&str) -> ToolError,
+) -> Result<(), ToolError> {
     let task = match &call.context.task_id {
         Some(task) if call.context.purpose == SessionPurpose::Implement => task,
         _ => {
-            return Err(refuse(
-                "an implement session of a task writes a workbook: a chat or a conversation does not",
-            ));
+            return Err(refuse(&format!(
+                "an implement session of a task writes {what}: a chat or a conversation does not"
+            )));
         }
     };
     if call.row(task)?.assignee_id.as_deref() != Some(call.agent_id()) {
-        return Err(refuse("the task's assignee writes a workbook in it"));
+        return Err(refuse(&format!("the task's assignee writes {what} in it")));
     }
-    Ok(folder)
+    Ok(())
 }
 
 /// `farik_write_sheet`: writes the whole workbook the input describes at its path in the caller's

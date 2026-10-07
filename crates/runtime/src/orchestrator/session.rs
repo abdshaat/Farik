@@ -813,6 +813,8 @@ const SCHEDULE_POST_TOOL: &str = "farik_schedule_post";
 const READ_COSTS_TOOL: &str = "farik_read_costs";
 const READ_SHEET_TOOL: &str = "farik_read_sheet";
 const WRITE_SHEET_TOOL: &str = "farik_write_sheet";
+/// The tool that writes a comparison as a note, the Procurement Specialist's alone (step 10b).
+const WRITE_EVALUATION_TOOL: &str = "farik_write_evaluation";
 
 /// The Farik tools a read-only session is not offered: the command runner, which has no
 /// executor there, and the git writes, which only the assignee may make.
@@ -853,6 +855,11 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
             READ_COSTS_TOOL => ask.agent.role == RoleWire::FinanceSpecialist,
             WRITE_SHEET_TOOL => {
                 private_folder(Role::from(ask.agent.role)).is_some()
+                    && ask.purpose == SessionPurpose::Implement
+                    && ask.contract.is_some()
+            }
+            WRITE_EVALUATION_TOOL => {
+                ask.agent.role == RoleWire::ProcurementSpecialist
                     && ask.purpose == SessionPurpose::Implement
                     && ask.contract.is_some()
             }
@@ -2051,6 +2058,74 @@ mod tests {
                 Vec::<&str>::new(),
                 "{who} {purpose:?}"
             );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_evaluations_to_procurement_alone() {
+        let harness = Harness::with_procurement("session-evaluation-offer");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.finance_task("FRK-2", Some("in_progress"));
+        harness.in_progress("FRK-3", "dev-a", "dev-b");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let read = |task: &str| {
+            deps.tools
+                .files
+                .read_contract(&task.parse().expect("an id"))
+                .expect("the contract")
+        };
+        let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
+        let offered = |who: &str, purpose: SessionPurpose, about| {
+            let mut ask = asked(deps, agent(&team, who), purpose, about);
+            ask.read_only = purpose == SessionPurpose::Verify;
+            session_spec(deps, &team, &ask)
+                .expect("the spec")
+                .farik_tools
+                .iter()
+                .any(|tool| tool == "farik_write_evaluation")
+        };
+
+        assert!(
+            offered("proc", SessionPurpose::Implement, Some(&procurement)),
+            "its task's implement session is offered it"
+        );
+        for (who, purpose, about, what) in [
+            ("proc", SessionPurpose::Chat, None, "its chat"),
+            (
+                "proc",
+                SessionPurpose::Implement,
+                None,
+                "its implement session about no task",
+            ),
+            (
+                "fin",
+                SessionPurpose::Implement,
+                Some(&finance),
+                "a Finance Specialist's implement session",
+            ),
+            (
+                "dev-a",
+                SessionPurpose::Implement,
+                Some(&developers),
+                "a Developer's implement session",
+            ),
+            (
+                "pm",
+                SessionPurpose::Verify,
+                Some(&procurement),
+                "the Product Manager reviewing its task",
+            ),
+            (
+                "pm",
+                SessionPurpose::Implement,
+                Some(&procurement),
+                "the Product Manager in an implement session about its task",
+            ),
+        ] {
+            assert!(!offered(who, purpose, about), "{what}");
         }
     }
 
