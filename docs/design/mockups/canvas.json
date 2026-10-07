@@ -754,6 +754,60 @@
       "title": "Phone: Remove Google Ads, pausing the ads first (step 08g)",
       "page": "connectors",
       "is_interactive": true
+    },
+    "TodayPurchaseOrder.dc.html": {
+      "x": 6530,
+      "y": 0,
+      "w": 1280,
+      "h": 4198,
+      "title": "Today: Ivo sets up an order, Approve or Reject (step 10c)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhonePurchaseOrder.dc.html": {
+      "x": 8010,
+      "y": 0,
+      "w": 390,
+      "h": 2673,
+      "title": "Phone: Ivo sets up an order (step 10c)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "AgentOrders.dc.html": {
+      "x": 8600,
+      "y": 0,
+      "w": 1440,
+      "h": 5636,
+      "title": "Ivo’s orders: to place, placed with their status, received, and recent (step 10c)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneAgentOrders.dc.html": {
+      "x": 10240,
+      "y": 0,
+      "w": 390,
+      "h": 4044,
+      "title": "Phone: Ivo’s orders, Mark placed and Mark received (step 10c)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "TodayRenewal.dc.html": {
+      "x": 10830,
+      "y": 0,
+      "w": 1280,
+      "h": 2685,
+      "title": "Today: renewals coming up, Ask for a review and Dismiss (step 10c)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneRenewal.dc.html": {
+      "x": 12310,
+      "y": 0,
+      "w": 390,
+      "h": 1834,
+      "title": "Phone: renewals coming up (step 10c)",
+      "page": "procurement",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -876,9 +930,9 @@
     },
     "t_procurement": {
       "kind": "title1",
-      "maxW": 6000,
+      "maxW": 12800,
       "page": "procurement",
-      "text": "Procurement Specialist: more roles in setup, and the sites it may read",
+      "text": "Procurement Specialist: more roles in setup, the sites it may read, purchase orders and renewals",
       "w": 240,
       "x": 0,
       "y": -300
@@ -968,7 +1022,13 @@
     "MarketingPlanApproval.dc.html",
     "PhoneMarketingPlanApproval.dc.html",
     "RemoveGoogleAds.dc.html",
-    "PhoneRemoveGoogleAds.dc.html"
+    "PhoneRemoveGoogleAds.dc.html",
+    "TodayPurchaseOrder.dc.html",
+    "PhonePurchaseOrder.dc.html",
+    "AgentOrders.dc.html",
+    "PhoneAgentOrders.dc.html",
+    "TodayRenewal.dc.html",
+    "PhoneRenewal.dc.html"
   ],
   "pages": [
     {
