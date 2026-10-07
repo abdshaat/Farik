@@ -792,8 +792,9 @@ pub fn first_day(campaign: &PlanCampaign, today: NaiveDate) -> NaiveDate {
 
 /// The budget Google keeps for a plan campaign made on `today`, and its amount (`docs/SPEC.md`
 /// 6.7). The campaign's run is from its first day (`first_day`) to its last, both included. A run
-/// of 3 to 90 days takes a total budget for the run, the plan campaign's budget less `spent`, what
-/// earlier versions of it spent: Google never bills past one. Any other run takes a daily budget,
+/// of 3 to 90 days takes a total budget for the run, the plan campaign's budget less `spent`:
+/// Google never bills past one. The daemon asks with nothing spent, since a key has one campaign
+/// across a plan's whole lineage, so none of its budget was spent before the campaign is made. Any other run takes a daily budget,
 /// what is left divided by the days of the run and rounded down to the hundredth, which bounds
 /// Google's own charging while Farik is not running. In a currency of `ZERO_DECIMAL` the amount
 /// is whole units, rounded down.
