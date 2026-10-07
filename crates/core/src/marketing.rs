@@ -1217,16 +1217,156 @@ fn check_enable(
     }
 }
 
+/// What the campaigns Farik made for a plan's lineage have cost so far, in the plan's currency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanSpend {
+    /// By the plan campaign's key, over every campaign of the lineage with that key.
+    pub by_key: std::collections::BTreeMap<String, Amount>,
+    /// In all, a key the active plan has dropped included.
+    pub total: Amount,
+}
+
+/// What a cap is on: one campaign's budget, or the plan's Google Ads budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapScope {
+    /// A plan campaign's own budget.
+    Campaign,
+    /// The plan's budget for Google Ads.
+    Plan,
+}
+
+impl CapScope {
+    /// The wire's word for it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Campaign => "campaign",
+            Self::Plan => "plan",
+        }
+    }
+}
+
+/// A budget that was reached, and the campaigns Farik pauses for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cap {
+    /// What was reached.
+    pub scope: CapScope,
+    /// The plan campaign's key, for a campaign's cap.
+    pub key: Option<String>,
+    /// What was spent.
+    pub spent: Amount,
+    /// The budget it reached.
+    pub budget: Amount,
+    /// The resource names of the campaigns to pause: the campaign's own, or every one the active
+    /// plan carries.
+    pub campaigns: Vec<String>,
+}
+
+/// The active plan, as the spend watch reads it: its id, its proposal and its lineage.
+#[derive(Debug, Clone, Copy)]
+pub struct Lineage<'a> {
+    /// The active plan's id.
+    pub id: &'a str,
+    /// The active plan.
+    pub plan: &'a PlanProposal,
+    /// The active plan and every plan it replaces, `replaces` followed through the whole chain.
+    pub lineage: &'a [String],
+}
+
+/// Whether the active plan carries `made`: its plan is in the lineage, the active plan has its
+/// key, and it is in the active plan's ad account.
+fn is_carried(active: &Lineage<'_>, made: &CreatedCampaign) -> bool {
+    active.lineage.contains(&made.plan)
+        && active
+            .plan
+            .campaigns
+            .iter()
+            .any(|planned| planned.key == made.key)
+        && active
+            .plan
+            .google_ads_account
+            .as_deref()
+            .is_some_and(|account| in_account(&made.campaign, account).is_ok())
+}
+
+/// The caps the spend has reached and `recorded` does not hold yet (ADR 0042): a plan campaign
+/// whose key's cost is at least its budget reaches its own cap, and the plan, when its cost in
+/// all is at least its Google Ads budget, reaches the plan's, which takes every campaign the
+/// active plan carries. `recorded` is what was recorded for the active plan, by scope and key.
+/// The campaign caps come first, in the plan's order.
+#[must_use]
+pub fn caps_reached(
+    active: &Lineage<'_>,
+    created: &[CreatedCampaign],
+    spend: &PlanSpend,
+    recorded: &[(CapScope, Option<String>)],
+) -> Vec<Cap> {
+    let carried: Vec<&CreatedCampaign> = created
+        .iter()
+        .filter(|made| is_carried(active, made))
+        .collect();
+    let is_recorded = |scope: CapScope, key: Option<&str>| {
+        recorded
+            .iter()
+            .any(|(done, named)| *done == scope && named.as_deref() == key)
+    };
+    let mut caps = Vec::new();
+    for planned in &active.plan.campaigns {
+        let cost = spend.by_key.get(&planned.key).copied().unwrap_or(Amount(0));
+        if cost >= planned.budget && !is_recorded(CapScope::Campaign, Some(&planned.key)) {
+            caps.push(Cap {
+                scope: CapScope::Campaign,
+                key: Some(planned.key.clone()),
+                spent: cost,
+                budget: planned.budget,
+                campaigns: carried
+                    .iter()
+                    .filter(|made| made.key == planned.key)
+                    .map(|made| made.campaign.clone())
+                    .collect(),
+            });
+        }
+    }
+    let budget = active.plan.google_ads;
+    if budget.0 > 0 && spend.total >= budget && !is_recorded(CapScope::Plan, None) {
+        caps.push(Cap {
+            scope: CapScope::Plan,
+            key: None,
+            spent: spend.total,
+            budget,
+            campaigns: carried.iter().map(|made| made.campaign.clone()).collect(),
+        });
+    }
+    caps
+}
+
+/// The campaigns an ended plan leaves running (ADR 0042): every campaign Farik made that the
+/// active plan does not carry and that is not in `paused_for_end`, the resource names recorded
+/// paused for their plan's end. With no active plan, every one not paused.
+#[must_use]
+pub fn to_pause_for_end(
+    active: Option<&Lineage<'_>>,
+    created: &[CreatedCampaign],
+    paused_for_end: &[String],
+) -> Vec<CreatedCampaign> {
+    created
+        .iter()
+        .filter(|made| !paused_for_end.contains(&made.campaign))
+        .filter(|made| !active.is_some_and(|active| is_carried(active, made)))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, Days, FixedOffset, NaiveDate, Utc};
 
     use super::{
-        AdsPlanView, AdsWrite, Amount, BudgetKind, CreatedCampaign, EndReason, HeldAtGoogle,
-        PlanCampaign, PlanProposal, PlanRecord, PostChannel, PostSlot, PriceKind, ProposalRefusal,
-        SlotCheck, SlotRefusal, ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write,
-        check_proposal, check_slot, network_name, parse_amount, plans_to_end, price_kind,
-        text_fits, text_limit,
+        AdsPlanView, AdsWrite, Amount, BudgetKind, Cap, CapScope, CreatedCampaign, EndReason,
+        HeldAtGoogle, Lineage, PlanCampaign, PlanProposal, PlanRecord, PlanSpend, PostChannel,
+        PostSlot, PriceKind, ProposalRefusal, SlotCheck, SlotRefusal, ZERO_DECIMAL, active_plan,
+        campaign_budget, caps_reached, check_ads_write, check_proposal, check_slot, network_name,
+        parse_amount, plans_to_end, price_kind, text_fits, text_limit, to_pause_for_end,
     };
 
     fn day(text: &str) -> NaiveDate {
@@ -2669,5 +2809,203 @@ mod tests {
         daily.approved_on = "2026-11-02";
         daily.today = "2026-11-03";
         daily.passes(&create("search-b"));
+    }
+    /// What `an_ads_plan`'s keys have spent, in hundredths, and in all.
+    fn spent_of(by_key: &[(&str, u64)], total: u64) -> PlanSpend {
+        PlanSpend {
+            by_key: by_key
+                .iter()
+                .map(|(key, hundredths)| ((*key).to_string(), amount(*hundredths)))
+                .collect(),
+            total: amount(total),
+        }
+    }
+
+    fn the_caps(ads: &Ads, spend: &PlanSpend, recorded: &[(CapScope, Option<String>)]) -> Vec<Cap> {
+        let active = Lineage {
+            id: "MP-3",
+            plan: &ads.plan,
+            lineage: &ads.lineage,
+        };
+        caps_reached(&active, &ads.created, spend, recorded)
+    }
+
+    #[test]
+    fn a_campaign_at_its_budget_reaches_its_cap() {
+        let ads = Ads::new();
+        // 500.00 spent of 500.00 reaches it, with the campaign the lineage made for the key (11)
+        // and not the one a plan outside the lineage made for it (14).
+        assert_eq!(
+            the_caps(&ads, &spent_of(&[("search-a", 50_000)], 50_000), &[]),
+            [Cap {
+                scope: CapScope::Campaign,
+                key: Some("search-a".to_string()),
+                spent: amount(50_000),
+                budget: amount(50_000),
+                campaigns: vec![campaign(11)],
+            }]
+        );
+        // 499.99 does not.
+        assert_eq!(
+            the_caps(&ads, &spent_of(&[("search-a", 49_999)], 49_999), &[]),
+            []
+        );
+        // Past the budget reaches it too, and a key with nothing read has spent nothing.
+        assert_eq!(
+            the_caps(&ads, &spent_of(&[("search-b", 40_001)], 40_001), &[])[0].key,
+            Some("search-b".to_string())
+        );
+        assert_eq!(the_caps(&ads, &spent_of(&[], 0), &[]), []);
+    }
+
+    #[test]
+    fn the_plan_at_its_budget_takes_every_carried_campaign() {
+        let ads = Ads::new();
+        // 450.00 and 350.00 are under their own budgets (500.00 and 400.00); the dropped key's
+        // 200.00 brings the plan to its 1000.00.
+        let caps = the_caps(
+            &ads,
+            &spent_of(
+                &[
+                    ("search-a", 45_000),
+                    ("search-b", 35_000),
+                    ("search-old", 20_000),
+                ],
+                100_000,
+            ),
+            &[],
+        );
+        assert_eq!(
+            caps,
+            [Cap {
+                scope: CapScope::Plan,
+                key: None,
+                spent: amount(100_000),
+                budget: amount(100_000),
+                campaigns: vec![campaign(11), campaign(12)],
+            }],
+            "both carried campaigns, not the dropped key's (13) nor the other plan's (14)"
+        );
+        // A cent short of the plan's budget reaches nothing.
+        assert_eq!(
+            the_caps(
+                &ads,
+                &spent_of(
+                    &[
+                        ("search-a", 45_000),
+                        ("search-b", 35_000),
+                        ("search-old", 19_999)
+                    ],
+                    99_999,
+                ),
+                &[]
+            ),
+            []
+        );
+        // A plan with no Google Ads budget has none to reach.
+        let mut none = Ads::new();
+        none.plan.google_ads = amount(0);
+        assert_eq!(the_caps(&none, &spent_of(&[], 0), &[]), []);
+    }
+
+    #[test]
+    fn a_recorded_cap_is_not_reached_again() {
+        let ads = Ads::new();
+        let recorded = [(CapScope::Campaign, Some("search-a".to_string()))];
+        // The cap on search-a is recorded: the same spend reaches nothing.
+        assert_eq!(
+            the_caps(&ads, &spent_of(&[("search-a", 50_000)], 50_000), &recorded),
+            []
+        );
+        // The plan's cost then reaching its budget still reaches the plan's cap, and search-a's
+        // is not repeated beside it.
+        let caps = the_caps(
+            &ads,
+            &spent_of(
+                &[
+                    ("search-a", 50_000),
+                    ("search-b", 30_000),
+                    ("search-old", 20_000),
+                ],
+                100_000,
+            ),
+            &recorded,
+        );
+        assert_eq!(caps.len(), 1, "{caps:?}");
+        assert_eq!(caps[0].scope, CapScope::Plan);
+        // A plan cap recorded is not reached again either; another key's cap is its own.
+        let both = [recorded[0].clone(), (CapScope::Plan, None)];
+        assert_eq!(
+            the_caps(
+                &ads,
+                &spent_of(
+                    &[
+                        ("search-a", 50_000),
+                        ("search-b", 40_000),
+                        ("search-old", 10_000)
+                    ],
+                    100_000
+                ),
+                &both,
+            )
+            .iter()
+            .map(|cap| (cap.scope, cap.key.clone()))
+            .collect::<Vec<_>>(),
+            [(CapScope::Campaign, Some("search-b".to_string()))]
+        );
+    }
+
+    #[test]
+    fn an_ended_plan_s_campaigns_are_paused_unless_carried() {
+        let mut ads = Ads::new();
+        // The active plan's key in another ad account is not carried: it is not the plan's.
+        ads.created.push(CreatedCampaign {
+            campaign: "customers/9999999999/campaigns/15".to_string(),
+            ..made("MP-3", "search-b", 15, BudgetKind::Daily)
+        });
+        let active = Lineage {
+            id: "MP-3",
+            plan: &ads.plan,
+            lineage: &ads.lineage,
+        };
+        let numbers = |listed: Vec<CreatedCampaign>| -> Vec<String> {
+            listed.into_iter().map(|made| made.campaign).collect()
+        };
+        // 11 and 12 are carried (a key the active plan keeps, in its account, under its lineage);
+        // 13 is a key it dropped, 14 a plan outside its lineage with a key it has, 15 another
+        // account.
+        assert_eq!(
+            numbers(to_pause_for_end(Some(&active), &ads.created, &[])),
+            [
+                campaign(13),
+                campaign(14),
+                "customers/9999999999/campaigns/15".to_string()
+            ]
+        );
+        // One recorded paused for its end is not listed again.
+        assert_eq!(
+            numbers(to_pause_for_end(
+                Some(&active),
+                &ads.created,
+                &[campaign(13)]
+            )),
+            [
+                campaign(14),
+                "customers/9999999999/campaigns/15".to_string()
+            ]
+        );
+        // With no active plan every campaign not recorded paused is listed.
+        assert_eq!(
+            numbers(to_pause_for_end(
+                None,
+                &ads.created,
+                &[campaign(11), campaign(14)]
+            )),
+            [
+                campaign(12),
+                campaign(13),
+                "customers/9999999999/campaigns/15".to_string()
+            ]
+        );
     }
 }
