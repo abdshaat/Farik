@@ -1,11 +1,11 @@
 # Phase 7, step 10e: Data pipeline requests
 
-Status: ready once its mockups are approved (executes after steps 10c and 10d land)
+Status: ready (executes after steps 10c and 10d land)
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 5.7, 5.16, 6.1, 6.10, 8.5, 8.6; F3, F9
 Depends on: the commits of step 10c (`crates/runtime/src/procurement.rs` and its `ORDERS` lock, the three order tools after `farik_read_sites` in `TOOLS` with the read-tier slice at `[..35]`, `daemon/mcp.rs`'s count at 42 and `EVERY_KIND` at 87, `CHAT_TOOLS` holding `farik_read_purchase_orders`, the `purchase_order` waiting row that holds no task, Today's `PurchaseOrderRow`, its `PurchaseOrder` dialog and `visibly`) and of step 10d (the role's kit with its twelve skills; 10d adds no Farik tool and no event kind); both ready, not yet executed: execution starts only after both steps' commits exist. Step 10b2 (`site_of` in `farik_core::governor::sites`, `farik_request_sites`, the `site_request` row, `siteRequestScript`); step 10b (the role, `Role::ProcurementSpecialist`); step 06 (the Product Manager's kit, five skills); phase 6 step 11 (the Designer's plan decision, `orchestrator/design.rs`'s `decide` and `DECIDE_TOOL`, whose one-tool session this step copies without its contract); phase 6 (merged in #19). File:line citations are at 0dc45aa; the names are what count.
 Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-07 (one round, ADR 0032): not ready, 5 Blocking and the Should items, all folded below with the founder's answers; no second round
-Mockups approved by: pending
+Mockups approved by: the founder, 2026-10-07, as drawn ("Approve as drawn"): `TodayDataPipeline`, `PhoneDataPipeline` (`.dc.html`), with the choices shown on them ("data source" on screen; under `auto` an escalated or undecided request still waits for the owner; the Product Manager may decline without asking; a request names the source's page)
 Decided by the founder, 2026-10-07, in conversation (this plan's readiness review): whether, under ADR 0041's `auto`, a pipeline that costs money or whose cost is unknown still waits for the owner, "Auto may approve" (under `auto`, step 10h, the Product Manager's approval is enough; under `ask` it reaches the owner); whether a pipeline that sends the project's data out always comes to the owner, as one that costs money does, "Yes, always to me" (in both modes; the Product Manager cannot approve it). ADRs 0039 and 0041 are amended the same day.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
@@ -98,7 +98,7 @@ The stories use Firecrawl (`paid`), Shippo's rates (`free`, `needs_account`, `se
 
 Files: `TodayDataPipeline.dc.html`, `PhoneDataPipeline.dc.html` (Today's escalated rows, one that costs money and one that sends your data out, each with the Product Manager's reason, the host in bold and the agent's fields in `untrusted` frames; the Approve dialog with the filed text and a note, and the Decline dialog with a note; as variants, a cost not known, "The Product Manager did not decide.", a free one the Product Manager asks about, and a source on a name in another alphabet with 10b2's warning), `canvas.json`'s page "Procurement Specialist". Drawn by Opus (ADR 0032). The founder approves them before Task 6; the approval is written into this plan's header and Execution notes in the same commit.
 
-- [ ] `docs(design): mock up data pipeline requests`
+- [x] `docs(design): mock up data pipeline requests`
 
 ### Task 1: The rule, the events and the ask
 
