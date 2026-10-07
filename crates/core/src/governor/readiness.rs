@@ -62,6 +62,9 @@ pub enum ReadinessRule {
     /// the folder, no criterion is a `command` or a `test`, an `artifact` criterion names a
     /// workbook in the folder and searches no text, and the task has no parent epic.
     PrivateFolderTask,
+    /// A task for a role with a private folder is reviewed by the Product Manager alone: the
+    /// folder is its role's and the Product Manager's, as the reviewer, and no other role's.
+    PrivateFolderReviewer,
     /// A task's budget does not exceed the team's cap on a task; an epic is bounded by the
     /// sprint budget instead.
     BudgetWithinTeamMax,
@@ -145,7 +148,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 21] = [
+const CHECKS: [Check; 22] = [
     intent_present,
     summary_present,
     criteria_present,
@@ -162,6 +165,7 @@ const CHECKS: [Check; 21] = [
     marketing_paths_owned,
     no_farik_paths,
     private_folder_task,
+    private_folder_reviewer,
     budget_within_team_max,
     no_parent_for_epic,
     parent_in_progress,
@@ -792,6 +796,28 @@ fn private_folder_task(contract: &TaskContract, _: &ReadinessContext) -> Option<
             reasons.join("; ")
         ),
     ))
+}
+
+/// A task that works in a role's private folder is reviewed by the Product Manager alone (5.3, 6.6,
+/// 6.10; the founder's decision of 2026-10-07), so that each folder stays its own role's and, as
+/// the reviewer, the Product Manager's: the reviewer's session reads the folder's files, and no
+/// other role's does.
+fn private_folder_reviewer(
+    contract: &TaskContract,
+    _: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    let folder = task_private_folder(contract)?;
+    (contract.reviewer_role != Role::ProductManager).then(|| {
+        failure(
+            ReadinessRule::PrivateFolderReviewer,
+            format!(
+                "a task in the private folder {folder} is reviewed by the Product Manager alone, \
+                 and this one names the {} as its reviewer; name product_manager as its \
+                 reviewer_role",
+                plain_role(contract.reviewer_role)
+            ),
+        )
+    })
 }
 
 fn budget_within_team_max(
@@ -1544,6 +1570,67 @@ mod tests {
             let message = message_of(&task, &context, R::PrivateFolderTask);
             assert!(message.contains(said), "{path}: {message}");
         }
+    }
+
+    /// The founder's decision of 2026-10-07 ("Only the Product Manager"): a task that works in a
+    /// role's private folder is reviewed by the Product Manager, whatever the role, so that each
+    /// folder stays its own role's and, as the reviewer, the Product Manager's.
+    #[test]
+    fn a_private_folder_task_is_reviewed_by_the_product_manager() {
+        // Both folders' roles are on the team, so that a reviewer of either is available and the
+        // new rule is the only one that can refuse.
+        let mut context = a_ready_context();
+        for role in [Role::FinanceSpecialist, Role::ProcurementSpecialist] {
+            context.active_agents_by_role.insert(role, 1);
+        }
+        let books = a_finance_task(&[".farik/local/finance/**"], the_books_criteria());
+        let comparison = a_procurement_task(
+            &[".farik/local/procurement/**"],
+            json!([
+                { "id": "C1", "text": "The comparison is written.",
+                  "verification": { "method": "artifact", "path": "evaluations/email-sending.md" } },
+                { "id": "C2", "text": "Every price names its source.",
+                  "verification": { "method": "review", "rubric": ["Does every price name its source?"] } },
+                { "id": "C3", "text": "The recommendation is clear to the founder.",
+                  "verification": { "method": "human", "question": "Is the recommendation clear?" } }
+            ]),
+        );
+        // The Product Manager is accepted, for each folder.
+        assert_eq!(evaluate_readiness(&books, &context), Ok(()));
+        assert_eq!(evaluate_readiness(&comparison, &context), Ok(()));
+        // The other folder's role is refused, and so is any other role that could be available.
+        for (task, reviewer, folder) in [
+            (&books, Role::ProcurementSpecialist, ".farik/local/finance"),
+            (
+                &comparison,
+                Role::FinanceSpecialist,
+                ".farik/local/procurement",
+            ),
+            (&books, Role::Architect, ".farik/local/finance"),
+            (
+                &comparison,
+                Role::SoftwareDeveloper,
+                ".farik/local/procurement",
+            ),
+        ] {
+            let mut task = task.clone();
+            task.reviewer_role = reviewer;
+            assert_eq!(
+                failed_rules(&task, &context),
+                [R::PrivateFolderReviewer],
+                "{reviewer}"
+            );
+            let message = message_of(&task, &context, R::PrivateFolderReviewer);
+            assert!(
+                message.contains(folder) && message.contains("product_manager"),
+                "{reviewer}: {message}"
+            );
+        }
+        // An epic assigned to such a role works in no folder, and is not held to the rule.
+        let mut epic = books.clone();
+        epic.kind = Kind::Epic;
+        epic.reviewer_role = Role::Human;
+        assert!(!failed_rules(&epic, &context).contains(&R::PrivateFolderReviewer));
     }
 
     #[test]

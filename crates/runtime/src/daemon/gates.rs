@@ -2066,7 +2066,7 @@ pub(super) mod tests {
             &json!({ "task_id": "FRK-1", "contract": draft }),
             "contractCheckResult",
         );
-        assert_eq!(checked["total"], 22, "{checked}");
+        assert_eq!(checked["total"], 23, "{checked}");
         let failures = checked["failures"].as_array().expect("failures");
         assert_eq!(failures.len(), 1, "{checked}");
         assert_eq!(failures[0]["rule"], "reviewer_available");
