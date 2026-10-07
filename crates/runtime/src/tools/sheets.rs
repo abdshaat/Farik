@@ -12,7 +12,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use calamine::{Data, Reader as _, Xlsx, XlsxError as ReadError, open_workbook_from_rs};
 use chrono::{DateTime, NaiveDate, Utc};
 use farik_core::contract::Role;
-use farik_core::team::{private_folder, task_private_folder, workbook_path_fault};
+use farik_core::team::{
+    private_file_fault, private_folder, task_private_folder, workbook_path_fault,
+};
 use rust_xlsxwriter::utility::{check_sheet_name, row_col_to_cell};
 use rust_xlsxwriter::{ExcelDateTime, Format, Formula, Workbook, XlsxError};
 use schemars::JsonSchema;
@@ -132,17 +134,19 @@ fn is_a_link(at: &Path) -> Result<bool, ToolError> {
     }
 }
 
-/// The workbook at `path`, relative to the private folder `folder` of the project at `root`, with
-/// every rule of the folder line checked: the path's shape; that none of the folder's parts below
-/// `root`, and none of the path's, is a link; and that what is there, resolved, lies in the folder
-/// as it lies under the resolved `root`.
+/// The file at `path`, relative to the private folder `folder` of the project at `root`, with
+/// every rule of the folder line checked: the path's shape, as `private_file_fault` says it (a
+/// workbook, and in the procurement folder a note); that none of the folder's parts below `root`,
+/// and none of the path's, is a link; and that what is there, resolved, lies in the folder as it
+/// lies under the resolved `root`. The sheet tools read workbooks alone, so they check
+/// `workbook_path_fault` before they call it.
 ///
 /// # Errors
 ///
 /// `private_path_refused`, saying which rule.
 pub(crate) fn private_path(root: &Path, folder: &str, path: &str) -> Result<PathBuf, ToolError> {
     let bad = |why: &str| refused("private_path_refused", format!("{path:?} {why}"));
-    if let Some(why) = workbook_path_fault(path) {
+    if let Some(why) = private_file_fault(folder, path) {
         return Err(bad(&why));
     }
     let parts: Vec<&str> = path.split('/').collect();
@@ -174,6 +178,20 @@ pub(crate) fn private_path(root: &Path, folder: &str, path: &str) -> Result<Path
         return Err(bad("is outside the folder"));
     }
     Ok(at)
+}
+
+/// Refuses a `path` that is not a workbook's. The sheet tools read and write workbooks alone, and
+/// `private_path` also passes a note in the procurement folder, so they ask this first, before
+/// they open anything.
+///
+/// # Errors
+///
+/// `private_path_refused`, saying what is wrong with the path.
+fn workbook_only(path: &str) -> Result<(), ToolError> {
+    match workbook_path_fault(path) {
+        Some(why) => Err(refused("private_path_refused", format!("{path:?} {why}"))),
+        None => Ok(()),
+    }
 }
 
 /// The functions a formula may not use, because they read or send something outside the workbook,
@@ -611,6 +629,7 @@ fn folder_to_write(call: &Call<'_>) -> Result<&'static str, ToolError> {
 /// folder line itself.
 pub(super) fn write_sheet(call: &Call<'_>, input: &WriteSheetInput) -> Result<Value, ToolError> {
     let folder = folder_to_write(call)?;
+    workbook_only(&input.path)?;
     let root = call.deps().files.root();
     let target = private_path(root, folder, &input.path)?;
     let written = write_workbook(
@@ -837,6 +856,7 @@ pub(super) fn read_sheet(call: &Call<'_>, input: &ReadSheetInput) -> Result<Valu
             "`from_row` counts from 1 and `rows` is 1 to {MOST_READ_ROWS}"
         )));
     }
+    workbook_only(&input.path)?;
     let path = private_path(call.deps().files.root(), &folder, &input.path)?;
     let bytes = read_workbook_file(&path, &input.path)?;
     let mut book: Xlsx<Cursor<Vec<u8>>> =
@@ -1449,6 +1469,44 @@ mod tests {
                 "{linked}: {reason}"
             );
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn resolves_a_note_in_the_procurement_folder_alone() {
+        // The procurement folder holds notes as well as workbooks, and the finance folder
+        // workbooks alone (6.6, 6.10); either way the path is in the folder and reaches no link.
+        let project = a_finance_project("sheets-private-path-note");
+        let root = &project.repo.path;
+        let procurement = ".farik/local/procurement";
+        let finance = ".farik/local/finance";
+        assert_eq!(
+            private_path(root, procurement, "evaluations/email-sending.md")
+                .expect("a note in the procurement folder"),
+            root.join(procurement).join("evaluations/email-sending.md")
+        );
+        assert!(private_path(root, procurement, "vendors.xlsx").is_ok());
+        for (folder, path) in [
+            (procurement, "evaluations/email-sending.txt"),
+            (procurement, "evaluations/Email.MD"),
+            (finance, "notes.md"),
+        ] {
+            let reason = refusal_of(private_path(root, folder, path).map(|at| json!(at.to_str())));
+            assert!(
+                reason.starts_with("private_path_refused: "),
+                "{folder}/{path}: {reason}"
+            );
+        }
+        // A note's path is held to the folder as a workbook's is: a link above it refuses it.
+        let outside = root.join("outside");
+        fs::create_dir_all(outside.join("evaluations")).expect("a folder outside");
+        let elsewhere = root.join("another-root");
+        fs::create_dir_all(elsewhere.join(".farik/local")).expect("a root");
+        symlink(&outside, elsewhere.join(procurement)).expect("a link out");
+        let reason = refusal_of(
+            private_path(&elsewhere, procurement, "evaluations/x.md").map(|at| json!(at.to_str())),
+        );
+        assert!(reason.starts_with("private_path_refused: "), "{reason}");
     }
 
     #[test]

@@ -2074,6 +2074,235 @@ mod tests {
         );
     }
 
+    /// `a_finance_team`, with two Procurement Specialists, `proc-1` and `proc-2`, as well.
+    fn a_procurement_team() -> Team {
+        a_team(|wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+            for (id, role) in [
+                ("fin-1", "finance_specialist"),
+                ("proc-1", "procurement_specialist"),
+                ("proc-2", "procurement_specialist"),
+            ] {
+                wire["agents"]
+                    .as_array_mut()
+                    .expect("a list of agents")
+                    .push(an_agent_wire(id, role));
+            }
+        })
+    }
+
+    /// `wire` made a Procurement Specialist's task in its folder, reviewed by the Product Manager
+    /// and ended by a comparison written as a note.
+    fn as_a_procurement_task(wire: &mut Value) {
+        wire["assignee_role"] = json!("procurement_specialist");
+        wire["reviewer_role"] = json!("product_manager");
+        wire["allowed_paths"] = json!([".farik/local/procurement/**"]);
+        wire["exit_criteria"] = json!([{
+            "id": "C1",
+            "text": "The comparison is written.",
+            "satisfies": ["R1"],
+            "verification": { "method": "artifact", "path": "evaluations/email-sending.md" }
+        }]);
+    }
+
+    /// Files `task` as a Procurement Specialist's task in its folder, `ready`; and, when `held`
+    /// names a status, assigned to `proc-1` and moved on to it.
+    fn a_procurement_task(project: &Project, task: &str, held: Option<&str>) {
+        project.file(task, as_a_procurement_task);
+        project.created(task, "ready");
+        let Some(held) = held else { return };
+        let people = json!({ "assignee": "proc-1", "reviewer": "maya" });
+        project.moved(task, "ready", "assigned", &people, at(10));
+        if held != "assigned" {
+            project.moved(task, "assigned", held, &people, at(10));
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_folders_do_not_wait_for_each_other() {
+        let request = a_request(
+            "FRK-2",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+        let second = assigning("proc-1", "maya");
+        let busy = |project: &Project| {
+            project
+                .context(&request, &second)
+                .assignment
+                .expect("an assignment")
+                .private_folder_busy
+        };
+        // Finance work in any status does not hold the procurement folder, and the other way
+        // round (a guard: the busy check is per folder).
+        for held in ["in_progress", "verifying", "blocked"] {
+            let project = Project::new(
+                &format!("folders-apart-{held}"),
+                a_procurement_team(),
+                at(12),
+            );
+            a_finance_task(&project, "FRK-1", Some(held));
+            a_procurement_task(&project, "FRK-2", None);
+            assert!(!busy(&project), "{held}");
+            assert!(
+                matches!(project.ask(&request, &second), TransitionOutcome::Moved(_)),
+                "{held}"
+            );
+            let project = Project::new(
+                &format!("folders-apart-b-{held}"),
+                a_procurement_team(),
+                at(12),
+            );
+            a_procurement_task(&project, "FRK-1", Some(held));
+            a_finance_task(&project, "FRK-2", None);
+            let to_finance = project
+                .context(&request, &assigning("fin-1", "maya"))
+                .assignment
+                .expect("an assignment");
+            assert!(!to_finance.private_folder_busy, "{held}");
+        }
+        // A second procurement task waits for the first in any status short of the end, under a
+        // limit of two, which leaves the agent holding the first room for it.
+        for held in [
+            "assigned",
+            "in_progress",
+            "verifying",
+            "rejected",
+            "blocked",
+            "escalated",
+        ] {
+            let project = Project::new(&format!("proc-busy-{held}"), a_procurement_team(), at(12));
+            a_procurement_task(&project, "FRK-1", Some(held));
+            a_procurement_task(&project, "FRK-2", None);
+            let assignment = project
+                .context(&request, &second)
+                .assignment
+                .expect("an assignment");
+            assert!(assignment.private_folder_busy, "{held}");
+            assert_eq!(assignment.assignee_open_tasks, 1, "{held}");
+            assert_eq!(assignment.wip_limit, 2, "{held}");
+            let TransitionOutcome::Refused(refusal) = project.ask(&request, &second) else {
+                panic!("{held}: the second task was assigned");
+            };
+            assert!(
+                refusal_details(&refusal)
+                    .iter()
+                    .any(|reason| reason.starts_with("private_folder_busy:")),
+                "{held}: {refusal:?}"
+            );
+        }
+        // Over, the first holds nothing.
+        for ended in ["accepted", "cancelled"] {
+            let project = Project::new(&format!("proc-free-{ended}"), a_procurement_team(), at(12));
+            a_procurement_task(&project, "FRK-1", Some(ended));
+            a_procurement_task(&project, "FRK-2", None);
+            assert!(!busy(&project), "{ended}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_procurement_task_ends_at_accepted() {
+        let project = Project::new("procurement-accepted", a_procurement_team(), at(12));
+        a_procurement_task(&project, "FRK-1", Some("in_progress"));
+        let folder = project.repo.path.join(".farik/local/procurement");
+        std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
+        std::fs::write(folder.join("vendors.xlsx"), "register").expect("written");
+        std::fs::write(folder.join("evaluations/old.md"), "an old comparison").expect("written");
+        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        // Assignment's copy holds the notes as well as the workbooks (a guard: it copies all).
+        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        assert!(folder.join(".history/FRK-1/vendors.xlsx").is_file());
+        assert!(folder.join(".history/FRK-1/evaluations/old.md").is_file());
+        // The task writes its comparison and edits the register.
+        std::fs::write(folder.join("evaluations/email-sending.md"), "# Email").expect("written");
+        std::fs::write(folder.join("vendors.xlsx"), "register, edited").expect("written");
+        project.record(
+            "FRK-1",
+            "criterion.recorded",
+            &json!({
+                "criterion_id": "C1",
+                "passed": true,
+                "evidence": "the comparison is in the folder",
+                "run_by": "assignee",
+                "recorded_by": "proc-1"
+            }),
+            at(10),
+        );
+        let verifying = a_request(
+            "FRK-1",
+            TaskStatus::Verifying,
+            TransitionActor::Assignee,
+            Some("proc-1"),
+        );
+        let naming = |files: &[&str]| TransitionAsk {
+            workbooks: Some(files.iter().map(ToString::to_string).collect()),
+            ..TransitionAsk::default()
+        };
+
+        // A note that is not there is refused, by name; the note and the register are enough.
+        let TransitionOutcome::Refused(refusal) =
+            project.ask(&verifying, &naming(&["evaluations/absent.md"]))
+        else {
+            panic!("a note that is not in the folder");
+        };
+        assert!(
+            refusal_details(&refusal)
+                .iter()
+                .any(|reason| reason == "evaluations/absent.md is not in your folder"),
+            "{refusal:?}"
+        );
+        let outcome = project.ask(
+            &verifying,
+            &naming(&["vendors.xlsx", "evaluations/email-sending.md"]),
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+
+        // A task that depends on it, and an agent to give it to, wait for it.
+        a_procurement_task(&project, "FRK-2", None);
+        project.file("FRK-2", |wire| {
+            as_a_procurement_task(wire);
+            wire["dependencies"] = json!(["FRK-1"]);
+        });
+        let assigning_second = || {
+            let request = a_request(
+                "FRK-2",
+                TaskStatus::Assigned,
+                TransitionActor::ProductManager,
+                Some("maya"),
+            );
+            project.context(&request, &assigning("proc-2", "maya"))
+        };
+        assert!(
+            !assigning_second()
+                .assignment
+                .expect("an assignment")
+                .dependencies[0]
+                .integrated
+        );
+
+        // Accepted, it is finished: nothing is integrated, and its dependant may be assigned.
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "proc-1");
+        note(&project, "FRK-1", "review", "maya");
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let TransitionOutcome::Moved(decision) = outcome else {
+            panic!("the comparison is in the folder: {outcome:?}");
+        };
+        assert_eq!(
+            decision.effects,
+            [farik_core::governor::transition::TransitionEffect::NothingToIntegrate]
+        );
+        let after = assigning_second().assignment.expect("an assignment");
+        assert!(after.dependencies[0].integrated, "{after:?}");
+        assert!(!after.private_folder_busy);
+    }
+
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_task_holds_the_folder_by_its_role_not_by_its_agent() {

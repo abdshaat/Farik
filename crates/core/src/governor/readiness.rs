@@ -13,7 +13,9 @@ use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
 };
 use crate::generated::task_contract::FarikTaskContractKind as Kind;
-use crate::team::{changes_code, plain_role, task_private_folder, workbook_path_fault};
+use crate::team::{
+    changes_code, plain_role, private_file_fault, private_folder, task_private_folder,
+};
 use crate::text::listed;
 
 /// Builders for readiness contexts and typed contracts, usable by every crate's tests.
@@ -698,10 +700,11 @@ fn is_within_the_folder(path: &str, folder: &str) -> bool {
     is_within_any(path, &[folder.to_string()])
 }
 
-/// A task for a role with a private folder works only there (5.3, 6.6): its allowed paths lie
-/// within the folder, it has no `command` or `test` criterion, since it has no worktree to run one
-/// in, its `artifact` criteria name workbooks as the folder holds them and search no text, since a
-/// workbook is not text, and it has no parent epic, whose paths could not name `.farik/`.
+/// A task for a role with a private folder works only there (5.3, 6.6, 6.10): its allowed paths
+/// lie within the folder, it has no `command` or `test` criterion, since it has no worktree to run
+/// one in, its `artifact` criteria name files as the folder holds them (workbooks, and notes in the
+/// procurement folder) and search no text, since a workbook is not text and a note is checked for
+/// existence alone, and it has no parent epic, whose paths could not name `.farik/`.
 fn private_folder_task(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
     let folder = task_private_folder(contract)?;
     let mut reasons = Vec::new();
@@ -752,12 +755,17 @@ fn private_folder_task(contract: &TaskContract, _: &ReadinessContext) -> Option<
             continue;
         };
         let why = if path.starts_with(".farik/") {
+            let example = if private_folder(Role::ProcurementSpecialist) == Some(folder) {
+                "vendors.xlsx"
+            } else {
+                "books.xlsx"
+            };
             Some(format!(
                 "is relative to the project, and a path here is relative to {folder}; write \
-                 books.xlsx"
+                 {example}"
             ))
         } else {
-            workbook_path_fault(&path)
+            private_file_fault(folder, &path)
         };
         if let Some(why) = why {
             reasons.push(format!(
@@ -1439,6 +1447,103 @@ mod tests {
             the_books_criteria(),
         );
         assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
+    }
+
+    /// A task for the Procurement Specialist, reviewed by the Product Manager, allowed `paths`,
+    /// with exactly `criteria` (wire values).
+    fn a_procurement_task(paths: &[&str], criteria: serde_json::Value) -> TaskContract {
+        let mut wire = a_contract_wire();
+        wire["assignee_role"] = json!("procurement_specialist");
+        wire["reviewer_role"] = json!("product_manager");
+        wire["allowed_paths"] = json!(paths);
+        wire["exit_criteria"] = criteria;
+        validate_contract(&wire).expect("a schema-valid contract")
+    }
+
+    #[test]
+    fn a_procurement_task_is_ready_without_a_branch() {
+        let evaluation = json!([
+            { "id": "C1", "text": "The comparison is written.",
+              "verification": { "method": "artifact", "path": "evaluations/email-sending.md" } },
+            { "id": "C2", "text": "Every price names its source.",
+              "verification": { "method": "review", "rubric": ["Does every price name its source?"] } },
+            { "id": "C3", "text": "The recommendation is clear to the founder.",
+              "verification": { "method": "human", "question": "Is the recommendation clear?" } }
+        ]);
+        let folder = &[".farik/local/procurement/**"];
+        let task = a_procurement_task(folder, evaluation.clone());
+        assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
+        // The register is a workbook in the folder, and a note may sit a folder down.
+        let both = a_procurement_task(
+            folder,
+            json!([
+                evaluation[0].clone(), evaluation[1].clone(), evaluation[2].clone(),
+                { "id": "C4", "text": "The register is kept.",
+                  "verification": { "method": "artifact", "path": "vendors.xlsx" } }
+            ]),
+        );
+        assert_eq!(evaluate_readiness(&both, &a_ready_context()), Ok(()));
+        // A command criterion has no worktree to run in.
+        let runs = a_procurement_task(
+            folder,
+            json!([
+                evaluation[0].clone(), evaluation[1].clone(), evaluation[2].clone(),
+                { "id": "C4", "text": "It builds.",
+                  "verification": { "method": "command", "command": "make", "expect": { "exit_code": 0 } } }
+            ]),
+        );
+        let context = a_context_without_marketing();
+        assert_eq!(failed_rules(&runs, &context), [R::PrivateFolderTask]);
+        assert!(
+            message_of(&runs, &context, R::PrivateFolderTask)
+                .contains("criterion C4 is a command or a test")
+        );
+        // A note is not searched for text, as a workbook is not.
+        let searched = a_procurement_task(
+            folder,
+            json!([
+                { "id": "C1", "text": "The comparison names a seller.",
+                  "verification": { "method": "artifact", "path": "evaluations/email-sending.md",
+                                    "must_contain": ["seller"] } },
+                evaluation[1].clone(), evaluation[2].clone()
+            ]),
+        );
+        assert_eq!(failed_rules(&searched, &context), [R::PrivateFolderTask]);
+        // The finance folder is not its own.
+        let finance = a_procurement_task(&[".farik/local/finance/**"], evaluation.clone());
+        assert_eq!(
+            failed_rules(&finance, &context),
+            [R::NoFarikPaths, R::PrivateFolderTask]
+        );
+        assert!(
+            message_of(&finance, &context, R::PrivateFolderTask).contains(
+                "allowed paths .farik/local/finance/** lie outside .farik/local/procurement"
+            ),
+        );
+        // A path that is neither a workbook nor a note, and one that starts at the project.
+        for (path, said) in [
+            ("evaluations/x.txt", "is not a workbook or a note"),
+            (
+                ".farik/local/procurement/vendors.xlsx",
+                "is relative to the project",
+            ),
+        ] {
+            let task = a_procurement_task(
+                folder,
+                json!([
+                    { "id": "C1", "text": "It exists.",
+                      "verification": { "method": "artifact", "path": path } },
+                    evaluation[1].clone(), evaluation[2].clone()
+                ]),
+            );
+            assert_eq!(
+                failed_rules(&task, &context),
+                [R::PrivateFolderTask],
+                "{path}"
+            );
+            let message = message_of(&task, &context, R::PrivateFolderTask);
+            assert!(message.contains(said), "{path}: {message}");
+        }
     }
 
     #[test]

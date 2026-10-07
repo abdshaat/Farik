@@ -9,7 +9,7 @@ use std::time::Duration;
 use farik_core::contract::{ExitCriterion, TaskContract, TaskId, Verification};
 use farik_core::governor::done::{CriterionResult, RunBy};
 use farik_core::governor::paths::normalise;
-use farik_core::team::workbook_path_fault;
+use farik_core::team::private_file_fault;
 use farik_store::baseline::folder_in;
 use farik_store::{Git, GitError};
 
@@ -163,12 +163,13 @@ pub fn run_criteria(
 }
 
 /// Judges an `artifact` criterion of a task in a private folder (`docs/SPEC.md` 5.4, 6.6) on the
-/// host, with no sandbox: the artifact is a workbook, named as the folder holds it (`books.xlsx`),
-/// and it passes when it is a regular file in `folder`, the folder's path from the project's
-/// `root` (`.farik/local/finance`), reached through no link: none of the folder's parts from `root`
-/// down is one, and none of the artifact's. A workbook is not text, so a criterion that searches
-/// it for strings fails; a criterion that is not an artifact is not judged here and fails. The
-/// result is stamped `run_by`.
+/// host, with no sandbox: the artifact is a file named as the folder holds it (`books.xlsx`, and a
+/// note such as `evaluations/email-sending.md` in the procurement folder), and it passes when it is
+/// a regular file in `folder`, the folder's path from the project's `root`
+/// (`.farik/local/finance`), reached through no link: none of the folder's parts from `root` down
+/// is one, and none of the artifact's. A workbook is not text, so a criterion that searches it for
+/// strings fails; a criterion that is not an artifact is not judged here and fails. The result is
+/// stamped `run_by`.
 #[must_use]
 pub fn check_artifact_in(
     root: &Path,
@@ -185,7 +186,7 @@ pub fn check_artifact_in(
                 .to_owned(),
         );
     };
-    if let Some(why) = workbook_path_fault(&path) {
+    if let Some(why) = private_file_fault(folder, &path) {
         return fail(format!(
             "the artifact path \"{path}\" {why}: nothing was read"
         ));
@@ -761,6 +762,50 @@ mod tests {
         );
         assert!(
             !passed && evidence.contains("not an artifact"),
+            "{evidence}"
+        );
+    }
+
+    #[test]
+    fn checks_a_note_in_the_procurement_folder() {
+        const PROCUREMENT: &str = ".farik/local/procurement";
+        let root = fresh_root("artifact-note");
+        let folder = root.join(PROCUREMENT);
+        std::fs::create_dir_all(folder.join("evaluations")).expect("made");
+        std::fs::write(folder.join("evaluations/email-sending.md"), "a comparison")
+            .expect("written");
+        std::fs::write(folder.join("vendors.xlsx"), "register").expect("written");
+        let checked = |folder: &str, path: &str| match check_artifact_in(
+            &root,
+            folder,
+            &artifact(path, &[]),
+            RunBy::Reviewer,
+        ) {
+            CriterionOutcome::Result(result) => (result.passed, result.evidence),
+            other => panic!("not a result: {other:?}"),
+        };
+        // A note and the register pass, as files there are in the folder.
+        for path in ["evaluations/email-sending.md", "vendors.xlsx"] {
+            let (passed, evidence) = checked(PROCUREMENT, path);
+            assert!(passed, "{path}: {evidence}");
+            assert!(evidence.contains(path), "{evidence}");
+        }
+        // A file of another kind, a name in capitals, and an absent note fail, saying why.
+        for (path, why) in [
+            ("notes.txt", "ends in `.xlsx` or `.md`"),
+            ("evaluations/Email.MD", "ends in `.xlsx` or `.md`"),
+            ("evaluations/absent.md", "is not there"),
+        ] {
+            let (passed, evidence) = checked(PROCUREMENT, path);
+            assert!(!passed, "{path}");
+            assert!(evidence.contains(why), "{path}: {evidence}");
+        }
+        // The finance folder holds workbooks alone: a note named there is refused for its kind.
+        std::fs::create_dir_all(root.join(FOLDER)).expect("made");
+        std::fs::write(root.join(FOLDER).join("notes.md"), "a note").expect("written");
+        let (passed, evidence) = checked(FOLDER, "notes.md");
+        assert!(
+            !passed && evidence.contains("ends in `.xlsx`"),
             "{evidence}"
         );
     }

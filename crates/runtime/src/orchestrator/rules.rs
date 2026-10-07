@@ -2146,6 +2146,151 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_procurement_session_runs_in_its_folder() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        // FRK-2 is in review; FRK-1 is in progress. The folder is not made yet.
+        let harness = Harness::with_procurement("orch-procurement-sessions");
+        let folder = harness.procurement_folder();
+        harness.file("FRK-2", "ready", |wire| {
+            wire["assignee_role"] = json!("procurement_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!([".farik/local/procurement/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "Every price names its source.",
+                "satisfies": ["R1"],
+                "verification": { "method": "review", "rubric": ["Does every price name its source?"] }
+            }]);
+        });
+        let people = json!({ "assignee": "proc", "reviewer": "pm" });
+        for (from, to) in [
+            ("ready", "assigned"),
+            ("assigned", "in_progress"),
+            ("in_progress", "verifying"),
+        ] {
+            harness.project.moved("FRK-2", from, to, &people);
+        }
+        assert!(!folder.exists());
+        let recorded = harness.recorded(vec![review_writes_note(), reads_a_file()]);
+        let witness = Arc::new(ExecutorWitness::new(
+            recorded.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+
+        // The review: the reviewer's session works in the folder, made for its owner alone.
+        orchestrator.tick().await.expect("the review runs");
+        assert_eq!(
+            folder
+                .metadata()
+                .map(|metadata| metadata.permissions().mode() & 0o777)
+                .ok(),
+            Some(0o700),
+            "the folder is made for its owner alone"
+        );
+        // The implement session of another task, with no sandbox made for it.
+        harness
+            .project
+            .moved("FRK-2", "verifying", "cancelled", &people);
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        orchestrator
+            .tick()
+            .await
+            .expect("the implement session runs");
+
+        let started = recorded.started();
+        assert_eq!(
+            started
+                .iter()
+                .map(|spec| (spec.agent_id.as_str(), spec.purpose, spec.cwd.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("pm", SessionPurpose::Verify, folder.clone()),
+                ("proc", SessionPurpose::Implement, folder.clone()),
+            ]
+        );
+        assert_eq!(witness.had_executor(), vec![false, false]);
+        assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
+        assert!(!harness.worktree("FRK-1").exists());
+        assert!(!harness.worktree("FRK-2").exists());
+        // No exception was made for it: the team still protects `.farik/local/**`, which the
+        // session's `permissions.deny` is made from, and every other session is refused it.
+        let team = harness.project.deps.files.read_team().expect("the team");
+        assert!(
+            team.rules()
+                .protected_paths
+                .contains(&".farik/local/**".to_string()),
+            "{:?}",
+            team.rules().protected_paths
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assignment_copies_a_procurement_folder_notes_and_all() {
+        let harness = Harness::with_procurement("orch-procurement-baseline");
+        let folder = harness.procurement_folder();
+        std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
+        std::fs::write(folder.join("vendors.xlsx"), "register").expect("written");
+        std::fs::write(folder.join("evaluations/old.md"), "an old comparison").expect("written");
+        harness.procurement_task("FRK-1", Some("assigned"));
+        let adapter = harness.recorded(vec![]);
+
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let copy = folder.join(".history/FRK-1");
+        let read = |name: &str| std::fs::read_to_string(copy.join(name)).ok();
+        assert_eq!(read("vendors.xlsx").as_deref(), Some("register"));
+        assert_eq!(
+            read("evaluations/old.md").as_deref(),
+            Some("an old comparison")
+        );
+        assert!(!harness.worktree("FRK-1").exists());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_procurement_reviewer_is_told_what_changed() {
+        let harness = Harness::with_procurement("orch-procurement-review");
+        harness.procurement_task("FRK-1", Some("verifying"));
+        let folder = harness.procurement_folder();
+        std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
+        std::fs::write(folder.join("vendors.xlsx"), "register").expect("written");
+        let task = "FRK-1".parse().expect("a task id");
+        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        // The task changed the register and wrote a note, and the reviewer's run of the criterion
+        // finds it.
+        std::fs::write(folder.join("vendors.xlsx"), "register, edited").expect("written");
+        std::fs::write(
+            folder.join("evaluations/email-sending.md"),
+            "# Email sending",
+        )
+        .expect("written");
+        let adapter = harness.recorded(vec![review_writes_note()]);
+
+        harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the review runs");
+
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert_eq!(
+            block(prompt, "changes").trim(),
+            "evaluations/email-sending.md: new, 15 bytes\nvendors.xlsx: changed, 16 bytes"
+        );
+        assert!(!prompt.contains("The diff from"), "{prompt}");
+        assert!(block(prompt, "results").contains("C1: passed"), "{prompt}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_dependency_to_be_integrated() {
         // FRK-1's assignee is paused, so that no rule works FRK-1 and the tick reaches FRK-2.
         let harness = Harness::new("orch-plan-dependency", |wire| {

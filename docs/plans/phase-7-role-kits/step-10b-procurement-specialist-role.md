@@ -111,7 +111,7 @@ Files: `private_folder` and `private_file_fault` in `crates/core/src/team.rs` an
 - `the_folders_do_not_wait_for_each_other`: a procurement task is assignable while a finance task is `in_progress` (this half a guard: the busy check is per folder); a second procurement task is not while another holds the folder, in any status but `accepted` and `cancelled` (spec 5.2), under a WIP limit of two. RED for the second half: the role has no folder, so nothing holds it.
 - `a_procurement_task_ends_at_accepted`: at assignment both `.xlsx` and `.md` files are copied to `.history/<task-id>/` (a guard for the copy: `copy_baseline` already copies every file); it reaches `verifying` when every file named in `workbooks` exists (an `.md` among them), its reviewer receives each changed file beside the copy, and once `accepted` a task depending on it is assignable. RED: `folder_work` refuses the `.md` through `private_path`.
 
-- [ ] `feat(core): give the Procurement Specialist its private folder`
+- [x] `feat(core): give the Procurement Specialist its private folder`
 
 ### Task 3: The sheet tools by folder
 

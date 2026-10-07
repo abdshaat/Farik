@@ -1621,6 +1621,85 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn procurement_cannot_climb_out() {
+        // A procurement task's session works in `.farik/local/procurement` (6.10), beside the
+        // finance folder. The hook reads no role: the working directory holds the session, as it
+        // holds a finance one, so the finance books are as far away as the project's database.
+        use crate::daemon::SessionRegistration;
+
+        let daemon = TestDaemon::new("hook-procurement-folder", |_| {});
+        daemon
+            .project
+            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+                wire["assignee_role"] = json!("procurement_specialist");
+                wire["reviewer_role"] = json!("product_manager");
+                wire["allowed_paths"] = json!([".farik/local/procurement/**"]);
+                wire["exit_criteria"] = json!([{
+                    "id": "C1",
+                    "text": "The comparison is written.",
+                    "satisfies": ["R1"],
+                    "verification": { "method": "artifact", "path": "evaluations/email-sending.md" }
+                }]);
+            });
+        let root = daemon.project.repo.path.clone();
+        let folder = root.join(".farik/local/procurement");
+        let finance = root.join(".farik/local/finance");
+        std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
+        std::fs::create_dir_all(&finance).expect("the finance folder is made");
+        std::fs::write(folder.join("evaluations/email-sending.md"), "a note").expect("written");
+        std::fs::write(finance.join("books.xlsx"), "books").expect("written");
+        daemon.state.register_session(SessionRegistration {
+            session_id: "session-procurement".to_string(),
+            agent_id: "dev-a".to_string(),
+            task_id: Some("FRK-2".parse().expect("a task id")),
+            purpose: crate::session::SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            skills: Vec::new(),
+            skills_root: None,
+            cwd: folder.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
+            connectors: Vec::new(),
+            preview: None,
+        });
+        let hook = |tool: &str, input: Value| {
+            decide_pre_tool_use(
+                &daemon.call("session-procurement", tool, &input),
+                &daemon.state,
+            )
+        };
+        // Its own folder is reachable, by a path relative to it or an absolute one.
+        for file in [
+            "evaluations/email-sending.md",
+            &folder
+                .join("evaluations/email-sending.md")
+                .display()
+                .to_string(),
+        ] {
+            let allowed = hook("Read", json!({ "file_path": file }));
+            assert!(allowed.allow, "{file}: {allowed:?}");
+        }
+        // The finance folder is not, by a path that climbs, an absolute one, or one from the root.
+        for file in [
+            "../finance/books.xlsx".to_string(),
+            "../../local/finance/books.xlsx".to_string(),
+            finance.join("books.xlsx").display().to_string(),
+            ".farik/local/finance/books.xlsx".to_string(),
+        ] {
+            let refused = hook("Read", json!({ "file_path": file }));
+            assert!(!refused.allow, "{file}: {refused:?}");
+        }
+        denied_for(
+            &hook("Glob", json!({ "pattern": "../finance/**" })),
+            "path_outside_workspace",
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_reach_the_skill_folder_and_writes_do_not() {
         let daemon = TestDaemon::new("hook-skill-reads", |_| {});
         let root = daemon.project.repo.path.clone();

@@ -106,12 +106,14 @@ pub fn changes_code(role: Role) -> bool {
 }
 
 /// The folder, under the project root, that only one role's sessions work in (`docs/SPEC.md` 6.6,
-/// D5): the Finance Specialist's books, `.farik/local/finance`. It lies under `.farik/local/`,
-/// which Farik keeps out of git, so it is never committed. No other role has one.
+/// 6.10, D5): the Finance Specialist's books, `.farik/local/finance`, and the Procurement
+/// Specialist's register and comparisons, `.farik/local/procurement`. Each lies under
+/// `.farik/local/`, which Farik keeps out of git, so it is never committed. No other role has one.
 #[must_use]
 pub fn private_folder(role: Role) -> Option<&'static str> {
     match role {
         Role::FinanceSpecialist => Some(".farik/local/finance"),
+        Role::ProcurementSpecialist => Some(".farik/local/procurement"),
         _ => None,
     }
 }
@@ -152,6 +154,23 @@ fn is_a_workbook_name(part: &str) -> bool {
 /// and that the path resolves inside the folder.
 #[must_use]
 pub fn workbook_path_fault(path: &str) -> Option<String> {
+    path_fault(path, false)
+}
+
+/// Why `path` is not the path of a file `folder` holds, or `None` when it is one (`docs/SPEC.md`
+/// 6.6, 6.10): the shape of [`workbook_path_fault`], and an ending that is `.xlsx` in the finance
+/// folder, and `.xlsx` or `.md`, a workbook or a note, in lower case, in the procurement folder.
+/// A `folder` that is neither's holds workbooks alone.
+#[must_use]
+pub fn private_file_fault(folder: &str, path: &str) -> Option<String> {
+    path_fault(
+        path,
+        private_folder(Role::ProcurementSpecialist) == Some(folder),
+    )
+}
+
+/// [`workbook_path_fault`], and with `notes` a path ending in `.md` too.
+fn path_fault(path: &str, notes: bool) -> Option<String> {
     let parts: Vec<&str> = path.split('/').collect();
     if path.is_empty()
         || path.chars().count() > MOST_WORKBOOK_PATH
@@ -169,14 +188,19 @@ pub fn workbook_path_fault(path: &str) -> Option<String> {
                 .to_string(),
         );
     }
-    if parts
-        .last()
-        .and_then(|last| last.strip_suffix(".xlsx"))
-        .is_none()
-    {
-        return Some("is not a workbook: it ends in `.xlsx`, in lower case".to_string());
+    let last = parts.last().copied().unwrap_or_default();
+    let ends_in = |extension: &str| last.strip_suffix(extension).is_some();
+    if ends_in(".xlsx") || (notes && ends_in(".md")) {
+        return None;
     }
-    None
+    Some(
+        if notes {
+            "is not a workbook or a note: it ends in `.xlsx` or `.md`, in lower case"
+        } else {
+            "is not a workbook: it ends in `.xlsx`, in lower case"
+        }
+        .to_string(),
+    )
 }
 
 /// Checks a value against `docs/schemas/team.schema.json` and, when it conforms, returns the typed
@@ -1296,7 +1320,8 @@ mod tests {
         AgentStatus, HumanAcceptsContracts, Integration, JudgeChoice, JudgmentPolicy,
         JudgmentRequired, PermissionTier, PermissionTierWire, Preview, Role, RoleWire,
         SMALL_ENOUGH_QUESTION, Team, TeamPermissions, TeamPolicy, changes_code, defaults,
-        plain_role, private_folder, task_private_folder, validate_team, workbook_path_fault,
+        plain_role, private_file_fault, private_folder, task_private_folder, validate_team,
+        workbook_path_fault,
     };
     use super::{CustomServer, CustomTransport, canonical_json, custom_server, spec_sha256};
     use crate::contract::fixtures::a_contract_wire;
@@ -2274,10 +2299,14 @@ mod tests {
     }
 
     #[test]
-    fn only_the_finance_specialist_has_a_folder() {
+    fn the_procurement_folder_is_its_own() {
         assert_eq!(
             private_folder(Role::FinanceSpecialist),
             Some(".farik/local/finance")
+        );
+        assert_eq!(
+            private_folder(Role::ProcurementSpecialist),
+            Some(".farik/local/procurement")
         );
         for role in [
             Role::ProductManager,
@@ -2289,6 +2318,47 @@ mod tests {
             Role::Human,
         ] {
             assert_eq!(private_folder(role), None, "{role}");
+        }
+    }
+
+    #[test]
+    fn a_procurement_folder_holds_workbooks_and_notes() {
+        let procurement = ".farik/local/procurement";
+        for path in ["vendors.xlsx", "evaluations/email-sending.md", "a b/c.md"] {
+            assert_eq!(private_file_fault(procurement, path), None, "{path}");
+        }
+        // Not lower case, not a workbook or a note, one part too many, and a name that is not one.
+        for path in [
+            "x.MD",
+            "x.txt",
+            "a/b/c/d.md",
+            ".history/x.md",
+            "../x.md",
+            "evaluations/.md",
+            "",
+        ] {
+            assert!(private_file_fault(procurement, path).is_some(), "{path:?}");
+        }
+        // The finance folder holds workbooks alone, and the shape rules are the workbook path's.
+        let finance = ".farik/local/finance";
+        assert_eq!(private_file_fault(finance, "books.xlsx"), None);
+        assert_eq!(
+            private_file_fault(finance, "notes.md"),
+            Some("is not a workbook: it ends in `.xlsx`, in lower case".to_string())
+        );
+        assert_eq!(
+            private_file_fault(procurement, "x.txt"),
+            Some(
+                "is not a workbook or a note: it ends in `.xlsx` or `.md`, in lower case"
+                    .to_string()
+            )
+        );
+        for path in ["", "a/b/c/d.xlsx", ".history/x.xlsx"] {
+            assert_eq!(
+                private_file_fault(finance, path),
+                workbook_path_fault(path),
+                "{path:?}"
+            );
         }
     }
 

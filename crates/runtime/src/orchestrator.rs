@@ -725,8 +725,9 @@ fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
 }
 
 /// Where a task's sessions work: its private folder, `.farik/local/finance` for a Finance
-/// Specialist's task, made for its owner alone when it is not there (6.6); any other task's
-/// worktree (5.14). A session in a folder has no worktree, no branch and no sandbox.
+/// Specialist's task and `.farik/local/procurement` for a Procurement Specialist's, made for its
+/// owner alone when it is not there (6.6, 6.10); any other task's worktree (5.14). A session in a
+/// folder has no worktree, no branch and no sandbox.
 ///
 /// # Errors
 ///

@@ -320,6 +320,52 @@ impl Harness {
         }
     }
 
+    /// A harness whose team also has a Finance Specialist, `fin`, and two Procurement
+    /// Specialists, `proc` and `proc-2`, each of whom may hold two tasks.
+    pub(crate) fn with_procurement(name: &str) -> Self {
+        Self::new(name, |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+            crate::tools::fixtures::with_the_finance_specialist(wire);
+            for id in ["proc", "proc-2"] {
+                wire["agents"]
+                    .as_array_mut()
+                    .expect("a list of agents")
+                    .push(farik_core::team::fixtures::an_agent_wire(
+                        id,
+                        "procurement_specialist",
+                    ));
+            }
+        })
+    }
+
+    /// The Procurement Specialists' private folder in this project.
+    pub(crate) fn procurement_folder(&self) -> PathBuf {
+        self.project.repo.path.join(".farik/local/procurement")
+    }
+
+    /// Files `task` `ready` as a Procurement Specialist's task in its folder, ended by its
+    /// comparison, `evaluations/email-sending.md`, and reviewed by the Product Manager; and, when
+    /// `held` names a status, held by `proc` there.
+    pub(crate) fn procurement_task(&self, task: &str, held: Option<&str>) {
+        self.file(task, "ready", |wire| {
+            wire["assignee_role"] = json!("procurement_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!([".farik/local/procurement/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The comparison is written.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": "evaluations/email-sending.md" }
+            }]);
+        });
+        let Some(held) = held else { return };
+        let people = json!({ "assignee": "proc", "reviewer": "pm" });
+        self.project.moved(task, "ready", "assigned", &people);
+        if held != "assigned" {
+            self.project.moved(task, "assigned", held, &people);
+        }
+    }
+
     /// Files `task` `ready`, as `file` does.
     pub(crate) fn ready(&self, task: &str) {
         self.file(task, "ready", |_| {});
