@@ -1262,6 +1262,8 @@ mod tests {
             "farik_ask_human",
             "## 4. You ask before you write",
             "Never give either tool a pull request's number.",
+            "Resource not accessible",
+            "never try another way",
         ] {
             assert!(
                 text.contains(phrase),
