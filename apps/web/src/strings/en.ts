@@ -935,7 +935,7 @@ export const en = {
 	taskLimitFor: "{usd} for this task",
 	taskChangesLine: "{size}, on the branch {branch}.",
 	privateChanges:
-		"This task changed the {role}’s private files, which are not shown in the browser. Its reviewer read each changed file beside the copy taken when the task started.",
+		"This task changed the {role}’s private files, which are not shown in the browser. Its reviewer reads each changed file beside the copy taken when the task started.",
 	taskNoNotes: "No notes yet.",
 	taskCost: "Cost so far",
 	taskCostTotal: "Total, of a {limit} limit",

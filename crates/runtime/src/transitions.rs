@@ -496,7 +496,7 @@ impl Transitions {
         let named = ask.workbooks.as_deref().unwrap_or_default();
         let (work, changed_paths) = self.work(&contract, team, named)?;
 
-        let assignment = assignment(
+        let mut assignment = assignment(
             ask,
             team,
             &board,
@@ -505,6 +505,10 @@ impl Transitions {
             dependency_states(&contract, &board),
             self.designer_browser(team),
         );
+        if let Some(assignment) = assignment.as_mut() {
+            assignment.private_folder_busy =
+                private_folder_busy(&self.files, &board, row, assignment.assignee_role)?;
+        }
 
         let review = self.review_of(team, &contract, &changed_paths, &history).1;
         let (results, completion_note, review_note) = evidence_since_work_began(&history);
@@ -1179,31 +1183,43 @@ fn assignment(
         plan_in_sprints: team.plans_in_sprints(),
         dependencies,
         designer_browser,
-        private_folder_busy: private_folder_busy(team, board, row, assignee_role),
+        // Filled by `context`, which reads the contracts of the tasks that might hold the folder.
+        private_folder_busy: false,
     })
 }
 
-/// Whether another task holds the private folder `assignee_role` works in (6.6): one assigned to an
-/// agent whose role has that folder, in any status but `accepted` and `cancelled`. It is not
-/// `open_tasks`, which counts one agent's tasks and leaves out those waiting for a sprint: a task
-/// in the Backlog that was assigned still has its copy of the folder, and holds it.
+/// Whether another task holds the private folder `assignee_role` works in (6.6): one assigned to
+/// an agent, whose own contract names a role with that folder, in any status but `accepted` and
+/// `cancelled`. The task's role is the one that holds the folder, not its agent's current one, so
+/// an agent no longer on the team does not free it. It is not `open_tasks`, which counts one
+/// agent's tasks and leaves out those waiting for a sprint: a task in the Backlog that was
+/// assigned still has its copy of the folder, and holds it.
+///
+/// # Errors
+///
+/// `Files` when a contract that might hold the folder cannot be read; a task with no contract file
+/// holds nothing.
 fn private_folder_busy(
-    team: &Team,
+    files: &ProjectFiles,
     board: &[TaskProjection],
     row: &TaskProjection,
     assignee_role: Role,
-) -> bool {
+) -> Result<bool, TransitionError> {
     let Some(folder) = private_folder(assignee_role) else {
-        return false;
+        return Ok(false);
     };
-    board.iter().any(|other| {
+    for other in board.iter().filter(|other| {
         other.task_id != row.task_id
+            && other.assignee_id.is_some()
             && !matches!(other.status, TaskStatus::Accepted | TaskStatus::Cancelled)
-            && other
-                .assignee_id
-                .as_deref()
-                .is_some_and(|agent| private_folder(role_in(team, agent)) == Some(folder))
-    })
+    }) {
+        match files.read_contract(&other.task_id) {
+            Ok(contract) if task_private_folder(&contract) == Some(folder) => return Ok(true),
+            Ok(_) | Err(FilesError::NotFound { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(false)
 }
 
 /// The status the board gives a task, if the board has it.
@@ -2040,6 +2056,88 @@ mod tests {
                 .private_folder_busy,
             "a task is not kept out of the folder by itself"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_task_holds_the_folder_by_its_role_not_by_its_agent() {
+        // FRK-1's agent is no longer on the team, so the team gives it no role; the task's copy of
+        // the folder and its work are still there, and it is the task's own role that holds them.
+        let project = Project::new("folder-agent-left", a_finance_team(), at(12));
+        a_finance_task(&project, "FRK-1", None);
+        let people = json!({ "assignee": "fin-gone", "reviewer": "maya" });
+        project.moved("FRK-1", "ready", "assigned", &people, at(10));
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(10));
+        a_finance_task(&project, "FRK-2", None);
+        let request = a_request(
+            "FRK-2",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+
+        let assignment = project
+            .context(&request, &assigning("fin-2", "maya"))
+            .assignment
+            .expect("an assignment");
+
+        assert!(assignment.private_folder_busy);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_task_waiting_in_the_backlog_still_holds_the_folder() {
+        // FRK-1 was in progress when its sprint ended and was left in the Backlog with its agent.
+        // It waits and fills no one's limit, but its copy of the folder is kept, so FRK-2, in the
+        // next sprint, still waits for the folder.
+        let project = Project::new(
+            "folder-backlog",
+            a_team(|wire| {
+                wire["policy"]["wip_limit_per_agent"] = json!(2);
+                wire["policy"]["plan_in_sprints"] = json!(true);
+                for id in ["fin-1", "fin-2"] {
+                    wire["agents"]
+                        .as_array_mut()
+                        .expect("a list of agents")
+                        .push(an_agent_wire(id, "finance_specialist"));
+                }
+            }),
+            at(12),
+        );
+        a_finance_task(&project, "FRK-1", Some("in_progress"));
+        a_finance_task(&project, "FRK-2", None);
+        project.open_sprint("S1", 100.0, &["FRK-1"]);
+        project.append_wire(&json!({
+            "seq": 1,
+            "recorded_at": at(11).to_rfc3339(),
+            "team_id": "farik",
+            "project_id": "farik",
+            "kind": "sprint.ended",
+            "body": { "sprint_id": "S1", "ended_by": "human", "left": ["FRK-1"], "backlog": true },
+        }));
+        project.open_sprint("S2", 100.0, &["FRK-2"]);
+        let request = a_request(
+            "FRK-2",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+
+        let assignment = project
+            .context(&request, &assigning("fin-2", "maya"))
+            .assignment
+            .expect("an assignment");
+
+        // The Backlog's task fills no limit, and holds the folder all the same.
+        assert!(
+            project
+                .projections
+                .board()
+                .expect("the board")
+                .iter()
+                .any(|row| { row.task_id.as_str() == "FRK-1" && row.left_for_the_backlog })
+        );
+        assert!(assignment.private_folder_busy);
     }
 
     #[test]

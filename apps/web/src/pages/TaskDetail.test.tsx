@@ -136,7 +136,7 @@ describe("task detail", () => {
 		const panel = screen.getByRole("tabpanel");
 		expect(
 			within(panel).getByText(
-				"This task changed the Finance Specialist’s private files, which are not shown in the browser. Its reviewer read each changed file beside the copy taken when the task started.",
+				"This task changed the Finance Specialist’s private files, which are not shown in the browser. Its reviewer reads each changed file beside the copy taken when the task started.",
 			),
 		).toBeTruthy();
 		const files = within(panel).getAllByRole("listitem");

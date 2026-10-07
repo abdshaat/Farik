@@ -2527,6 +2527,32 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_no_changes_of_a_private_folder_task_that_has_no_copy_yet() {
+        // A task not yet assigned has no copy of the folder to differ from, so it changed
+        // nothing: its page does not list the books as its new files.
+        let harness = Harness::with_finance("gates-folder-no-copy");
+        harness.finance_task("FRK-1", None);
+        let folder = harness.finance_folder();
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+
+        let diff = query(
+            &harness.daemon,
+            "task.diff",
+            &json!({ "task_id": "FRK-1" }),
+            "taskDiffResult",
+        );
+
+        assert_eq!(
+            diff,
+            json!({
+                "diff": "", "files": [], "added": 0, "removed": 0, "private_folder": true,
+            })
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn answers_tries_and_the_sprint() {
         let harness = driven("gates-tries");
         harness.rejected("FRK-1", 3, "C1 still fails");
