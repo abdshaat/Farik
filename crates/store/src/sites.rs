@@ -322,7 +322,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{SiteDecision, approved_sites, site_requests};
+    use super::{DeclinedSite, SiteDecision, approved_sites, declined_sites, site_requests};
     use crate::waiting::fixtures::{Board, at};
 
     fn set(hosts: &[&str]) -> BTreeSet<String> {
@@ -458,6 +458,66 @@ mod tests {
                 note: Some("No.".to_string())
             }),
             "the first of the owner's decisions is the one"
+        );
+    }
+
+    /// Only the owner declines a site: an agent's record of a decline is no one's word, and an
+    /// agent's record of an approval does not lift the owner's decline.
+    #[test]
+    fn only_the_owner_declines_a_site() {
+        let board = Board::new("sites-declined-by-owner");
+        let task = "FRK-1".parse().expect("a task id");
+        let declined = |host: &str| json!({ "host": host, "request": 1, "note": "No." });
+        board.session(
+            at(10, 1),
+            Some("FRK-1"),
+            "kai",
+            "session-1",
+            "site.declined",
+            declined("forged.example"),
+        );
+        board.put(
+            at(10, 2),
+            Some("FRK-1"),
+            Some("kai"),
+            "site.declined",
+            declined("forged-too.example"),
+        );
+        assert_eq!(
+            declined_sites(&board.log, &task),
+            Ok(Vec::new()),
+            "an agent's record declines nothing"
+        );
+
+        board.put(
+            at(10, 3),
+            Some("FRK-1"),
+            None,
+            "site.declined",
+            declined("shop.example"),
+        );
+        board.put(
+            at(10, 4),
+            Some("FRK-2"),
+            None,
+            "site.declined",
+            declined("another-task.example"),
+        );
+        board.session(
+            at(10, 5),
+            Some("FRK-1"),
+            "kai",
+            "session-1",
+            "site.approved",
+            json!({ "host": "shop.example", "request": 1 }),
+        );
+        assert_eq!(
+            declined_sites(&board.log, &task),
+            Ok(vec![DeclinedSite {
+                host: "shop.example".to_string(),
+                note: Some("No.".to_string()),
+            }]),
+            "the owner's decline of this task stands, whatever an agent records"
         );
     }
 }
