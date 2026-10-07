@@ -1,7 +1,7 @@
 //! The sites the Procurement Specialist may read (`docs/SPEC.md` 6.10, ADR 0039), folded from the
 //! four `site.` kinds of the project's log.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
@@ -159,6 +159,121 @@ pub fn site_requests(log: &EventLog) -> Result<Vec<SiteRequest>, StoreError> {
         }
     }
     Ok(requests)
+}
+
+/// One of Farik's own sites, as the running release lists it: the store keeps no copy of the list,
+/// so whoever asks passes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FarikEntry {
+    /// The shop's primary domain.
+    pub host: String,
+    /// The shop's name.
+    pub shop: String,
+    /// What the shop sells, as the list words it.
+    pub category: String,
+}
+
+/// One of Farik's sites and whether the team may read it now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FarikRow {
+    /// The shop's primary domain.
+    pub host: String,
+    /// The shop's name.
+    pub shop: String,
+    /// What the shop sells.
+    pub category: String,
+    /// Whether it is in the approved set: on unless the owner turned it off.
+    pub on: bool,
+    /// When the owner last turned it off or back on, when they ever did.
+    pub at: Option<DateTime<Utc>>,
+}
+
+/// A site the owner allowed that is not on Farik's list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerRow {
+    /// The site, in its ASCII form.
+    pub host: String,
+    /// When the owner allowed it.
+    pub at: DateTime<Utc>,
+    /// The request the owner answered by allowing it, when an agent asked and they did not add it
+    /// unasked.
+    pub request: Option<u64>,
+}
+
+/// Everything the agent's page and the command line show of the approved sites.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SiteList {
+    /// Farik's sites in the list's order.
+    pub farik: Vec<FarikRow>,
+    /// The owner's own sites, by host.
+    pub owner: Vec<OwnerRow>,
+    /// The requests nobody decided yet, by host.
+    pub waiting: Vec<SiteRequest>,
+}
+
+/// The sites as the owner sees them: each of Farik's `farik` entries with whether it is on, the
+/// owner's own sites, and the requests that wait.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn site_list(log: &EventLog, farik: &[FarikEntry]) -> Result<SiteList, StoreError> {
+    let hosts: BTreeSet<String> = farik.iter().map(|entry| entry.host.clone()).collect();
+    let approved = approved_sites(log, &hosts)?;
+    let events = log.read(&EventQuery {
+        kinds: vec![EventKind::SiteApproved, EventKind::SiteRemoved],
+        ..EventQuery::default()
+    })?;
+    // The owner's last word on each host: when, and the request it answered.
+    let mut last: BTreeMap<String, (DateTime<Utc>, Option<u64>)> = BTreeMap::new();
+    for event in events.iter().filter(|event| is_the_owners(event)) {
+        match &event.body {
+            EventBody::SiteApproved(body) => {
+                last.insert(
+                    body.host.to_string(),
+                    (
+                        event.envelope.recorded_at,
+                        body.request.map(std::num::NonZeroU64::get),
+                    ),
+                );
+            }
+            EventBody::SiteRemoved(body) => {
+                last.insert(body.host.to_string(), (event.envelope.recorded_at, None));
+            }
+            _ => {}
+        }
+    }
+    let farik_rows = farik
+        .iter()
+        .map(|entry| FarikRow {
+            host: entry.host.clone(),
+            shop: entry.shop.clone(),
+            category: entry.category.clone(),
+            on: approved.contains(&entry.host),
+            at: last.get(&entry.host).map(|(at, _)| *at),
+        })
+        .collect();
+    let owner = approved
+        .iter()
+        .filter(|host| !hosts.contains(*host))
+        .filter_map(|host| {
+            last.get(host).map(|(at, request)| OwnerRow {
+                host: host.clone(),
+                at: *at,
+                request: *request,
+            })
+        })
+        .collect();
+    let mut waiting: Vec<SiteRequest> = site_requests(log)?
+        .into_iter()
+        .filter(|asked| asked.decision.is_none())
+        .collect();
+    waiting.sort_by(|a, b| (&a.host, a.request).cmp(&(&b.host, b.request)));
+    Ok(SiteList {
+        farik: farik_rows,
+        owner,
+        waiting,
+    })
 }
 
 /// A site the owner did not allow for a task, with their own words when they said any.

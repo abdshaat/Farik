@@ -114,7 +114,8 @@ fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Fa
 }
 
 /// One row of `waiting.list`; a connector call's also names its approval, server, tool and input,
-/// and a post's its number, network, text, pictures and time.
+/// a post's its number, network, text, pictures and time, and a site request's its number, site,
+/// address and reason.
 fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
     let mut row = json!({
         "task_id": item.task_id,
@@ -136,6 +137,12 @@ fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
         row["currency"] = json!(ask.currency);
         row["starts_on"] = json!(ask.starts_on.to_string());
         row["ends_on"] = json!(ask.ends_on.to_string());
+    }
+    if let Some(ask) = &item.site {
+        row["request"] = json!(ask.request);
+        row["host"] = json!(ask.host);
+        row["url"] = json!(ask.url);
+        row["why"] = json!(ask.why);
     }
     if let Some(ask) = &item.post {
         row["post"] = json!(ask.post);
@@ -211,6 +218,7 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
         }
         "marketing_plan.list" => marketing_plan_list(deps),
         "marketing_plan.get" => marketing_plan_get(deps, params["plan"].as_str().unwrap_or("")),
+        "sites.list" => crate::tools::sites::site_list(&deps.log).map_err(|e| internal(&e)),
         "social_posts.list" => Ok(json!({
             "posts": going_out(&social_posts(&deps.log).map_err(|e| internal(&e))?, deps.clock.now())
         })),
@@ -2915,5 +2923,158 @@ pub(super) mod tests {
             .clone();
         assert_eq!(dev_a["line"], "Answering your chat", "{dev_a}");
         assert_eq!(dev_a["purpose"], "chat", "{dev_a}");
+    }
+
+    /// `proc`'s request, on FRK-1, to read `host`: the request's number.
+    fn site_asked(harness: &Harness, host: &str) -> u64 {
+        harness
+            .project
+            .record_by(
+                Some("proc"),
+                at(),
+                "FRK-1",
+                "site.requested",
+                &json!({ "host": host, "url": format!("https://www.{host}/boxes"), "why": "A maker." }),
+            )
+            .envelope
+            .seq
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn waiting_lists_a_site_request() {
+        let harness = Harness::with_procurement("gates-site-waits");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let request = site_asked(&harness, "shop.example");
+        let name = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team")
+            .agents
+            .iter()
+            .find(|agent| agent.id.as_str() == "proc")
+            .map(|agent| agent.display_name.to_string())
+            .expect("proc");
+        let waiting = || {
+            query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult",
+            )["waiting"]
+                .clone()
+        };
+
+        assert_eq!(
+            waiting(),
+            json!([{
+                "task_id": "FRK-1", "kind": "site_request", "agent_id": "proc",
+                "title": "Add a login page",
+                "line": format!("{name} asks to read shop.example"),
+                "request": request, "host": "shop.example",
+                "url": "https://www.shop.example/boxes", "why": "A maker."
+            }])
+        );
+
+        harness.project.record(
+            "FRK-1",
+            "site.approved",
+            &json!({ "host": "shop.example", "request": request }),
+        );
+        assert_eq!(waiting(), json!([]), "gone once decided");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_the_sites() {
+        let harness = Harness::with_procurement("gates-sites-list");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let farik = farik_roles::sites::farik_sites();
+        let minute = |n: i64| at() + chrono::Duration::minutes(n);
+        let stamp = |n: i64| minute(n).to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
+        // The owner turned one of Farik's off, and another off and on again, allowed a site a
+        // request named, added one unasked, and two requests wait.
+        harness.project.record_at(
+            minute(1),
+            "",
+            "site.removed",
+            &json!({ "host": farik[1].host }),
+        );
+        harness.project.record_at(
+            minute(2),
+            "",
+            "site.removed",
+            &json!({ "host": farik[2].host }),
+        );
+        harness.project.record_at(
+            minute(3),
+            "",
+            "site.approved",
+            &json!({ "host": farik[2].host }),
+        );
+        let allowed = site_asked(&harness, "allowed.example");
+        harness.project.record_at(
+            minute(4),
+            "FRK-1",
+            "site.approved",
+            &json!({ "host": "allowed.example", "request": allowed }),
+        );
+        harness.project.record_at(
+            minute(5),
+            "",
+            "site.approved",
+            &json!({ "host": "added.example" }),
+        );
+        let later = site_asked(&harness, "wait.example");
+        let earlier = site_asked(&harness, "again.example");
+
+        let listed = query(&harness.daemon, "sites.list", &json!({}), "sitesListResult");
+
+        let rows = listed["farik"].as_array().expect("a list");
+        assert_eq!(rows.len(), farik.len(), "every entry, in the file's order");
+        for (row, site) in rows.iter().zip(farik) {
+            assert_eq!(row["host"], site.host);
+            assert_eq!(row["shop"], site.shop);
+            assert_eq!(row["category"], site.category.to_string());
+        }
+        assert_eq!(rows[0]["on"], true);
+        assert!(
+            rows[0].get("at").is_none(),
+            "nothing was ever decided: {}",
+            rows[0]
+        );
+        assert_eq!(
+            (&rows[1]["on"], &rows[1]["at"]),
+            (&json!(false), &json!(stamp(1)))
+        );
+        assert_eq!(
+            (&rows[2]["on"], &rows[2]["at"]),
+            (&json!(true), &json!(stamp(3))),
+            "turned back on"
+        );
+        assert_eq!(
+            listed["owner"],
+            json!([
+                { "host": "added.example", "at": stamp(5) },
+                { "host": "allowed.example", "at": stamp(4), "request": allowed },
+            ])
+        );
+        let waiting = listed["waiting"].as_array().expect("a list");
+        let hosts: Vec<&str> = waiting
+            .iter()
+            .map(|row| row["host"].as_str().expect("a host"))
+            .collect();
+        assert_eq!(hosts, ["again.example", "wait.example"], "by host");
+        assert_eq!(
+            waiting[1],
+            json!({
+                "request": later, "host": "wait.example",
+                "url": "https://www.wait.example/boxes", "why": "A maker.",
+                "task_id": "FRK-1", "agent_id": "proc", "at": stamp(0)
+            })
+        );
+        assert_eq!(waiting[0]["request"], earlier);
     }
 }

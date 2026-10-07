@@ -60,6 +60,7 @@ mod serve;
 mod setup;
 /// One contract, and what happened to it.
 pub mod show;
+pub mod site;
 
 #[cfg(unix)]
 mod skill;
@@ -523,6 +524,12 @@ enum Commands {
         #[command(subcommand)]
         command: MarketingCommands,
     },
+    /// List the sites the Procurement Specialist may read, allow or refuse the ones it asked for,
+    /// and add or remove one (6.10).
+    Site {
+        #[command(subcommand)]
+        command: SiteCommands,
+    },
     /// Start, end, or show a sprint (5.5).
     Sprint {
         #[command(subcommand)]
@@ -724,6 +731,38 @@ enum SprintCommands {
     Show {
         /// The sprint, as S<n>.
         sprint_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SiteCommands {
+    /// Farik's approved sites, on or off, the sites you allowed, and the requests that wait.
+    List,
+    /// Allow a site the Procurement Specialist asked to read.
+    Approve {
+        /// The request's number, as farik run prints it.
+        request: u64,
+        /// A note for the Procurement Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Do not allow a site the Procurement Specialist asked to read.
+    Decline {
+        /// The request's number, as farik run prints it.
+        request: u64,
+        /// A note for the Procurement Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Allow a site no one asked for, or turn one of Farik's back on.
+    Add {
+        /// A name like shop.com, or the address of any page on it.
+        site: String,
+    },
+    /// Take a site away: one you allowed, or one of Farik's, which this turns off.
+    Remove {
+        /// A name like shop.com, or the address of any page on it.
+        host: String,
     },
 }
 
@@ -992,6 +1031,13 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
                 },
         } => open_project(&io.cwd, now).and_then(|project| marketing::posts(&project, now)),
         Commands::Marketing { .. } => open_project(&io.cwd, now).and_then(|project| {
+            let (name, command) = humans(&parsed.command)?;
+            human_command(&project, command, name, io)
+        }),
+        Commands::Site {
+            command: SiteCommands::List,
+        } => open_project(&io.cwd, now).and_then(|project| site::list(&project)),
+        Commands::Site { .. } => open_project(&io.cwd, now).and_then(|project| {
             let (name, command) = humans(&parsed.command)?;
             human_command(&project, command, name, io)
         }),
@@ -1324,6 +1370,29 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
             PostCommands::List => {
                 return Err("farik marketing post list only reads".to_string());
             }
+        },
+        Commands::Site { command } => match command {
+            SiteCommands::Approve { request, note } => (
+                "site approve",
+                Command::SiteDecide {
+                    request: *request,
+                    allow: true,
+                    note: note.clone(),
+                },
+            ),
+            SiteCommands::Decline { request, note } => (
+                "site decline",
+                Command::SiteDecide {
+                    request: *request,
+                    allow: false,
+                    note: note.clone(),
+                },
+            ),
+            SiteCommands::Add { site } => ("site add", Command::SiteAdd { site: site.clone() }),
+            SiteCommands::Remove { host } => {
+                ("site remove", Command::SiteRemove { host: host.clone() })
+            }
+            SiteCommands::List => return Err("farik site list only reads".to_string()),
         },
         _ => return Err("this is not one of the human's commands".to_string()),
     })

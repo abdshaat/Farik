@@ -5,11 +5,12 @@
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 
+use chrono::{DateTime, SecondsFormat, Utc};
 use farik_core::contract::TaskId;
 use farik_core::governor::sites::{WebAccess, site_of, web_access};
 use farik_protocol::event::{EventBody, SiteRequestedBody};
 use farik_roles::sites::farik_sites;
-use farik_store::sites::{approved_sites, declined_sites, site_requests};
+use farik_store::sites::{FarikEntry, approved_sites, declined_sites, site_requests};
 use farik_store::{EventLog, StoreError};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -73,6 +74,61 @@ fn farik_hosts() -> BTreeSet<String> {
 /// What the log refused.
 pub(crate) fn approved_set(log: &EventLog) -> Result<BTreeSet<String>, StoreError> {
     approved_sites(log, &farik_hosts())
+}
+
+/// The sites as `sites.list` and `farik site list --json` answer: Farik's with whether each is on
+/// and when the owner last turned it off or on, the owner's own, and the requests that wait.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn site_list(log: &EventLog) -> Result<Value, StoreError> {
+    let entries: Vec<FarikEntry> = farik_sites()
+        .iter()
+        .map(|site| FarikEntry {
+            host: site.host.clone(),
+            shop: site.shop.clone(),
+            category: site.category.to_string(),
+        })
+        .collect();
+    let list = farik_store::sites::site_list(log, &entries)?;
+    let time = |at: DateTime<Utc>| at.to_rfc3339_opts(SecondsFormat::AutoSi, true);
+    let farik: Vec<Value> = list
+        .farik
+        .iter()
+        .map(|row| {
+            let mut wire = json!({
+                "host": row.host, "shop": row.shop, "category": row.category, "on": row.on,
+            });
+            if let Some(at) = row.at {
+                wire["at"] = json!(time(at));
+            }
+            wire
+        })
+        .collect();
+    let owner: Vec<Value> = list
+        .owner
+        .iter()
+        .map(|row| {
+            let mut wire = json!({ "host": row.host, "at": time(row.at) });
+            if let Some(request) = row.request {
+                wire["request"] = json!(request);
+            }
+            wire
+        })
+        .collect();
+    let waiting: Vec<Value> = list
+        .waiting
+        .iter()
+        .map(|asked| {
+            json!({
+                "request": asked.request, "host": asked.host, "url": asked.url,
+                "why": asked.why, "task_id": asked.task_id, "agent_id": asked.agent_id,
+                "at": time(asked.at),
+            })
+        })
+        .collect();
+    Ok(json!({ "farik": farik, "owner": owner, "waiting": waiting }))
 }
 
 /// An address cut for an answer or a refusal, so that what an agent wrote never fills the log.

@@ -64,7 +64,8 @@
         "allowances.list",
         "marketing_plan.list",
         "marketing_plan.get",
-        "social_posts.list"
+        "social_posts.list",
+        "sites.list"
       ]
     },
     "subscribeRequest": {
@@ -288,6 +289,9 @@
             },
             {
               "$ref": "#/$defs/socialPostsListQuery"
+            },
+            {
+              "$ref": "#/$defs/sitesListQuery"
             },
             {
               "$ref": "#/$defs/metricsQuery"
@@ -2242,6 +2246,25 @@
         }
       }
     },
+    "sitesListQuery": {
+      "title": "Sites List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "sites.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
     "metricsQuery": {
       "title": "Metrics Query",
       "type": "object",
@@ -2350,7 +2373,7 @@
       }
     },
     "waitingListResult": {
-      "description": "What waits on the human, questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), then posts outside the plan waiting for the owner (social_post, whose title is its task's and whose line is \"<agent name> wants to post on <Network>\", each with post, its number, channel, text, media, the pictures and clips as their addresses with kind image or video, and at, when it would go out in the offset it was written in, which only that kind carries; a post that was decided or whose time came is no longer listed), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
+      "description": "What waits on the human, questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), then posts outside the plan waiting for the owner (social_post, whose title is its task's and whose line is \"<agent name> wants to post on <Network>\", each with post, its number, channel, text, media, the pictures and clips as their addresses with kind image or video, and at, when it would go out in the offset it was written in, which only that kind carries; a post that was decided or whose time came is no longer listed), then sites the Procurement Specialist asked to read, waiting for the owner (site_request, whose title is its task's and whose line is \"<agent name> asks to read <host>\", each with request, its number, host, the site in its ASCII form, url, the first page the agent wants exactly as it wrote it, and why, its reason in its own words, which only that kind carries and which are untrusted text; a request that was decided is no longer listed), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2375,6 +2398,7 @@
                   "tool_approval",
                   "marketing_plan",
                   "social_post",
+                  "site_request",
                   "preview_missing",
                   "designer_needs_sandbox",
                   "designer_needs_browser"
@@ -2455,6 +2479,19 @@
               "at": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "request": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "host": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
               }
             },
             "required": [
@@ -3355,6 +3392,62 @@
               }
             }
           ]
+        }
+      }
+    },
+    "sitesListResult": {
+      "description": "The sites the Procurement Specialist may read (docs/SPEC.md 6.10; ADR 0039): farik is every entry of Farik's own list in its order, with its shop, its category, on (whether the team may read it now, which it may unless the owner turned it off) and at, when the owner last turned it off or back on, absent when they never did; owner is the sites the owner allowed that are not on Farik's list, by host, each with at, when they allowed it, and request, the number of the request their allowing answered, absent for a site they added unasked; waiting is the requests nobody decided yet, by host, each with the agent's address and reason, which are its own words and untrusted text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["farik", "owner", "waiting"],
+      "properties": {
+        "farik": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["host", "shop", "category", "on"],
+            "properties": {
+              "host": { "type": "string" },
+              "shop": { "type": "string" },
+              "category": {
+                "type": "string",
+                "enum": ["general_marketplace", "office_supplies", "industrial_supplies", "packaging_and_shipping", "electronic_components", "computers_and_it", "furniture", "food_service", "printing", "software"]
+              },
+              "on": { "type": "boolean" },
+              "at": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "owner": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["host", "at"],
+            "properties": {
+              "host": { "type": "string" },
+              "at": { "type": "string", "format": "date-time" },
+              "request": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "waiting": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["request", "host", "url", "why", "task_id", "agent_id", "at"],
+            "properties": {
+              "request": { "type": "integer", "minimum": 1 },
+              "host": { "type": "string" },
+              "url": { "type": "string" },
+              "why": { "type": "string" },
+              "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+              "agent_id": { "type": "string" },
+              "at": { "type": "string", "format": "date-time" }
+            }
+          }
         }
       }
     },

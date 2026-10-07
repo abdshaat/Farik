@@ -18,10 +18,10 @@ use crate::generated::command::{
     EscalationResolveBody, FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject,
     HumanSendBackBody, HumanSendBackBodySubject, MarketingPlanDecideBody,
     MarketingPlanDecideBodyDecision, MarketingPlanEndBody, MessagePostBody, QuestionAnswerBody,
-    RequestTriageBody, RequestTriageBodySize, SessionStopBody, SkillConfirmBody, SkillLevel,
-    SkillRemoveBody, SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision,
-    SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
-    ToolDecisionBody,
+    RequestTriageBody, RequestTriageBodySize, SessionStopBody, SiteAddBody, SiteDecideBody,
+    SiteRemoveBody, SkillConfirmBody, SkillLevel, SkillRemoveBody, SkillSaveBody,
+    SocialPostDecideBody, SocialPostDecideBodyDecision, SocialPostStopBody, SprintStartBody,
+    TaskCreateBody, TaskIdBody, TaskTransitionBody, ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -289,6 +289,26 @@ pub enum Command {
         /// The post's number.
         post: u64,
     },
+    /// Allow a site the Procurement Specialist asked to read, or not allow it (ADR 0039).
+    SiteDecide {
+        /// The request's number, the seq of its `site.requested`.
+        request: u64,
+        /// Whether the owner allows the site (false: does not).
+        allow: bool,
+        /// What the owner says to the agent.
+        note: Option<String>,
+    },
+    /// Allow a site no agent asked for, or turn one of Farik's back on (ADR 0039).
+    SiteAdd {
+        /// A name like `shop.com`, or the address of any page on the site.
+        site: String,
+    },
+    /// Take a site away from the Procurement Specialist: one the owner allowed, or one of Farik's
+    /// (ADR 0039).
+    SiteRemove {
+        /// The site, as a name or as the address of a page on it.
+        host: String,
+    },
     /// Allow a post written outside the plan, or not allow it (ADR 0042).
     SocialPostDecide {
         /// The post's number.
@@ -459,6 +479,26 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             let body: SocialPostStopBody = read_body(body, name)?;
             Ok(Command::SocialPostStop {
                 post: body.post.get(),
+            })
+        }
+        CommandName::SiteDecide => {
+            let body: SiteDecideBody = read_body(body, name)?;
+            Ok(Command::SiteDecide {
+                request: body.request.get(),
+                allow: body.allow,
+                note: body.note.map(|note| note.as_str().to_string()),
+            })
+        }
+        CommandName::SiteAdd => {
+            let body: SiteAddBody = read_body(body, name)?;
+            Ok(Command::SiteAdd {
+                site: body.site.to_string(),
+            })
+        }
+        CommandName::SiteRemove => {
+            let body: SiteRemoveBody = read_body(body, name)?;
+            Ok(Command::SiteRemove {
+                host: body.host.to_string(),
             })
         }
         CommandName::SocialPostDecide => {
@@ -724,6 +764,20 @@ pub fn command_to_value(command: &Command) -> Value {
             ),
         ),
         Command::SocialPostStop { post } => (CommandName::SocialPostStop, json!({ "post": post })),
+        Command::SiteDecide {
+            request,
+            allow,
+            note,
+        } => (
+            CommandName::SiteDecide,
+            with_optional(
+                json!({ "request": request, "allow": allow }),
+                "note",
+                note.as_ref().map(|note| json!(note)),
+            ),
+        ),
+        Command::SiteAdd { site } => (CommandName::SiteAdd, json!({ "site": site })),
+        Command::SiteRemove { host } => (CommandName::SiteRemove, json!({ "host": host })),
         Command::SocialPostDecide {
             post,
             post_it,
@@ -1499,6 +1553,77 @@ mod tests {
             let errors = refusal(&json!({ "command": name, "body": body }));
             assert!(!errors.is_empty(), "{name} {body}");
         }
+    }
+
+    #[test]
+    fn reads_and_writes_the_site_commands() {
+        for (name, body, command) in [
+            (
+                "site_decide",
+                json!({ "request": 7, "allow": true }),
+                Command::SiteDecide {
+                    request: 7,
+                    allow: true,
+                    note: None,
+                },
+            ),
+            (
+                "site_decide",
+                json!({ "request": 8, "allow": false, "note": "Not that shop." }),
+                Command::SiteDecide {
+                    request: 8,
+                    allow: false,
+                    note: Some("Not that shop.".to_string()),
+                },
+            ),
+            (
+                "site_add",
+                json!({ "site": "https://www.shop.example/boxes" }),
+                Command::SiteAdd {
+                    site: "https://www.shop.example/boxes".to_string(),
+                },
+            ),
+            (
+                "site_remove",
+                json!({ "host": "grainger.com" }),
+                Command::SiteRemove {
+                    host: "grainger.com".to_string(),
+                },
+            ),
+        ] {
+            assert_eq!(read(name, &body), command, "{name}");
+            assert_eq!(
+                command_to_value(&command),
+                json!({ "command": name, "body": body }),
+                "{name}"
+            );
+        }
+        for (name, body) in [
+            ("site_decide", json!({ "request": 1 })),
+            ("site_decide", json!({ "allow": true })),
+            ("site_decide", json!({ "request": 0, "allow": true })),
+            ("site_decide", json!({ "request": "1", "allow": true })),
+            ("site_decide", json!({ "request": 1, "allow": "yes" })),
+            (
+                "site_decide",
+                json!({ "request": 1, "allow": true, "note": "x".repeat(601) }),
+            ),
+            ("site_add", json!({})),
+            ("site_add", json!({ "site": 7 })),
+            (
+                "site_add",
+                json!({ "site": "shop.example", "host": "shop.example" }),
+            ),
+            ("site_remove", json!({})),
+            ("site_remove", json!({ "site": "shop.example" })),
+        ] {
+            let errors = refusal(&json!({ "command": name, "body": body }));
+            assert!(!errors.is_empty(), "{name} {body}");
+        }
+        read(
+            "site_decide",
+            &json!({ "request": 1, "allow": false, "note": "x".repeat(600) }),
+        );
     }
 
     #[test]

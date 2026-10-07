@@ -24,7 +24,8 @@ use serde_json::{Value, json};
 
 use project::{
     LiveDriver, a_high_risk_task_verifying, a_project, a_team, events, filed, files_of,
-    hold_the_run_lock, joined, moved, record, record_as, run, run_with, status_of, tool_deps,
+    hold_the_run_lock, joined, moved, record, record_as, recorded, run, run_with, status_of,
+    tool_deps,
 };
 
 /// Records a question from `pm` on `task`, and answers its sequence number.
@@ -1320,4 +1321,134 @@ fn post_stop_with_no_driver_records_it() {
         body.by,
         farik_protocol::event::SocialPostStoppedBodyBy::Owner
     );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one project, from the waiting line to the list after every command"
+)]
+fn farik_site_lists_and_decides() {
+    let repository = a_project("human-site");
+    let task = filed(&repository, "Add done.txt");
+    let ask = |host: &str| {
+        record_as(
+            &repository,
+            &task,
+            Some(("theo", "session-1")),
+            "site.requested",
+            &json!({ "host": host, "url": format!("https://{host}/boxes"), "why": "A maker." }),
+        )
+        .envelope
+        .seq
+    };
+    let (shop, other, third) = (
+        ask("shop.example"),
+        ask("other.example"),
+        ask("third.example"),
+    );
+    let farik = farik_roles::sites::farik_sites()[0].host.clone();
+
+    // A process driving the project says what waits, with both commands.
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let line = ran
+        .out
+        .lines()
+        .find(|line| line.contains("asks to read shop.example"))
+        .unwrap_or_else(|| panic!("a waiting line: {}", ran.out));
+    assert!(line.starts_with(&format!("{task} waits: ")), "{line}");
+    assert!(
+        line.ends_with(&format!(
+            "asks to read shop.example: farik site approve {shop}, or farik site decline {shop}"
+        )),
+        "{line}"
+    );
+    let json = run_with(&repository.path, &["--json", "run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    let last: Value = serde_json::from_str(json.out.lines().last().expect("a line")).expect("JSON");
+    assert_eq!(last["waiting_on_you"][0]["request"], shop, "{last}");
+
+    // The list shows Farik's sites on, the owner's, and what waits.
+    let listed = run(&repository.path, &["site", "list"]);
+    assert_eq!(listed.code, 0, "{}", listed.err);
+    assert!(
+        listed
+            .out
+            .lines()
+            .any(|line| line.contains(&farik) && line.contains(" on")),
+        "{}",
+        listed.out
+    );
+    for waiting in [
+        format!("{shop} shop.example"),
+        format!("{other} other.example"),
+    ] {
+        assert!(listed.out.contains(&waiting), "{waiting}: {}", listed.out);
+    }
+
+    // Deciding, with and without a note, and adding and removing.
+    let approved = run(
+        &repository.path,
+        &["site", "approve", &shop.to_string(), "--note", "ok"],
+    );
+    assert_eq!(approved.code, 0, "{}", approved.err);
+    let declined = run(&repository.path, &["site", "decline", &other.to_string()]);
+    assert_eq!(declined.code, 0, "{}", declined.err);
+    let allowed = events(&repository, &[EventKind::SiteApproved]);
+    let EventBody::SiteApproved(body) = &allowed[0].body else {
+        panic!("an approval");
+    };
+    assert_eq!(
+        (
+            body.host.as_str(),
+            body.request.map(std::num::NonZeroU64::get),
+            body.note.as_ref().map(|note| note.as_str())
+        ),
+        ("shop.example", Some(shop), Some("ok"))
+    );
+    assert_eq!(events(&repository, &[EventKind::SiteDeclined]).len(), 1);
+    let again = run(&repository.path, &["site", "approve", &shop.to_string()]);
+    assert_eq!(again.code, 1, "{}", again.out);
+    assert!(
+        again.err.starts_with("farik: site_request_decided"),
+        "{}",
+        again.err
+    );
+    let removed = run(&repository.path, &["site", "remove", &farik]);
+    assert_eq!(removed.code, 0, "{}", removed.err);
+    let off = events(&repository, &[EventKind::SiteRemoved]);
+    let EventBody::SiteRemoved(body) = &off[0].body else {
+        panic!("a removal");
+    };
+    assert_eq!(body.host.as_str(), farik);
+    let added = run(
+        &repository.path,
+        &["site", "add", "https://www.shop2.example/x"],
+    );
+    assert_eq!(added.code, 0, "{}", added.err);
+    let after = run(&repository.path, &["site", "list"]);
+    assert!(
+        after
+            .out
+            .lines()
+            .any(|line| line.contains(&farik) && line.contains(" off")),
+        "{}",
+        after.out
+    );
+    assert!(after.out.contains("shop2.example"), "{}", after.out);
+    assert!(
+        after.out.contains(&format!("{third} third.example")),
+        "{}",
+        after.out
+    );
+    let machine = run(&repository.path, &["--json", "site", "list"]);
+    assert_eq!(machine.code, 0, "{}", machine.err);
+    let wire: Value = serde_json::from_str(machine.out.trim()).expect("JSON");
+    assert_eq!(wire["waiting"][0]["request"], third, "{wire}");
+    assert_eq!(wire["farik"][0]["on"], false, "{wire}");
 }

@@ -244,6 +244,13 @@ pub(super) fn human_message(history: &[FarikEvent], agent_id: &str) -> Option<St
             {
                 decision_block(history, event, body.approval.get(), agent_id)
             }
+            // The owner's decision on a site this agent asked to read, since its own last session
+            // started (ADR 0039).
+            EventBody::SiteApproved(_) | EventBody::SiteDeclined(_)
+                if event.envelope.seq > own_since =>
+            {
+                site_block(history, event, agent_id)
+            }
             _ if event.envelope.seq <= since => None,
             EventBody::QuestionAnswered(body) => {
                 let id = body.question_id.get();
@@ -297,6 +304,54 @@ pub(super) fn human_message(history: &[FarikEvent], agent_id: &str) -> Option<St
         })
         .collect();
     (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+}
+
+/// The owner's decision `event` on a request to read a site, as `agent_id`'s next session is told
+/// it: only when that agent asked, only the owner's first decision on the request, and the owner's
+/// note in their own words, not wrapped (ADR 0011).
+fn site_block(history: &[FarikEvent], event: &FarikEvent, agent_id: &str) -> Option<String> {
+    let (body, allowed) = match &event.body {
+        EventBody::SiteApproved(body) => (body, true),
+        EventBody::SiteDeclined(body) => (body, false),
+        _ => return None,
+    };
+    let request = body.request?.get();
+    if !is_the_owners(event) {
+        return None;
+    }
+    // The first decision the owner recorded on the request is the only one.
+    let first = history.iter().find(|decided| {
+        is_the_owners(decided)
+            && match &decided.body {
+                EventBody::SiteApproved(other) | EventBody::SiteDeclined(other) => {
+                    other.request.map(std::num::NonZeroU64::get) == Some(request)
+                }
+                _ => false,
+            }
+    })?;
+    if first.envelope.seq != event.envelope.seq {
+        return None;
+    }
+    let asked = history.iter().find(|asked| asked.envelope.seq == request)?;
+    if !matches!(asked.body, EventBody::SiteRequested(_))
+        || asked.envelope.ids.agent_id.as_deref() != Some(agent_id)
+    {
+        return None;
+    }
+    let host = body.host.as_str();
+    let note = body
+        .note
+        .as_ref()
+        .map(|note| note.as_str())
+        .filter(|note| !note.is_empty());
+    Some(match (allowed, note) {
+        (true, None) => format!("The owner allowed you to read {host}."),
+        (true, Some(note)) => {
+            format!("The owner allowed you to read {host}. The owner adds: {note}")
+        }
+        (false, None) => format!("The owner did not allow {host}."),
+        (false, Some(note)) => format!("The owner did not allow {host}: {note}"),
+    })
 }
 
 /// Whether `event` was recorded by the owner or by Farik, not in an agent's session.

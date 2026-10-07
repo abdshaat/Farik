@@ -45,7 +45,8 @@ mod reading;
 pub(crate) mod refusal;
 mod retro;
 pub(crate) mod sheets;
-pub(crate) mod sites;
+/// The Procurement Specialist's tools for the sites it may read, and what lists them.
+pub mod sites;
 mod work;
 
 use refusal::Refusal;

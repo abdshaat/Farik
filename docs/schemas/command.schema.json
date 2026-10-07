@@ -43,7 +43,10 @@
         "marketing_plan_decide",
         "marketing_plan_end",
         "social_post_stop",
-        "social_post_decide"
+        "social_post_decide",
+        "site_decide",
+        "site_add",
+        "site_remove"
       ]
     },
     "commandBodyWire": {
@@ -73,6 +76,9 @@
         { "$ref": "#/$defs/marketingPlanEndBody" },
         { "$ref": "#/$defs/socialPostStopBody" },
         { "$ref": "#/$defs/socialPostDecideBody" },
+        { "$ref": "#/$defs/siteDecideBody" },
+        { "$ref": "#/$defs/siteAddBody" },
+        { "$ref": "#/$defs/siteRemoveBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -300,6 +306,38 @@
         "post": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "decision": { "type": "string", "enum": ["post", "dont_post"] },
         "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "siteDecideBody": {
+      "title": "Site Decide Body",
+      "description": "The owner allows (allow true) or does not allow (allow false) the site the Procurement Specialist asked to read in request, the sequence number of its site.requested (docs/SPEC.md 6.10; ADR 0039). note is what the owner says to the agent, whichever they decide, at most 600 characters. Allowed, site.approved { host, request, note } is recorded with the request's task and no agent, and so is one for every other request still waiting for the same site, each on its own task; not allowed, site.declined { request, host, note } is recorded for this request alone. Refused unknown_site_request when request names no site.requested, and site_request_decided when it was decided before. Only the owner decides, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request", "allow"],
+      "properties": {
+        "request": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "allow": { "type": "boolean" },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "siteAddBody": {
+      "title": "Site Add Body",
+      "description": "The owner allows a site no agent asked for, or turns one of Farik's back on (docs/SPEC.md 6.10; ADR 0039). site is trimmed, has https:// put before it only when it holds no ://, and is then taken as the site its address names, a host and its www. twin being one: site.approved { host } is recorded with no task, and every request waiting for the site is allowed too. Refused site_invalid for a site Farik cannot open (an address that is not https, a port, a user name, an IP address, a name with no dot), and site_already_allowed for one that is approved.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["site"],
+      "properties": {
+        "site": { "type": "string", "minLength": 1, "maxLength": 2048 }
+      }
+    },
+    "siteRemoveBody": {
+      "title": "Site Remove Body",
+      "description": "The owner takes a site away from the Procurement Specialist, whether they allowed it or it is one of Farik's, which this turns off (docs/SPEC.md 6.10; ADR 0039). host is normalised as siteAddBody's site is: site.removed { host } is recorded with no task. Refused site_invalid for a host Farik cannot open, and site_not_allowed for one that is not approved now.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host"],
+      "properties": {
+        "host": { "type": "string", "minLength": 1, "maxLength": 2048 }
       }
     },
     "skillLevel": {
