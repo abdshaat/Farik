@@ -297,6 +297,11 @@ mod tests {
             );
         }
         assert_eq!(site_of("https://www.com/").as_deref(), Ok("www.com"));
+        // Only one `www.` is the twin's: another is part of the name.
+        assert_eq!(
+            site_of("https://www.www.example.com/").as_deref(),
+            Ok("www.example.com")
+        );
     }
 
     fn approved(hosts: &[&str]) -> BTreeSet<String> {
