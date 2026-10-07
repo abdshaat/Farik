@@ -898,6 +898,78 @@
       "title": "Phone: read a seller’s reply (step 10f)",
       "page": "procurement",
       "is_interactive": true
+    },
+    "SettingsApprovals.dc.html": {
+      "x": 5440,
+      "y": 0,
+      "w": 1280,
+      "h": 2311,
+      "title": "Settings: Approvals, ask me first or let the team act on its own (step 10h)",
+      "page": "team",
+      "is_interactive": true
+    },
+    "PhoneSettingsApprovals.dc.html": {
+      "x": 6800,
+      "y": 0,
+      "w": 390,
+      "h": 2327,
+      "title": "Phone: Approvals in Settings (step 10h)",
+      "page": "team",
+      "is_interactive": true
+    },
+    "AutoMode.dc.html": {
+      "x": 7270,
+      "y": 0,
+      "w": 1280,
+      "h": 1269,
+      "title": "Let the team act on its own? What stops asking, what never does, Turn on or Keep asking (step 10h)",
+      "page": "team",
+      "is_interactive": true
+    },
+    "PhoneAutoMode.dc.html": {
+      "x": 8630,
+      "y": 0,
+      "w": 390,
+      "h": 1470,
+      "title": "Phone: let the team act on its own? (step 10h)",
+      "page": "team",
+      "is_interactive": true
+    },
+    "TodayOnItsOwn.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 3593,
+      "title": "Today on auto: the mode, what it did on its own, a limit reached with Raise it, a post outside the plan with Stop, a message that could not go (step 10h)",
+      "page": "auto",
+      "is_interactive": true
+    },
+    "PhoneTodayOnItsOwn.dc.html": {
+      "x": 1480,
+      "y": 0,
+      "w": 390,
+      "h": 4397,
+      "title": "Phone: Today on auto, and Raise it (step 10h)",
+      "page": "auto",
+      "is_interactive": true
+    },
+    "DoneOnItsOwn.dc.html": {
+      "x": 2070,
+      "y": 0,
+      "w": 1280,
+      "h": 2867,
+      "title": "Done on its own: each act, and what went out as text (step 10h)",
+      "page": "auto",
+      "is_interactive": true
+    },
+    "PhoneDoneOnItsOwn.dc.html": {
+      "x": 3550,
+      "y": 0,
+      "w": 390,
+      "h": 2388,
+      "title": "Phone: Done on its own (step 10h)",
+      "page": "auto",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -957,7 +1029,7 @@
     },
     "t_team": {
       "kind": "title1",
-      "maxW": 4400,
+      "maxW": 9020,
       "page": "team",
       "text": "Farik: team and settings",
       "w": 240,
@@ -1023,6 +1095,15 @@
       "maxW": 23300,
       "page": "procurement",
       "text": "Procurement Specialist: more roles in setup, the sites it may read, purchase orders, renewals, data pipelines and contacting sellers",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_auto": {
+      "kind": "title1",
+      "maxW": 3940,
+      "page": "auto",
+      "text": "Ask or auto: Today when the team acts on its own, and what it did on its own",
       "w": 240,
       "x": 0,
       "y": -300
@@ -1128,7 +1209,15 @@
     "SellerMessage.dc.html",
     "PhoneSellerMessage.dc.html",
     "SellerReply.dc.html",
-    "PhoneSellerReply.dc.html"
+    "PhoneSellerReply.dc.html",
+    "SettingsApprovals.dc.html",
+    "PhoneSettingsApprovals.dc.html",
+    "AutoMode.dc.html",
+    "PhoneAutoMode.dc.html",
+    "TodayOnItsOwn.dc.html",
+    "PhoneTodayOnItsOwn.dc.html",
+    "DoneOnItsOwn.dc.html",
+    "PhoneDoneOnItsOwn.dc.html"
   ],
   "pages": [
     {
@@ -1186,6 +1275,10 @@
     {
       "id": "procurement",
       "name": "Procurement Specialist"
+    },
+    {
+      "id": "auto",
+      "name": "Ask or auto"
     }
   ],
   "title": "Farik web UI mockup"
