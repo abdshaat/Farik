@@ -10,7 +10,9 @@ use farik_core::contract::TaskId;
 use farik_core::team::Preview;
 
 use crate::exec::supervise;
-use crate::preview::{PreviewError, PreviewFactory, RunningPreview, browser_container};
+use crate::preview::{
+    AVAILABLE_FOR, PreviewError, PreviewFactory, RunningPreview, browser_container,
+};
 use crate::sandbox::SandboxError;
 use crate::sandbox::docker::{docker, docker_name, id, removed, stderr_of};
 
@@ -24,8 +26,6 @@ const PROBE_LIMIT: Duration = Duration::from_secs(5);
 const CLIENT_GRACE: Duration = Duration::from_secs(30);
 /// How long `docker info` has to answer before Docker counts as not there.
 const INFO_LIMIT: Duration = Duration::from_secs(10);
-/// How long `docker info`'s answer holds for `available`.
-const AVAILABLE_FOR: Duration = Duration::from_secs(60);
 /// How many lines of output a failure keeps.
 const TAIL_LINES: usize = 40;
 
@@ -82,6 +82,8 @@ impl DockerPreviewFactory {
 impl PreviewFactory for DockerPreviewFactory {
     fn available(&self) -> bool {
         let mut last = crate::locked(&self.asked);
+        // The driver's `PolledPreviews` holds its answer as long, and records it after this one,
+        // so that when it asks again this answer is out of date and Docker is asked.
         match *last {
             Some((at, answer)) if at.elapsed() < AVAILABLE_FOR => answer,
             _ => {

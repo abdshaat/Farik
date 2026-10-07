@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use farik_core::contract::TaskId;
 use farik_core::governor::gates::DesignerBrowser;
@@ -114,6 +116,9 @@ pub trait RunningPreview: Send + Sync {
 pub trait PreviewFactory: Send + Sync {
     /// Whether a preview can run here at all: false in no-sandbox mode, and without Docker.
     fn available(&self) -> bool;
+    /// Waits until `available` answers what was found rather than for want of an answer: at once
+    /// for every factory but `PolledPreviews`.
+    fn settle(&self) {}
     /// Prepares the preview when `preview.prepare` is set, then starts it and waits for it to
     /// answer. `tree` is the task branch's `HEAD^{tree}` the preview is of.
     ///
@@ -149,6 +154,120 @@ impl PreviewFactory for NoPreviews {
         Err(PreviewError::DockerUnavailable {
             detail: "Farik runs without Docker's sandbox".to_string(),
         })
+    }
+}
+
+/// How long `PolledPreviews` holds an answer before it asks again.
+pub const AVAILABLE_FOR: Duration = Duration::from_secs(60);
+
+/// A factory whose `available` never waits on `inner`'s, which for Docker is `docker info` and
+/// can take 10 seconds (8.3): it answers the last answer `inner` gave, and asks again on a thread
+/// of its own, one ask at a time, once that answer is older than `holds`. The first ask is made
+/// with it, and until its answer comes no preview can run, as without Docker; `settle` waits for
+/// that answer, which the driver does before its daemon listens, so that no request waits on
+/// Docker and none is answered on the guess.
+pub struct PolledPreviews {
+    inner: Arc<dyn PreviewFactory>,
+    holds: Duration,
+    polled: Arc<(Mutex<Polled>, Condvar)>,
+    spawn: Spawn,
+}
+
+/// What `PolledPreviews` knows: its last answer and when it came, and whether an ask is under way.
+#[derive(Default)]
+struct Polled {
+    last: Option<(Instant, bool)>,
+    is_asking: bool,
+}
+
+/// What runs an ask of `PolledPreviews` apart from its caller: a thread of its own outside tests.
+pub(crate) type Spawn = Arc<dyn Fn(Box<dyn FnOnce() + Send>) -> std::io::Result<()> + Send + Sync>;
+
+impl PolledPreviews {
+    /// Asks `inner` at once, whose answers hold for `holds`.
+    #[must_use]
+    pub fn new(inner: Arc<dyn PreviewFactory>, holds: Duration) -> Self {
+        Self::spawning(
+            inner,
+            holds,
+            Arc::new(|ask| {
+                std::thread::Builder::new()
+                    .name("farik-previews".to_string())
+                    .spawn(ask)
+                    .map(drop)
+            }),
+        )
+    }
+
+    /// `new`, its asks run by `spawn`.
+    pub(crate) fn spawning(inner: Arc<dyn PreviewFactory>, holds: Duration, spawn: Spawn) -> Self {
+        let previews = Self {
+            inner,
+            holds,
+            polled: Arc::default(),
+            spawn,
+        };
+        previews.last_answer();
+        previews
+    }
+
+    /// The last answer, false before the first; an ask is started when the answer is missing or
+    /// out of date and none is under way.
+    fn last_answer(&self) -> bool {
+        let mut polled = crate::locked(&self.polled.0);
+        let is_due = polled.last.is_none_or(|(at, _)| at.elapsed() >= self.holds);
+        if is_due && !polled.is_asking {
+            polled.is_asking = true;
+            let (inner, shared) = (Arc::clone(&self.inner), Arc::clone(&self.polled));
+            let asked = (self.spawn)(Box::new(move || {
+                // An ask that panics answers no, so that it is asked again and `settle` ends.
+                let available =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inner.available()))
+                        .unwrap_or(false);
+                let (polled, answered) = &*shared;
+                *crate::locked(polled) = Polled {
+                    last: Some((Instant::now(), available)),
+                    is_asking: false,
+                };
+                answered.notify_all();
+            }));
+            // Without a thread to ask on, no preview can run until the next ask.
+            if asked.is_err() {
+                *polled = Polled {
+                    last: Some((Instant::now(), false)),
+                    is_asking: false,
+                };
+                self.polled.1.notify_all();
+            }
+        }
+        polled.last.is_some_and(|(_, available)| available)
+    }
+}
+
+impl PreviewFactory for PolledPreviews {
+    fn available(&self) -> bool {
+        self.last_answer()
+    }
+
+    fn settle(&self) {
+        let (polled, answered) = &*self.polled;
+        drop(
+            answered
+                .wait_while(crate::locked(polled), |polled| polled.last.is_none())
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+    }
+
+    fn start(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+        preview: &Preview,
+        tree: &str,
+    ) -> Result<Box<dyn RunningPreview>, PreviewError> {
+        self.inner
+            .start(project_id, task_id, worktree, preview, tree)
     }
 }
 
@@ -502,12 +621,13 @@ fn run_within(
 #[cfg(test)]
 pub(crate) mod fixtures {
     use std::path::Path;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Condvar, Mutex, PoisonError};
+    use std::time::Duration;
 
     use farik_core::contract::TaskId;
     use farik_core::team::Preview;
 
-    use super::{CheckError, PreviewError, PreviewFactory, RunningPreview};
+    use super::{CheckError, PreviewError, PreviewFactory, RunningPreview, Spawn};
 
     /// A factory that starts `NamedPreview`s, or fails with `fails`, and keeps each `prepare` it
     /// was asked to run.
@@ -572,6 +692,154 @@ pub(crate) mod fixtures {
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             panic!("a preview factory was asked to start a preview");
         }
+    }
+
+    /// How long a test waits on a caller or an ask before it fails rather than hang.
+    const BOUND: Duration = Duration::from_secs(30);
+
+    /// A factory whose `available` waits while it is held, as a `docker info` that has not
+    /// answered yet, then answers `answer`. It counts the asks begun and notes one begun while
+    /// another was under way.
+    pub(crate) struct HeldPreviews {
+        state: Mutex<Gate>,
+        changed: Condvar,
+    }
+
+    struct Gate {
+        held: bool,
+        answer: bool,
+        asks: usize,
+        under_way: usize,
+        overlapped: bool,
+    }
+
+    impl HeldPreviews {
+        /// Held, answering `answer` once released.
+        pub(crate) fn held(answer: bool) -> Self {
+            Self {
+                state: Mutex::new(Gate {
+                    held: true,
+                    answer,
+                    asks: 0,
+                    under_way: 0,
+                    overlapped: false,
+                }),
+                changed: Condvar::new(),
+            }
+        }
+
+        pub(crate) fn hold(&self) {
+            crate::locked(&self.state).held = true;
+        }
+
+        pub(crate) fn release(&self) {
+            crate::locked(&self.state).held = false;
+            self.changed.notify_all();
+        }
+
+        /// Waits until `asks` asks have begun, failing past the bound.
+        pub(crate) fn wait_for_asks(&self, asks: usize) {
+            let waited = self
+                .changed
+                .wait_timeout_while(crate::locked(&self.state), BOUND, |state| state.asks < asks)
+                .unwrap_or_else(PoisonError::into_inner);
+            assert!(!waited.1.timed_out(), "{asks} asks did not begin");
+        }
+
+        pub(crate) fn asks(&self) -> usize {
+            crate::locked(&self.state).asks
+        }
+
+        /// Whether an ask began while another was under way.
+        pub(crate) fn overlapped(&self) -> bool {
+            crate::locked(&self.state).overlapped
+        }
+    }
+
+    impl PreviewFactory for HeldPreviews {
+        fn available(&self) -> bool {
+            let mut state = crate::locked(&self.state);
+            state.asks += 1;
+            state.overlapped |= state.under_way > 0;
+            state.under_way += 1;
+            self.changed.notify_all();
+            let mut state = self
+                .changed
+                .wait_while(state, |state| state.held)
+                .unwrap_or_else(PoisonError::into_inner);
+            state.under_way -= 1;
+            state.answer
+        }
+
+        fn start(
+            &self,
+            _project_id: &str,
+            _task_id: &TaskId,
+            _worktree: &Path,
+            _preview: &Preview,
+            _tree: &str,
+        ) -> Result<Box<dyn RunningPreview>, PreviewError> {
+            panic!("a held factory was asked to start a preview");
+        }
+    }
+
+    /// The asks a `PolledPreviews` started, each kept until the test runs it.
+    #[derive(Default)]
+    pub(crate) struct QueuedAsks {
+        asks: Mutex<Vec<Box<dyn FnOnce() + Send>>>,
+    }
+
+    impl QueuedAsks {
+        /// What keeps each ask here, or, `refused`, starts none.
+        pub(crate) fn spawn(self: &Arc<Self>, refused: bool) -> Spawn {
+            let queued = Arc::clone(self);
+            Arc::new(move |ask| {
+                if refused {
+                    return Err(std::io::Error::other("no thread to ask on"));
+                }
+                crate::locked(&queued.asks).push(ask);
+                Ok(())
+            })
+        }
+
+        /// How many asks wait to be run.
+        pub(crate) fn queued(&self) -> usize {
+            crate::locked(&self.asks).len()
+        }
+
+        /// Runs the oldest ask here.
+        pub(crate) fn run_next(&self) {
+            let ask = crate::locked(&self.asks).remove(0);
+            ask();
+        }
+    }
+
+    /// Waits for `previews` to settle, failing past the bound rather than hang.
+    pub(crate) fn settled(previews: &Arc<dyn PreviewFactory>) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let settling = Arc::clone(previews);
+        std::thread::spawn(move || {
+            settling.settle();
+            let _ = sender.send(());
+        });
+        receiver
+            .recv_timeout(BOUND)
+            .expect("the first answer came within the bound");
+    }
+
+    /// What `ask` answers, which must come while `docker` still holds its ask: past the bound
+    /// `docker` is released, so that a caller it holds ends, and the test fails.
+    pub(crate) fn at_once<T: Send>(docker: &HeldPreviews, ask: impl FnOnce() -> T + Send) -> T {
+        std::thread::scope(|scope| {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            scope.spawn(move || {
+                let _ = sender.send(ask());
+            });
+            receiver.recv_timeout(BOUND).unwrap_or_else(|_| {
+                docker.release();
+                panic!("the caller waited on Docker's answer");
+            })
+        })
     }
 
     /// A preview whose page check prints `printed` and saves a screenshot where its arguments
@@ -693,11 +961,17 @@ pub(crate) mod fixtures {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use farik_roles::builtin_connector;
 
-    use super::fixtures::NamedPreview;
-    use super::{AXE_SOURCE, AXE_TAGS, connector_server};
+    use super::fixtures::{
+        HeldPreviews, NamedPreview, QueuedAsks, UnaskedPreviews, at_once, settled,
+    };
+    use super::{
+        AVAILABLE_FOR, AXE_SOURCE, AXE_TAGS, PolledPreviews, PreviewFactory, connector_server,
+    };
     use crate::session::McpTransport;
 
     fn after<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
@@ -705,6 +979,88 @@ mod tests {
             .filter(|pair| pair[0] == flag)
             .map(|pair| pair[1].as_str())
             .collect()
+    }
+
+    #[test]
+    fn says_no_preview_can_run_at_once_while_docker_is_first_asked() {
+        let docker = Arc::new(HeldPreviews::held(true));
+        let previews: Arc<dyn PreviewFactory> =
+            Arc::new(PolledPreviews::new(Arc::clone(&docker) as _, AVAILABLE_FOR));
+        // The first ask is made with the factory, before anyone wants the answer.
+        docker.wait_for_asks(1);
+        assert!(!at_once(&docker, || previews.available()));
+
+        docker.release();
+        settled(&previews);
+        assert!(previews.available());
+    }
+
+    #[test]
+    fn answers_the_last_answer_while_docker_is_asked_again_one_ask_at_a_time() {
+        let docker = Arc::new(HeldPreviews::held(true));
+        docker.release();
+        // An answer that holds for no time is out of date as soon as it comes.
+        let previews: Arc<dyn PreviewFactory> = Arc::new(PolledPreviews::new(
+            Arc::clone(&docker) as _,
+            Duration::ZERO,
+        ));
+        settled(&previews);
+        docker.hold();
+
+        assert!(at_once(&docker, || previews.available()));
+        docker.wait_for_asks(2);
+        for _ in 0..3 {
+            assert!(at_once(&docker, || previews.available()));
+        }
+        assert_eq!(docker.asks(), 2);
+        docker.release();
+        assert!(!docker.overlapped());
+    }
+
+    #[test]
+    fn asks_again_only_once_the_answer_is_out_of_date() {
+        let docker = Arc::new(HeldPreviews::held(true));
+        docker.release();
+        let asks = Arc::new(QueuedAsks::default());
+
+        let holding =
+            PolledPreviews::spawning(Arc::clone(&docker) as _, AVAILABLE_FOR, asks.spawn(false));
+        assert_eq!(asks.queued(), 1, "the first ask is made with the factory");
+        asks.run_next();
+        assert!(holding.available());
+        assert_eq!(asks.queued(), 0, "an answer that holds starts no ask");
+
+        let stale = PolledPreviews::spawning(docker, Duration::ZERO, asks.spawn(false));
+        asks.run_next();
+        assert!(stale.available());
+        assert_eq!(asks.queued(), 1, "an answer out of date starts one");
+        assert!(stale.available());
+        assert_eq!(asks.queued(), 1, "and no other while it is under way");
+    }
+
+    #[test]
+    fn says_no_preview_can_run_when_an_ask_fails() {
+        // An ask that panics is an answer too, or the driver would wait for one forever.
+        let previews: Arc<dyn PreviewFactory> = Arc::new(PolledPreviews::new(
+            Arc::new(UnaskedPreviews),
+            AVAILABLE_FOR,
+        ));
+        settled(&previews);
+        assert!(!previews.available());
+    }
+
+    #[test]
+    fn says_no_preview_can_run_without_a_thread_to_ask_on() {
+        let docker = Arc::new(HeldPreviews::held(true));
+        docker.release();
+        let asks = Arc::new(QueuedAsks::default());
+        let previews: Arc<dyn PreviewFactory> = Arc::new(PolledPreviews::spawning(
+            docker,
+            AVAILABLE_FOR,
+            asks.spawn(true),
+        ));
+        settled(&previews);
+        assert!(!previews.available());
     }
 
     #[test]
