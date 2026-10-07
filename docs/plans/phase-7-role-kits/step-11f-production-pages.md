@@ -5,6 +5,7 @@ Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 4.2, 6.9, 7 (F9, F12); F9
 Depends on: step 11 (the approved mockups `DevOpsCard`, `Production`, `TodayIncident`, `Incident`, `DeployPanel`, `PhoneIncident`, `PhoneProduction`); steps 11b to 11e (`Team::production`, `production.status`, `incidents.list`, `incident.get`, the four incident commands, the deploy events); phase 6 (merged in #19)
 Readiness confirmed by: not yet run
+Amended 2026-10-07 by step 11's readiness review and the founder's answer to it ("On this computer only"; ADR 0045, 3; step 11b's header): "Your production" reads and saves the settings through `production.get` and the command `production_set`, never `team.get`'s `production` or `team.save`, says "Kept on this computer, never in the files that go with your project.", and `saves_the_settings_through_the_team_file` becomes `saves_the_settings_on_this_computer`; this step's readiness review re-plans Task 1 to it.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 11 (see step 11's header). Every screen here is built from step 11's approved boards; no new screen is drawn.
 

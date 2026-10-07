@@ -121,6 +121,10 @@ Tests against a fixture MCP server that answers Vercel's tool names with recorde
 
 - [ ] `docs(spec): record the DevOps Engineer's kit and Vercel`
 
+## Open question
+
+O1 (for this step's readiness review; the founder, 2026-10-07, answering step 11's: "Decide at step 12"): once the DevOps Engineer reads production logs through its platform's read tools, should its sandbox lose network, as the Procurement Specialist's web reading is held to approved sites (step 10b2)? Logs are untrusted (spec 8.6) and written as much by the service's users as by the service, and step 11 leaves its web reading open (`web_access(DevopsEngineer)` is `Open`), so a log line could steer it to fetch an address with what it read. The readiness review puts the question to the founder with a recommendation and folds the answer before Task 1.
+
 ## Verification
 
 ```
