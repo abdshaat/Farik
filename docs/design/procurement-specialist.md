@@ -54,7 +54,7 @@ The rest of its setup:
   .history/                 the previous version of each file, and under <task-id>/ the copy taken at assignment
 ```
 
-It sits under `.farik/local/`, never committed (D5). Step 09 builds the finance folder's rules (the session's working directory, the exception to the protected `.farik/local/**` and to `permissions.deny`, the readiness exceptions, `verifying` without a commit, `accepted` as the end, one piece of work at a time) keyed by role, so this role adds `procurement` and no new exception. The two folders are independent. The Finance Specialist may read `vendors.xlsx`; no other role reads the folder, except the Product Manager receiving a procurement task's changed files in its review.
+It sits under `.farik/local/`, never committed (D5). Step 09 builds the finance folder's rules keyed by role through `private_folder(role)`: the session's working directory, which holds the session to its folder, so that `.farik/local/**` stays protected for every other call and in `permissions.deny` and no exception is made for any role (spec 0.62); the readiness rule `private_folder_task`; `verifying` without a commit; `accepted` as the end; one piece of work at a time. So this role adds `procurement` to `private_folder` and no new exception, and a file rule of its own, notes (`.md`) beside workbooks. The two folders are independent. The Finance Specialist may read `vendors.xlsx`; no other role reads the folder, except the reviewer and the Product Manager receiving a procurement task's changed files in its review.
 
 The register's `Vendors` sheet has these columns, in order: `vendor`, `what_for`, `plan`, `price`, `currency`, `period` (`month`, `year`, `once` or `usage`), `started_on`, `renews_on`, `notice_days`, `auto_renews`, `status` (`planned`, `trial`, `active` or `cancelled`), `owner`, `purchase` (the purchase order's number), `terms_url`, `evaluation`, `notes`. Dates are ISO; every cell from a seller or a connector is a value, never a formula.
 
@@ -92,7 +92,6 @@ The user keeps a procurement mailbox of their own, a second address or alias at 
 |---|---|---|---|---|
 | `farik_read_sheet` | `read` | Procurement Specialist (its folder); Finance Specialist (`vendors.xlsx` only) | Step 09's tool, given the procurement folder | 10b |
 | `farik_write_sheet` | `read` | Procurement Specialist (its folder, not `orders/`) | Step 09's tool, with its formula refusals and `.history/` | 10b |
-| `farik_read_costs` | `read` | Procurement Specialist | Step 09's tool: the team's AI spending | 10b |
 | `farik_write_evaluation` | `read` | Procurement Specialist | Writes `evaluations/<name>.md` and keeps the previous version | 10b |
 | `farik_draft_purchase_order` | `read` | Procurement Specialist | Writes `orders/PO-<n>.xlsx`, records `purchase_order.drafted` | 10c |
 | `farik_read_purchase_orders` | `read` | Procurement Specialist | Every order and its state | 10c |
@@ -102,6 +101,8 @@ The user keeps a procurement mailbox of their own, a second address or alias at 
 | `farik_draft_seller_message` | `read` | Procurement Specialist | Records `seller_message.drafted` | 10f |
 | `farik_read_seller_messages` | `read` | Procurement Specialist | Each draft and the text the founder sent | 10f |
 | `farik_read_seller_replies` | `read` | Procurement Specialist | Each reply, untrusted | 10f |
+
+The role is not given `farik_read_costs`: the team's AI spending stays the Finance Specialist's (spec 6.6; the founder's answer of 2026-10-07 to step 10b's readiness review, "No").
 
 ## The kit (steps 10d and 10g)
 

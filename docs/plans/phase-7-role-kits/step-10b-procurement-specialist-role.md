@@ -187,7 +187,7 @@ Files: `Team.tsx` (`ROLES`), `TeamSetup.tsx` (`roleName`, `ringOf`, `EXTRAS`, th
 
 `docs/SPEC.md`: 6.10 says what was built, with any change in execution, and no longer gives the role `farik_read_costs`; 1 and F1 name a ninth optional role, and F1 that setup's "More roles" offers the Finance Specialist and the Procurement Specialist; 5.3 names `.farik/local/procurement/` as a second place under `.farik/` a contract may name, with its `.md` files; 5.4's sentence on `task.diff` for a private-folder task, answered after acceptance from the move's `changed`; 5.6 that no exception is made for a procurement session; 6.6 that the Finance Specialist reads `vendors.xlsx`; 8.5 the optional `changed` of `task.transitioned`; the revision line. `docs/plans/project-plan.md`: row 10b, what was executed; row 09c's deferral, done here. `docs/design/procurement-specialist.md`: line 57 (it still describes the exception to `.farik/local/**` and `permissions.deny` withdrawn in 0.62) and the tools table's `farik_read_costs` row (the founder's answer 2).
 
-- [ ] `docs(spec): record the Procurement Specialist role`
+- [x] `docs(spec): record the Procurement Specialist role`
 
 ## Verification
 
