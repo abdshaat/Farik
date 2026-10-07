@@ -1,13 +1,13 @@
 # Phase 7, step 08g: The marketing budget's hard stop
 
-Status: ready once its mockups are approved
+Status: ready
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 3, 5.5, 5.7, 5.16, 6.5, 8.5; F3, F9
 Depends on: step 08f of this phase (landed and landing-reviewed at `8e6c25a`: `GoogleAds`, `spend_query`, `ads_calls.rs` with `access_of`, `grant_of`, `Writing::spend` and `ads_writes`, `marketing_campaign.created`, `CreatedCampaign`, `check_ads_write`, `campaign_budget`, `first_day`); step 08d (`hand_over.rs`, a rule with no model); step 08c (`active_plan`, `marketing_plans`, `check_proposal`, `record_plan_end`, `marketing_plan_end`, the plan's page); phase 6 step 15 (`SprintHold`, `sprint_hold`, `waits_for_a_sprint`, `in_the_backlog`, `in_the_open_sprint`, `the_sprint_pays`); phase 6 (merged in #19)
 Decided by the founder, 2026-10-06: removing the Google Ads connection while a plan's campaigns run first pauses them (Farik's own call, as at a cap), then removes the connection, since Farik could no longer stop them at the budget; Remove's confirmation says so.
 Decided by the founder, 2026-10-07, in conversation: (1) a pause that fails when the owner removes Google Ads, "Remove regardless": the connection is removed all the same, and the confirmation and Today say the ads keep running at Google until their end date or their budget there, and to pause them in Google Ads; (2) Google reporting cost up to about an hour late, so that Farik's stop can come about an hour past a cap: "Farik must have a plan of what exactly to advertise and get a final price before beginning. If the price is dynamic, then just dont say so before committing to a plan", and, asked to choose, "Disclose dynamic ones": each campaign states what it advertises, and the plan shows each campaign's price kind before the owner approves; (3) a raise request under "Plan work in sprints", "Skip the queue": it is worked on at once, outside sprints, as ADR 0027's incident fix is, and its row does not say it waits for a sprint.
 Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-07 (one round, ADR 0032): not ready, 7 Blocking and the Should items, all folded below with the founder's answers; no second round
-Mockups approved by: pending
+Mockups approved by: the founder, 2026-10-07, as drawn ("Approve as drawn"): `TodayBudgetReached`, `PhoneBudgetReached`, `RaiseBudget`, `PhoneRaiseBudget`, `MarketingPlanSpend`, `PhoneMarketingPlanSpend`, `MarketingPlanApproval`, `PhoneMarketingPlanApproval`, `RemoveGoogleAds`, `PhoneRemoveGoogleAds` (`.dc.html`)
 Amended 2026-10-06 by ADR 0044 (replacing ADR 0043's amendment of the same day): Google Ads signs in through Farik Cloud with Farik's Google app from phase 11, so the quota below is Farik Cloud's project's, shared by every customer (Explorer's 2,880 operations a day carry about 30 active plans, a phase 11 concern), and the founder's live check of 08e to 08g is phase 11's (step 01f). The tests sign in against the fake with a table of their own, as 08e's and 08f's do.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from step 08f at the seam between running ads and stopping them.
@@ -104,7 +104,7 @@ impl Orchestrator { pub async fn watch_marketing_spend(&self) -> Result<(), Orch
 
 On the canvas the earlier steps used, desktop and phone, copied to `docs/design/mockups/`: Today's `marketing_budget` row in its "paused" and "could not pause" forms, the `marketing_spend_unread` row and the `marketing_ads_running` row (`TodayBudgetReached`, `PhoneBudgetReached`, page "marketing"); the raise dialog, its refusals and the row once sent (`RaiseBudget`, `PhoneRaiseBudget`); the plan page's spend section, its pauses, a failed read, the End confirmation and an ended plan (`MarketingPlanSpend`, `PhoneMarketingPlanSpend`); the plan's approval view with each campaign's "Advertises" and price lines, fixed and not, and "Not stated" (`MarketingPlanApproval`, `PhoneMarketingPlanApproval`); the "Remove Google Ads from Kai?" confirmation with its new paragraph, and Today after a removal that Google refused (`RemoveGoogleAds`, `PhoneRemoveGoogleAds`, page "connectors"; step 03b's board 7 stays as it was). Drawn 2026-10-07; the Decisions above hold their words. The founder's approval, with its date and the canvas version, goes into the header's "Mockups approved by:" in the same commit; Task 9 waits for it.
 
-- [ ] `docs(design): mock up the marketing budget's stop and its raise`
+- [x] `docs(design): mock up the marketing budget's stop and its raise`
 
 ### Task 2: What each campaign advertises, and its price
 
