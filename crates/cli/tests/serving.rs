@@ -607,6 +607,85 @@ fn the_e2e_binary_serves_with_recorded_sessions() {
 }
 
 #[cfg(feature = "e2e")]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn answers_the_setup_page_while_docker_info_hangs() {
+    use std::io::{BufRead as _, BufReader};
+    use std::process::{Command, Stdio};
+
+    // A `docker` whose `info` never answers by itself: Farik gives it 10 seconds.
+    let directory = scratch("serve-docker-hangs-bin");
+    let source = directory.join("docker.txt");
+    std::fs::write(
+        &source,
+        "#!/bin/sh\n[ \"$1\" = info ] && exec sleep 60\nexit 1\n",
+    )
+    .expect("written");
+    // Copied rather than written in place, as `a_claude_saying` says.
+    let program = directory.join("docker");
+    let copied = Command::new("cp")
+        .arg(&source)
+        .arg(&program)
+        .status()
+        .expect("cp runs");
+    assert!(copied.success());
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let repository = a_team("serve-docker-hangs");
+    std::fs::write(
+        repository.path.join(".farik/local/settings.json"),
+        r#"{"sandbox":"docker"}"#,
+    )
+    .expect("the settings are written");
+
+    let port = free_port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_farik-e2e-serve"))
+        .args(["--port", &port, "--sandbox-image", "farik-sandbox-unused"])
+        .env("PATH", path)
+        .current_dir(&repository.path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("the binary starts");
+    let mut lines = BufReader::new(child.stdout.take().expect("stdout")).lines();
+    let (port, code) = loop {
+        let line = lines.next().expect("the link is printed").expect("a line");
+        if let Some(link) = link_of(&line) {
+            break link;
+        }
+    };
+    let cookie = connected(port, &code);
+    let asked = Instant::now();
+    let proposed = call(
+        port,
+        &cookie,
+        "query",
+        json!({ "name": "team.propose", "params": {} }),
+    );
+    let waited = asked.elapsed();
+    let stopped = run(&repository.path, &["stop"]);
+    let status = child.wait().expect("the binary ends");
+
+    // `docker info` is asked off the request's path: the page is answered before its 10 seconds
+    // are up, with the Designer as it is without Docker until Docker answers.
+    assert!(
+        waited < Duration::from_secs(5),
+        "team.propose took {waited:?}"
+    );
+    assert_eq!(
+        proposed["result"]["unavailable"],
+        json!([{ "agent_id": "iris", "reason": "designer_needs_sandbox" }]),
+        "{proposed}"
+    );
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    assert!(status.success());
+}
+
+#[cfg(feature = "e2e")]
 /// The raw answer to `GET <path>` sent to the daemon on `port` with `Host: <host>`, and `cookie`
 /// when there is one.
 fn get_as(port: u16, host: &str, path: &str, cookie: Option<&str>) -> String {

@@ -2453,6 +2453,42 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn proposes_the_team_while_docker_has_not_answered() {
+        use crate::preview::fixtures::{HeldPreviews, at_once};
+        use crate::preview::{AVAILABLE_FOR, PolledPreviews};
+
+        // Setup is not held up behind `docker info`, which the driver asks off the request path.
+        let docker = Arc::new(HeldPreviews::held(true));
+        let mut harness = Harness::new("team-propose-docker-asked", |_| {});
+        harness.previews = Arc::new(PolledPreviews::new(Arc::clone(&docker) as _, AVAILABLE_FOR));
+        let _ = harness.orchestrator(harness.recorded(Vec::new()));
+        let proposed = at_once(&docker, || {
+            query(
+                &harness.daemon,
+                "team.propose",
+                &json!({}),
+                "teamProposeResult",
+            )
+        });
+        // Until Docker answers, the Designer is shown as it is without Docker (D3).
+        assert_eq!(
+            proposed["unavailable"],
+            json!([{ "agent_id": "iris", "reason": "designer_needs_sandbox" }])
+        );
+
+        docker.release();
+        harness.previews.settle();
+        let proposed = query(
+            &harness.daemon,
+            "team.propose",
+            &json!({}),
+            "teamProposeResult",
+        );
+        assert_eq!(proposed["unavailable"], json!([]));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn team_get_says_whether_sessions_run_in_the_sandbox() {
         // Without the sandbox an agent's command can reach a connector's keys, and the add page
         // must not promise otherwise (re-review N5). The project's sandbox setting says it: asking

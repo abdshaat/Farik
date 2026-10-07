@@ -22,9 +22,9 @@ use farik_runtime::orchestrator::{
 };
 use farik_runtime::sleep::{Sleeper, TokioSleeper};
 use farik_runtime::{
-    DockerPreviewFactory, DockerSandboxFactory, HostSandboxFactory, NoPreviews, PreviewFactory,
-    RuntimeAdapter, RuntimeError, SANDBOX_IMAGE, SandboxFactory, SessionHandle, SessionSpec,
-    Templates,
+    AVAILABLE_FOR, DockerPreviewFactory, DockerSandboxFactory, HostSandboxFactory, NoPreviews,
+    PolledPreviews, PreviewFactory, RuntimeAdapter, RuntimeError, SANDBOX_IMAGE, SandboxFactory,
+    SessionHandle, SessionSpec, Templates,
 };
 use farik_store::files::Sandbox;
 use serde_json::Value;
@@ -538,17 +538,21 @@ fn sandbox_image<'a>(io: &'a CliIo<'_>) -> &'a str {
 }
 
 /// What makes a task's sandbox and its preview, by the project's sandbox setting, in `image`:
-/// the Designer has no browser without Docker's sandbox (D3).
+/// the Designer has no browser without Docker's sandbox (D3). Whether Docker is there is asked
+/// off every request's path, from the moment the factory is made.
 fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn PreviewFactory>) {
     match sandbox {
         Sandbox::Docker => (
             Arc::new(DockerSandboxFactory {
                 image: image.to_string(),
             }),
-            Arc::new(DockerPreviewFactory {
-                image: image.to_string(),
-                browser: farik_runtime::computer::browser_image(),
-            }),
+            Arc::new(PolledPreviews::new(
+                Arc::new(DockerPreviewFactory {
+                    image: image.to_string(),
+                    browser: farik_runtime::computer::browser_image(),
+                }),
+                AVAILABLE_FOR,
+            )),
         ),
         Sandbox::None => (Arc::new(HostSandboxFactory), Arc::new(NoPreviews)),
     }

@@ -430,6 +430,8 @@ pub struct Orchestrator {
     /// it. One permit is kept when nobody waits: a command handled during a tick ends the wait
     /// after it at once, which costs one tick.
     commands: tokio::sync::Notify,
+    /// Set once the first tick has waited for `previews` to settle.
+    previews_settled: tokio::sync::OnceCell<()>,
 }
 
 impl Orchestrator {
@@ -442,6 +444,7 @@ impl Orchestrator {
             stopped: AtomicBool::new(false),
             stops: tokio::sync::Notify::new(),
             commands: tokio::sync::Notify::new(),
+            previews_settled: tokio::sync::OnceCell::new(),
         }
     }
 
@@ -462,6 +465,15 @@ impl Orchestrator {
     ///
     /// As `tick`.
     pub async fn tick_within(&self, scope: &TickScope) -> Result<TickReport, OrchestratorError> {
+        // Whether a preview can run is answered without waiting on Docker, and before Docker's
+        // first answer as if it were not there (`PolledPreviews`): the team's work waits for that
+        // answer once, so that no assignment or session is judged on the guess.
+        self.previews_settled
+            .get_or_init(|| async {
+                let previews = Arc::clone(&self.deps.previews);
+                let _ = tokio::task::spawn_blocking(move || previews.settle()).await;
+            })
+            .await;
         let log = &self.deps.tools.log;
         // The ends that dates bring to marketing plans come first, before the pause is read: they
         // start no session, so a paused team has them too (ADR 0042).
@@ -819,6 +831,22 @@ mod tests {
                 other => panic!("a note.written, got {other:?}"),
             })
             .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_once_for_whether_a_preview_can_run_before_its_first_tick() {
+        // No work is judged on the answer `PolledPreviews` gives before Docker's first.
+        use crate::preview::fixtures::SettlingPreviews;
+
+        let mut harness = Harness::new("orch-settles-previews", |_| {});
+        let previews = std::sync::Arc::new(SettlingPreviews::default());
+        harness.previews = std::sync::Arc::clone(&previews) as _;
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        for _ in 0..2 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(previews.settles(), 1);
     }
 
     #[tokio::test]

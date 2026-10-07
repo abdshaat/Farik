@@ -3,7 +3,6 @@
 
 use std::path::Path;
 use std::process::{Command, Output};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use farik_core::contract::TaskId;
@@ -24,8 +23,6 @@ const PROBE_LIMIT: Duration = Duration::from_secs(5);
 const CLIENT_GRACE: Duration = Duration::from_secs(30);
 /// How long `docker info` has to answer before Docker counts as not there.
 const INFO_LIMIT: Duration = Duration::from_secs(10);
-/// How long `docker info`'s answer holds for `available`.
-const AVAILABLE_FOR: Duration = Duration::from_secs(60);
 /// How many lines of output a failure keeps.
 const TAIL_LINES: usize = 40;
 
@@ -51,9 +48,6 @@ fn daemon_answers(program: &str, limit: Duration) -> bool {
     .is_ok_and(|finished| finished.exit_code == 0 && !finished.killed)
 }
 
-/// The last answer of `docker info`, and when it came.
-static AVAILABLE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
-
 /// Makes previews in containers of one image.
 pub struct DockerPreviewFactory {
     /// The image `prepare` and `start` run in, `SANDBOX_IMAGE` outside tests.
@@ -63,16 +57,10 @@ pub struct DockerPreviewFactory {
 }
 
 impl PreviewFactory for DockerPreviewFactory {
+    /// Asks `docker info`, which may take `INFO_LIMIT`: the driver asks it through
+    /// `PolledPreviews`, off every request's path.
     fn available(&self) -> bool {
-        let mut last = crate::locked(&AVAILABLE);
-        match *last {
-            Some((at, answer)) if at.elapsed() < AVAILABLE_FOR => answer,
-            _ => {
-                let answer = daemon_answers("docker", INFO_LIMIT);
-                *last = Some((Instant::now(), answer));
-                answer
-            }
-        }
+        daemon_answers("docker", INFO_LIMIT)
     }
 
     fn start(
