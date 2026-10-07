@@ -1425,10 +1425,26 @@ mod tests {
             .collect()
     }
 
+    /// The address and scopes a kit entry signs in with, after holding it to route 1 (ADR 0035):
+    /// the service registers Farik itself, so the entry carries no client id and no callback port,
+    /// which would swap it for an app registered in advance (mutations M13 and R2). A kit that
+    /// legitimately carries a client id must not use this helper; none does today.
     fn signed_in(server: &CustomServer) -> (&str, Option<&[String]>) {
         let CustomTransport::Http { url, oauth, .. } = &server.transport else {
             panic!("{} is http", server.name);
         };
+        if let Some(settings) = oauth {
+            assert!(
+                settings.client_id.is_none(),
+                "{} signs in by route 1, so it names no client id",
+                server.name
+            );
+            assert!(
+                settings.callback_port.is_none(),
+                "{} signs in by route 1, so it names no callback port",
+                server.name
+            );
+        }
         (
             url,
             oauth.as_ref().map(|settings| settings.scopes.as_slice()),
