@@ -1,11 +1,11 @@
 # Phase 7, step 11: DevOps Engineer role
 
-Status: ready once its mockups are approved
+Status: ready
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 1, 5.6, 5.12, 6.9, 8.6; F1
 Depends on: steps 09 and 10b of this phase (an optional role's pattern; setup's "More roles" list, `MORE_ROLES` and `EXTRAS` as step 10b leaves them); steps 05 to 08b (every role ships a `kit.yaml`); step 08g (`skips_sprints`, which the ADR's item 7 names); phase 6 (merged in #19). It uses no code of step 10h: the ADR's item 1 cites ADR 0041 as amended, and step 11b, which reads the approval mode, keeps that dependency.
 Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-07 (one round, ADR 0032): not ready, 4 Blocking and the Should items, all folded below with the founder's answers; no second round
-Mockups approved by: pending
+Mockups approved by: the founder, 2026-10-07, as drawn ("Approve as drawn"): `DevOpsRole`, `DevOpsCard`, `Production`, `PhoneProduction`, `TodayIncident`, `PhoneIncident`, `Incident`, `DeployPanel`, `TodayDeployApproval`, `SprintStartDeploys`, `ConnectorFileKey` and the revised `PhoneSetupTeamMoreRoles` (`.dc.html`), with the choices shown on them (the push warning about hosting that goes live from a branch; Today's section "Production"; production settings on this computer; the restart and rollback confirmations)
 Decided by the founder, 2026-10-07, in conversation: (1) whether the team's "Let agents push" answer applies to the DevOps Engineer, "Yes, like Developers": under `push` it gains `git_remote` as the Developers and the UI/UX Designer do, against the reviewer's recommendation, and a branch it pushes may deploy through the user's own pipeline, outside Farik's three tools, which the ADR and spec 8.6 record and the setup copy says; (2) where the production settings live, "On this computer only": in this computer's log for the project, as step 10h keeps the approval mode, set only by the owner from the daemon's token or the browser's cookie, never in `team.yaml` or a template, so a pulled commit cannot re-point a deploy, a restart or a rollback at another service; this decides the ADR's item 3, and step 11b's header says steps 11b to 12e read them there; (3) whether its sandbox loses network once it reads production logs (step 12), "Decide at step 12": an open question in step 12's plan for its readiness review.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at e8efb23; the names are what count. The project plan's row 11 is split in six, at the seams the code map of 2026-10-05 showed: this step is the role, its mockups and the ADR the next five rest on; 11b deploy tasks and `farik_deploy` over a fake platform; 11c the watch; 11d incidents, the restart and the rollback; 11e the incident's fix; 11f the pages and the command line. Row 12 is split in five (`step-12-devops-engineer-kit.md` to `step-12e-...`), one plan per group of platforms.
@@ -83,7 +83,7 @@ An Opus session (ADR 0032) draws these in `docs/design/mockups/`, on `canvas.jso
 
 Gate: the founder approves the boards, or says to approve them automatically; the approval, its date and the canvas version are written into this plan's header and the headers of steps 11b to 11f and 12d in the same commit. Tasks 3 and 4 wait for it.
 
-- [ ] `docs(design): mock up the DevOps Engineer`
+- [x] `docs(design): mock up the DevOps Engineer`
 
 ### Task 1: ADR 0045
 
