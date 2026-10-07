@@ -42,6 +42,8 @@ const FIVE = [
 	agent("kai", "Kai", "marketing_specialist", "marketing-specialist"),
 ];
 const IRIS = agent("iris", "Iris", "ui_ux_designer", "extra-1");
+/** The six Farik suggests: the five, with the Designer after the Developer. */
+const SIX = [...FIVE.slice(0, 4), IRIS, ...FIVE.slice(4)];
 const TESTS_PASS = {
 	name: "the-tests-pass",
 	text: "Every test passes: pnpm test.",
@@ -225,9 +227,10 @@ describe("team setup", () => {
 		const names = within(list).getAllByRole("textbox", {
 			name: "Name for the Developer",
 		});
+		// "More roles" holds Noor and Ivo, so the first spare name left is Lena.
 		expect(names.map((n) => (n as HTMLInputElement).value)).toEqual([
 			"Theo",
-			"Noor",
+			"Lena",
 		]);
 		// A name whose id is taken gets the next free one.
 		fireEvent.change(
@@ -252,7 +255,7 @@ describe("team setup", () => {
 			["ada", "Ada", "architect"],
 			["theo", "Theo", "software_developer"],
 			["theo-2", "Theo", "marketing_specialist"],
-			["noor", "Noor", "software_developer"],
+			["lena", "Lena", "software_developer"],
 		]);
 		await s.reply(validate, {
 			errors: [
@@ -327,7 +330,8 @@ describe("team setup", () => {
 		);
 		await expectNoAxeViolations(container);
 
-		// Added agents never take Iris's picture, nor the Finance Specialist's.
+		// Added agents never take Iris's picture, the Finance Specialist's, nor the Procurement
+		// Specialist's, so they share the two extras once those are taken.
 		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
 		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
 		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
@@ -339,9 +343,9 @@ describe("team setup", () => {
 		expect(faces.slice(0, 3)).toEqual([
 			AVATAR_URLS["extra-2"],
 			AVATAR_URLS["extra-3"],
-			AVATAR_URLS["extra-5"],
+			AVATAR_URLS["extra-2"],
 		]);
-		for (const taken of ["extra-1", "extra-4"] as const)
+		for (const taken of ["extra-1", "extra-4", "extra-5"] as const)
 			expect(faces).not.toContain(AVATAR_URLS[taken]);
 		for (const added of within(list).getAllByRole("checkbox").slice(6))
 			fireEvent.click(added);
@@ -362,6 +366,38 @@ describe("team setup", () => {
 		]);
 	});
 
+	it("added_agents_draw_from_two_extras", async () => {
+		const { socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(
+			s,
+			"team.propose",
+			proposed((team) => {
+				team.agents = SIX;
+			}),
+		);
+		const list = await screen.findByRole("list", { name: en.teamMembers });
+		for (let added = 0; added < 3; added++)
+			fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		const rows = within(list).getAllByRole("listitem").slice(6);
+		expect(
+			rows.map((row) => [
+				(within(row).getByRole("textbox") as HTMLInputElement).getAttribute(
+					"aria-label",
+				),
+				row.querySelector("img")?.getAttribute("src"),
+			]),
+		).toEqual([
+			["Name for the Developer", AVATAR_URLS["extra-2"]],
+			["Name for the Developer", AVATAR_URLS["extra-3"]],
+			["Name for the Developer", AVATAR_URLS["extra-2"]],
+		]);
+		// The fifth extra is the Procurement Specialist's alone.
+		expect(
+			rows.map((row) => row.querySelector("img")?.getAttribute("src")),
+		).not.toContain(AVATAR_URLS["extra-5"]);
+	});
+
 	it("setup_does_not_suggest_finance", async () => {
 		const { socket } = await renderApp("/setup/team");
 		const s = socket as FakeSocket;
@@ -369,16 +405,17 @@ describe("team setup", () => {
 			s,
 			"team.propose",
 			proposed((team) => {
-				team.agents = [...FIVE.slice(0, 4), IRIS, ...FIVE.slice(4)];
+				team.agents = SIX;
 			}),
 		);
 		const list = await screen.findByRole("list", { name: en.teamMembers });
 		expect(within(list).getAllByRole("listitem")).toHaveLength(6);
-		expect(
-			screen.queryByRole("checkbox", {
-				name: "Include the Finance Specialist",
-			}),
-		).toBeNull();
+		// It is offered under "More roles", unticked, and is not one of the team's rows.
+		const finance = screen.getByRole("checkbox", {
+			name: "Include the Finance Specialist",
+		}) as HTMLInputElement;
+		expect(finance.checked).toBe(false);
+		expect(list.contains(finance)).toBe(false);
 		fireEvent.click(
 			screen.getByRole("button", { name: "Continue with these six" }),
 		);
@@ -394,6 +431,237 @@ describe("team setup", () => {
 				"ui_ux_designer",
 			].sort(),
 		);
+	});
+
+	it("offers_procurement_and_does_not_suggest_it", async () => {
+		const { container, socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(
+			s,
+			"team.propose",
+			proposed((team) => {
+				team.agents = SIX;
+			}),
+		);
+		const list = await screen.findByRole("list", { name: en.teamMembers });
+		// The suggested six, ticked, and nothing else among them.
+		const six = within(list).getAllByRole("listitem");
+		expect(six).toHaveLength(6);
+		for (const row of six)
+			expect(
+				(within(row).getByRole("checkbox") as HTMLInputElement).checked,
+			).toBe(true);
+		// "More roles" follows "Add someone" and offers the two roles Farik does not suggest.
+		const more = screen.getByRole("region", { name: en.setupMoreRoles });
+		expect(within(more).getByText(en.setupMoreRolesNote)).toBeTruthy();
+		expect(
+			screen
+				.getByRole("button", { name: en.teamAdd })
+				.compareDocumentPosition(more) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		const offered = within(more).getAllByRole("listitem");
+		const described = (row: HTMLElement) => {
+			const face = row.querySelector("img") as HTMLElement;
+			return [
+				(within(row).getByRole("checkbox") as HTMLInputElement).checked,
+				row.querySelector("label")?.textContent,
+				(within(row).getByRole("textbox") as HTMLInputElement).value,
+				face.getAttribute("src"),
+				face.style.getPropertyValue("--ring"),
+			];
+		};
+		expect(offered.map(described)).toEqual([
+			[
+				false,
+				"Finance Specialist",
+				"Noor",
+				AVATAR_URLS["finance-specialist"],
+				"var(--farik-color-role-finance-specialist)",
+			],
+			[
+				false,
+				"Procurement Specialist",
+				"Ivo",
+				AVATAR_URLS["extra-5"],
+				"var(--farik-color-role-procurement-specialist)",
+			],
+		]);
+		expect(
+			within(offered[0] as HTMLElement).getByText(en.jobFinance),
+		).toBeTruthy();
+		expect(
+			within(offered[1] as HTMLElement).getByText(en.jobProcurement),
+		).toBeTruthy();
+		expect(en.jobProcurement).toBe(
+			"Finds sellers and prices for anything you need to buy, asks them for quotes, and sets up orders for you to approve.",
+		);
+		expect(
+			screen.getByRole("button", { name: "Continue with these six" }),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		// Ticking it makes seven, and the team it saves holds Ivo with its own picture.
+		fireEvent.click(
+			screen.getByRole("checkbox", {
+				name: "Include the Procurement Specialist",
+			}),
+		);
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
+		const validate = await asked(s, "team.validate");
+		const team = (
+			validate.params.params as { team: { agents: Record<string, unknown>[] } }
+		).team;
+		expect(team.agents).toHaveLength(7);
+		expect(team.agents.at(-1)).toMatchObject({
+			id: "ivo",
+			display_name: "Ivo",
+			role: "procurement_specialist",
+			avatar: "extra-5",
+			status: "active",
+		});
+		expect(team.agents.map((a) => a.role)).not.toContain("finance_specialist");
+		await s.reply(validate, { errors: [], effects: [] });
+		expect(
+			await screen.findByRole("heading", { name: en.mayTitle }),
+		).toBeTruthy();
+	});
+
+	it("more_roles_from_scratch", async () => {
+		const { container, socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerQuery(s, "templates.list", { ...LISTED, templates: [] });
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^From scratch/ }),
+		);
+		// The two rows every team needs have no tick; each row of "More roles" has one.
+		const list = screen.getByRole("list", { name: en.teamMembers });
+		expect(within(list).queryAllByRole("checkbox")).toHaveLength(0);
+		const more = screen.getByRole("region", { name: en.setupMoreRoles });
+		const ticks = within(more).getAllByRole("checkbox") as HTMLInputElement[];
+		expect(
+			ticks.map((tick) => [tick.getAttribute("aria-label"), tick.checked]),
+		).toEqual([
+			["Include the Finance Specialist", false],
+			["Include the Procurement Specialist", false],
+		]);
+		// An offered row that is left blank holds nothing up; the two required rows still do.
+		fireEvent.change(
+			within(more).getByRole("textbox", {
+				name: "Name for the Procurement Specialist",
+			}),
+			{
+				target: { value: "" },
+			},
+		);
+		const onward = screen.getByRole("button", {
+			name: en.teamContinue,
+		}) as HTMLButtonElement;
+		for (const name of [
+			"Name for the Product Manager",
+			"Name for the Developer",
+		])
+			fireEvent.change(screen.getByRole("textbox", { name }), {
+				target: { value: name.endsWith("Manager") ? "Mira" : "Theo" },
+			});
+		expect(onward.disabled).toBe(false);
+		await expectNoAxeViolations(container);
+		fireEvent.click(ticks[1] as HTMLInputElement);
+		fireEvent.click(onward);
+		const validate = await asked(s, "team.validate");
+		const team = (
+			validate.params.params as { team: { agents: Record<string, unknown>[] } }
+		).team;
+		expect(team.agents.map((a) => a.role)).toEqual([
+			"product_manager",
+			"software_developer",
+			"procurement_specialist",
+		]);
+	});
+
+	it("a_saved_team_with_the_role_has_no_more_roles_row", async () => {
+		const { container, socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(
+			s,
+			"team.propose",
+			proposed((team) => {
+				team.agents = SIX;
+			}),
+		);
+		await answerQuery(s, "templates.list", {
+			...LISTED,
+			templates: [SHOP],
+		});
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^A saved team/ }),
+		);
+		await screen.findByText(t("teamLeadSaved", { name: "Shop team" }));
+		// Ivo is one of the team's rows, with the persona that was saved.
+		const list = screen.getByRole("list", { name: en.teamMembers });
+		const procurement = within(list)
+			.getByRole("checkbox", { name: "Include the Procurement Specialist" })
+			.closest("li") as HTMLElement;
+		expect(
+			(within(procurement).getByRole("textbox") as HTMLInputElement).value,
+		).toBe("Ivo");
+		expect(
+			within(procurement).getByText("Finds the best seller at the right price"),
+		).toBeTruthy();
+		expect(
+			(within(procurement).getByRole("checkbox") as HTMLInputElement).checked,
+		).toBe(true);
+		// "More roles" offers the Finance Specialist alone, in the job's words.
+		const more = screen.getByRole("region", { name: en.setupMoreRoles });
+		const offered = within(more).getAllByRole("listitem");
+		expect(offered).toHaveLength(1);
+		expect(
+			within(offered[0] as HTMLElement).getByText(en.jobFinance),
+		).toBeTruthy();
+		expect(
+			screen.queryAllByRole("checkbox", {
+				name: "Include the Procurement Specialist",
+			}),
+		).toHaveLength(1);
+		await expectNoAxeViolations(container);
+	});
+
+	it("eight_ticked_are_refused_on_continue", async () => {
+		const { socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(
+			s,
+			"team.propose",
+			proposed((team) => {
+				team.agents = SIX;
+			}),
+		);
+		await screen.findByRole("list", { name: en.teamMembers });
+		for (const role of ["Finance Specialist", "Procurement Specialist"])
+			fireEvent.click(
+				screen.getByRole("checkbox", { name: `Include the ${role}` }),
+			);
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
+		const validate = await asked(s, "team.validate");
+		expect(
+			(validate.params.params as { team: { agents: unknown[] } }).team.agents,
+		).toHaveLength(8);
+		await s.reply(validate, {
+			errors: [
+				{
+					path: "/agents",
+					message:
+						"A team has seven agents at most. Retire one before adding another.",
+					code: "too_many",
+				},
+			],
+			effects: [],
+		});
+		// The daemon's words for any team over seven, tied to no row, and nothing goes on.
+		const alert = await screen.findByRole("alert");
+		expect(alert.textContent).toBe(en.refuseTooMany);
+		expect(screen.queryByRole("heading", { name: en.mayTitle })).toBeNull();
+		expect(s.calls("team.start")).toHaveLength(0);
 	});
 
 	it("someone_gives_finance_its_picture", () => {
@@ -419,9 +687,38 @@ describe("team setup", () => {
 		const second = someone([...team, finance], like("finance_specialist"));
 		expect(second.avatar).toBe("finance-specialist");
 		expect(second.displayName).toBe("Ivo");
-		// Every other role keeps the extras, never Iris's or the Finance Specialist's.
+		// Every other role keeps the extras, never Iris's, the Finance Specialist's or the
+		// Procurement Specialist's.
 		const developer = someone([...team, finance], like("software_developer"));
-		expect(["extra-2", "extra-3", "extra-5"]).toContain(developer.avatar);
+		expect(["extra-2", "extra-3"]).toContain(developer.avatar);
+	});
+
+	it("someone_gives_procurement_its_picture", () => {
+		const like = (role: Agent["role"]): Agent => ({
+			id: "",
+			displayName: "",
+			role,
+			status: "active",
+		});
+		const team = FIVE.map(
+			(a): Agent => ({
+				id: a.id,
+				displayName: a.display_name,
+				role: a.role as Agent["role"],
+				avatar: a.avatar,
+				status: "active",
+			}),
+		);
+		const procurement = someone(team, like("procurement_specialist"));
+		expect(procurement.avatar).toBe("extra-5");
+		expect(procurement.displayName).toBe("Noor");
+		// Another takes the same picture, and the next spare name.
+		const second = someone(
+			[...team, procurement],
+			like("procurement_specialist"),
+		);
+		expect(second.avatar).toBe("extra-5");
+		expect(second.displayName).toBe("Ivo");
 	});
 
 	it("says_what_the_finance_specialist_does_in_its_row", async () => {
@@ -564,7 +861,8 @@ describe("team setup", () => {
 				.map((n) => (n as HTMLInputElement).value);
 		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
 		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
-		expect(developers()).toEqual(["Theo", "Noor", "Ivo"]);
+		// "More roles" holds Noor and Ivo, so the spare names start at Lena.
+		expect(developers()).toEqual(["Theo", "Lena", "Sami"]);
 		// A renamed newcomer frees its spare name, which the next one takes.
 		fireEvent.change(
 			within(list).getAllByRole("textbox", {
@@ -573,7 +871,7 @@ describe("team setup", () => {
 			{ target: { value: "Zed" } },
 		);
 		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
-		expect(developers()).toEqual(["Theo", "Zed", "Ivo", "Noor"]);
+		expect(developers()).toEqual(["Theo", "Zed", "Sami", "Lena"]);
 		expect(
 			warned.mock.calls.some((call) => String(call[0]).includes("same key")),
 		).toBe(false);
@@ -1092,6 +1390,42 @@ const THREE = {
 	},
 };
 const LISTED = { folder: "/home/me/.config/farik/templates", unreadable: [] };
+/** A saved team that holds a Procurement Specialist. */
+const SHOP = {
+	slug: "shop-team",
+	template: {
+		version: 1,
+		name: "Shop team",
+		saved_at: "2026-09-28T12:00:00Z",
+		agents: [
+			{
+				id: "mira",
+				display_name: "Mira",
+				role: "product_manager",
+				persona: "Asks the question behind the question.",
+			},
+			{
+				id: "theo",
+				display_name: "Theo",
+				role: "software_developer",
+				persona: "Terse. Shows rather than tells.",
+			},
+			{
+				id: "ivo",
+				display_name: "Ivo",
+				role: "procurement_specialist",
+				persona: "Finds the best seller at the right price",
+				avatar: "extra-5",
+			},
+		],
+		policy: {
+			permissions: { run_commands: true, push: false },
+			judgment: { required: "never", questions: [BUDGET], judge: "auto" },
+			integration: "pull_request",
+		},
+		budgets: { daily_usd: 20 },
+	},
+};
 
 describe("team setup's three starts", () => {
 	it("offers_three_starts", async () => {

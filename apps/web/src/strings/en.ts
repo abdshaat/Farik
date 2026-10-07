@@ -210,6 +210,11 @@ export const en = {
 		"Looks at your app the way a customer does, plans changes to its screens, and makes them once {pm} agrees. Checks every screen {developer} builds.",
 	jobFinance:
 		"Keeps the books and forecasts your spending, starting with the team's AI costs.",
+	jobProcurement:
+		"Finds sellers and prices for anything you need to buy, asks them for quotes, and sets up orders for you to approve.",
+	setupMoreRoles: "More roles",
+	setupMoreRolesNote:
+		"Roles Farik does not suggest. Tick one to add it to your team; a team has seven people at most.",
 	teamName: "Name for the {role}",
 	teamAdd: "Add someone",
 	teamContinueSix: "Continue with these six",
@@ -221,6 +226,7 @@ export const en = {
 	roleMarketing: "Marketing Specialist",
 	roleDesigner: "UI/UX Designer",
 	roleFinance: "Finance Specialist",
+	roleProcurement: "Procurement Specialist",
 	mayTitle: "What may your team do on its own?",
 	mayLead:
 		"Two things can cause real harm, so Farik asks you about them directly. Nothing runs until you answer both.",

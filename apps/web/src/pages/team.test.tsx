@@ -319,6 +319,7 @@ describe("team page", () => {
 			en.roleDesigner,
 			en.roleMarketing,
 			"Finance Specialist",
+			"Procurement Specialist",
 		]);
 		fireEvent.change(select, { target: { value: "finance_specialist" } });
 		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
@@ -327,6 +328,29 @@ describe("team page", () => {
 			display_name: "Noor",
 			role: "finance_specialist",
 			avatar: "finance-specialist",
+			status: "active",
+		});
+	});
+
+	it("the_team_page_adds_procurement", async () => {
+		const { s } = await opened("/team");
+		const select = (await screen.findByLabelText(
+			en.teamAddRole,
+		)) as HTMLSelectElement;
+		// The Procurement Specialist is the last role offered, and is not suggested.
+		expect(
+			within(select)
+				.getAllByRole("option")
+				.map((option) => option.textContent)
+				.at(-1),
+		).toBe("Procurement Specialist");
+		fireEvent.change(select, { target: { value: "procurement_specialist" } });
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		const team = await saved(s);
+		expect(team.agents.at(-1)).toMatchObject({
+			display_name: "Noor",
+			role: "procurement_specialist",
+			avatar: "extra-5",
 			status: "active",
 		});
 	});

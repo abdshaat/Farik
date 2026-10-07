@@ -8,6 +8,7 @@ import { Faces, templateMeta, useTemplates } from "../SavedTeams.tsx";
 import { PreviewFields } from "./PreviewFields.tsx";
 import styles from "./setup.module.css";
 import {
+	type Draft,
 	draftOf,
 	ringOf,
 	roleName,
@@ -29,6 +30,7 @@ const JOBS = {
 	marketing_specialist: "jobMarketing",
 	ui_ux_designer: "jobDesigner",
 	finance_specialist: "jobFinance",
+	procurement_specialist: "jobProcurement",
 } as const;
 
 /** Setup's fifth step: where the team starts from, then its agents, named, and anyone added. */
@@ -46,9 +48,11 @@ export function SetupTeam() {
 		change(draftOf(proposed, start, template));
 	};
 	const scratch = draft.start === "scratch";
-	// From scratch, the two required rows have to be named before going on.
+	// From scratch, the two required rows have to be named before going on; a role offered under
+	// "More roles" is named by the daemon's check when it is ticked.
 	const unnamed =
-		scratch && draft.members.some((m) => !m.agent.displayName.trim());
+		scratch &&
+		draft.members.some((m) => !m.more && !m.agent.displayName.trim());
 	const [errors, setErrors] = useState<Checked["errors"]>([]);
 	const [busy, setBusy] = useState(false);
 	const on = draft.members.filter((m) => m.on);
@@ -75,7 +79,7 @@ export function SetupTeam() {
 				i !== index
 					? m
 					: {
-							key: m.key,
+							...m,
 							on: next.on ?? m.on,
 							agent: {
 								...m.agent,
@@ -103,6 +107,7 @@ export function SetupTeam() {
 					on: true,
 					// An id is handed out again once its name changes; a row's key is its own.
 					key: draft.members.length,
+					more: false,
 				},
 			],
 		});
@@ -122,6 +127,104 @@ export function SetupTeam() {
 			setErrors(refusalsOf(e));
 		}
 		setBusy(false);
+	};
+
+	/** One row: its tick, its picture in its role's ring, its role over its name, and its job. */
+	const row = (member: Draft["members"][number], index: number) => {
+		const { agent, on: included } = member;
+		const role = roleName(agent.role);
+		const avatar = AVATAR_URLS[agent.avatar as AvatarKey];
+		const nameId = `name-${index}`;
+		const why = included ? at(on.indexOf(member)) : [];
+		const whyId = `why-${index}`;
+		const designer = agent.role === "ui_ux_designer";
+		const cannot = unavailable.includes(agent.role);
+		return (
+			<li key={member.key} className={styles.member}>
+				{(member.more || !scratch) && (
+					<input
+						type="checkbox"
+						checked={included}
+						disabled={cannot}
+						aria-label={t("teamInclude").replace("{role}", role)}
+						onChange={(e) => set(index, { on: e.target.checked })}
+					/>
+				)}
+				{avatar && (
+					<img
+						className={styles.face}
+						style={ringOf(agent.role)}
+						src={avatar}
+						alt=""
+					/>
+				)}
+				<span className={styles.who}>
+					<label htmlFor={nameId}>{role}</label>
+					<input
+						id={nameId}
+						className={styles.input}
+						value={agent.displayName}
+						aria-label={t("teamName").replace("{role}", role)}
+						aria-invalid={why.length > 0 || undefined}
+						aria-describedby={why.length > 0 ? whyId : undefined}
+						onChange={(e) => set(index, { name: e.target.value })}
+					/>
+				</span>
+				<span className={styles.persona}>
+					{!member.more && scratch
+						? t("teamScratchNote")
+						: !member.more && draft.from
+							? agent.persona
+							: t(JOBS[agent.role], { pm, developer })}
+				</span>
+				{why.length > 0 && (
+					<span id={whyId} className={styles.error}>
+						{why.map((e) => said(e.code)).join(" ")}
+					</span>
+				)}
+				{cannot && (
+					<div className={styles.memberCard}>
+						<strong>{t("teamNeedsSandbox")}</strong>
+						<p>
+							{t("teamNeedsSandboxNote", {
+								designer: agent.displayName,
+							})}
+						</p>
+						<div className={styles.buttons}>
+							<Button onClick={checkAgain}>{t("teamCheckAgain")}</Button>
+							<a
+								href="https://docs.docker.com/get-started/get-docker/"
+								target="_blank"
+								rel="noreferrer"
+							>
+								{t("teamInstallDocker")}
+							</a>
+						</div>
+					</div>
+				)}
+				{designer && included && (
+					<section
+						className={styles.memberCard}
+						aria-labelledby={`preview-${index}`}
+					>
+						<h2 id={`preview-${index}`}>
+							{t("previewSetupTitle", { designer: agent.displayName })}
+						</h2>
+						<p>{t("previewSetupLead", { designer: agent.displayName })}</p>
+						<PreviewFields
+							id={`preview-${index}`}
+							form={draft.preview}
+							designer={agent.displayName}
+							errors={errors}
+							onChange={(preview) => {
+								setErrors(errors.filter((e) => !e.path.startsWith("/preview")));
+								change({ ...draft, preview });
+							}}
+						/>
+					</section>
+				)}
+			</li>
+		);
 	};
 
 	return (
@@ -177,112 +280,26 @@ export function SetupTeam() {
 			/>
 			{draft.from && <p>{t("teamLeadSaved", { name: draft.from })}</p>}
 			<ul className={styles.members} aria-label={t("teamMembers")}>
-				{draft.members.map((member, index) => {
-					const { agent, on: included } = member;
-					const role = roleName(agent.role);
-					const avatar = AVATAR_URLS[agent.avatar as AvatarKey];
-					const nameId = `name-${index}`;
-					const why = included ? at(on.indexOf(member)) : [];
-					const whyId = `why-${index}`;
-					const designer = agent.role === "ui_ux_designer";
-					const cannot = unavailable.includes(agent.role);
-					return (
-						<li key={member.key} className={styles.member}>
-							{!scratch && (
-								<input
-									type="checkbox"
-									checked={included}
-									disabled={cannot}
-									aria-label={t("teamInclude").replace("{role}", role)}
-									onChange={(e) => set(index, { on: e.target.checked })}
-								/>
-							)}
-							{avatar && (
-								<img
-									className={styles.face}
-									style={ringOf(agent.role)}
-									src={avatar}
-									alt=""
-								/>
-							)}
-							<span className={styles.who}>
-								<label htmlFor={nameId}>{role}</label>
-								<input
-									id={nameId}
-									className={styles.input}
-									value={agent.displayName}
-									aria-label={t("teamName").replace("{role}", role)}
-									aria-invalid={why.length > 0 || undefined}
-									aria-describedby={why.length > 0 ? whyId : undefined}
-									onChange={(e) => set(index, { name: e.target.value })}
-								/>
-							</span>
-							<span className={styles.persona}>
-								{scratch
-									? t("teamScratchNote")
-									: draft.from
-										? agent.persona
-										: t(JOBS[agent.role], { pm, developer })}
-							</span>
-							{why.length > 0 && (
-								<span id={whyId} className={styles.error}>
-									{why.map((e) => said(e.code)).join(" ")}
-								</span>
-							)}
-							{cannot && (
-								<div className={styles.memberCard}>
-									<strong>{t("teamNeedsSandbox")}</strong>
-									<p>
-										{t("teamNeedsSandboxNote", {
-											designer: agent.displayName,
-										})}
-									</p>
-									<div className={styles.buttons}>
-										<Button onClick={checkAgain}>{t("teamCheckAgain")}</Button>
-										<a
-											href="https://docs.docker.com/get-started/get-docker/"
-											target="_blank"
-											rel="noreferrer"
-										>
-											{t("teamInstallDocker")}
-										</a>
-									</div>
-								</div>
-							)}
-							{designer && included && (
-								<section
-									className={styles.memberCard}
-									aria-labelledby={`preview-${index}`}
-								>
-									<h2 id={`preview-${index}`}>
-										{t("previewSetupTitle", { designer: agent.displayName })}
-									</h2>
-									<p>
-										{t("previewSetupLead", { designer: agent.displayName })}
-									</p>
-									<PreviewFields
-										id={`preview-${index}`}
-										form={draft.preview}
-										designer={agent.displayName}
-										errors={errors}
-										onChange={(preview) => {
-											setErrors(
-												errors.filter((e) => !e.path.startsWith("/preview")),
-											);
-											change({ ...draft, preview });
-										}}
-									/>
-								</section>
-							)}
-						</li>
-					);
-				})}
+				{draft.members.map(
+					(member, index) => !member.more && row(member, index),
+				)}
 			</ul>
 			<span>
 				<Button kind="quiet" onClick={add}>
 					{t("teamAdd")}
 				</Button>
 			</span>
+			{draft.members.some((m) => m.more) && (
+				<section className={styles.more} aria-labelledby="more-roles">
+					<h2 id="more-roles">{t("setupMoreRoles")}</h2>
+					<p>{t("setupMoreRolesNote")}</p>
+					<ul className={styles.members} aria-labelledby="more-roles">
+						{draft.members.map(
+							(member, index) => member.more && row(member, index),
+						)}
+					</ul>
+				</section>
+			)}
 			{draft.from && (
 				<p className={styles.note}>
 					{t("teamSavedAnswers", { name: draft.from })}
