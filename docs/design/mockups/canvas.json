@@ -624,8 +624,8 @@
       "x": 1640,
       "y": 0,
       "w": 390,
-      "h": 4128,
-      "title": "Phone: setup’s More roles (step 10b)",
+      "h": 4568,
+      "title": "Phone: setup’s More roles, with the DevOps Engineer (steps 10b, 11)",
       "page": "procurement",
       "is_interactive": true
     },
@@ -970,6 +970,105 @@
       "title": "Phone: Done on its own (step 10h)",
       "page": "auto",
       "is_interactive": true
+    },
+    "DevOpsRole.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 3587,
+      "title": "Setup: More roles offers the DevOps Engineer, Lena; seven at most; Sami and Rui added by hand (step 11)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "DevOpsCard.dc.html": {
+      "x": 1640,
+      "y": 0,
+      "w": 1440,
+      "h": 1596,
+      "title": "Your team: Lena’s card says what the production watch last saw (steps 11, 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "Production.dc.html": {
+      "x": 3280,
+      "y": 0,
+      "w": 1280,
+      "h": 2831,
+      "title": "Settings: Your production, kept on this computer; no platform yet; the refusals (step 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "PhoneProduction.dc.html": {
+      "x": 4760,
+      "y": 0,
+      "w": 390,
+      "h": 3133,
+      "title": "Phone: Your production (step 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "TodayIncident.dc.html": {
+      "x": 5350,
+      "y": 0,
+      "w": 1280,
+      "h": 2943,
+      "title": "Today: an incident first, its steps, Stop, Restart, Roll back, Mark as fixed, and its states (steps 11d, 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "PhoneIncident.dc.html": {
+      "x": 6830,
+      "y": 0,
+      "w": 390,
+      "h": 2843,
+      "title": "Phone: an incident on Today (steps 11d, 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "Incident.dc.html": {
+      "x": 7420,
+      "y": 0,
+      "w": 1280,
+      "h": 1235,
+      "title": "Incident 412: what happened, Lena’s notes as text, the deploys it touched, the fix (step 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "DeployPanel.dc.html": {
+      "x": 8900,
+      "y": 0,
+      "w": 1280,
+      "h": 2369,
+      "title": "A deploy task: its Deploy tab, each state, and its gate (steps 11b, 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "TodayDeployApproval.dc.html": {
+      "x": 10380,
+      "y": 0,
+      "w": 1280,
+      "h": 2563,
+      "title": "Today: Lena wants to put a new version live, a deploy the sprint did not plan (step 11b)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "SprintStartDeploys.dc.html": {
+      "x": 11860,
+      "y": 0,
+      "w": 1440,
+      "h": 1069,
+      "title": "Start a sprint: it approves the deploys planned into it (step 11b)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "ConnectorFileKey.dc.html": {
+      "x": 13500,
+      "y": 0,
+      "w": 1440,
+      "h": 1948,
+      "title": "Connect Kubernetes to Lena: a key that is a whole file (step 12d)",
+      "page": "devops",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -1107,6 +1206,15 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_devops": {
+      "kind": "title1",
+      "maxW": 14940,
+      "page": "devops",
+      "text": "DevOps Engineer: Lena on the team, production, deploys and incidents",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -1217,7 +1325,18 @@
     "TodayOnItsOwn.dc.html",
     "PhoneTodayOnItsOwn.dc.html",
     "DoneOnItsOwn.dc.html",
-    "PhoneDoneOnItsOwn.dc.html"
+    "PhoneDoneOnItsOwn.dc.html",
+    "DevOpsRole.dc.html",
+    "DevOpsCard.dc.html",
+    "Production.dc.html",
+    "PhoneProduction.dc.html",
+    "TodayIncident.dc.html",
+    "PhoneIncident.dc.html",
+    "Incident.dc.html",
+    "DeployPanel.dc.html",
+    "TodayDeployApproval.dc.html",
+    "SprintStartDeploys.dc.html",
+    "ConnectorFileKey.dc.html"
   ],
   "pages": [
     {
@@ -1279,6 +1398,10 @@
     {
       "id": "auto",
       "name": "Ask or auto"
+    },
+    {
+      "id": "devops",
+      "name": "DevOps Engineer"
     }
   ],
   "title": "Farik web UI mockup"
