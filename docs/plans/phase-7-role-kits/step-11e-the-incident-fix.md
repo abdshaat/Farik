@@ -5,6 +5,7 @@ Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 3, 5.2, 5.5, 5.16, 6.9, 8.5; F9
 Depends on: step 11d (`incident_step`, `IncidentFacts`, incident sessions, `INCIDENT_TOOLS`, `production_gate` in an incident); step 11b (`farik_deploy`, `deployment.started`, `DeployWork`); step 11c (settling); phase 6 step 15 (`SprintHold`, `waits_for_a_sprint`, `in_the_open_sprint`, `PlannedBy::Governor`); phase 6 (merged in #19)
 Readiness confirmed by: not yet run
+Amended 2026-10-07 by step 08g (the founder's "Skip the queue" for a raised marketing budget, ADR 0042): 08g builds ADR 0028's exception first, as `skips_sprints` on `SprintHold`, `AssignmentInput` and `TaskProjection` (column `task_projections.skips_sprints`); this step fills it from `task.created`'s `incident` too, in place of the `incident_fix` fields its Decisions name (its `incident` column stays), and still joins the open sprint with `PlannedBy::Governor`.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 11 (see step 11's header); ADR 0043, 7, is this step's, and it closes the exception ADR 0028 left for it.
 
