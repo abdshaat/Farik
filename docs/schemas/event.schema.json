@@ -127,7 +127,8 @@
         "social_post.sent",
         "social_post.stopped",
         "social_post.missed",
-        "social_post.failed"
+        "social_post.failed",
+        "marketing_campaign.created"
       ]
     },
     "eventBodyWire": {
@@ -198,7 +199,8 @@
         { "$ref": "#/$defs/socialPostSentBody" },
         { "$ref": "#/$defs/socialPostStoppedBody" },
         { "$ref": "#/$defs/socialPostMissedBody" },
-        { "$ref": "#/$defs/socialPostFailedBody" }
+        { "$ref": "#/$defs/socialPostFailedBody" },
+        { "$ref": "#/$defs/marketingCampaignCreatedBody" }
       ]
     },
     "contractSummary": {
@@ -1194,6 +1196,22 @@
         "reason": { "type": "string", "minLength": 1 }
       }
     },
+    "marketingCampaignCreatedBody": {
+      "title": "Marketing Campaign Created Body",
+      "description": "Farik made a Google Ads campaign for a plan campaign of the active marketing plan, paused, on a session's call of create_search_campaign (docs/SPEC.md 6.7; ADR 0042): plan is the active plan, key the plan campaign's, account the ad account as NNN-NNN-NNNN, campaign and budget the resource names Google gave, budget_kind whether the budget is a total one for the campaign's run or a daily one, and amount its figure in the plan's currency. The envelope names the agent, the session and the task that asked, and the event is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "key", "account", "campaign", "budget", "budget_kind", "amount"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "key": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 },
+        "account": { "type": "string", "pattern": "^[0-9]{3}-[0-9]{3}-[0-9]{4}$" },
+        "campaign": { "type": "string", "pattern": "^customers/[0-9]{10}/campaigns/[0-9]{1,20}$" },
+        "budget": { "type": "string", "pattern": "^customers/[0-9]{10}/campaignBudgets/[0-9]{1,20}$" },
+        "budget_kind": { "type": "string", "enum": ["total", "daily"] },
+        "amount": { "$ref": "#/$defs/marketingPlanAmount" }
+      }
+    },
     "connectorTag": {
       "type": "string",
       "enum": ["network", "external_effect", "denied"],
@@ -1239,7 +1257,7 @@
     },
     "toolCalledBody": {
       "title": "Tool Called Body",
-      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one. A connector's call also names its server and the tool's tag, and a call the human allowed names approval, the sequence number of its tool_approval.requested, which this call uses up.",
+      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one. A connector's call also names its server and the tool's tag, and a call the human allowed names approval, the sequence number of its tool_approval.requested, which this call uses up. A call the active marketing plan approved, a Farik connector's tool the kit marks as the plan's (ADR 0042), names marketing_plan, the plan's id, and neither approval nor allowance.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tool", "input"],
@@ -1250,7 +1268,8 @@
         "server": { "type": "string", "minLength": 1 },
         "tag": { "$ref": "#/$defs/connectorTag" },
         "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
-        "allowance": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "A connector call that ran inside its allowance (ADR 0037) names the number it ran inside, the calls each period its agent makes of the tool without asking. A call a grant allowed names approval instead." }
+        "allowance": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "A connector call that ran inside its allowance (ADR 0037) names the number it ran inside, the calls each period its agent makes of the tool without asking. A call a grant allowed names approval instead." },
+        "marketing_plan": { "$ref": "#/$defs/marketingPlanId", "description": "The active marketing plan that approved this call (ADR 0042): present only for a tool the kit marks as the plan's." }
       }
     },
     "toolDeniedBody": {

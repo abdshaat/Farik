@@ -661,6 +661,14 @@ mod tests {
             prompt.contains("names where it came from"),
             "the prompt lost its source rule: {prompt}"
         );
+        // Kit skills load on demand (ADR 0034), so the rule that keeps a customer's details out of
+        // the books, which the Stripe setup copy promises the user, is in the prompt every session reads.
+        assert!(
+            prompt.contains(
+                "write a customer's name, email or card anywhere: a workbook, a note or the channel"
+            ),
+            "the prompt lost its customers' details rule: {prompt}"
+        );
         for phrase in ["every number names its source", "never write to a service"] {
             assert!(
                 skill.contains(phrase),

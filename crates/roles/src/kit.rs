@@ -44,6 +44,9 @@ pub enum KitConnector {
         copy: SetupCopy,
         /// The calls per sprint a user may pre-approve, by tool (step 05b).
         allowances: BTreeMap<String, KitAllowance>,
+        /// The tools the owner's approved marketing plan approves (ADR 0042): `external_effect`
+        /// tools of Farik's own connector only. Not part of the entry or its hash.
+        plan_approved: BTreeSet<String>,
     },
     /// A server Farik runs in Docker itself.
     Container(ConnectorDefinition),
@@ -160,7 +163,7 @@ type EmbeddedSkills = Vec<(&'static str, &'static [(&'static str, &'static str)]
 pub const FARIK_COMMAND: &str = "farik";
 
 /// The names of Farik's own connectors, each started as `farik connector <name>`.
-pub const FARIK_CONNECTORS: &[&str] = &["osv"];
+pub const FARIK_CONNECTORS: &[&str] = &["osv", "google-ads"];
 
 /// Whether `command` and `args` are, exactly, `farik connector <name>` for one of Farik's own
 /// connectors. Nothing else, a user's own `farik` command included, is Farik's.
@@ -229,6 +232,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "researching-the-market",
             "writing-the-marketing-plan",
             "running-social-channels",
+            "running-search-ads",
         ),
         Role::FinanceSpecialist => embedded!("finance_specialist":
             "categorising-expenses",
@@ -276,6 +280,7 @@ fn shape(transport: &str) -> Shape {
                 "oauth",
                 "tools",
                 "allowances",
+                "plan_approved",
                 "title",
                 "about",
                 "why",
@@ -295,6 +300,7 @@ fn shape(transport: &str) -> Shape {
                 "oauth",
                 "tools",
                 "allowances",
+                "plan_approved",
                 "title",
                 "about",
                 "why",
@@ -574,7 +580,7 @@ fn load_server(
     let mut entry = serde_json::Map::new();
     entry.insert("source".to_string(), Value::from("custom"));
     for (field, item) in &object {
-        if !COPY.contains(&field.as_str()) && field != "allowances" {
+        if !COPY.contains(&field.as_str()) && field != "allowances" && field != "plan_approved" {
             entry.insert(field.clone(), item.clone());
         }
     }
@@ -636,6 +642,7 @@ fn load_server(
             },
         );
     }
+    let plan_approved = check_plan_marks(connector, transport, &tools, &allowances, &at, refused);
     for (tool, label) in &labels {
         refused.check_words(&at(&format!("labels/{tool}")), label);
     }
@@ -660,7 +667,52 @@ fn load_server(
         entry: wire,
         copy,
         allowances,
+        plan_approved,
     })
+}
+
+/// A connector's `plan_approved`: the tools the owner's marketing plan approves, each held to the
+/// rules of ADR 0042, answered whole. Only Farik's own connector may mark one, asked of the pair
+/// itself and not of `check_pinned`, which a fixture kit skips.
+fn check_plan_marks(
+    connector: &Value,
+    transport: &str,
+    tools: &BTreeMap<String, ConnectorTag>,
+    allowances: &BTreeMap<String, KitAllowance>,
+    at: &dyn Fn(&str) -> String,
+    refused: &mut Refusals,
+) -> BTreeSet<String> {
+    let plan_approved: BTreeSet<String> =
+        strings(&connector["plan_approved"]).into_iter().collect();
+    let command = connector["command"].as_str().unwrap_or_default();
+    let own = transport == "stdio" && is_farik_connector(command, &strings(&connector["args"]));
+    if !plan_approved.is_empty() && !own {
+        refused.add(
+            at("plan_approved"),
+            "plan_mark_not_farik",
+            "only Farik's own connector, `farik connector <name>`, may mark a tool as approved by \
+             the marketing plan, since only Farik's own server can be trusted to check the plan",
+        );
+    }
+    for tool in &plan_approved {
+        if tools.get(tool) != Some(&ConnectorTag::ExternalEffect) {
+            refused.add(
+                at(&format!("plan_approved/{tool}")),
+                "plan_mark_not_external",
+                &format!(
+                    "only a tool tagged external_effect is approved by the plan, and {tool} is not"
+                ),
+            );
+        }
+        if allowances.contains_key(tool) {
+            refused.add(
+                at(&format!("plan_approved/{tool}")),
+                "plan_mark_with_allowance",
+                &format!("{tool} is approved by the plan, so it has no allowance"),
+            );
+        }
+    }
+    plan_approved
 }
 
 /// The code a team-file refusal opens with, before its colon.
@@ -999,7 +1051,8 @@ mod tests {
                 match role {
                     Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
                     Role::FinanceSpecialist => 3,
-                    Role::ProductManager | Role::Architect | Role::MarketingSpecialist => 4,
+                    Role::ProductManager | Role::Architect => 4,
+                    Role::MarketingSpecialist => 5,
                     _ => 0,
                 },
                 "{role}"
@@ -1091,6 +1144,8 @@ mod tests {
                 "Never make a difference disappear by changing a figure",
                 "`Monthly summary` after every other row",
                 "`Status` cell reads `closed` only when every",
+                "difference named above is explained",
+                "never a customer's name, email or card",
             ],
         );
         said(
@@ -1196,9 +1251,10 @@ mod tests {
 
     /// The kit's skills are the nine of steps 08 and 08b, then the four of step 08c: the brand kit,
     /// the brand persona, the market and the marketing plan, each written for any business; then
-    /// the one of step 08d, running the social channels, which names the tool that posts.
+    /// the one of step 08d, running the social channels, which names the tool that posts; then
+    /// the one of step 08f, running search ads, which names Google Ads' own tools.
     #[test]
-    fn marketing_kit_carries_running_social_channels() {
+    fn marketing_kit_carries_running_search_ads() {
         let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
         let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
         assert_eq!(
@@ -1218,6 +1274,7 @@ mod tests {
                 "researching-the-market",
                 "writing-the-marketing-plan",
                 "running-social-channels",
+                "running-search-ads",
             ]
         );
         for skill in &kit.skills {
@@ -1227,7 +1284,7 @@ mod tests {
                 skill.name
             );
         }
-        // The five new skills: when each applies, numbered sections, under 6 KB, and the skill it
+        // The six new skills: when each applies, numbered sections, under 6 KB, and the skill it
         // sits beside named where the design says it does.
         for (name, description, beside) in [
             (
@@ -1254,6 +1311,11 @@ mod tests {
                 "running-social-channels",
                 "Use when the task asks for posts on the business's social channels",
                 "`farik_schedule_post`",
+            ),
+            (
+                "running-search-ads",
+                "Use when the active marketing plan has Google Ads campaigns",
+                "`create_search_campaign`",
             ),
         ] {
             let skill = kit
@@ -1424,10 +1486,26 @@ mod tests {
             .collect()
     }
 
+    /// The address and scopes a kit entry signs in with, after holding it to route 1 (ADR 0035):
+    /// the service registers Farik itself, so the entry carries no client id and no callback port,
+    /// which would swap it for an app registered in advance (mutations M13 and R2). A kit that
+    /// legitimately carries a client id must not use this helper; none does today.
     fn signed_in(server: &CustomServer) -> (&str, Option<&[String]>) {
         let CustomTransport::Http { url, oauth, .. } = &server.transport else {
             panic!("{} is http", server.name);
         };
+        if let Some(settings) = oauth {
+            assert!(
+                settings.client_id.is_none(),
+                "{} signs in by route 1, so it names no client id",
+                server.name
+            );
+            assert!(
+                settings.callback_port.is_none(),
+                "{} signs in by route 1, so it names no callback port",
+                server.name
+            );
+        }
         (
             url,
             oauth.as_ref().map(|settings| settings.scopes.as_slice()),
@@ -1591,6 +1669,7 @@ mod tests {
             entry,
             copy,
             allowances,
+            ..
         } = &kit.connectors[0]
         else {
             panic!("context7 is a server");
@@ -1945,6 +2024,7 @@ mod tests {
                 entry,
                 copy,
                 allowances,
+                ..
             } = connector
             {
                 let server = custom_server(&entry).expect("a custom server");
@@ -2496,8 +2576,17 @@ mod tests {
     fn the_marketing_kits_services_in_order() {
         let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
         let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
-        assert_eq!(names, ["higgsfield", "recraft", "buffer", "kit"]);
-        for connector in &kit.connectors {
+        assert_eq!(
+            names,
+            ["higgsfield", "recraft", "buffer", "kit", "google-ads"]
+        );
+        // The four services of the web are signed in to by route 1; Google Ads is Farik's own
+        // connector, held by `google_ads_runs_only_inside_the_plan`.
+        for connector in kit
+            .connectors
+            .iter()
+            .filter(|connector| connector.name() != "google-ads")
+        {
             let KitConnector::Server { entry, .. } = connector else {
                 panic!("{} is a server", connector.name());
             };
@@ -2508,6 +2597,126 @@ mod tests {
             assert!(oauth.is_some(), "{} signs in", server.name);
             assert!(server.credential_keys.is_empty(), "{}", server.name);
         }
+    }
+
+    /// Google Ads' three reads, which run on their own.
+    const GOOGLE_ADS_READS: [&str; 3] = ["keyword_ideas", "list_accounts", "report"];
+
+    /// Google Ads' seven writes: each runs only inside the marketing plan the owner approved.
+    const GOOGLE_ADS_WRITES: [&str; 7] = [
+        "add_ad_group",
+        "add_keywords",
+        "add_negative_keywords",
+        "add_responsive_search_ad",
+        "create_search_campaign",
+        "set_campaign_budget",
+        "set_campaign_status",
+    ];
+
+    /// The tools `name` of `role`'s kit marks as approved by the marketing plan.
+    fn plan_marked(role: Role, name: &str) -> Vec<String> {
+        let kit = load_kit(role).expect("a shipped kit");
+        for connector in kit.connectors {
+            if let KitConnector::Server {
+                entry,
+                plan_approved,
+                ..
+            } = connector
+                && entry.name.as_str() == name
+            {
+                return plan_approved.into_iter().collect();
+            }
+        }
+        panic!("the {role} kit has no {name}");
+    }
+
+    /// Google Ads is Farik's own connector (ADR 0042, step 08f): signed in to with Google's one
+    /// Ads scope, three reads, and seven writes that run only inside the plan the owner approved,
+    /// so each is `external_effect`, plan-marked and without an allowance. Nothing else in any kit
+    /// carries the mark.
+    #[test]
+    fn google_ads_runs_only_inside_the_plan() {
+        let (server, copy, allowances) = marketing_service("google-ads");
+        let CustomTransport::Stdio {
+            command,
+            args,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("google-ads is stdio");
+        };
+        assert_eq!(command, "farik");
+        assert_eq!(args, &["connector".to_string(), "google-ads".to_string()]);
+        let oauth = oauth.as_ref().expect("it signs in");
+        assert_eq!(
+            oauth.scopes,
+            ["https://www.googleapis.com/auth/adwords".to_string()]
+        );
+        assert!(oauth.client_id.is_none() && oauth.callback_port.is_none());
+        assert!(server.credential_keys.is_empty());
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Network),
+            sorted(&GOOGLE_ADS_READS)
+        );
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::ExternalEffect),
+            sorted(&GOOGLE_ADS_WRITES)
+        );
+        assert_eq!(tagged(&server, ConnectorTag::Denied), 0);
+        assert_eq!(server.tools.len(), 10);
+        assert!(allowances.is_empty(), "a plan covers a write, no allowance");
+        assert_eq!(
+            plan_marked(Role::MarketingSpecialist, "google-ads"),
+            sorted(&GOOGLE_ADS_WRITES)
+        );
+        // Only this entry, of every kit, carries the mark.
+        for role in SHIPPED {
+            for connector in load_kit(role).expect("a shipped kit").connectors {
+                if let KitConnector::Server { plan_approved, .. } = &connector
+                    && connector.name() != "google-ads"
+                {
+                    assert!(plan_approved.is_empty(), "{role}/{}", connector.name());
+                }
+            }
+        }
+        assert_eq!(copy.title, "Google Ads");
+        assert_eq!(
+            copy.about,
+            "Google Ads shows your ads to people searching on Google and charges you for the clicks."
+        );
+        assert_eq!(
+            copy.why,
+            "So the Marketing Specialist can find the words your customers search for and run the \
+             search ads in a marketing plan you approved, within its budget."
+        );
+        assert_eq!(
+            copy.setup,
+            "Sign in with the Google account that manages your ads and allow Farik to manage them. \
+             Farik makes and changes search ads only inside a marketing plan you approved, never \
+             deletes anything, and never touches billing or who can use your account. The ads cost \
+             money at Google, up to the budget in your plan."
+        );
+        assert!(copy.key_page.is_none());
+        let labels: Vec<(&str, &str)> = copy
+            .labels
+            .iter()
+            .map(|(tool, label)| (tool.as_str(), label.as_str()))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                ("add_ad_group", "add an ad group"),
+                ("add_keywords", "add search words"),
+                ("add_negative_keywords", "rule out search words"),
+                ("add_responsive_search_ad", "write an ad"),
+                ("create_search_campaign", "start a search campaign"),
+                ("keyword_ideas", "find search words"),
+                ("list_accounts", "list ad accounts"),
+                ("report", "read ad results"),
+                ("set_campaign_budget", "change a campaign's budget"),
+                ("set_campaign_status", "pause or run a campaign"),
+            ]
+        );
     }
 
     /// Step 10: Stripe's official server, signed in to by route 1 asking for its one scope, and
@@ -2560,7 +2769,7 @@ mod tests {
         );
         assert_eq!(
             copy.setup,
-            "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see the name and email on each payment; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under \u{2018}OAuth sessions\u{2019} in your Stripe user settings."
+            "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see your customers' names, emails, addresses and the last four digits of their cards; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under \u{2018}OAuth sessions\u{2019} in your Stripe user settings."
         );
     }
 
@@ -2741,6 +2950,53 @@ mod tests {
         }
     }
 
+    /// A guard over the six finance skills: a skill that names a tool its kit `denied` tells the
+    /// agent to call what the harness will always refuse (mutation M18: `using-finance-sources`
+    /// naming `stripe_api_write` in place of `stripe_api_read` passed every test). The tools a
+    /// skill does name must be found, or the check would pass by never matching.
+    #[test]
+    fn no_finance_skill_names_a_denied_tool() {
+        let kit = load_kit(Role::FinanceSpecialist).expect("the Finance Specialist's kit");
+        assert!(!kit.skills.is_empty());
+        let texts: Vec<(&str, &str)> = kit
+            .skills
+            .iter()
+            .flat_map(|skill| {
+                skill
+                    .session_files
+                    .values()
+                    .map(|text| (skill.name.as_str(), text.as_str()))
+            })
+            .collect();
+        let (mut denied, mut named) = (0, 0);
+        for connector in &kit.connectors {
+            let KitConnector::Server { entry, .. } = connector else {
+                panic!("{} is a server", connector.name());
+            };
+            let server = custom_server(entry).expect("a custom server");
+            for (tool, tag) in &server.tools {
+                let quoted = format!("`{tool}`");
+                if *tag == ConnectorTag::Denied {
+                    denied += 1;
+                    for (skill, text) in &texts {
+                        assert!(
+                            !text.contains(&quoted),
+                            "{skill} names {quoted}, which {} denies",
+                            server.name
+                        );
+                    }
+                } else {
+                    named += texts
+                        .iter()
+                        .filter(|(_, text)| text.contains(&quoted))
+                        .count();
+                }
+            }
+        }
+        assert!(denied > 0, "the kit denies a tool");
+        assert!(named > 0, "the skills name the tools they use in backticks");
+    }
+
     /// A guard: it passes with no marketing connector at all.
     #[test]
     fn every_spending_tool_of_the_marketing_kit_has_a_label() {
@@ -2816,6 +3072,7 @@ mod tests {
             entry,
             copy,
             allowances,
+            ..
         } = &kit.connectors[0]
         else {
             panic!("a server");
@@ -3071,6 +3328,20 @@ mod tests {
     }
 
     #[test]
+    fn google_ads_is_one_of_farik_s_own_connectors() {
+        use super::{FARIK_CONNECTORS, is_farik_connector};
+
+        assert_eq!(FARIK_CONNECTORS, ["osv", "google-ads"]);
+        let pair = |name: &str| ["connector".to_string(), name.to_string()];
+        assert!(is_farik_connector("farik", &pair("google-ads")));
+        for other in ["google-ad", "Google-Ads", "google_ads", "google-ads2"] {
+            assert!(!is_farik_connector("farik", &pair(other)), "{other}");
+        }
+        parse(&stdio("farik", &["connector", "google-ads"]))
+            .expect("the kit may start Farik's Google Ads connector");
+    }
+
+    #[test]
     fn accepts_farik_by_its_bare_name() {
         parse(&stdio("farik", &["connector", "osv"])).expect("Farik's own OSV server loads");
     }
@@ -3102,6 +3373,85 @@ mod tests {
             &signing_in("farik", &["connector", "other"]),
             "/connectors/0/args",
             "package_not_pinned",
+        );
+    }
+
+    /// The base's `create_page` is `external_effect` and `search` is `network`: a stdio connector
+    /// that marks the named tools as approved by the marketing plan.
+    fn marking(command: &str, args: &[&str], marked: &[&str]) -> Value {
+        let mut value = stdio(command, args);
+        value["connectors"][0]["plan_approved"] = json!(marked);
+        value
+    }
+
+    #[test]
+    fn the_mark_is_farik_s_own_and_external_only() {
+        // Farik's own connector, one `external_effect` tool marked: it loads, by either parser, the
+        // mark is the kit's alone, and the team entry is the one an unmarked kit has.
+        let own = marking("farik", &["connector", "osv"], &["create_page"]);
+        let unmarked = stdio("farik", &["connector", "osv"]);
+        for kit in [
+            parse(&own).expect("a mark on Farik's own connector loads"),
+            super::parse_fixture_kit(Role::ProductManager, &own.to_string(), &[], &[])
+                .expect("and in a fixture kit"),
+        ] {
+            let KitConnector::Server {
+                entry,
+                plan_approved,
+                ..
+            } = &kit.connectors[0]
+            else {
+                panic!("a server");
+            };
+            assert_eq!(plan_approved.iter().collect::<Vec<_>>(), ["create_page"]);
+            assert!(
+                !serde_json::to_string(entry)
+                    .expect("an entry")
+                    .contains("plan_approved"),
+                "the mark is not in the team entry, so not in its hash"
+            );
+        }
+        let KitConnector::Server {
+            plan_approved: none,
+            ..
+        } = &parse(&unmarked).expect("unmarked loads").connectors[0]
+        else {
+            panic!("a server");
+        };
+        assert!(none.is_empty());
+
+        // Not Farik's own: an http connector, and a package, are refused whatever they mark.
+        let mut http = base();
+        http["connectors"][0]["plan_approved"] = json!(["create_page"]);
+        http["connectors"][0]
+            .as_object_mut()
+            .expect("an object")
+            .remove("allowances");
+        refused(&http, "/connectors/0/plan_approved", "plan_mark_not_farik");
+        refused(
+            &marking("npx", &["x@1.0.0"], &["create_page"]),
+            "/connectors/0/plan_approved",
+            "plan_mark_not_farik",
+        );
+
+        // Only an `external_effect` tool: a `network` one, a `denied` one and one the connector
+        // does not list are each refused, at the tool.
+        for tool in ["search", "delete_page", "nothing"] {
+            refused(
+                &marking("farik", &["connector", "osv"], &[tool]),
+                &format!("/connectors/0/plan_approved/{tool}"),
+                "plan_mark_not_external",
+            );
+        }
+
+        // Never a tool with an allowance: the plan approves it, so nothing counts calls.
+        let mut counted = marking("farik", &["connector", "osv"], &["create_page"]);
+        counted["connectors"][0]["allowances"] =
+            json!({ "create_page": { "calls": 5, "what": "pages" } });
+        refused(
+            &counted,
+            "/connectors/0/plan_approved/create_page",
+            "plan_mark_with_allowance",
         );
     }
 

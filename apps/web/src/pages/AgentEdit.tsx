@@ -853,6 +853,14 @@ function KitRow({
 		<li className={styles.kitRow}>
 			<strong>{service.title}</strong>
 			<p className={styles.muted}>{service.why}</p>
+			{service.atLaunch && !held && (
+				<>
+					<p className={styles.muted}>{service.about}</p>
+					<p>
+						<strong>{t("kitAtLaunch", { service: service.title })}</strong>
+					</p>
+				</>
+			)}
 			{connected && (
 				<>
 					<p>
@@ -896,7 +904,7 @@ function KitRow({
 				</p>
 			)}
 			<span className={styles.actions}>
-				{!held && (
+				{!held && !service.atLaunch && (
 					<Button onClick={onConnect}>
 						{t("kitConnect")}{" "}
 						<span className={styles.hidden}>{service.title}</span>

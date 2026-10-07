@@ -122,13 +122,14 @@ pub(super) async fn run_session(
         ..deps.tools.ids.clone()
     };
     // The custom connectors `session_spec` confirmed and put in the spec, with their labels.
+    let kit = (deps.tools.kits)(role).ok();
     let mut connectors: Vec<SessionConnector> = custom_servers(ask.agent)
         .filter(|server| {
             spec.mcp_servers
                 .iter()
                 .any(|given| given.name == server.name)
         })
-        .map(session_connector)
+        .map(|server| session_connector(server, kit.as_ref()))
         .collect();
     let browser = match give_browser(deps, team, &ask, &mut spec, &ids).await? {
         Ok(Some((browser, connector))) => {
@@ -213,12 +214,19 @@ pub(super) async fn run_session(
 
 /// A custom or kit connector as its session's registration holds it: its tags, and the allowances
 /// the entry gives its calls (ADR 0037).
-fn session_connector(server: CustomServer) -> SessionConnector {
+///
+/// `kit` is the agent's role's kit: the tools it marks as approved by the owner's marketing plan
+/// (ADR 0042) go to the entry that is exactly the kit's, and to no other.
+fn session_connector(server: CustomServer, kit: Option<&farik_roles::Kit>) -> SessionConnector {
+    let plan_tools = kit
+        .map(|kit| crate::daemon::plan_tools_of(kit, &server))
+        .unwrap_or_default();
     SessionConnector {
         server: server.name,
         origin: None,
         tools: server.tools,
         allowances: server.allowances,
+        plan_tools,
     }
 }
 
@@ -297,6 +305,7 @@ async fn give_browser(
         origin: Some(running.origin()),
         tools: definition.tools.clone(),
         allowances: std::collections::BTreeMap::new(),
+        plan_tools: std::collections::BTreeSet::new(),
     };
     Ok(Ok(Some((running, connector))))
 }
@@ -3007,11 +3016,74 @@ mod tests {
             kit: true,
             allowances: [("make".to_string(), 20)].into(),
         };
-        let registered = super::session_connector(server);
+        let registered = super::session_connector(server, None);
         assert_eq!(registered.server, "higgsfield");
         assert_eq!(
             registered.allowances,
             std::collections::BTreeMap::from([("make".to_string(), 20)])
+        );
+    }
+
+    /// A fixture kit whose Farik connector `osv` marks `look` as approved by the marketing plan.
+    fn a_kit_that_marks_a_tool() -> farik_roles::Kit {
+        let kit = json!({
+            "role": "marketing_specialist", "skills": [],
+            "connectors": [{
+                "name": "osv", "transport": "stdio", "command": "farik",
+                "args": ["connector", "osv"],
+                "title": "Lookups", "about": "Looks things up.", "why": "To look.",
+                "setup": "Nothing to do.",
+                "tools": { "look": "external_effect", "read": "network" },
+                "plan_approved": ["look"]
+            }]
+        });
+        farik_roles::parse_fixture_kit(
+            farik_core::contract::Role::MarketingSpecialist,
+            &kit.to_string(),
+            &[],
+            &[],
+        )
+        .expect("the fixture kit loads")
+    }
+
+    #[test]
+    fn a_custom_entry_gets_no_plan_mark() {
+        use farik_core::team::{McpServerSource, custom_server};
+
+        let kit = a_kit_that_marks_a_tool();
+        let farik_roles::KitConnector::Server { entry, .. } = &kit.connectors[0] else {
+            panic!("a server");
+        };
+        let entry_as = |source: McpServerSource| {
+            let mut wire = entry.clone();
+            wire.source = source;
+            custom_server(&wire).expect("a custom server")
+        };
+        // The kit's own entry carries the kit's mark.
+        let kits_own = super::session_connector(entry_as(McpServerSource::Kit), Some(&kit));
+        assert_eq!(
+            kits_own.plan_tools.iter().collect::<Vec<_>>(),
+            ["look"],
+            "the kit's entry that matches the kit"
+        );
+        // A custom entry naming the same command and arguments, whatever its tags, gets none.
+        let custom = super::session_connector(entry_as(McpServerSource::Custom), Some(&kit));
+        assert!(custom.plan_tools.is_empty(), "{custom:?}");
+        // So does a kit entry that is not what the kit says, a widened tag, and one with no kit.
+        let mut widened = entry_as(McpServerSource::Kit);
+        widened.tools.insert(
+            "read".to_string(),
+            farik_core::governor::permissions::ConnectorTag::ExternalEffect,
+        );
+        assert!(
+            super::session_connector(widened, Some(&kit))
+                .plan_tools
+                .is_empty()
+        );
+        assert!(
+            super::session_connector(entry_as(McpServerSource::Kit), None)
+                .plan_tools
+                .is_empty()
         );
     }
 

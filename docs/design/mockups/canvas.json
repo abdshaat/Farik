@@ -610,6 +610,60 @@
       "title": "Phone: posts going out (step 08d)",
       "page": "marketing",
       "is_interactive": true
+    },
+    "SetupTeamMoreRoles.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 4329,
+      "title": "Setup: More roles offers the Finance and the Procurement Specialist (step 10b)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneSetupTeamMoreRoles.dc.html": {
+      "x": 1640,
+      "y": 0,
+      "w": 390,
+      "h": 4128,
+      "title": "Phone: setup’s More roles (step 10b)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "TodaySiteRequest.dc.html": {
+      "x": 2230,
+      "y": 0,
+      "w": 1280,
+      "h": 3337,
+      "title": "Today: Ivo asks to read two sites, Allow and Don’t allow (step 10b2)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneSiteRequest.dc.html": {
+      "x": 3710,
+      "y": 0,
+      "w": 390,
+      "h": 3193,
+      "title": "Phone: Ivo asks to read a site (step 10b2)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "AgentSites.dc.html": {
+      "x": 4300,
+      "y": 0,
+      "w": 1440,
+      "h": 3841,
+      "title": "Ivo’s sites: Farik’s approved sites, the sites you allowed, Remove and Add a site (step 10b2)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneAgentSites.dc.html": {
+      "x": 5940,
+      "y": 0,
+      "w": 390,
+      "h": 3029,
+      "title": "Phone: Ivo’s sites (step 10b2)",
+      "page": "procurement",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -729,6 +783,15 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_procurement": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "procurement",
+      "text": "Procurement Specialist: more roles in setup, and the sites it may read",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -799,7 +862,13 @@
     "MarketingPlan.dc.html",
     "PhoneMarketingPlan.dc.html",
     "TodayGoingOut.dc.html",
-    "PhoneGoingOut.dc.html"
+    "PhoneGoingOut.dc.html",
+    "SetupTeamMoreRoles.dc.html",
+    "PhoneSetupTeamMoreRoles.dc.html",
+    "TodaySiteRequest.dc.html",
+    "PhoneSiteRequest.dc.html",
+    "AgentSites.dc.html",
+    "PhoneAgentSites.dc.html"
   ],
   "pages": [
     {
@@ -853,6 +922,10 @@
     {
       "id": "marketing",
       "name": "Marketing plan and posts"
+    },
+    {
+      "id": "procurement",
+      "name": "Procurement Specialist"
     }
   ],
   "title": "Farik web UI mockup"

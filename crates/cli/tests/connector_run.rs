@@ -24,6 +24,7 @@ use farik_runtime::connectors::{
     ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
 };
 use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, SessionRegistration, serve};
+use farik_runtime::sign_in::OAuthGrant;
 use farik_runtime::transitions::Transitions;
 use farik_runtime::{SessionPurpose, ToolDeps};
 use farik_store::files::ProjectFiles;
@@ -72,10 +73,33 @@ fn a_team(change: impl FnOnce(&mut Value)) -> Team {
             "name": "osv", "source": "custom", "transport": "stdio",
             "command": "farik", "args": ["connector", "osv"], "credential_keys": [],
             "tools": { "query_package": "network" }
+        },
+        {
+            "name": "google-ads", "source": "custom", "transport": "stdio",
+            "command": "farik", "args": ["connector", "google-ads"], "oauth": {},
+            "tools": { "report": "network" }
         }
     ]);
     change(&mut wire);
     validate_team(&wire).expect("a team")
+}
+
+/// A sign-in the service has not ended, good for an hour, so that nothing is refreshed.
+fn a_grant() -> OAuthGrant {
+    OAuthGrant {
+        issuer: "https://accounts.example".to_string(),
+        resource: "https://ads.example/".to_string(),
+        client_id: "a-client".to_string(),
+        token_endpoint: "http://127.0.0.1:1/token".to_string(),
+        revocation_endpoint: None,
+        access_token: Secret::new("an-access-token-the-shim-never-sees".to_string()),
+        refresh_token: Some(Secret::new("a-refresh-token".to_string())),
+        issued_at: Utc::now(),
+        expires_at: Some(Utc::now() + chrono::Duration::hours(1)),
+        scopes: Vec::new(),
+        lapsed: false,
+        app: None,
+    }
 }
 
 fn servers(team: &Team) -> Vec<CustomServer> {
@@ -137,10 +161,19 @@ impl Served {
         for server in servers(&team) {
             let at = SecretAt::of(&Served::state_of(&repo), &repo.path, "dev-a", &server.name)
                 .expect("an address");
-            let entry = ConnectorEntry {
-                spec_sha256: spec_sha256(&server),
-                keys: [("API_KEY".to_string(), Secret::new(KEY_VALUE.to_string()))].into(),
-                oauth: None,
+            // A server that signs in is kept with a grant, which never leaves the daemon.
+            let entry = if server.oauth().is_some() {
+                ConnectorEntry {
+                    spec_sha256: spec_sha256(&server),
+                    keys: std::collections::BTreeMap::new(),
+                    oauth: Some(a_grant()),
+                }
+            } else {
+                ConnectorEntry {
+                    spec_sha256: spec_sha256(&server),
+                    keys: [("API_KEY".to_string(), Secret::new(KEY_VALUE.to_string()))].into(),
+                    oauth: None,
+                }
             };
             store.save(&at, &entry).expect("kept");
         }
@@ -162,6 +195,7 @@ impl Served {
                     origin: None,
                     tools: server.tools,
                     allowances: std::collections::BTreeMap::new(),
+                    plan_tools: std::collections::BTreeSet::new(),
                 })
                 .collect(),
             preview: None,
@@ -457,5 +491,82 @@ fn the_launcher_starts_its_own_executable_for_farik() {
     assert_eq!(
         reply["result"]["serverInfo"]["name"], "farik-osv",
         "{reply}"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn the_launched_shim_reaches_the_daemon_with_its_ticket() {
+    use std::io::{BufRead as _, Write as _};
+
+    // `farik connector run` starts Google Ads' shim with the ticket and the daemon's address, so
+    // a call reaches the daemon's route, which knows the session by the ticket: here it answers
+    // that the entry is not the kit's, which only a call it accepted gets (a ticket it did not
+    // accept is a 401, and a shim with no ticket says it runs only inside a Farik session).
+    let served = Served::new("connector-run-ads-shim");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_farik"))
+        .args(["connector", "run", "--daemon"])
+        .arg(&served.daemon_file)
+        .args(["--session", SESSION, "--server", "google-ads"])
+        .current_dir(&served.repo.path)
+        .env_clear()
+        .env("PATH", "")
+        .env("HOME", "/home/someone")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("farik runs");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout)
+            .lines()
+            .map_while(Result::ok)
+        {
+            let _ = sender.send(line);
+        }
+    });
+    let mut send = |message: Value| writeln!(stdin, "{message}").expect("a line is sent");
+    let answer_to = |id: u64| -> Value {
+        loop {
+            let line = receiver
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .unwrap_or_else(|_| panic!("no answer to {id}"));
+            let reply: Value = serde_json::from_str(&line).expect("JSON");
+            if reply["id"] == json!(id) {
+                return reply;
+            }
+        }
+    };
+    send(
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18", "capabilities": {},
+        "clientInfo": { "name": "launcher-test", "version": "1" } } }),
+    );
+    assert_eq!(
+        answer_to(1)["result"]["serverInfo"]["name"],
+        "farik-google-ads"
+    );
+    send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+    send(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+    let listed = answer_to(2);
+    assert_eq!(listed["result"]["tools"].as_array().map(Vec::len), Some(10));
+    send(
+        json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+        "name": "list_accounts", "arguments": {} } }),
+    );
+    let called = answer_to(3);
+    let _ = child.kill();
+    let output = child.wait_with_output().expect("farik ends");
+    assert_eq!(called["result"]["isError"], json!(true), "{called}");
+    let said = called["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        said.starts_with("google_ads_not_kit: "),
+        "{said} {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }

@@ -27,9 +27,10 @@
 //! each service has; the kit itself asks Kick for `mcp:read` alone. Kick lists fewer tools to a
 //! narrower grant, so the run also records what an `mcp:read` grant lists.
 //!
-//! A connector Farik runs itself (`command: farik`, the Architect's OSV) is skipped, with a line
-//! saying so: its pin is the offline test `osv_server_lists_the_kits_tools`, since its tools are
-//! Farik's own and change only with a Farik release. The comparison is also proven by
+//! A connector Farik runs itself (`command: farik`, the Architect's OSV and the Marketing
+//! Specialist's Google Ads) is skipped, with a line saying so: its pin is the offline test
+//! `osv_server_lists_the_kits_tools` or `google_ads_server_lists_the_kits_tools`, since its tools
+//! are Farik's own and change only with a Farik release. The comparison is also proven by
 //! `pin_drift`'s tests and `fixture_mcp.rs`.
 
 use std::collections::BTreeMap;
@@ -78,7 +79,7 @@ async fn live_kit_pins_hold() {
             {
                 eprintln!(
                     "skipped {role}'s {name}: Farik's own server, pinned offline by \
-                     osv_server_lists_the_kits_tools"
+                     osv_server_lists_the_kits_tools or google_ads_server_lists_the_kits_tools"
                 );
                 continue;
             }

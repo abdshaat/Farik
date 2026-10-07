@@ -31,7 +31,7 @@ connectors:
     title: Stripe
     about: "Stripe takes your product's payments: charges, subscriptions, invoices, fees, refunds and payouts."
     why: "So the Finance Specialist can put your revenue, fees and payouts in the books from Stripe's own numbers. It only reads."
-    setup: "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see the name and email on each payment; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under ‘OAuth sessions’ in your Stripe user settings."
+    setup: "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see your customers' names, emails, addresses and the last four digits of their cards; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under ‘OAuth sessions’ in your Stripe user settings."
     labels:
       stripe_api_search: "find what Stripe can answer"
       stripe_api_details: "read how to ask Stripe"

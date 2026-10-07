@@ -58,6 +58,8 @@ export type KitService = {
 	credentialKeys: string[];
 	/** What the kit lets the user pre-approve: each spending tool with its default calls each sprint (ADR 0037). */
 	allowances?: { tool: string; calls: number; what: string }[];
+	/** The service signs in through Farik Cloud, which comes with the web launch: this build cannot connect it yet (ADR 0044). */
+	atLaunch?: true;
 };
 /** The services Farik offers one role. */
 export type RoleKit = { role: Agent["role"]; connectors: KitService[] };

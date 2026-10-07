@@ -739,13 +739,364 @@ pub fn check_slot(check: &SlotCheck<'_>) -> Result<(), SlotRefusal> {
     Ok(())
 }
 
+/// The currencies with no minor unit (ISO 4217's exponent 0): Google takes a budget in them only
+/// in whole units.
+pub const ZERO_DECIMAL: &[&str] = &[
+    "BIF", "CLP", "DJF", "GNF", "ISK", "JPY", "KMF", "KRW", "PYG", "RWF", "UGX", "UYI", "VND",
+    "VUV", "XAF", "XOF", "XPF",
+];
+
+/// Whether a campaign's budget is for its whole run, or a daily one (ADR 0042).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BudgetKind {
+    /// One total for the campaign's run, which Google never bills past.
+    Total,
+    /// A daily amount, which bounds Google's own charging while Farik is not running.
+    Daily,
+}
+
+impl BudgetKind {
+    /// The wire's word for it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Total => "total",
+            Self::Daily => "daily",
+        }
+    }
+}
+
+/// A Google Ads campaign Farik made for a plan campaign, as `marketing_campaign.created` says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedCampaign {
+    /// The plan it was made under, `MP-<n>`.
+    pub plan: String,
+    /// The plan campaign's key.
+    pub key: String,
+    /// Its resource name at Google, `customers/<id>/campaigns/<id>`.
+    pub campaign: String,
+    /// Its budget's resource name at Google.
+    pub budget: String,
+    /// Whether the budget is a total or a daily one.
+    pub kind: BudgetKind,
+}
+
+/// The first day a plan campaign made on `today` can start: its own first day, or tomorrow when
+/// that is not ahead, so that no time zone makes it the past. Every day is a UTC date.
+#[must_use]
+pub fn first_day(campaign: &PlanCampaign, today: NaiveDate) -> NaiveDate {
+    campaign.starts_on.max(today + Duration::days(1))
+}
+
+/// The budget Google keeps for a plan campaign made on `today`, and its amount (`docs/SPEC.md`
+/// 6.7). The campaign's run is from its first day (`first_day`) to its last, both included. A run
+/// of 3 to 90 days takes a total budget for the run, the plan campaign's budget less `spent`, what
+/// earlier versions of it spent: Google never bills past one. Any other run takes a daily budget,
+/// what is left divided by the days of the run and rounded down to the hundredth, which bounds
+/// Google's own charging while Farik is not running. In a currency of `ZERO_DECIMAL` the amount
+/// is whole units, rounded down.
+#[must_use]
+pub fn campaign_budget(
+    campaign: &PlanCampaign,
+    currency: &str,
+    spent: Amount,
+    today: NaiveDate,
+) -> (BudgetKind, Amount) {
+    let run = (campaign.ends_on - first_day(campaign, today)).num_days() + 1;
+    let days = u64::try_from(run).unwrap_or(0).max(1);
+    let left = campaign.budget.0.saturating_sub(spent.0);
+    let (kind, hundredths) = if (3..=90).contains(&days) {
+        (BudgetKind::Total, left)
+    } else {
+        (BudgetKind::Daily, left / days)
+    };
+    let whole = ZERO_DECIMAL.contains(&currency);
+    (
+        kind,
+        Amount(if whole {
+            hundredths / 100 * 100
+        } else {
+            hundredths
+        }),
+    )
+}
+
+/// One change to Google Ads the agent asks for, by what it names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdsWrite {
+    /// A new campaign for the plan campaign `plan_campaign`.
+    Create {
+        /// The ad account, as `NNN-NNN-NNNN`.
+        account: String,
+        /// The plan campaign's key.
+        plan_campaign: String,
+    },
+    /// An ad group, keywords, negative keywords or an ad, under `campaign`.
+    UnderCampaign {
+        /// The ad account.
+        account: String,
+        /// The campaign's resource name.
+        campaign: String,
+    },
+    /// A new budget for `campaign`.
+    Budget {
+        /// The ad account.
+        account: String,
+        /// The campaign's resource name.
+        campaign: String,
+        /// The new amount.
+        amount: Amount,
+    },
+    /// Running `campaign`.
+    Enable {
+        /// The ad account.
+        account: String,
+        /// The campaign's resource name.
+        campaign: String,
+    },
+    /// Pausing `campaign`.
+    Pause {
+        /// The ad account.
+        account: String,
+        /// The campaign's resource name.
+        campaign: String,
+    },
+}
+
+/// What a write is checked against: the active plan, its lineage, what was made under it and what
+/// was spent.
+#[derive(Debug, Clone, Copy)]
+pub struct AdsPlanView<'a> {
+    /// The active plan's id.
+    pub plan_id: &'a str,
+    /// The active plan.
+    pub plan: &'a PlanProposal,
+    /// The active plan and every plan it replaces, `replaces` followed through the whole chain.
+    pub lineage: &'a [String],
+    /// Every campaign Farik made for any plan.
+    pub created: &'a [CreatedCampaign],
+    /// What each plan campaign's key has spent, in all the campaigns of the lineage.
+    pub spent: &'a std::collections::BTreeMap<String, Amount>,
+    /// Today's UTC date.
+    pub today: NaiveDate,
+}
+
+/// The ad account `write` is for.
+fn account_of(write: &AdsWrite) -> &str {
+    match write {
+        AdsWrite::Create { account, .. }
+        | AdsWrite::UnderCampaign { account, .. }
+        | AdsWrite::Budget { account, .. }
+        | AdsWrite::Enable { account, .. }
+        | AdsWrite::Pause { account, .. } => account,
+    }
+}
+
+/// Whether the active plan covers `write` (ADR 0042, `docs/SPEC.md` 6.7), the plan's lineage being
+/// the active plan and every plan it replaces:
+///
+/// - every write: the account is the plan's `google_ads_account`;
+/// - a create: the key is one of the plan's campaigns, no campaign was made for it under any plan
+///   of the lineage, and its last day is not before the first day it can start;
+/// - a write under a campaign, a new budget or enabling it: the campaign was made for a key the
+///   active plan has, under a plan of the lineage, in the plan's account; a total budget's new
+///   amount is from what the campaign spent to the plan campaign's budget, a daily one at most
+///   what is left over the days left; enabling needs today within the plan campaign's dates, its
+///   spend below its budget and the plan's Google Ads spend below the plan's;
+/// - pausing: any campaign made under a plan of the lineage, whether or not the active plan still
+///   has its key.
+///
+/// # Errors
+///
+/// The sentence that says why not.
+pub fn check_ads_write(view: &AdsPlanView<'_>, write: &AdsWrite) -> Result<(), String> {
+    let account = account_of(write);
+    match view.plan.google_ads_account.as_deref() {
+        None => return Err("the active plan names no Google Ads account".to_string()),
+        Some(plan_account) if plan_account != account => {
+            return Err(format!(
+                "the active plan runs in Google Ads account {plan_account}, not {account}"
+            ));
+        }
+        Some(_) => {}
+    }
+    match write {
+        AdsWrite::Create { plan_campaign, .. } => check_create(view, plan_campaign),
+        AdsWrite::UnderCampaign { campaign, .. } => {
+            made_for_plan(view, campaign, account).map(|_| ())
+        }
+        AdsWrite::Budget {
+            campaign, amount, ..
+        } => check_new_budget(view, campaign, account, *amount),
+        AdsWrite::Enable { campaign, .. } => check_enable(view, campaign, account),
+        AdsWrite::Pause { campaign, .. } => {
+            let made = view
+                .created
+                .iter()
+                .find(|made| made.campaign == *campaign && view.lineage.contains(&made.plan))
+                .ok_or_else(|| {
+                    format!(
+                        "that campaign was not made for {} or a plan it replaces, so Farik \
+                         leaves it alone",
+                        view.plan_id
+                    )
+                })?;
+            in_account(&made.campaign, account)
+        }
+    }
+}
+
+/// A create of the plan campaign `key`.
+fn check_create(view: &AdsPlanView<'_>, key: &str) -> Result<(), String> {
+    let campaign = view
+        .plan
+        .campaigns
+        .iter()
+        .find(|campaign| campaign.key == key)
+        .ok_or_else(|| format!("the active plan has no campaign {key}"))?;
+    if let Some(made) = view
+        .created
+        .iter()
+        .find(|made| made.key == key && view.lineage.contains(&made.plan))
+    {
+        return Err(format!(
+            "{key} has a campaign already ({}), made for {}",
+            made.campaign, made.plan
+        ));
+    }
+    let start = first_day(campaign, view.today);
+    if campaign.ends_on < start {
+        return Err(format!(
+            "{key} ends on {}, before the first day it could start, {start}",
+            campaign.ends_on
+        ));
+    }
+    Ok(())
+}
+
+/// The record of `campaign`, made under a plan of the lineage for a key the active plan has, and
+/// the plan campaign of that key.
+fn made_for_plan<'a>(
+    view: &AdsPlanView<'a>,
+    campaign: &str,
+    account: &str,
+) -> Result<(&'a CreatedCampaign, &'a PlanCampaign), String> {
+    let found = view
+        .created
+        .iter()
+        .filter(|made| made.campaign == campaign && view.lineage.contains(&made.plan))
+        .find_map(|made| {
+            view.plan
+                .campaigns
+                .iter()
+                .find(|planned| planned.key == made.key)
+                .map(|planned| (made, planned))
+        })
+        .ok_or_else(|| {
+            format!(
+                "that campaign was not made for the active plan {}, so Farik leaves it alone",
+                view.plan_id
+            )
+        })?;
+    in_account(campaign, account)?;
+    Ok(found)
+}
+
+/// Whether the campaign's resource name is in the ad account `account` (`NNN-NNN-NNNN`).
+fn in_account(campaign: &str, account: &str) -> Result<(), String> {
+    let customer = campaign
+        .strip_prefix("customers/")
+        .and_then(|rest| rest.split('/').next());
+    if customer == Some(account.replace('-', "").as_str()) {
+        Ok(())
+    } else {
+        Err(format!(
+            "that campaign is in another Google Ads account than the plan's, {account}"
+        ))
+    }
+}
+
+/// What a plan campaign's key has spent so far.
+fn spent_by(view: &AdsPlanView<'_>, key: &str) -> Amount {
+    view.spent.get(key).copied().unwrap_or(Amount(0))
+}
+
+/// A new budget for `campaign`.
+fn check_new_budget(
+    view: &AdsPlanView<'_>,
+    campaign: &str,
+    account: &str,
+    amount: Amount,
+) -> Result<(), String> {
+    let (made, planned) = made_for_plan(view, campaign, account)?;
+    let key = &made.key;
+    let spent = spent_by(view, key);
+    match made.kind {
+        BudgetKind::Total => {
+            if amount > planned.budget {
+                return Err(format!(
+                    "a total budget of {amount} is more than {key}'s {} in the plan",
+                    planned.budget
+                ));
+            }
+            if amount < spent {
+                return Err(format!(
+                    "a total budget of {amount} is less than the {spent} {key} has spent"
+                ));
+            }
+            Ok(())
+        }
+        BudgetKind::Daily => {
+            let from = planned.starts_on.max(view.today);
+            let days = u64::try_from((planned.ends_on - from).num_days() + 1).unwrap_or(0);
+            if days == 0 {
+                return Err(format!("{key} ended on {}", planned.ends_on));
+            }
+            let left = Amount(planned.budget.0.saturating_sub(spent.0));
+            let most = Amount(left.0 / days);
+            if amount > most {
+                return Err(format!(
+                    "a daily budget of {amount} is more than the {most} a day that {key}'s {left} \
+                     left allows over {days} days"
+                ));
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Running `campaign`.
+fn check_enable(view: &AdsPlanView<'_>, campaign: &str, account: &str) -> Result<(), String> {
+    let (made, planned) = made_for_plan(view, campaign, account)?;
+    let key = &made.key;
+    if view.today < planned.starts_on {
+        return Err(format!("{key} starts on {}", planned.starts_on));
+    }
+    if view.today > planned.ends_on {
+        return Err(format!("{key} ended on {}", planned.ends_on));
+    }
+    let spent = spent_by(view, key);
+    if spent >= planned.budget {
+        return Err(format!("{key} has spent {spent} of its {}", planned.budget));
+    }
+    let all = Amount(view.spent.values().map(|each| each.0).sum());
+    if all >= view.plan.google_ads {
+        return Err(format!(
+            "the plan's Google Ads spend is {all} of its {}",
+            view.plan.google_ads
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, Days, FixedOffset, NaiveDate, Utc};
 
     use super::{
-        Amount, EndReason, PlanCampaign, PlanProposal, PlanRecord, PostChannel, PostSlot,
-        ProposalRefusal, SlotCheck, SlotRefusal, active_plan, check_proposal, check_slot,
+        AdsPlanView, AdsWrite, Amount, BudgetKind, CreatedCampaign, EndReason, PlanCampaign,
+        PlanProposal, PlanRecord, PostChannel, PostSlot, ProposalRefusal, SlotCheck, SlotRefusal,
+        ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write, check_proposal, check_slot,
         network_name, parse_amount, plans_to_end, text_fits, text_limit,
     };
 
@@ -1571,5 +1922,397 @@ mod tests {
             ),
             Err(SlotRefusal::PostOffItsDay)
         );
+    }
+
+    /// A plan campaign of `budget` hundredths between two days.
+    fn a_campaign(budget: u64, starts_on: &str, ends_on: &str) -> PlanCampaign {
+        PlanCampaign {
+            key: "search".to_string(),
+            name: "Search".to_string(),
+            goal: "Sales".to_string(),
+            budget: amount(budget),
+            starts_on: day(starts_on),
+            ends_on: day(ends_on),
+        }
+    }
+
+    /// The budget of a campaign that starts on `starts_on` and ends `days - 1` days later, made on
+    /// 2026-11-02 with nothing spent.
+    fn budget_of_a_run(days: u64, starts_on: &str) -> (BudgetKind, Amount) {
+        let first = day(starts_on);
+        let last = first.checked_add_days(Days::new(days - 1)).expect("a date");
+        campaign_budget(
+            &a_campaign(30_000, starts_on, &last.to_string()),
+            "USD",
+            amount(0),
+            today(),
+        )
+    }
+
+    #[test]
+    fn a_short_or_long_campaign_takes_a_daily_budget() {
+        // From tomorrow to the last day, both included: 2 and 91 days are daily, 3 and 90 total.
+        assert_eq!(
+            budget_of_a_run(2, "2026-11-03"),
+            (BudgetKind::Daily, amount(15_000))
+        );
+        assert_eq!(
+            budget_of_a_run(3, "2026-11-03"),
+            (BudgetKind::Total, amount(30_000))
+        );
+        assert_eq!(
+            budget_of_a_run(90, "2026-11-03"),
+            (BudgetKind::Total, amount(30_000))
+        );
+        // 300.00 over 91 days is 3.2967: rounded down to the hundredth.
+        assert_eq!(
+            budget_of_a_run(91, "2026-11-03"),
+            (BudgetKind::Daily, amount(329))
+        );
+        // A one-day run is a daily budget of all of it, never a division by nothing.
+        assert_eq!(
+            budget_of_a_run(1, "2026-11-03"),
+            (BudgetKind::Daily, amount(30_000))
+        );
+
+        // A campaign that starts today starts tomorrow, and is counted from there: three days from
+        // its own first day are two from tomorrow, so daily; four are three, so total.
+        assert_eq!(
+            budget_of_a_run(3, "2026-11-02"),
+            (BudgetKind::Daily, amount(15_000))
+        );
+        assert_eq!(
+            budget_of_a_run(4, "2026-11-02"),
+            (BudgetKind::Total, amount(30_000))
+        );
+        // One that began before today is counted from tomorrow too.
+        assert_eq!(
+            budget_of_a_run(10, "2026-10-20"),
+            (BudgetKind::Daily, amount(30_000))
+        );
+
+        // What earlier versions of it spent comes off, never below nothing.
+        let campaign = a_campaign(30_000, "2026-11-03", "2026-12-02");
+        assert_eq!(
+            campaign_budget(&campaign, "USD", amount(6_000), today()),
+            (BudgetKind::Total, amount(24_000))
+        );
+        assert_eq!(
+            campaign_budget(&campaign, "USD", amount(40_000), today()),
+            (BudgetKind::Total, amount(0))
+        );
+        let short = a_campaign(30_000, "2026-11-03", "2026-11-04");
+        assert_eq!(
+            campaign_budget(&short, "USD", amount(6_000), today()),
+            (BudgetKind::Daily, amount(12_000))
+        );
+
+        // In a currency with no minor unit a budget is whole units, rounded down.
+        assert!(ZERO_DECIMAL.contains(&"JPY") && !ZERO_DECIMAL.contains(&"USD"));
+        let yen = a_campaign(100_050, "2026-11-03", "2026-12-02");
+        assert_eq!(
+            campaign_budget(&yen, "JPY", amount(0), today()),
+            (BudgetKind::Total, amount(100_000))
+        );
+        let long_yen = a_campaign(100_000, "2026-11-03", "2027-02-01");
+        assert_eq!(
+            campaign_budget(&long_yen, "JPY", amount(0), today()),
+            (BudgetKind::Daily, amount(1_000)),
+            "1000.00 over 91 days is 10.98: ten yen"
+        );
+        assert_eq!(
+            campaign_budget(&long_yen, "USD", amount(0), today()),
+            (BudgetKind::Daily, amount(1_098))
+        );
+    }
+
+    /// The Google Ads account of `an_ads_plan`.
+    const ACCOUNT: &str = "123-456-7890";
+
+    /// A plan whose two campaigns run 30 days from tomorrow, `search-a` on 500.00 and `search-b`
+    /// on 400.00 of the plan's 1000.00 for Google Ads.
+    fn an_ads_plan() -> PlanProposal {
+        let mut plan = a_proposal();
+        plan.google_ads = amount(100_000);
+        plan.campaigns = vec![
+            PlanCampaign {
+                key: "search-a".to_string(),
+                ..a_campaign(50_000, "2026-11-03", "2026-12-02")
+            },
+            PlanCampaign {
+                key: "search-b".to_string(),
+                ..a_campaign(40_000, "2026-11-03", "2026-12-02")
+            },
+        ];
+        plan
+    }
+
+    fn made(plan: &str, key: &str, number: u64, kind: BudgetKind) -> CreatedCampaign {
+        CreatedCampaign {
+            plan: plan.to_string(),
+            key: key.to_string(),
+            campaign: campaign(number),
+            budget: format!("customers/1234567890/campaignBudgets/{number}"),
+            kind,
+        }
+    }
+
+    fn campaign(number: u64) -> String {
+        format!("customers/1234567890/campaigns/{number}")
+    }
+
+    /// Everything a write is checked against, in one place that each case changes a little.
+    struct Ads {
+        plan: PlanProposal,
+        lineage: Vec<String>,
+        created: Vec<CreatedCampaign>,
+        spent: std::collections::BTreeMap<String, Amount>,
+        today: &'static str,
+    }
+
+    impl Ads {
+        /// MP-3 is active and replaces MP-2, which replaced MP-1; `search-a` was made under MP-1
+        /// (campaign 11, a total budget), `search-b` under MP-3 (campaign 12, a daily one), and
+        /// `search-old`, which MP-3 dropped, under MP-2 (campaign 13).
+        fn new() -> Self {
+            Self {
+                plan: an_ads_plan(),
+                lineage: vec!["MP-3".to_string(), "MP-2".to_string(), "MP-1".to_string()],
+                created: vec![
+                    made("MP-1", "search-a", 11, BudgetKind::Total),
+                    made("MP-3", "search-b", 12, BudgetKind::Daily),
+                    made("MP-2", "search-old", 13, BudgetKind::Total),
+                    made("MP-9", "search-a", 14, BudgetKind::Total),
+                ],
+                spent: std::collections::BTreeMap::new(),
+                today: "2026-11-10",
+            }
+        }
+
+        fn check(&self, write: &AdsWrite) -> Result<(), String> {
+            check_ads_write(
+                &AdsPlanView {
+                    plan_id: "MP-3",
+                    plan: &self.plan,
+                    lineage: &self.lineage,
+                    created: &self.created,
+                    spent: &self.spent,
+                    today: day(self.today),
+                },
+                write,
+            )
+        }
+
+        /// The sentence the write is refused with, which must hold `says`.
+        fn refuses(&self, write: &AdsWrite, says: &str) {
+            let why = self.check(write).expect_err("the write is refused");
+            assert!(
+                why.contains(says),
+                "wanted a refusal saying {says:?}, got {why:?}"
+            );
+        }
+
+        fn passes(&self, write: &AdsWrite) {
+            if let Err(why) = self.check(write) {
+                panic!("the write should pass, but {why}");
+            }
+        }
+    }
+
+    fn create(key: &str) -> AdsWrite {
+        AdsWrite::Create {
+            account: ACCOUNT.to_string(),
+            plan_campaign: key.to_string(),
+        }
+    }
+
+    fn under(number: u64) -> AdsWrite {
+        AdsWrite::UnderCampaign {
+            account: ACCOUNT.to_string(),
+            campaign: campaign(number),
+        }
+    }
+
+    fn budget(number: u64, hundredths: u64) -> AdsWrite {
+        AdsWrite::Budget {
+            account: ACCOUNT.to_string(),
+            campaign: campaign(number),
+            amount: amount(hundredths),
+        }
+    }
+
+    fn enable(number: u64) -> AdsWrite {
+        AdsWrite::Enable {
+            account: ACCOUNT.to_string(),
+            campaign: campaign(number),
+        }
+    }
+
+    fn pause(number: u64) -> AdsWrite {
+        AdsWrite::Pause {
+            account: ACCOUNT.to_string(),
+            campaign: campaign(number),
+        }
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one case per refusal, side by side, so a missing case is plain to see"
+    )]
+    fn checks_each_write_against_the_plan() {
+        let mut ads = Ads::new();
+        // A new campaign for a key no plan of the lineage has made one for.
+        ads.created.retain(|made| made.key != "search-b");
+        ads.passes(&create("search-b"));
+
+        // Another account: every kind of write.
+        let elsewhere = "999-999-9999".to_string();
+        for write in [
+            AdsWrite::Create {
+                account: elsewhere.clone(),
+                plan_campaign: "search-b".to_string(),
+            },
+            AdsWrite::UnderCampaign {
+                account: elsewhere.clone(),
+                campaign: campaign(11),
+            },
+            AdsWrite::Budget {
+                account: elsewhere.clone(),
+                campaign: campaign(11),
+                amount: amount(100),
+            },
+            AdsWrite::Enable {
+                account: elsewhere.clone(),
+                campaign: campaign(11),
+            },
+            AdsWrite::Pause {
+                account: elsewhere.clone(),
+                campaign: campaign(11),
+            },
+        ] {
+            ads.refuses(&write, "999-999-9999");
+        }
+        let mut no_account = Ads::new();
+        no_account.plan.google_ads_account = None;
+        no_account.refuses(&under(11), "no Google Ads account");
+
+        // A key the plan lacks.
+        ads.refuses(&create("search-c"), "no campaign search-c");
+
+        // A second campaign for a key: under the active plan, under a plan two replaces back, and
+        // not when the only one was made under a plan outside the lineage.
+        let ads = Ads::new();
+        ads.refuses(&create("search-b"), "has a campaign already");
+        ads.refuses(&create("search-a"), "has a campaign already");
+        let mut outside = Ads::new();
+        outside
+            .created
+            .retain(|made| !(made.key == "search-a" && made.plan == "MP-1"));
+        outside.passes(&create("search-a"));
+
+        // A create whose last day is before the first day it could start: starting tomorrow.
+        let mut late = Ads::new();
+        late.created.clear();
+        late.today = "2026-12-01";
+        late.passes(&create("search-b"));
+        late.today = "2026-12-02";
+        late.refuses(&create("search-b"), "before");
+        // A campaign of the plan that starts later than tomorrow still starts when it says.
+        late.today = "2026-11-02";
+        late.plan.campaigns[1].starts_on = day("2026-12-10");
+        late.plan.campaigns[1].ends_on = day("2026-12-10");
+        late.passes(&create("search-b"));
+        late.plan.campaigns[1].ends_on = day("2026-12-09");
+        late.refuses(&create("search-b"), "before");
+
+        // Under a campaign: one the plan's lineage made for a key the plan has, a campaign two
+        // replaces back included.
+        let ads = Ads::new();
+        ads.passes(&under(11));
+        ads.passes(&under(12));
+        // Another plan's campaign, one never recorded, and one whose key the plan dropped.
+        ads.refuses(&under(14), "not made for");
+        ads.refuses(&under(99), "not made for");
+        ads.refuses(&under(13), "not made for");
+        // A campaign in another account than the plan's, whatever was recorded.
+        let mut moved = Ads::new();
+        moved.created[0].campaign = "customers/5555555555/campaigns/11".to_string();
+        moved.refuses(
+            &AdsWrite::UnderCampaign {
+                account: ACCOUNT.to_string(),
+                campaign: "customers/5555555555/campaigns/11".to_string(),
+            },
+            "another Google Ads account",
+        );
+
+        // A total budget: from what the campaign spent to the plan campaign's budget.
+        let mut ads = Ads::new();
+        ads.spent.insert("search-a".to_string(), amount(10_000));
+        ads.passes(&budget(11, 50_000));
+        ads.passes(&budget(11, 10_000));
+        ads.refuses(&budget(11, 50_001), "more than search-a's 500.00");
+        ads.refuses(&budget(11, 9_999), "less than the 100.00");
+        // A daily one: at most what is left over the days left. Today is the 10th: 23 days left
+        // to 2026-12-02 inclusive, and 400.00 less 92.00 spent is 308.00, 13.39 a day.
+        ads.spent.insert("search-b".to_string(), amount(9_200));
+        ads.passes(&budget(12, 1_339));
+        ads.refuses(&budget(12, 1_340), "more than the 13.39 a day");
+        // Before its first day the days left are all of its run, 30 from 2026-11-03: 400.00 is
+        // 13.33 a day.
+        ads.spent.clear();
+        ads.today = "2026-11-02";
+        ads.passes(&budget(12, 1_333));
+        ads.refuses(&budget(12, 1_334), "more than the 13.33 a day");
+        ads.today = "2026-11-10";
+        ads.spent.insert("search-b".to_string(), amount(9_200));
+        // A campaign the lineage did not make, or another plan's.
+        ads.refuses(&budget(14, 100), "not made for");
+        ads.refuses(&budget(13, 100), "not made for");
+        // A campaign whose dates are over has no daily budget.
+        ads.today = "2026-12-03";
+        ads.refuses(&budget(12, 1), "ended on 2026-12-02");
+
+        // Enabling: within the dates, below the campaign's budget and below the plan's.
+        let mut ads = Ads::new();
+        ads.passes(&enable(11));
+        ads.today = "2026-11-02";
+        ads.refuses(&enable(11), "starts on 2026-11-03");
+        ads.today = "2026-11-03";
+        ads.passes(&enable(11));
+        ads.today = "2026-12-03";
+        ads.refuses(&enable(11), "ended on 2026-12-02");
+        ads.today = "2026-12-02";
+        ads.passes(&enable(11));
+        ads.today = "2026-11-10";
+        ads.spent.insert("search-a".to_string(), amount(49_999));
+        ads.passes(&enable(11));
+        ads.spent.insert("search-a".to_string(), amount(50_000));
+        ads.refuses(&enable(11), "has spent 500.00 of its 500.00");
+        ads.spent.insert("search-a".to_string(), amount(60_000));
+        ads.refuses(&enable(11), "has spent 600.00 of its 500.00");
+        // The plan's own limit: 1000.00 for Google Ads, spent over its campaigns.
+        ads.spent.insert("search-a".to_string(), amount(49_000));
+        ads.spent.insert("search-b".to_string(), amount(39_000));
+        ads.spent.insert("search-old".to_string(), amount(11_999));
+        ads.passes(&enable(11));
+        ads.spent.insert("search-old".to_string(), amount(12_000));
+        ads.refuses(
+            &enable(11),
+            "the plan's Google Ads spend is 1000.00 of its 1000.00",
+        );
+        // A campaign the lineage did not make cannot be enabled, nor one the plan dropped.
+        ads.spent.clear();
+        ads.refuses(&enable(14), "not made for");
+        ads.refuses(&enable(13), "not made for");
+
+        // Pausing covers any campaign of the lineage, the dropped key's included, and none of
+        // another plan or none.
+        let ads = Ads::new();
+        ads.passes(&pause(11));
+        ads.passes(&pause(12));
+        ads.passes(&pause(13));
+        ads.refuses(&pause(14), "not made for");
+        ads.refuses(&pause(99), "not made for");
     }
 }

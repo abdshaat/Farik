@@ -32,6 +32,7 @@ use farik_protocol::command::{
 };
 use farik_protocol::event::Thread;
 use serde_json::Value;
+use sha2::{Digest as _, Sha256};
 
 use self::mcp::FarikMcp;
 
@@ -42,6 +43,7 @@ use crate::preview::RunningPreview;
 use crate::session::SessionPurpose;
 use crate::tools::{ToolContext, ToolDeps};
 
+mod ads_calls;
 mod app;
 mod board;
 #[cfg(test)]
@@ -66,7 +68,7 @@ pub use hooks::{
 pub use setup::{SetupError, SetupHost};
 pub(crate) use signed_in::{Fresh, refreshed_entry};
 pub use team::SETUP_PENDING;
-pub use team::{custom_entry, kit_entry, labelled, matches_kit};
+pub use team::{custom_entry, kit_entry, labelled, matches_kit, plan_tools_of};
 pub(crate) use team::{secret_at, with_server};
 
 /// What a daemon with no project answers what needs one.
@@ -144,6 +146,26 @@ pub(crate) struct Session {
     pub(crate) registration: SessionRegistration,
     pub(crate) tool_calls: u32,
     pub(crate) stop_reason: Option<String>,
+    /// The sha256, in hex, of the ticket each Farik connector that signs in was launched with in
+    /// this session, by server (ADR 0038, ADR 0042): a call to `POST /connector/call` names its
+    /// session by the ticket alone, and the ticket ends with the session.
+    pub(crate) tickets: BTreeMap<String, String>,
+}
+
+/// The session a connector ticket was given to (`DaemonState::ticketed`).
+pub(crate) struct Ticketed {
+    /// The session.
+    pub(crate) session_id: String,
+    /// The agent the session is, whose connection a call is made with.
+    pub(crate) agent_id: String,
+    /// The task it works on, when it works on one.
+    pub(crate) task_id: Option<TaskId>,
+    /// The server the ticket was given to.
+    pub(crate) server: String,
+    /// Why the session was told to stop, once it was.
+    pub(crate) stop_reason: Option<String>,
+    /// The connectors the session was given.
+    pub(crate) connectors: Vec<SessionConnector>,
 }
 
 /// What `POST /command` hands a command the human gave to: the orchestrator driving the project in
@@ -188,6 +210,12 @@ pub struct DaemonState {
     /// The calls made in the period connector allowances count in (ADR 0037). Whoever holds the
     /// sessions lock takes it second, so a count and the call it allows are one step.
     allowance_counts: Mutex<crate::allowances::AllowanceCounts>,
+    /// Held by every write to Google Ads from reading the plan and the campaigns made through
+    /// Google's answer and the record of what it made, so two calls for one plan campaign cannot
+    /// both pass the check that none was made (ADR 0042).
+    ads_writes: tokio::sync::Mutex<()>,
+    /// The address of Google's Ads API, when a test sets one; until then `GOOGLE_ADS_API`.
+    google_ads_api: OnceLock<String>,
 }
 
 /// What a kept entry says of the agent's sign-in to the service.
@@ -258,6 +286,8 @@ impl DaemonState {
             entry_locks: Mutex::new(BTreeMap::new()),
             sign_ins: Mutex::new(BTreeMap::new()),
             allowance_counts: Mutex::default(),
+            ads_writes: tokio::sync::Mutex::new(()),
+            google_ads_api: OnceLock::new(),
         }
     }
 
@@ -282,6 +312,8 @@ impl DaemonState {
             entry_locks: Mutex::new(BTreeMap::new()),
             sign_ins: Mutex::new(BTreeMap::new()),
             allowance_counts: Mutex::default(),
+            ads_writes: tokio::sync::Mutex::new(()),
+            google_ads_api: OnceLock::new(),
         }
     }
 
@@ -313,6 +345,25 @@ impl DaemonState {
             .get()
             .copied()
             .unwrap_or(crate::registered_apps::REGISTERED_APPS)
+    }
+
+    /// Speaks to Google's Ads API at `api` from now on, in place of `GOOGLE_ADS_API`: a test's
+    /// fixture, whose address is on this computer. Answers `true`, or `false` when an address was
+    /// already set, which is kept.
+    pub fn set_google_ads_api(&self, api: String) -> bool {
+        self.google_ads_api.set(api).is_ok()
+    }
+
+    /// The address of Google's Ads API, as this daemon speaks to it.
+    pub(crate) fn google_ads_api(&self) -> &str {
+        self.google_ads_api
+            .get()
+            .map_or(crate::google_ads::GOOGLE_ADS_API, String::as_str)
+    }
+
+    /// The lock every write to Google Ads holds.
+    pub(crate) fn ads_writes(&self) -> &tokio::sync::Mutex<()> {
+        &self.ads_writes
     }
 
     /// Sets Farik's own executable; answers whether it was not set before.
@@ -527,6 +578,7 @@ impl DaemonState {
                 registration,
                 tool_calls: 0,
                 stop_reason: None,
+                tickets: BTreeMap::new(),
             },
         );
     }
@@ -582,6 +634,50 @@ impl DaemonState {
     /// The notice a request filed in the browser wakes, so that the team's wait ends at once.
     pub(crate) fn wakes(&self) -> &tokio::sync::Notify {
         &self.wakes
+    }
+
+    /// A new ticket for `server` in `session_id`: thirty-two random bytes in hex, whose sha256 the
+    /// session keeps until it ends (ADR 0038, ADR 0042), replacing any earlier ticket of that
+    /// server. `None` for a session the daemon does not answer for.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when no random bytes can be read.
+    pub(crate) fn issue_ticket(
+        &self,
+        session_id: &str,
+        server: &str,
+    ) -> Result<Option<String>, DaemonError> {
+        let ticket = random_token()?;
+        let hash = hex(&Sha256::digest(ticket.as_bytes()));
+        Ok(self.sessions().get_mut(session_id).map(|session| {
+            session.tickets.insert(server.to_string(), hash);
+            ticket
+        }))
+    }
+
+    /// The session a ticket was given to, and what it was given and told: `None` for a ticket no
+    /// live session holds. Every kept ticket is compared, so how long it takes says nothing of
+    /// how much of a guess was right.
+    pub(crate) fn ticketed(&self, ticket: &str) -> Option<Ticketed> {
+        let given = hex(&Sha256::digest(ticket.as_bytes()));
+        let sessions = self.sessions();
+        let mut found = None;
+        for session in sessions.values() {
+            for (server, held) in &session.tickets {
+                if same_token(given.as_bytes(), held.as_bytes()) && found.is_none() {
+                    found = Some(Ticketed {
+                        session_id: session.registration.session_id.clone(),
+                        agent_id: session.registration.agent_id.clone(),
+                        task_id: session.registration.task_id.clone(),
+                        server: server.clone(),
+                        stop_reason: session.stop_reason.clone(),
+                        connectors: session.registration.connectors.clone(),
+                    });
+                }
+            }
+        }
+        found
     }
 
     /// Stops answering for a session: every later hook of it is `unknown_session`.
@@ -933,6 +1029,15 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
         .fallback(get(app::app_from::<E>))
         .layer(Extension(cancel))
         .with_state(Arc::clone(&state));
+    // Outside the daemon-token layer: a Farik connector's shim holds no daemon token, only the
+    // ticket its launch was given, which names its session (ADR 0038, ADR 0042).
+    let calls = Router::new()
+        .route("/connector/call", post(connector_call))
+        .with_state(Arc::clone(&state))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            require_project,
+        ));
     Router::new()
         .route("/hook/pre-tool-use", post(pre_tool_use))
         .route("/hook/post-tool-use", post(post_tool_use))
@@ -942,6 +1047,7 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
         .merge(mcp)
         .layer(middleware::from_fn_with_state(state, require_project))
         .layer(middleware::from_fn_with_state(expected, require_token))
+        .merge(calls)
         .merge(browser)
 }
 
@@ -1030,6 +1136,45 @@ async fn handled(state: &DaemonState, command: Command) -> CommandReply {
                 detail: format!("the command's task failed: {error}"),
             },
         },
+    }
+}
+
+/// What a Farik connector's shim asks: a tool and its arguments.
+#[derive(serde::Deserialize)]
+struct CallAsk {
+    tool: String,
+    #[serde(default)]
+    arguments: Value,
+}
+
+/// `POST /connector/call` (ADR 0038, ADR 0042): a tool of Farik's Google Ads connector, run in the
+/// daemon for the session the `Authorization: Bearer <ticket>` names, as that session's agent.
+/// 401 for a ticket no live session holds. The answer is `{ "ok": … }` or `{ "error": "<code>:
+/// <words>" }`.
+async fn connector_call(
+    State(state): State<Arc<DaemonState>>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let ticket = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    let Some(ticket) = ticket.filter(|ticket| state.ticketed(ticket).is_some()) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Ok(asked) = serde_json::from_slice::<CallAsk>(&body) else {
+        return Json(serde_json::json!({
+            "error": "google_ads_input: the call is { tool, arguments }"
+        }))
+        .into_response();
+    };
+    match ads_calls::ads_call(&state, ticket, &asked.tool, asked.arguments).await {
+        Ok(answer) => Json(serde_json::json!({ "ok": answer })).into_response(),
+        Err(reason) if reason.starts_with("unauthorized:") => {
+            StatusCode::UNAUTHORIZED.into_response()
+        }
+        Err(reason) => Json(serde_json::json!({ "error": reason })).into_response(),
     }
 }
 
@@ -1196,7 +1341,11 @@ async fn launch_answer(state: &Arc<DaemonState>, asked: &LaunchAsk) -> Result<Va
         .await?
         .ok_or_else(not_confirmed)?
     };
-    let (held, name) = (Arc::clone(state), asked.server.clone());
+    let (held, name, session) = (
+        Arc::clone(state),
+        asked.server.clone(),
+        asked.session.clone(),
+    );
     blocking(move || {
         let failed = |detail: String| (StatusCode::INTERNAL_SERVER_ERROR, detail);
         let refused = |error: ConnectorError| match error {
@@ -1217,15 +1366,32 @@ async fn launch_answer(state: &Arc<DaemonState>, asked: &LaunchAsk) -> Result<Va
                     .collect()
             };
         Ok(match &server.transport {
-            CustomTransport::Stdio { .. } => {
+            CustomTransport::Stdio { command, args, .. } => {
                 let spec = launch_spec(&server, &entry).map_err(refused)?;
                 let folder = held
                     .connector_folder(&at)
                     .map_err(|error| failed(crate::connectors::folder_refusal(&error)))?;
-                serde_json::json!({
+                let mut answer = serde_json::json!({
                     "command": spec.command, "args": spec.args, "env": exposed(&spec.env),
                     "cwd": folder.display().to_string()
-                })
+                });
+                // A Farik connector that signs in is never given the grant: it calls the daemon
+                // with a ticket that names this session (ADR 0038, ADR 0042).
+                if signs_in && farik_roles::is_farik_connector(command, args) {
+                    let ticket = held
+                        .issue_ticket(&session, &name)
+                        .map_err(|error| failed(error.to_string()))?
+                        .ok_or_else(|| {
+                            (
+                                StatusCode::NOT_FOUND,
+                                format!(
+                                    "unknown_session: the daemon does not answer for {session}"
+                                ),
+                            )
+                        })?;
+                    answer["ticket"] = serde_json::Value::from(ticket);
+                }
+                answer
             }
             CustomTransport::Http { .. } => {
                 let headers = launch_headers(&server, &entry).map_err(refused)?;
@@ -2051,6 +2217,7 @@ mod tests {
                     origin: None,
                     tools: server.tools,
                     allowances: std::collections::BTreeMap::new(),
+                    plan_tools: std::collections::BTreeSet::new(),
                 })
                 .collect(),
             preview: None,
@@ -2396,6 +2563,7 @@ mod tests {
                 origin: None,
                 tools: server.tools,
                 allowances: std::collections::BTreeMap::new(),
+                plan_tools: std::collections::BTreeSet::new(),
             }],
             preview: None,
         });
@@ -2518,8 +2686,14 @@ mod tests {
                 .join("connectors")
                 .join(&at.project_id)
                 .join("dev-a/osv");
+        // Beside them, a ticket that names the session, which is no token of the service's.
+        let mut rest = answer.clone();
+        let ticket = rest
+            .as_object_mut()
+            .and_then(|fields| fields.remove("ticket"))
+            .expect("a ticket");
         assert_eq!(
-            answer,
+            rest,
             json!({
                 "command": "farik", "args": ["connector", "osv"], "env": {},
                 "cwd": folder.display().to_string()
@@ -2537,11 +2711,72 @@ mod tests {
                 .to_string(),
         ];
         for token in &tokens {
+            assert_ne!(
+                ticket.as_str(),
+                Some(token.as_str()),
+                "the ticket is no token"
+            );
             assert!(!body.contains(token), "the answer holds a token");
             assert!(!some_file_holds(&daemon, token), "a file holds a token");
             let events = format!("{:?}", daemon.project.events(&[]));
             assert!(!events.contains(token), "an event holds a token");
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_launch_gives_a_ticket_and_no_token() {
+        use sha2::{Digest as _, Sha256};
+
+        let fixture = crate::oauth_fixture::Fixture::start().await;
+        let (daemon, grant) = launching_signed_in_as(
+            "launch-farik-ticket",
+            &fixture,
+            chrono::Duration::minutes(60),
+            true,
+        );
+        let (status, body) = launch(&daemon, "session-signed", "osv").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let answer: Value = serde_json::from_str(&body).expect("JSON");
+        // A ticket of thirty-two random bytes in hex, an empty environment, and no token.
+        let ticket = answer["ticket"].as_str().expect("a ticket").to_string();
+        assert_eq!(ticket.len(), 64, "{ticket}");
+        assert!(
+            ticket.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "{ticket}"
+        );
+        assert_eq!(answer["env"], json!({}));
+        for token in [
+            grant.access_token.expose(),
+            grant
+                .refresh_token
+                .as_ref()
+                .expect("a refresh token")
+                .expose(),
+        ] {
+            assert!(!body.contains(token), "the answer holds a token");
+        }
+        // The session holds the ticket's sha256 and not the ticket, by server.
+        let hash = super::hex(&Sha256::digest(ticket.as_bytes()));
+        assert_eq!(
+            daemon.state.sessions()["session-signed"].tickets,
+            std::collections::BTreeMap::from([("osv".to_string(), hash)])
+        );
+        assert!(
+            !format!("{:?}", daemon.state.sessions()["session-signed"].tickets).contains(&ticket)
+        );
+        // Another launch of the server is another ticket, and only the latest is kept.
+        let (_, again) = launch(&daemon, "session-signed", "osv").await;
+        let again: Value = serde_json::from_str(&again).expect("JSON");
+        assert_ne!(again["ticket"], answer["ticket"]);
+        assert_eq!(daemon.state.sessions()["session-signed"].tickets.len(), 1);
+        // A connector that does not sign in is given none.
+        let daemon = launching("launch-no-ticket", true, false);
+        let (status, body) = launch(&daemon, "session-custom", "github").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let plain: Value = serde_json::from_str(&body).expect("JSON");
+        assert!(plain.get("ticket").is_none(), "{body}");
+        assert!(daemon.state.sessions()["session-custom"].tickets.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]

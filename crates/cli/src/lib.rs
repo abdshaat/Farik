@@ -706,6 +706,8 @@ enum ConnectorCommands {
     Headers(ConnectorAsk),
     /// Look packages up in the open vulnerability database (used by the Architect's kit).
     Osv,
+    /// Run Google Ads' tools in the daemon, for a Marketing Specialist's session (used by its kit).
+    GoogleAds,
 }
 
 #[derive(Subcommand)]
@@ -924,6 +926,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
                 connector_run::headers(&io.cwd.join(&ask.daemon), &ask.session, &ask.server, io)
             }
             ConnectorCommands::Osv => connector_run::osv(io),
+            ConnectorCommands::GoogleAds => connector_run::google_ads(io),
         };
     }
     if parsed.json && matches!(parsed.command, Commands::Serve { .. }) {

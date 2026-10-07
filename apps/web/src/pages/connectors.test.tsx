@@ -1650,6 +1650,19 @@ const KIT_POSTHOG = {
 	auth: "keys",
 	credential_keys: ["POSTHOG_KEY"],
 };
+/** A kit service that signs in through Farik Cloud, which no build can reach before the web launch. */
+const KIT_ADS = {
+	name: "google-ads",
+	title: "Google Ads",
+	about:
+		"Google Ads shows your ads to people searching on Google and charges you for the clicks.",
+	why: "So the Marketing Specialist can find the words your customers search for and run the search ads in a marketing plan you approved, within its budget.",
+	setup: "Sign in with the Google account that manages your ads.",
+	labels: {},
+	auth: "oauth",
+	credential_keys: [],
+	at_launch: true,
+};
 /** A kit service as `team.yaml` holds it once connected: the kit's tags are its tools. */
 const kitEntry = (name: string, transport: "http" | "stdio" = "stdio") => ({
 	name,
@@ -1782,6 +1795,25 @@ describe("a role's kit on the agent page", () => {
 		expect(
 			within(yours).getByText("airtable", { selector: "strong" }),
 		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("agent_edit_says_a_kit_service_comes_at_launch", async () => {
+		// Google Ads signs in through Farik Cloud, which comes with the web launch (ADR 0044): until
+		// then the row says so, in place of a Connect that could not work.
+		const { container } = await openedWithKit([KIT_ADS, KIT_NOTION], [], []);
+		const ads = kitRow("Google Ads");
+		expect(within(ads).getByText(KIT_ADS.about)).toBeTruthy();
+		expect(
+			within(ads).getByText("Google Ads comes with Farik’s web launch."),
+		).toBeTruthy();
+		expect(within(ads).queryByRole("button")).toBeNull();
+		// A service that does not come at launch still offers Connect, and says nothing of it.
+		const notion = kitRow("Notion");
+		expect(
+			within(notion).getByRole("button", { name: "Connect Notion" }),
+		).toBeTruthy();
+		expect(within(notion).queryByText(/web launch/)).toBeNull();
 		await expectNoAxeViolations(container);
 	});
 

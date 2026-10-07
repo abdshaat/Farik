@@ -1017,6 +1017,10 @@
                         "type": "string"
                       }
                     },
+                    "at_launch": {
+                      "const": true,
+                      "description": "Present when the service signs in through one of Farik's own connectors and this build has no app of Farik's for it: it comes with the web launch (ADR 0044), and the page offers no Connect."
+                    },
                     "allowances": {
                       "type": "array",
                       "description": "What the kit lets the user pre-approve (ADR 0037): each spending tool with its default calls each period and the plural noun for what a call makes. Present when the kit offers any.",

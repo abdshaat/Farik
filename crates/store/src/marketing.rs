@@ -2,16 +2,16 @@
 //! decision on it, and its end, folded from the four `marketing_plan.` kinds; and the posts, folded
 //! from the six `social_post.` kinds.
 
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use farik_core::contract::TaskId;
 use farik_core::marketing::{
-    EndReason, PlanCampaign, PlanProposal, PlanRecord, PostChannel, PostDetails, PostSlot,
-    parse_amount,
+    BudgetKind, CreatedCampaign, EndReason, PlanCampaign, PlanProposal, PlanRecord, PostChannel,
+    PostDetails, PostSlot, parse_amount,
 };
 use farik_protocol::event::{
-    EventBody, EventKind, FarikEvent, MarketingPlanEndedBodyWhy, MarketingPlanProposedBody,
-    SocialPostMediaKind, SocialPostMissedBodyWhy, SocialPostScheduledBodyApprovedBy,
-    SocialPostStoppedBodyBy,
+    EventBody, EventKind, FarikEvent, MarketingCampaignCreatedBodyBudgetKind,
+    MarketingPlanEndedBodyWhy, MarketingPlanProposedBody, SocialPostMediaKind,
+    SocialPostMissedBodyWhy, SocialPostScheduledBodyApprovedBy, SocialPostStoppedBodyBy,
 };
 
 use crate::{EventLog, EventQuery, StoreError};
@@ -653,6 +653,59 @@ fn fold_posts(log: &EventLog) -> Result<(Vec<SocialPost>, Vec<PostMove>), StoreE
     Ok((posts, trail))
 }
 
+/// Every Google Ads campaign Farik made for a plan campaign, oldest first, each with the UTC day
+/// it was made on (`marketing_campaign.created`, ADR 0042). A campaign recorded twice counts once.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn created_campaigns_on(
+    log: &EventLog,
+) -> Result<Vec<(CreatedCampaign, NaiveDate)>, StoreError> {
+    let events = log.read(&EventQuery {
+        kinds: vec![EventKind::MarketingCampaignCreated],
+        ..EventQuery::default()
+    })?;
+    let mut made: Vec<(CreatedCampaign, NaiveDate)> = Vec::new();
+    for event in &events {
+        let EventBody::MarketingCampaignCreated(body) = &event.body else {
+            continue;
+        };
+        if made
+            .iter()
+            .any(|(known, _)| known.campaign == body.campaign.as_str())
+        {
+            continue;
+        }
+        made.push((
+            CreatedCampaign {
+                plan: body.plan.as_str().to_string(),
+                key: body.key.as_str().to_string(),
+                campaign: body.campaign.as_str().to_string(),
+                budget: body.budget.as_str().to_string(),
+                kind: match body.budget_kind {
+                    MarketingCampaignCreatedBodyBudgetKind::Total => BudgetKind::Total,
+                    MarketingCampaignCreatedBodyBudgetKind::Daily => BudgetKind::Daily,
+                },
+            },
+            event.envelope.recorded_at.date_naive(),
+        ));
+    }
+    Ok(made)
+}
+
+/// Every Google Ads campaign Farik made for a plan campaign, oldest first.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn created_campaigns(log: &EventLog) -> Result<Vec<CreatedCampaign>, StoreError> {
+    Ok(created_campaigns_on(log)?
+        .into_iter()
+        .map(|(made, _)| made)
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -1264,5 +1317,56 @@ mod tests {
         );
         assert_eq!(stopped.state_at, at(15));
         assert_eq!(stopped.buffer_post, None, "a stopped post was never sent");
+    }
+
+    #[test]
+    fn the_store_folds_the_campaigns_made() {
+        use farik_core::marketing::{BudgetKind, CreatedCampaign};
+
+        let log = a_log();
+        assert_eq!(super::created_campaigns(&log).expect("reads"), []);
+        let made = |hour: u32, key: &str, number: u64, kind: &str, when: Option<&str>| {
+            append(&log, EventKind::MarketingCampaignCreated, hour, |wire| {
+                wire["body"]["key"] = json!(key);
+                wire["body"]["campaign"] =
+                    json!(format!("customers/1234567890/campaigns/{number}"));
+                wire["body"]["budget"] = json!(format!(
+                    "customers/1234567890/campaignBudgets/{}",
+                    number + 100
+                ));
+                wire["body"]["budget_kind"] = json!(kind);
+                wire["agent_id"] = json!("kai");
+                wire["session_id"] = json!("session-1");
+                if let Some(when) = when {
+                    wire["recorded_at"] = json!(when);
+                }
+            });
+        };
+        made(9, "search-a", 11, "total", None);
+        made(10, "search-b", 12, "daily", Some("2026-11-02T23:30:00Z"));
+        // The same campaign recorded again counts once, as first recorded.
+        made(11, "search-c", 11, "daily", None);
+        let campaign = |key: &str, number: u64, kind: BudgetKind| CreatedCampaign {
+            plan: "MP-1".to_string(),
+            key: key.to_string(),
+            campaign: format!("customers/1234567890/campaigns/{number}"),
+            budget: format!("customers/1234567890/campaignBudgets/{}", number + 100),
+            kind,
+        };
+        let expected = [
+            campaign("search-a", 11, BudgetKind::Total),
+            campaign("search-b", 12, BudgetKind::Daily),
+        ];
+        assert_eq!(super::created_campaigns(&log).expect("reads"), expected);
+        let days: Vec<String> = super::created_campaigns_on(&log)
+            .expect("reads")
+            .iter()
+            .map(|(_, day)| day.to_string())
+            .collect();
+        assert_eq!(
+            days,
+            ["2026-11-01", "2026-11-02"],
+            "the UTC day it was made on"
+        );
     }
 }

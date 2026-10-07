@@ -167,6 +167,15 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::SocialPostStopped
         | EventKind::SocialPostMissed
         | EventKind::SocialPostFailed => a_social_post_body_wire(kind),
+        EventKind::MarketingCampaignCreated => json!({
+            "plan": "MP-1",
+            "key": "search-launch",
+            "account": "123-456-7890",
+            "campaign": "customers/1234567890/campaigns/11",
+            "budget": "customers/1234567890/campaignBudgets/12",
+            "budget_kind": "total",
+            "amount": "800.00",
+        }),
     }
 }
 
