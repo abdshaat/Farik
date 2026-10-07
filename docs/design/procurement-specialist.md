@@ -35,7 +35,7 @@ It cannot:
 - change Farik's budgets or the books.
 
 The rest of its setup:
-- **Tiers:** `read` and `network`. No `write_workspace`, `execute`, git or `external_effect` tier. Its web reading is held to approved sites, the ones Farik ships (`approved_sites.yaml`, 46 shops in ten categories, each the owner may turn off) and the ones the owner allows; `WebFetch` and every `url` and `urls` of a connector's call must name one, `WebSearch` is open, and the agent asks for another site with `farik_request_sites` while its task waits on the owner (step 10b2; spec 5.6, 5.7, 6.10, 8.6).
+- **Tiers:** `read` and `network`. No `write_workspace`, `execute`, git or `external_effect` tier. Its web reading is held to approved sites, the ones Farik ships (`approved_sites.yaml`, 46 shops in ten categories, each the owner may turn off) and the ones the owner allows; `WebFetch` and every address in a connector's call, in a `url` or `urls` field or any other string that is an address, must name one, `WebSearch` is open, and the agent asks for another site with `farik_request_sites` while its task waits on the owner (step 10b2; spec 5.6, 5.7, 6.10, 8.6).
 - **Reviewer:** the Product Manager, who owns the need.
 - **Model:** the Marketing Specialist's default, Claude Sonnet 5.5 at medium effort.
 - **In the team builder:** optional, not suggested. Persona: "Finds the best seller at the right price". Picture `extra-5`, which leaves `extra-2` and `extra-3` for agents added by hand. Tag "PROC", colour `role-procurement-specialist` `#A6C3BF`, a pale sea green the brand's contrast test must pass.
