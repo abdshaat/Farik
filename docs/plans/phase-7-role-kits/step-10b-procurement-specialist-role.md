@@ -124,7 +124,7 @@ Files: `tools.rs` (`farik_read_sheet`'s input gains optional `folder: "procureme
 - `procurement_is_not_given_the_costs` (a guard: the handler and `offered_tools` name the Finance Specialist alone today; it holds the founder's answer 2 while this task rekeys the sheet arms): a Procurement Specialist's `farik_read_costs` is refused `sheet_refused` by the handler (`costs.rs`), and its implement session is not offered the tool.
 - `procurement_is_offered_its_tools`: a procurement task's `implement` session is offered `farik_read_sheet` and `farik_write_sheet`, and not `farik_read_costs`, `farik_exec`, `farik_git_commit` or `farik_git_push`. RED: the sheet arms of `offered_tools` name the Finance Specialist.
 
-- [ ] `feat(runtime): give the sheet tools the procurement folder`
+- [x] `feat(runtime): give the sheet tools the procurement folder`
 
 ### Task 4: `farik_write_evaluation`
 
@@ -207,3 +207,4 @@ The founder's run in the web app (a Procurement Specialist writing an evaluation
   - The latest revision of the spec at HEAD is 0.69, so Task 9's is 0.70.
   - Task 0's approval is in this plan's header (the founder, 2026-10-07, "Approved, We will improve the Ui/ UX later", commit 3cda9dc). `canvas.json` has no version field, so that commit is the version.
   - The new refusals of Task 4 reuse `Refusal::Finance { code, detail }` (`tools/refusal.rs`), whose codes are free text: `evaluation_refused`, `evaluation_name_invalid`, `evaluation_too_large`, `evaluation_not_text`. No new variant.
+- **Task 3.** `farik_read_sheet`'s `folder` is an enum of one value, `procurement`, so any other value is invalid input. Only the Finance Specialist may name it: the Procurement Specialist, whose own folder it reads without asking, is refused `sheet_refused` as every other role is. A Finance Specialist's `folder` with `baseline` is `sheet_refused`. The sheet arms of `offered_tools` are keyed by `private_folder(role)` and not by whose task it is, as the Finance Specialist's were: a Procurement Specialist's implement session about another role's task is offered `farik_write_sheet` and the handler refuses its call. The test `offers_the_sheet_tools_to_the_finance_specialist_alone` is renamed `offers_the_sheet_tools_to_a_role_with_a_folder_alone`.

@@ -118,7 +118,9 @@ mod tests {
     use serde_json::{Value, json};
 
     use crate::tools::ToolError;
-    use crate::tools::fixtures::{TestProject, a_team_of_three, with_the_finance_specialist};
+    use crate::tools::fixtures::{
+        TestProject, a_team_of_three, with_the_finance_specialist, with_the_procurement_specialist,
+    };
 
     /// A project whose finance agent `fin` can read the costs of `FRK-1`, spent by `dev-a` and
     /// `dev-b` over two days, and of a sprint that holds it.
@@ -184,6 +186,35 @@ mod tests {
                 json!({ "key": "dev-b", "usd": 4.0, "input_tokens": 400, "output_tokens": 40, "sessions": 1 }),
             ]
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn procurement_is_not_given_the_costs() {
+        // The team's AI costs stay the Finance Specialist's (6.6; the founder's answer of
+        // 2026-10-07 to step 10b's review), though the Procurement Specialist has a folder too.
+        let project = TestProject::new(
+            "costs-not-procurement",
+            &a_team_of_three(|wire| {
+                with_the_finance_specialist(wire);
+                with_the_procurement_specialist(wire);
+            }),
+        );
+        project.filed("FRK-1", "in_progress", "task", None);
+        let before = project.event_count();
+        for task in [None, Some("FRK-1")] {
+            let refused = project
+                .call("proc", task, "farik_read_costs", json!({ "by": "agent" }))
+                .expect_err("only the Finance Specialist reads the costs");
+            assert!(
+                matches!(&refused, ToolError::Refused { reason } if reason.starts_with("sheet_refused: ")),
+                "{task:?}: {refused:?}"
+            );
+        }
+        assert_eq!(project.event_count(), before, "a read records nothing");
+        project
+            .call("fin", None, "farik_read_costs", json!({ "by": "agent" }))
+            .expect("the Finance Specialist still reads them");
     }
 
     #[test]

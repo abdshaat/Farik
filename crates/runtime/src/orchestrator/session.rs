@@ -807,8 +807,9 @@ const PROPOSE_MARKETING_PLAN_TOOL: &str = "farik_propose_marketing_plan";
 /// The tool that schedules a social post, the Marketing Specialist's alone (ADR 0042).
 const SCHEDULE_POST_TOOL: &str = "farik_schedule_post";
 
-/// The Finance Specialist's tools (step 09b, `docs/SPEC.md` 6.6): the team's AI spending, and a
-/// private folder's workbooks, which `farik_write_sheet` writes and `farik_read_sheet` reads.
+/// The Finance Specialist's tools (step 09b, `docs/SPEC.md` 6.6): the team's AI spending, which is
+/// its alone, and a private folder's workbooks, which `farik_write_sheet` writes and
+/// `farik_read_sheet` reads, for each role with a folder (step 10b).
 const READ_COSTS_TOOL: &str = "farik_read_costs";
 const READ_SHEET_TOOL: &str = "farik_read_sheet";
 const WRITE_SHEET_TOOL: &str = "farik_write_sheet";
@@ -843,19 +844,20 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                     && ask.purpose == SessionPurpose::Implement
                     && ask.contract.is_some())
         })
-        // The books are the Finance Specialist's: it reads the costs and the workbooks in any
-        // session and writes a workbook in the implement session of a task; a verify session
-        // about a task of a role with a private folder reads that folder's workbooks, as its
-        // reviewer and the Product Manager accepting it do (step 09b).
+        // The books are the Finance Specialist's, and the register the Procurement Specialist's:
+        // a role with a private folder reads the workbooks in any session and writes one in the
+        // implement session of a task, and the costs stay the Finance Specialist's alone; a verify
+        // session about a task of a role with a private folder reads that folder's workbooks, as
+        // its reviewer and the Product Manager accepting it do (steps 09b and 10b).
         .filter(|tool| match tool.name {
             READ_COSTS_TOOL => ask.agent.role == RoleWire::FinanceSpecialist,
             WRITE_SHEET_TOOL => {
-                ask.agent.role == RoleWire::FinanceSpecialist
+                private_folder(Role::from(ask.agent.role)).is_some()
                     && ask.purpose == SessionPurpose::Implement
                     && ask.contract.is_some()
             }
             READ_SHEET_TOOL => {
-                ask.agent.role == RoleWire::FinanceSpecialist
+                private_folder(Role::from(ask.agent.role)).is_some()
                     || (ask.purpose == SessionPurpose::Verify
                         && ask.contract.is_some_and(|contract| {
                             private_folder(contract.assignee_role).is_some()
@@ -1963,7 +1965,98 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn offers_the_sheet_tools_to_the_finance_specialist_alone() {
+    fn procurement_is_offered_its_tools() {
+        let harness = Harness::with_procurement("session-procurement-offer");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let procurement = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("an id"))
+            .expect("the contract");
+        let offered = |who: &str, purpose: SessionPurpose, about, tools: &[&'static str]| {
+            let mut ask = asked(deps, agent(&team, who), purpose, about);
+            ask.read_only = purpose == SessionPurpose::Verify;
+            let given = session_spec(deps, &team, &ask)
+                .expect("the spec")
+                .farik_tools;
+            tools
+                .iter()
+                .copied()
+                .filter(|tool| given.iter().any(|one| one == tool))
+                .collect::<Vec<_>>()
+        };
+        let sheets = ["farik_read_sheet", "farik_write_sheet"];
+        let not_for_it = [
+            "farik_read_costs",
+            "farik_exec",
+            "farik_git_commit",
+            "farik_git_push",
+        ];
+
+        // Its task's implement session reads and writes workbooks, and is given none of the
+        // costs, the shell, or git: the costs stay the Finance Specialist's (the founder's answer).
+        assert_eq!(
+            offered(
+                "proc",
+                SessionPurpose::Implement,
+                Some(&procurement),
+                &sheets
+            ),
+            sheets
+        );
+        assert_eq!(
+            offered(
+                "proc",
+                SessionPurpose::Implement,
+                Some(&procurement),
+                &not_for_it
+            ),
+            Vec::<&str>::new()
+        );
+        // Out of a task it reads and does not write; the costs are not given there either.
+        for (what, purpose, about) in [
+            ("a chat", SessionPurpose::Chat, None),
+            (
+                "an implement session about no task",
+                SessionPurpose::Implement,
+                None,
+            ),
+        ] {
+            assert_eq!(
+                offered("proc", purpose, about, &sheets),
+                ["farik_read_sheet"],
+                "{what}"
+            );
+            assert_eq!(
+                offered("proc", purpose, about, &not_for_it),
+                Vec::<&str>::new(),
+                "{what}"
+            );
+        }
+        // The Product Manager reviewing it reads what it wrote, and writes nothing; a Developer
+        // is given neither.
+        assert_eq!(
+            offered("pm", SessionPurpose::Verify, Some(&procurement), &sheets),
+            ["farik_read_sheet"]
+        );
+        for (who, purpose) in [
+            ("dev-a", SessionPurpose::Implement),
+            ("pm", SessionPurpose::Chat),
+        ] {
+            assert_eq!(
+                offered(who, purpose, Some(&procurement), &sheets),
+                Vec::<&str>::new(),
+                "{who} {purpose:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_the_sheet_tools_to_a_role_with_a_folder_alone() {
         use crate::tools::fixtures::{with_the_finance_specialist, with_the_marketing_specialist};
         let harness = Harness::new("session-sheet-offer", |wire| {
             with_the_finance_specialist(wire);

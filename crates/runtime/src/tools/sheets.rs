@@ -1,7 +1,9 @@
-//! The Finance Specialist's spreadsheet tools (`docs/SPEC.md` 6.6): `farik_write_sheet` writes a
-//! whole `.xlsx` workbook in the role's private folder, `.farik/local/finance/`, keeping every
-//! previous version and refusing any formula that could reach outside the workbook;
-//! `farik_read_sheet` reads one, for the role and for the reviewer of its task.
+//! The spreadsheet tools of the roles that keep a private folder (`docs/SPEC.md` 6.6, 6.10), the
+//! Finance Specialist and the Procurement Specialist: `farik_write_sheet` writes a whole `.xlsx`
+//! workbook in the role's own folder, `.farik/local/finance/` or `.farik/local/procurement/`,
+//! keeping every previous version and refusing any formula that could reach outside the workbook;
+//! `farik_read_sheet` reads one, for the role and for the reviewer of its task, and lets the
+//! Finance Specialist read the procurement register.
 
 use std::collections::BTreeSet;
 use std::fs::{self, DirBuilder, File, OpenOptions};
@@ -600,15 +602,14 @@ pub(crate) fn write_workbook(
     })
 }
 
-/// The folder a `farik_write_sheet` call writes in: the Finance Specialist's own, in its implement
-/// session of a task it is the assignee of, so that a chat or a conversation never writes the
-/// books and a task's baseline holds (spec 6.6).
+/// The folder a `farik_write_sheet` call writes in: that of the caller's own role, in its
+/// implement session of a task it is the assignee of, so that a chat or a conversation never
+/// writes a role's files and a task's baseline holds (spec 6.6, 6.10).
 fn folder_to_write(call: &Call<'_>) -> Result<&'static str, ToolError> {
     let refuse = |why: &str| sheet_refused(format!("only {why}"));
-    let folder = (call.role() == Role::FinanceSpecialist)
-        .then(|| private_folder(Role::FinanceSpecialist))
-        .flatten()
-        .ok_or_else(|| refuse("the Finance Specialist writes a workbook"))?;
+    let folder = private_folder(call.role()).ok_or_else(|| {
+        refuse("the Finance Specialist and the Procurement Specialist write a workbook")
+    })?;
     let task = match &call.context.task_id {
         Some(task) if call.context.purpose == SessionPurpose::Implement => task,
         _ => {
@@ -652,6 +653,11 @@ pub(super) fn write_sheet(call: &Call<'_>, input: &WriteSheetInput) -> Result<Va
 pub(crate) struct ReadSheetInput {
     /// The workbook's path inside your folder, as for `farik_write_sheet`.
     path: String,
+    /// Only the Finance Specialist, and only with `path` `vendors.xlsx`: read the procurement
+    /// register, `procurement`, in place of a workbook of your own folder. Leave it out to read
+    /// your own folder.
+    #[serde(default)]
+    folder: Option<OtherFolder>,
     /// The one sheet to read; without it, every sheet.
     #[serde(default)]
     sheet: Option<String>,
@@ -667,6 +673,17 @@ pub(crate) struct ReadSheetInput {
     baseline: bool,
 }
 
+/// A folder other than the caller's own that `farik_read_sheet` may read (6.10).
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum OtherFolder {
+    /// The Procurement Specialist's folder: its register, `vendors.xlsx`, and nothing else in it.
+    Procurement,
+}
+
+/// The one workbook of the procurement folder the Finance Specialist reads.
+const REGISTER: &str = "vendors.xlsx";
+
 /// The rows a read gives of each sheet when it is not told how many.
 const DEFAULT_READ_ROWS: u32 = 200;
 /// The most rows a read gives of each sheet.
@@ -677,13 +694,21 @@ const SHEETS_CAP: usize = 256 * 1024;
 /// about it, which can quote the file) a refusal quotes.
 const NAMES_CAP: usize = 2 * 1024;
 
-/// The folder a `farik_read_sheet` call reads in (spec 6.6): a Finance Specialist's own, in any
-/// session; and, in a verify session about a task whose assignee's role has a private folder, that
+/// The folder a `farik_read_sheet` call reads in (spec 6.6, 6.10): that of the caller's own role,
+/// in any session; the procurement folder, for the Finance Specialist alone, when `other` asks for
+/// it; and, in a verify session about a task whose assignee's role has a private folder, that
 /// folder, for the task's reviewer and for the Product Manager, who accepts the task.
-fn folder_to_read(call: &Call<'_>) -> Result<&'static str, ToolError> {
-    if let Some(folder) =
-        private_folder(call.role()).filter(|_| call.role() == Role::FinanceSpecialist)
-    {
+fn folder_to_read(call: &Call<'_>, other: Option<OtherFolder>) -> Result<&'static str, ToolError> {
+    if other == Some(OtherFolder::Procurement) {
+        return match private_folder(Role::ProcurementSpecialist) {
+            Some(folder) if call.role() == Role::FinanceSpecialist => Ok(folder),
+            _ => Err(sheet_refused(
+                "only the Finance Specialist names the procurement folder, to read its register; \
+                 leave `folder` out to read your own, or the folder of the task you review",
+            )),
+        };
+    }
+    if let Some(folder) = private_folder(call.role()) {
         return Ok(folder);
     }
     if let Some(task) = &call.context.task_id
@@ -698,8 +723,8 @@ fn folder_to_read(call: &Call<'_>) -> Result<&'static str, ToolError> {
         }
     }
     Err(sheet_refused(
-        "only the Finance Specialist reads a workbook, and the reviewer of a task of a role with a \
-         private folder, and the Product Manager who accepts it, in a verify session about it",
+        "only a role with a private folder reads a workbook, and the reviewer of a task of such a \
+         role, and the Product Manager who accepts it, in a verify session about it",
     ))
 }
 
@@ -843,7 +868,26 @@ fn page_of(
 /// one named, and answers them as one untrusted block (8.6): what a workbook holds is the user's
 /// and the services', never an instruction.
 pub(super) fn read_sheet(call: &Call<'_>, input: &ReadSheetInput) -> Result<Value, ToolError> {
-    let folder = folder_to_read(call)?;
+    let folder = folder_to_read(call, input.folder)?;
+    if input.folder.is_some() {
+        // The register is the one thing a role reads of another's folder, as it is now.
+        if input.baseline {
+            return Err(sheet_refused(
+                "`baseline` reads the copy taken for a task in your own folder, and not the \
+                 procurement folder's",
+            ));
+        }
+        if input.path != REGISTER {
+            return Err(refused(
+                "private_path_refused",
+                format!(
+                    "{:?} is not the register: the procurement folder's {REGISTER} is the one \
+                     workbook there that you read",
+                    input.path
+                ),
+            ));
+        }
+    }
     let folder = if input.baseline {
         baseline_folder(call, folder)?
     } else {
@@ -911,17 +955,41 @@ mod tests {
     use crate::tools::ToolError;
     use crate::tools::fixtures::{
         TestProject, a_team_of_three, run, with_the_finance_specialist,
-        with_the_marketing_specialist,
+        with_the_marketing_specialist, with_the_procurement_specialist,
     };
 
     /// A project with the Finance Specialist `fin`, whose task FRK-1 is in progress, and a
     /// Developer's task FRK-2; and the Marketing Specialist `kai`.
     fn a_finance_project(name: &str) -> TestProject {
+        a_project(name, false)
+    }
+
+    /// `a_finance_project`, and the Procurement Specialist `proc` too, whose task FRK-3 is in
+    /// progress, reviewed by `pm`.
+    fn a_procurement_project(name: &str) -> TestProject {
+        let project = a_project(name, true);
+        project.filed_with("FRK-3", "assigned", "task", None, |wire| {
+            wire["assignee_role"] = json!("procurement_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+        });
+        project.moved(
+            "FRK-3",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "proc", "reviewer": "pm" }),
+        );
+        project
+    }
+
+    fn a_project(name: &str, procurement: bool) -> TestProject {
         let project = TestProject::new(
             name,
             &a_team_of_three(|wire| {
                 with_the_finance_specialist(wire);
                 with_the_marketing_specialist(wire);
+                if procurement {
+                    with_the_procurement_specialist(wire);
+                }
             }),
         );
         project.filed_with("FRK-1", "assigned", "task", None, |wire| {
@@ -947,6 +1015,16 @@ mod tests {
     /// The Finance Specialist's folder.
     fn folder(project: &TestProject) -> PathBuf {
         project.repo.path.join(".farik/local/finance")
+    }
+
+    /// The Procurement Specialist's folder.
+    fn procurement_folder(project: &TestProject) -> PathBuf {
+        project.repo.path.join(".farik/local/procurement")
+    }
+
+    /// `farik_write_sheet` as `proc` in its implement session of FRK-3.
+    fn write_register(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
+        project.call("proc", Some("FRK-3"), "farik_write_sheet", input.clone())
     }
 
     /// `farik_write_sheet` as `fin` in its implement session of FRK-1.
@@ -2319,6 +2397,202 @@ mod tests {
             json!({ "path": ".history/FRK-1/books.xlsx", "baseline": true }),
         ));
         assert!(reason.starts_with("private_path_refused: "), "{reason}");
+    }
+
+    /// The register, as the Procurement Specialist writes it: one sheet of two sellers.
+    fn the_register() -> Value {
+        json!({ "path": "vendors.xlsx", "sheets": [
+            sheet("Vendors", &["vendor", "price"], &json!([["Acme", 12], ["Bolt", 9]]))
+        ] })
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn procurement_writes_its_register() {
+        let project = a_procurement_project("sheets-register");
+
+        let answer = write_register(&project, &the_register()).expect("the register is written");
+
+        assert_eq!(answer["path"], "vendors.xlsx");
+        assert_eq!(answer["replaced"], false);
+        assert!(procurement_folder(&project).join("vendors.xlsx").is_file());
+        assert_eq!(files_under(&folder(&project)), Vec::<String>::new());
+        let read = project
+            .call(
+                "proc",
+                Some("FRK-3"),
+                "farik_read_sheet",
+                json!({ "path": "vendors.xlsx" }),
+            )
+            .expect("it reads back");
+        assert_eq!(pages(&read)[0]["rows"][1], json!(["Acme", 12]));
+        // A second write keeps the first beside it, in the procurement folder's own history.
+        write_register(&project, &the_register()).expect("the register is written again");
+        let kept = files_under(&procurement_folder(&project));
+        assert_eq!(kept.len(), 2, "{kept:?}");
+        assert!(kept.contains(&"vendors.xlsx".to_string()), "{kept:?}");
+        assert!(
+            kept.iter().any(|path| path
+                .strip_prefix(".history/vendors.xlsx.")
+                .is_some_and(|rest| rest.strip_suffix(".xlsx").is_some())),
+            "{kept:?}"
+        );
+        // Its chat does not write, as the Finance Specialist's does not.
+        let mut chat = project.context("proc", None);
+        chat.purpose = SessionPurpose::Chat;
+        let reason = refusal_of(run(&chat, "farik_write_sheet", the_register()));
+        assert!(reason.starts_with("sheet_refused: "), "{reason}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn finance_reads_the_register_and_nothing_else_there() {
+        let project = a_procurement_project("sheets-finance-register");
+        write_register(&project, &the_register()).expect("the register is written");
+        write_register(
+            &project,
+            &json!({ "path": "orders/PO-1.xlsx", "sheets": [sheet("Order", &[], &json!([["a"]]))] }),
+        )
+        .expect("an order is written");
+        let evaluations = procurement_folder(&project).join("evaluations");
+        fs::create_dir_all(&evaluations).expect("the folder");
+        fs::write(evaluations.join("x.md"), "a comparison").expect("a note");
+        write(&project, &one_sheet("books.xlsx", &json!([["rent", 2]]))).expect("the books");
+        let finance = |input: Value| project.call("fin", Some("FRK-1"), "farik_read_sheet", input);
+
+        let answer = finance(json!({ "folder": "procurement", "path": "vendors.xlsx" }))
+            .expect("the register is read");
+        assert_eq!(pages(&answer)[0]["rows"][1], json!(["Acme", 12]));
+        // Nothing else there: a note, another workbook, a path that climbs, the history.
+        for path in [
+            "evaluations/x.md",
+            "orders/PO-1.xlsx",
+            "other.xlsx",
+            "../finance/books.xlsx",
+            ".history/vendors.xlsx",
+            "Vendors.xlsx",
+        ] {
+            let reason = refusal_of(finance(json!({ "folder": "procurement", "path": path })));
+            assert!(
+                reason.starts_with("private_path_refused: "),
+                "{path}: {reason}"
+            );
+        }
+        // No copy of a task is read there, and without `folder` its own folder is read still.
+        let reason = refusal_of(finance(
+            json!({ "folder": "procurement", "path": "vendors.xlsx", "baseline": true }),
+        ));
+        assert!(reason.starts_with("sheet_refused: "), "{reason}");
+        let books = finance(json!({ "path": "books.xlsx" })).expect("its own books");
+        assert_eq!(pages(&books)[0]["rows"][1], json!(["rent", 2]));
+        // Nothing is written there: `farik_write_sheet` takes no folder, and what it writes lands
+        // in the finance folder.
+        let mut input = the_register();
+        input["folder"] = json!("procurement");
+        let refused = project.call("fin", Some("FRK-1"), "farik_write_sheet", input);
+        assert!(
+            matches!(&refused, Err(ToolError::InvalidInput { .. })),
+            "{refused:?}"
+        );
+        let before = files_under(&procurement_folder(&project));
+        write(&project, &the_register()).expect("the finance folder's own register");
+        assert_eq!(files_under(&procurement_folder(&project)), before);
+        assert!(folder(&project).join("vendors.xlsx").is_file());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn other_roles_never_reach_the_register() {
+        let project = a_procurement_project("sheets-register-closed");
+        write_register(&project, &the_register()).expect("the register is written");
+        let context = |who: &str, task: Option<&str>, purpose: SessionPurpose| {
+            let mut context = project.context(who, task);
+            context.purpose = purpose;
+            context
+        };
+        let asking = json!({ "folder": "procurement", "path": "vendors.xlsx" });
+        for (who, context) in [
+            (
+                "the Product Manager",
+                context("pm", Some("FRK-1"), SessionPurpose::Implement),
+            ),
+            (
+                "a Developer",
+                context("dev-a", Some("FRK-2"), SessionPurpose::Implement),
+            ),
+            (
+                "the Marketing Specialist",
+                context("kai", None, SessionPurpose::Chat),
+            ),
+            (
+                "the Procurement Specialist, whose own folder it reads without asking",
+                context("proc", Some("FRK-3"), SessionPurpose::Implement),
+            ),
+            (
+                "the Product Manager reviewing a procurement task",
+                context("pm", Some("FRK-3"), SessionPurpose::Verify),
+            ),
+            (
+                "the reviewer of a Developer's task",
+                context("dev-b", Some("FRK-2"), SessionPurpose::Verify),
+            ),
+        ] {
+            let reason = refusal_of(run(&context, "farik_read_sheet", asking.clone()));
+            assert!(reason.starts_with("sheet_refused: "), "{who}: {reason}");
+        }
+        // A reviewer's read resolves against the reviewed task's own folder, with no `folder`.
+        let verifying = context("pm", Some("FRK-3"), SessionPurpose::Verify);
+        let answer = run(
+            &verifying,
+            "farik_read_sheet",
+            json!({ "path": "vendors.xlsx" }),
+        )
+        .expect("the reviewer reads the register of the task it reviews");
+        assert_eq!(pages(&answer)[0]["rows"][1], json!(["Acme", 12]));
+        // Another folder than the one `folder` names is no value of it.
+        let finance = project.call(
+            "fin",
+            Some("FRK-1"),
+            "farik_read_sheet",
+            json!({ "folder": "finance", "path": "vendors.xlsx" }),
+        );
+        assert!(
+            matches!(&finance, Err(ToolError::InvalidInput { .. })),
+            "{finance:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_sheet_tools_read_workbooks_alone() {
+        // The procurement folder holds notes, and `private_path` passes one; a sheet tool opens a
+        // workbook alone, so it refuses a note by `workbook_path_fault` before it opens anything.
+        let project = a_procurement_project("sheets-workbooks-alone");
+        let evaluations = procurement_folder(&project).join("evaluations");
+        fs::create_dir_all(&evaluations).expect("the folder");
+        fs::write(evaluations.join("x.md"), "a comparison").expect("a note");
+        let before = files_under(&procurement_folder(&project));
+
+        let reason = refusal_of(write_register(
+            &project,
+            &json!({ "path": "evaluations/x.md", "sheets": [sheet("Vendors", &[], &json!([["a"]]))] }),
+        ));
+        assert!(reason.starts_with("private_path_refused: "), "{reason}");
+        assert!(reason.contains("not a workbook"), "{reason}");
+        assert_eq!(files_under(&procurement_folder(&project)), before);
+        assert_eq!(
+            fs::read_to_string(evaluations.join("x.md")).ok().as_deref(),
+            Some("a comparison"),
+            "the note is as it was"
+        );
+        let reason = refusal_of(project.call(
+            "proc",
+            Some("FRK-3"),
+            "farik_read_sheet",
+            json!({ "path": "evaluations/x.md" }),
+        ));
+        assert!(reason.starts_with("private_path_refused: "), "{reason}");
+        assert!(reason.contains("not a workbook"), "{reason}");
     }
 
     #[test]

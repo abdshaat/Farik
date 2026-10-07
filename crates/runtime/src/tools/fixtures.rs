@@ -69,6 +69,14 @@ pub(crate) fn with_the_finance_specialist(wire: &mut Value) {
         .push(an_agent_wire("fin", "finance_specialist"));
 }
 
+/// Adds the Procurement Specialist `proc` to a team's wire.
+pub(crate) fn with_the_procurement_specialist(wire: &mut Value) {
+    wire["agents"]
+        .as_array_mut()
+        .expect("a list of agents")
+        .push(an_agent_wire("proc", "procurement_specialist"));
+}
+
 /// The Designer `iris` and the Architect `ada` added, both with the Playwright connector on,
 /// and a preview set.
 pub(crate) fn browsing(wire: &mut Value) {
