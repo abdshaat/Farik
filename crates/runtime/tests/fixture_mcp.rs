@@ -154,8 +154,8 @@ async fn the_server_sees_its_keys_and_not_the_model_key() {
     );
 }
 
-/// An HTTP MCP server. Its tool `whoami` lists with the `Authorization` header it was listed with
-/// as its description; the tools below answer when called: `structured` structured content that
+/// An HTTP MCP server. Its tool `whoami` lists with the `Authorization` and `X-MCP-Readonly`
+/// headers it was listed with as its description; the tools below answer when called: `structured` structured content that
 /// differs from its text, `json_text` the text `{"b":2}`, `plain_text` the text `hello`,
 /// `long_error` an error result of 2,000 characters, `rpc_error` a JSON-RPC error of 2,000
 /// characters, `authorization` the `Authorization` header it was called with, and `sleeps` a call
@@ -176,14 +176,19 @@ const FIXTURE_TOOLS: [&str; 8] = [
     "sleeps",
 ];
 
-fn authorization_of(context: &RequestContext<RoleServer>) -> String {
+/// The header `name` the request in `context` carried, or `none`.
+fn header_of(context: &RequestContext<RoleServer>, name: &str) -> String {
     context
         .extensions
         .get::<Parts>()
-        .and_then(|parts| parts.headers.get("authorization"))
+        .and_then(|parts| parts.headers.get(name))
         .and_then(|value| value.to_str().ok())
         .unwrap_or("none")
         .to_string()
+}
+
+fn authorization_of(context: &RequestContext<RoleServer>) -> String {
+    header_of(context, "authorization")
 }
 
 impl ServerHandler for HttpFixture {
@@ -198,7 +203,12 @@ impl ServerHandler for HttpFixture {
         _request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        let seen = authorization_of(&context);
+        // `whoami` lists with the two headers a narrowing server like GitHub's reads at listing.
+        let seen = format!(
+            "Authorization: {}; X-MCP-Readonly: {}",
+            authorization_of(&context),
+            header_of(&context, "x-mcp-readonly")
+        );
         std::future::ready(Ok(ListToolsResult::with_all_items(
             FIXTURE_TOOLS
                 .iter()
@@ -299,10 +309,11 @@ async fn fills_http_headers_from_keys() {
         name: "fixture".to_string(),
         transport: CustomTransport::Http {
             url: http_server().await,
-            headers: BTreeMap::from([(
-                "Authorization".to_string(),
-                "Bearer {API_KEY}".to_string(),
-            )]),
+            headers: BTreeMap::from([
+                ("Authorization".to_string(), "Bearer {API_KEY}".to_string()),
+                // A header that names no key, which a narrowing server reads at listing.
+                ("X-MCP-Readonly".to_string(), "true".to_string()),
+            ]),
             oauth: None,
         },
         credential_keys: vec!["API_KEY".to_string()],
@@ -319,7 +330,10 @@ async fn fills_http_headers_from_keys() {
     )
     .await
     .expect("the tools are listed");
-    assert_eq!(tool(&tools, "whoami").description, "Bearer k");
+    assert_eq!(
+        tool(&tools, "whoami").description,
+        "Authorization: Bearer k; X-MCP-Readonly: true"
+    );
 
     // A key the header names, with no value kept for it, is refused before anything is sent.
     assert_eq!(
