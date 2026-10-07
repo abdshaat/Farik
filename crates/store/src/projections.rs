@@ -449,7 +449,8 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                  (SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_records \
                                   WHERE cost_records.task_id = task_projections.task_id), \
                                  assignee_id, reviewer_id, iteration, awaiting_integration, \
-                                 (open_questions > 0 OR open_approvals > 0 OR open_plans > 0), \
+                                 (open_questions > 0 OR open_approvals > 0 OR open_plans > 0 \
+                                  OR open_sites > 0), \
                                  awaiting_approval, verifications, \
                                  rejections, interventions, sprint, \
                                  left_for_the_backlog \
@@ -655,7 +656,10 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::ToolApprovalRefused(_)
         | EventBody::MarketingPlanProposed(_)
         | EventBody::MarketingPlanApproved(_)
-        | EventBody::MarketingPlanReturned(_) => apply_waiting(transaction, &id, &event.body, seq),
+        | EventBody::MarketingPlanReturned(_)
+        | EventBody::SiteRequested(_)
+        | EventBody::SiteApproved(_)
+        | EventBody::SiteDeclined(_) => apply_waiting(transaction, &id, &event.body, seq),
         EventBody::DriftDetected(_)
         | EventBody::PullRequestOpened(_)
         | EventBody::ProjectScanned(_)
@@ -713,7 +717,9 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::SocialPostStopped(_)
         | EventBody::SocialPostMissed(_)
         | EventBody::SocialPostFailed(_)
-        | EventBody::MarketingCampaignCreated(_) => Ok(()),
+        | EventBody::MarketingCampaignCreated(_)
+        // A removal is about no task, and a site is folded from the log when it is asked for.
+        | EventBody::SiteRemoved(_) => Ok(()),
     }
 }
 
@@ -769,8 +775,8 @@ fn apply_move(
 }
 
 /// The columns that say what the board waits on the human for: an open question (5.7), an open
-/// approval of a connector's call (ADR 0031), an open marketing plan (ADR 0042), and an approval
-/// of a contract (5.16 item 2).
+/// approval of a connector's call (ADR 0031), an open marketing plan (ADR 0042), an open request
+/// for a site (ADR 0039), and an approval of a contract (5.16 item 2).
 fn apply_waiting(
     transaction: &Transaction<'_>,
     id: &str,
@@ -813,6 +819,25 @@ fn apply_waiting(
         EventBody::MarketingPlanApproved(_) | EventBody::MarketingPlanReturned(_) => update(
             transaction,
             "UPDATE task_projections SET open_plans = max(0, open_plans - 1), updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::SiteRequested(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_sites = open_sites + 1, updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        // A site the owner added unasked answers no request, so it lowers nothing.
+        EventBody::SiteApproved(body) if body.request.is_some() => update(
+            transaction,
+            "UPDATE task_projections SET open_sites = max(0, open_sites - 1), updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::SiteDeclined(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_sites = max(0, open_sites - 1), updated_seq = ?2
              WHERE task_id = ?1",
             (id, seq),
         ),
@@ -1401,7 +1426,7 @@ mod tests {
         );
         assert_eq!(
             migrations::known_versions(),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
         );
     }
 
@@ -1850,6 +1875,75 @@ mod tests {
             &log,
             &projections,
             &a_new_event(EventKind::MarketingPlanEnded),
+        );
+        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+    }
+
+    #[test]
+    fn a_site_request_makes_its_task_wait() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        let first = record(
+            &log,
+            &projections,
+            &about(EventKind::SiteRequested, "FRK-1"),
+        );
+        assert!(
+            row_of(&projections, "FRK-1").waiting_on_human,
+            "the asking task waits on the owner"
+        );
+        assert!(
+            !row_of(&projections, "FRK-2").waiting_on_human,
+            "no other task does"
+        );
+        let second = record(
+            &log,
+            &projections,
+            &about(EventKind::SiteRequested, "FRK-1"),
+        );
+
+        // An approval that answers a request lowers the count, as a decline does.
+        let approves = |request: &FarikEvent| {
+            with_body(
+                EventKind::SiteApproved,
+                "FRK-1",
+                json!({ "host": "shop.example", "request": request.envelope.seq }),
+            )
+        };
+        let declines = |request: &FarikEvent| {
+            with_body(
+                EventKind::SiteDeclined,
+                "FRK-1",
+                json!({ "request": request.envelope.seq, "host": "shop.example", "note": "" }),
+            )
+        };
+        record(&log, &projections, &approves(&first));
+        assert!(
+            row_of(&projections, "FRK-1").waiting_on_human,
+            "one request still waits"
+        );
+        // A site the owner added unasked answers no request and lowers nothing.
+        record(
+            &log,
+            &projections,
+            &with_body(
+                EventKind::SiteApproved,
+                "FRK-1",
+                json!({ "host": "added.example" }),
+            ),
+        );
+        record(&log, &projections, &a_new_event(EventKind::SiteRemoved));
+        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+        record(&log, &projections, &declines(&second));
+        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+
+        // A decision with nothing waiting never takes the count below nothing.
+        record(&log, &projections, &declines(&second));
+        record(
+            &log,
+            &projections,
+            &about(EventKind::SiteRequested, "FRK-1"),
         );
         assert!(row_of(&projections, "FRK-1").waiting_on_human);
     }

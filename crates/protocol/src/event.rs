@@ -49,6 +49,8 @@ pub use crate::generated::event::{
 };
 /// The channel's vocabularies, named for what they are rather than for the body they sit in.
 pub use crate::generated::event::{MessagePostedBodyKind as MessageKind, Thread};
+/// The bodies of the four `site.` kinds: an approval and a removal share one.
+pub use crate::generated::event::{SiteDeclinedBody, SiteHostBody, SiteRequestedBody};
 /// The bodies of the six `social_post.` kinds, with the vocabularies they repeat.
 pub use crate::generated::event::{
     SocialPostChannel, SocialPostDetails, SocialPostFailedBody, SocialPostMedia,
@@ -184,6 +186,9 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::SocialPostMissed => "socialPostMissedBody",
         EventKind::SocialPostFailed => "socialPostFailedBody",
         EventKind::MarketingCampaignCreated => "marketingCampaignCreatedBody",
+        EventKind::SiteRequested => "siteRequestedBody",
+        EventKind::SiteApproved | EventKind::SiteRemoved => "siteHostBody",
+        EventKind::SiteDeclined => "siteDeclinedBody",
     }
 }
 
@@ -229,6 +234,8 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::MarketingPlanReturned
             | EventKind::SocialPostScheduled
             | EventKind::SocialPostRequested
+            | EventKind::SiteRequested
+            | EventKind::SiteDeclined
     )
 }
 
@@ -250,7 +257,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// three `marketing_plan.` kinds name no one in the body: the owner decided or ended a plan, or
 /// Farik ended one by its dates, and their envelope names no agent and no session. The six
 /// `social_post.` kinds name no one in the body either: the agent that wrote a post is on the
-/// envelope of `scheduled` and `requested`, and the other four are the owner's or Farik's.
+/// envelope of `scheduled` and `requested`, and the other four are the owner's or Farik's. Nor
+/// do the four `site.` kinds: the agent that asked is on the envelope of `site.requested`, and the
+/// other three are the owner's.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -324,13 +333,17 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::SocialPostStopped(_)
         | EventBody::SocialPostMissed(_)
         | EventBody::SocialPostFailed(_)
-        | EventBody::MarketingCampaignCreated(_) => None,
+        | EventBody::MarketingCampaignCreated(_)
+        | EventBody::SiteRequested(_)
+        | EventBody::SiteApproved(_)
+        | EventBody::SiteDeclined(_)
+        | EventBody::SiteRemoved(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 72] = [
+pub const EVERY_KIND: [EventKind; 76] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -403,6 +416,10 @@ pub const EVERY_KIND: [EventKind; 72] = [
     EventKind::SocialPostMissed,
     EventKind::SocialPostFailed,
     EventKind::MarketingCampaignCreated,
+    EventKind::SiteRequested,
+    EventKind::SiteApproved,
+    EventKind::SiteDeclined,
+    EventKind::SiteRemoved,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -659,6 +676,18 @@ pub enum EventBody {
     /// Farik made a Google Ads campaign, paused, for a plan campaign of the active plan.
     #[serde(rename = "marketing_campaign.created")]
     MarketingCampaignCreated(MarketingCampaignCreatedBody),
+    /// The Procurement Specialist asked to read a site that is not approved.
+    #[serde(rename = "site.requested")]
+    SiteRequested(SiteRequestedBody),
+    /// The owner allowed a site, for a request or unasked.
+    #[serde(rename = "site.approved")]
+    SiteApproved(SiteHostBody),
+    /// The owner did not allow a site an agent asked for.
+    #[serde(rename = "site.declined")]
+    SiteDeclined(SiteDeclinedBody),
+    /// The owner took a site away: one they allowed, or one of Farik's.
+    #[serde(rename = "site.removed")]
+    SiteRemoved(SiteHostBody),
 }
 
 impl EventBody {
@@ -738,6 +767,10 @@ impl EventBody {
             Self::SocialPostMissed(_) => EventKind::SocialPostMissed,
             Self::SocialPostFailed(_) => EventKind::SocialPostFailed,
             Self::MarketingCampaignCreated(_) => EventKind::MarketingCampaignCreated,
+            Self::SiteRequested(_) => EventKind::SiteRequested,
+            Self::SiteApproved(_) => EventKind::SiteApproved,
+            Self::SiteDeclined(_) => EventKind::SiteDeclined,
+            Self::SiteRemoved(_) => EventKind::SiteRemoved,
         }
     }
 }
@@ -1065,7 +1098,7 @@ mod tests {
                 // do design_plan.approved, design_plan.returned and preview.stopped, and
                 // tool_approval.granted and tool_approval.refused; no others do, and a
                 // fixture that made one equal must not hide it.
-                let shared: [&[EventKind]; 4] = [
+                let shared: [&[EventKind]; 5] = [
                     &[
                         EventKind::SkillAdded,
                         EventKind::SkillChanged,
@@ -1081,6 +1114,8 @@ mod tests {
                         EventKind::DesignPlanReturned,
                         EventKind::PreviewStopped,
                     ],
+                    // `{ "host": ... }` alone is both an added site and a removed one.
+                    &[EventKind::SiteApproved, EventKind::SiteRemoved],
                 ];
                 if other == kind
                     || shared
@@ -1696,8 +1731,99 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_every_site_event() {
+        let kinds = [
+            EventKind::SiteRequested,
+            EventKind::SiteApproved,
+            EventKind::SiteDeclined,
+            EventKind::SiteRemoved,
+        ];
+        for kind in kinds {
+            assert!(EVERY_KIND.contains(&kind), "{kind} is counted");
+            let wire = a_full_event_wire(kind);
+            let event = event_from_value(&wire).expect("a valid site event");
+            assert_eq!(event.body.kind(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+        }
+        assert_eq!(EVERY_KIND.len(), 76);
+    }
+
+    #[test]
+    fn a_site_request_and_its_decline_name_their_task() {
+        for kind in [EventKind::SiteRequested, EventKind::SiteDeclined] {
+            let mut wire = an_event_wire(kind);
+            wire.as_object_mut()
+                .expect("an object")
+                .remove("task_id")
+                .expect("a contract-scoped kind carries its task");
+            let errors = refusal(&wire);
+            assert_eq!(errors.len(), 1, "{kind}");
+            assert_eq!(errors[0].path, "/task_id", "{kind}");
+        }
+        for kind in [EventKind::SiteApproved, EventKind::SiteRemoved] {
+            event_from_value(&an_event_wire(kind)).expect("an added or removed site has no task");
+            event_from_value(&a_full_event_wire(kind))
+                .expect("an approval answering a request has one");
+        }
+    }
+
+    #[test]
+    fn holds_a_site_event_to_its_own_shape() {
+        let wire = |kind, body: serde_json::Value| {
+            let mut wire = an_event_wire(kind);
+            wire["body"] = body;
+            wire
+        };
+        // A decline always carries its note, empty when the owner said nothing: `{ request, host }`
+        // alone is also an approval's body, and the schema's choice of bodies must match exactly one.
+        for (kind, body) in [
+            (
+                EventKind::SiteDeclined,
+                json!({ "request": 7, "host": "shop.example" }),
+            ),
+            (
+                EventKind::SiteDeclined,
+                json!({ "request": 7, "host": "shop.example", "note": "x".repeat(601) }),
+            ),
+            (
+                EventKind::SiteRequested,
+                json!({ "host": "shop.example", "url": "https://shop.example/", "why": "" }),
+            ),
+            (
+                EventKind::SiteRequested,
+                json!({ "host": "shop.example", "url": "https://shop.example/", "why": "a\nb" }),
+            ),
+            (
+                EventKind::SiteRequested,
+                json!({ "host": "shop.example", "url": "https://shop.example/", "why": "x".repeat(301) }),
+            ),
+            (
+                EventKind::SiteApproved,
+                json!({ "host": "shop.example", "request": 0 }),
+            ),
+        ] {
+            let errors = refusal(&wire(kind, body.clone()));
+            assert!(!errors.is_empty(), "{kind} {body}");
+            assert!(
+                errors.iter().all(|error| error.path.starts_with("/body")),
+                "{kind} {body}: {errors:?}"
+            );
+        }
+        let declined = event_from_value(&wire(
+            EventKind::SiteDeclined,
+            json!({ "request": 7, "host": "shop.example", "note": "" }),
+        ))
+        .expect("a decline with no words");
+        let EventBody::SiteDeclined(body) = declined.body else {
+            panic!("a site.declined event carries a site.declined body");
+        };
+        assert_eq!(body.request.get(), 7);
+        assert_eq!(body.note.to_string(), "");
+    }
+
+    #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 72);
+        assert_eq!(EVERY_KIND.len(), 76);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

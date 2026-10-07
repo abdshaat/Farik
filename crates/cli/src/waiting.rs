@@ -1,7 +1,7 @@
 //! What waits on the human when a process driving the project ends (`docs/SPEC.md` 5.7): the
 //! questions nobody answered, the contracts awaiting approval, the escalations, the results that
-//! may need the human's acceptance, the tasks waiting to be integrated by hand, and the posts
-//! outside the plan that wait for the owner.
+//! may need the human's acceptance, the tasks waiting to be integrated by hand, the posts outside
+//! the plan that wait for the owner, and the sites the Procurement Specialist asked to read.
 
 use farik_core::team::Team;
 use farik_store::files::ProjectFiles;
@@ -25,6 +25,8 @@ pub(crate) struct Waiting {
     plan: Option<String>,
     /// The number of the post that waits, for a script to act on.
     post: Option<u64>,
+    /// The number of the site request that waits, for a script to act on.
+    request: Option<u64>,
 }
 
 impl Waiting {
@@ -51,6 +53,9 @@ impl Waiting {
         }
         if let Some(post) = self.post {
             item["post"] = json!(post);
+        }
+        if let Some(request) = self.request {
+            item["request"] = json!(request);
         }
         item
     }
@@ -128,6 +133,13 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
                 format!("farik marketing post send {post}, or farik marketing post decline {post}"),
             )
         }
+        WaitingKind::SiteRequest => {
+            let request = item.site.as_ref().map_or(0, |ask| ask.request);
+            (
+                format!("waits: {}", item.line),
+                format!("farik site approve {request}, or farik site decline {request}"),
+            )
+        }
         WaitingKind::Integration => (
             "waits for you to integrate it".to_string(),
             format!("farik integrate {id}"),
@@ -141,6 +153,7 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
         input: item.approval.as_ref().map(|ask| ask.input.clone()),
         plan: item.plan.as_ref().map(|ask| ask.plan.clone()),
         post: item.post.as_ref().map(|ask| ask.post),
+        request: item.site.as_ref().map(|ask| ask.request),
     }
 }
 
@@ -148,7 +161,7 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
 mod tests {
     use chrono::NaiveDate;
     use farik_core::contract::TaskId;
-    use farik_store::waiting::{PlanAsk, PostAsk, Waiting as Listed, WaitingKind};
+    use farik_store::waiting::{PlanAsk, PostAsk, SiteAsk, Waiting as Listed, WaitingKind};
 
     use super::describe;
 
@@ -171,6 +184,22 @@ mod tests {
                 ends_on: NaiveDate::from_ymd_opt(2026, 11, 15).expect("a date"),
             }),
             post: None,
+            site: None,
+        }
+    }
+
+    fn a_site_waiting() -> Listed {
+        Listed {
+            kind: WaitingKind::SiteRequest,
+            line: "Kai asks to read shop.example".to_string(),
+            plan: None,
+            site: Some(SiteAsk {
+                request: 17,
+                host: "shop.example".to_string(),
+                url: "https://shop.example/boxes".to_string(),
+                why: "It sells the boxes.".to_string(),
+            }),
+            ..a_plan_waiting()
         }
     }
 
@@ -233,5 +262,22 @@ mod tests {
             "farik marketing post send 42, or farik marketing post decline 42"
         );
         assert!(json.get("plan").is_none(), "a post names no plan");
+    }
+
+    #[test]
+    fn a_run_says_which_site_request_waits() {
+        let waiting = describe(&a_site_waiting());
+
+        assert_eq!(
+            waiting.lines(),
+            [
+                "FRK-1 waits: Kai asks to read shop.example: farik site approve 17, or farik site decline 17"
+            ]
+        );
+        let json = waiting.json();
+        assert_eq!(json["request"], 17);
+        assert_eq!(json["task_id"], "FRK-1");
+        assert!(json.get("plan").is_none(), "a request names no plan");
+        assert!(describe(&a_post_waiting()).json().get("request").is_none());
     }
 }

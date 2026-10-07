@@ -29,6 +29,8 @@ pub mod reconcile;
 pub mod requests;
 /// What the repository says it is.
 pub mod scan;
+/// The sites the Procurement Specialist may read.
+pub mod sites;
 /// What waits on the human.
 pub mod waiting;
 

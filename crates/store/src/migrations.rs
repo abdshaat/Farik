@@ -14,7 +14,7 @@ struct Migration {
 /// Every migration, in the order they apply. A migration is never edited once it has shipped; a
 /// change to the shape is a new one, so that a database written by an older Farik reaches the same
 /// shape as one made today.
-const MIGRATIONS: [Migration; 13] = [
+const MIGRATIONS: [Migration; 14] = [
     Migration {
         version: 1,
         sql: include_str!("migrations/0001_event_log.sql"),
@@ -66,6 +66,10 @@ const MIGRATIONS: [Migration; 13] = [
     Migration {
         version: 13,
         sql: include_str!("migrations/0013_marketing_plans.sql"),
+    },
+    Migration {
+        version: 14,
+        sql: include_str!("migrations/0014_site_requests.sql"),
     },
 ];
 

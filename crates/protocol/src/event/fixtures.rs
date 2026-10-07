@@ -167,6 +167,18 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::SocialPostStopped
         | EventKind::SocialPostMissed
         | EventKind::SocialPostFailed => a_social_post_body_wire(kind),
+        EventKind::SiteRequested => json!({
+            "host": "shop.example",
+            "url": "https://www.shop.example/boxes?size=12x9x6",
+            "why": "It sells the corrugated boxes the task asks about."
+        }),
+        EventKind::SiteApproved => json!({ "host": "shop.example", "request": 7 }),
+        EventKind::SiteDeclined => json!({
+            "request": 7,
+            "host": "shop.example",
+            "note": "We do not buy from them."
+        }),
+        EventKind::SiteRemoved => json!({ "host": "shop.example" }),
         EventKind::MarketingCampaignCreated => json!({
             "plan": "MP-1",
             "key": "search-launch",
