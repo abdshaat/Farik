@@ -834,7 +834,7 @@ pub struct NewCampaign<'a> {
     pub input: &'a CampaignInput,
     /// The plan's id, `MP-<n>`.
     pub plan: &'a str,
-    /// The first day, a UTC date no earlier than tomorrow.
+    /// The first day, a UTC date no earlier than two days ahead.
     pub start: NaiveDate,
     /// The last day.
     pub ends_on: NaiveDate,

@@ -781,11 +781,13 @@ pub struct CreatedCampaign {
     pub kind: BudgetKind,
 }
 
-/// The first day a plan campaign made on `today` can start: its own first day, or tomorrow when
-/// that is not ahead, so that no time zone makes it the past. Every day is a UTC date.
+/// The first day a plan campaign made on `today` can start: its own first day, or two days ahead
+/// when that is not later, so that no time zone makes it the past: in a zone east of UTC the
+/// account's own date can be a day ahead of the UTC date, so tomorrow's UTC date can be its today,
+/// and a start at 00:00:00 that day is already past. Every day is a UTC date.
 #[must_use]
 pub fn first_day(campaign: &PlanCampaign, today: NaiveDate) -> NaiveDate {
-    campaign.starts_on.max(today + Duration::days(1))
+    campaign.starts_on.max(today + Duration::days(2))
 }
 
 /// The budget Google keeps for a plan campaign made on `today`, and its amount (`docs/SPEC.md`
@@ -1951,48 +1953,60 @@ mod tests {
 
     #[test]
     fn a_short_or_long_campaign_takes_a_daily_budget() {
-        // From tomorrow to the last day, both included: 2 and 91 days are daily, 3 and 90 total.
+        // From two days ahead (2026-11-04) to the last day, both included: 2 and 91 days are
+        // daily, 3 and 90 total.
         assert_eq!(
-            budget_of_a_run(2, "2026-11-03"),
+            budget_of_a_run(2, "2026-11-04"),
             (BudgetKind::Daily, amount(15_000))
         );
         assert_eq!(
-            budget_of_a_run(3, "2026-11-03"),
+            budget_of_a_run(3, "2026-11-04"),
             (BudgetKind::Total, amount(30_000))
         );
         assert_eq!(
-            budget_of_a_run(90, "2026-11-03"),
+            budget_of_a_run(90, "2026-11-04"),
             (BudgetKind::Total, amount(30_000))
         );
         // 300.00 over 91 days is 3.2967: rounded down to the hundredth.
         assert_eq!(
-            budget_of_a_run(91, "2026-11-03"),
+            budget_of_a_run(91, "2026-11-04"),
             (BudgetKind::Daily, amount(329))
         );
         // A one-day run is a daily budget of all of it, never a division by nothing.
         assert_eq!(
-            budget_of_a_run(1, "2026-11-03"),
+            budget_of_a_run(1, "2026-11-04"),
             (BudgetKind::Daily, amount(30_000))
         );
 
-        // A campaign that starts today starts tomorrow, and is counted from there: three days from
-        // its own first day are two from tomorrow, so daily; four are three, so total.
+        // A campaign that starts today starts two days ahead, and is counted from there: four
+        // days from its own first day are two from the 4th, so daily; five are three, so total.
         assert_eq!(
-            budget_of_a_run(3, "2026-11-02"),
+            budget_of_a_run(4, "2026-11-02"),
             (BudgetKind::Daily, amount(15_000))
         );
         assert_eq!(
-            budget_of_a_run(4, "2026-11-02"),
+            budget_of_a_run(5, "2026-11-02"),
             (BudgetKind::Total, amount(30_000))
         );
-        // One that began before today is counted from tomorrow too.
+        // One that starts tomorrow starts two days ahead too: three days from the 3rd are two
+        // from the 4th, so daily; four are three, so total.
+        assert_eq!(
+            budget_of_a_run(3, "2026-11-03"),
+            (BudgetKind::Daily, amount(15_000))
+        );
+        assert_eq!(
+            budget_of_a_run(4, "2026-11-03"),
+            (BudgetKind::Total, amount(30_000))
+        );
+        // One that began before today is counted from two days ahead too: it ended on the 29th of
+        // October, before that, so its run counts as one day, a daily budget of all of it.
         assert_eq!(
             budget_of_a_run(10, "2026-10-20"),
             (BudgetKind::Daily, amount(30_000))
         );
 
         // What earlier versions of it spent comes off, never below nothing.
-        let campaign = a_campaign(30_000, "2026-11-03", "2026-12-02");
+        let campaign = a_campaign(30_000, "2026-11-04", "2026-12-03");
         assert_eq!(
             campaign_budget(&campaign, "USD", amount(6_000), today()),
             (BudgetKind::Total, amount(24_000))
@@ -2001,7 +2015,7 @@ mod tests {
             campaign_budget(&campaign, "USD", amount(40_000), today()),
             (BudgetKind::Total, amount(0))
         );
-        let short = a_campaign(30_000, "2026-11-03", "2026-11-04");
+        let short = a_campaign(30_000, "2026-11-04", "2026-11-05");
         assert_eq!(
             campaign_budget(&short, "USD", amount(6_000), today()),
             (BudgetKind::Daily, amount(12_000))
@@ -2009,12 +2023,12 @@ mod tests {
 
         // In a currency with no minor unit a budget is whole units, rounded down.
         assert!(ZERO_DECIMAL.contains(&"JPY") && !ZERO_DECIMAL.contains(&"USD"));
-        let yen = a_campaign(100_050, "2026-11-03", "2026-12-02");
+        let yen = a_campaign(100_050, "2026-11-04", "2026-12-03");
         assert_eq!(
             campaign_budget(&yen, "JPY", amount(0), today()),
             (BudgetKind::Total, amount(100_000))
         );
-        let long_yen = a_campaign(100_000, "2026-11-03", "2027-02-01");
+        let long_yen = a_campaign(100_000, "2026-11-04", "2027-02-02");
         assert_eq!(
             campaign_budget(&long_yen, "JPY", amount(0), today()),
             (BudgetKind::Daily, amount(1_000)),
@@ -2029,8 +2043,8 @@ mod tests {
     /// The Google Ads account of `an_ads_plan`.
     const ACCOUNT: &str = "123-456-7890";
 
-    /// A plan whose two campaigns run 30 days from tomorrow, `search-a` on 500.00 and `search-b`
-    /// on 400.00 of the plan's 1000.00 for Google Ads.
+    /// A plan whose two campaigns run from 2026-11-03 to 2026-12-02, `search-a` on 500.00 and
+    /// `search-b` on 400.00 of the plan's 1000.00 for Google Ads.
     fn an_ads_plan() -> PlanProposal {
         let mut plan = a_proposal();
         plan.google_ads = amount(100_000);
@@ -2211,14 +2225,15 @@ mod tests {
             .retain(|made| !(made.key == "search-a" && made.plan == "MP-1"));
         outside.passes(&create("search-a"));
 
-        // A create whose last day is before the first day it could start: starting tomorrow.
+        // A create whose last day is before the first day it could start: starting two days
+        // ahead, so on the 30th it can start on the 2nd, the last day, and on the 1st it cannot.
         let mut late = Ads::new();
         late.created.clear();
-        late.today = "2026-12-01";
+        late.today = "2026-11-30";
         late.passes(&create("search-b"));
-        late.today = "2026-12-02";
+        late.today = "2026-12-01";
         late.refuses(&create("search-b"), "before");
-        // A campaign of the plan that starts later than tomorrow still starts when it says.
+        // A campaign of the plan that starts later than two days ahead still starts when it says.
         late.today = "2026-11-02";
         late.plan.campaigns[1].starts_on = day("2026-12-10");
         late.plan.campaigns[1].ends_on = day("2026-12-10");

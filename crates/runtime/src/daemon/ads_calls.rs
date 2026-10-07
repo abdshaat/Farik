@@ -830,8 +830,9 @@ mod tests {
         }
 
         /// MP-`n`, proposed by Kai and approved by the owner, for the day of the fixture clock,
-        /// 2026-09-22: `search-launch` of 500.00 for 30 days from tomorrow (a total budget),
-        /// and `search-long` of 400.00 for 120 days (a daily one), out of 1000.00 for Google Ads.
+        /// 2026-09-22: `search-launch` of 500.00 to 2026-10-22 (a total budget, from two days
+        /// ahead), and `search-long` of 400.00 to 2027-01-20 (a daily one), out of 1000.00 for
+        /// Google Ads.
         fn plan(&self, plan: &str, replaces: Option<&str>) {
             let mut body =
                 farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
@@ -966,7 +967,7 @@ mod tests {
         let made = &operations[1]["campaignOperation"]["create"];
         assert_eq!(made["status"], json!("PAUSED"));
         assert_eq!(made["name"], json!("MP-1 search-launch: Launch"));
-        assert_eq!(made["startDateTime"], json!("2026-09-23 00:00:00"));
+        assert_eq!(made["startDateTime"], json!("2026-09-24 00:00:00"));
         assert_eq!(made["endDateTime"], json!("2026-10-22 23:59:59"));
         assert_eq!(
             sent[0].headers.get("authorization").map(String::as_str),
@@ -1007,14 +1008,14 @@ mod tests {
             Some(SESSION)
         );
 
-        // A plan campaign of 120 days takes a daily budget.
+        // A plan campaign that runs 119 days from two days ahead takes a daily budget.
         ads.call("create_search_campaign", create("search-long"))
             .await
             .expect("made");
         let sent = ads.mutates();
         assert_eq!(
             sent[1].body["mutateOperations"][0]["campaignBudgetOperation"]["create"]["amountMicros"],
-            json!("3330000")
+            json!("3360000")
         );
     }
 
@@ -1692,7 +1693,7 @@ mod tests {
         assert_eq!(code(&refused), "google_ads_input", "{refused}");
     }
 
-    /// A plan in yen with one campaign of 500.50 for 30 days from tomorrow.
+    /// A plan in yen with one campaign of 500.50 to 2026-10-22.
     fn yen_plan(plan: &str) -> Value {
         let mut body =
             farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
