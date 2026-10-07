@@ -1,11 +1,11 @@
 # Phase 7, step 10h: Ask or auto
 
-Status: draft until its second round and its mockups (executes after steps 10c to 10f land)
+Status: draft until its confirming second round (executes after steps 10c to 10f land)
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 4.4, 5.6, 5.7, 5.12, 6.1, 6.5, 6.7, 6.10, 8.5, 8.6; F3, F9, F15
 Depends on: the commits of steps 08g (the budget's hard stop), 10c (`purchase_order_decide`, `ORDERS`), 10d (the Procurement Specialist's kit, SerpApi's allowance), 10e (`pipeline_needs_owner`, `farik_decide_data_pipeline`, its decision session, `data_pipelines`, `decide_data_pipeline_message`, `deciding-data-pipelines`) and 10f (`send_message`, `compose`, `MAIL`, `seller_mail`, `draft_seller_message`, `sellerLead`, `mailboxDisclose`), each ready and not yet executed: execution starts only after their commits exist. Step 10b2 (`site.requested`, the approved sites); step 08f (`plan_approved`, `plan_tools`, `NoActivePlan`); step 08d (`farik_schedule_post`, `record`, `fits_the_plan`, `social_posts`, `hand_over_posts`, `PostGoingOut`); step 08c (`marketing_plan_decide`); step 07c (the Product Manager's GitHub entry, `using-product-sources`); step 05b (allowances, `calls_made`, `AllowanceCounts`, `allowances.list`, `ConnectorAllowance`, `KitConnect`'s how-many step); step 02 (`judge_connector`, `grant_for`, `ask`, `APPROVAL_NEEDED`); phase 6 step 15 (`TeamRules.tsx`, a rule's effect shown first); phase 6 (merged in #19). File:line citations are at 7aedef8; the names are what count.
 Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-07 (one round, ADR 0032): not ready, 9 Blocking and the Should items, all folded below with the founder's answers; a confirming second round follows
-Mockups approved by: pending
+Mockups approved by: the founder, 2026-10-07, as drawn ("Approve as drawn"): `SettingsApprovals`, `AutoMode`, `TodayOnItsOwn`, `DoneOnItsOwn` and their `Phone` versions (`.dc.html`), with the choices shown on them (the 24 credit tools that always ask still ask under ask, their limits applying on auto only; the mode kept in this project's local log, so another clone starts at ask; switching back to ask at once, with no dialog; "Done on its own" covers 7 days and remembers what was seen, in the log)
 Decided by the founder, 2026-10-07, in conversation (this plan's readiness review): the line ending a seller message the team sends on its own, "No AI line" (under `auto` such a message ends with the owner's name and carries no line saying an AI assistant wrote it; under `ask`, step 10f's approved line stays); credit-spending tools with no allowance (most of Higgsfield's, two of Recraft's), "Yes, give each a limit" (each gets a number the owner can change on the agent page, and on `auto` stops at it); when the team uses up an allowance on `auto`, "Yes, with 'Raise it'" (one line on Today names the limit reached, with "Raise it", which opens the allowance editor). ADR 0041 is amended the same day.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
@@ -133,7 +133,7 @@ Each test is watched to fail for the reason given, before the code that satisfie
 
 The rules card, the turn-on dialog, Today on auto and "Done on its own", desktop and phone, approved by the founder.
 
-- [ ] `docs(design): mock up ask or auto`
+- [x] `docs(design): mock up ask or auto`
 
 ### Task 1: The mode, in this computer's log
 
