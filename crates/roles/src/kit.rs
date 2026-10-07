@@ -990,7 +990,8 @@ mod tests {
                 kit.connectors.len(),
                 match role {
                     Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
-                    Role::ProductManager | Role::Architect => 3,
+                    Role::ProductManager => 4,
+                    Role::Architect => 3,
                     Role::MarketingSpecialist => 4,
                     _ => 0,
                 },
@@ -1508,10 +1509,11 @@ mod tests {
     }
 
     #[test]
-    fn the_product_managers_kit_only_reads() {
+    fn the_product_managers_kit_asks_before_it_writes() {
         let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
         let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
-        assert_eq!(names, ["amplitude", "linear", "notion"]);
+        assert_eq!(names, ["amplitude", "linear", "notion", "github"]);
+        let mut external: Vec<(String, String)> = Vec::new();
         for connector in &kit.connectors {
             let KitConnector::Server {
                 entry, allowances, ..
@@ -1520,13 +1522,22 @@ mod tests {
                 panic!("{} is a server", connector.name());
             };
             let server = custom_server(entry).expect("a custom server");
+            // An issue or a comment is published, so each asks: no connector has an allowance.
+            assert!(allowances.is_empty(), "{}", server.name);
+            external.extend(
+                names_tagged(&server, ConnectorTag::ExternalEffect)
+                    .into_iter()
+                    .map(|tool| (server.name.clone(), tool.to_string())),
+            );
+            if server.name == "github" {
+                continue;
+            }
             assert_eq!(
                 tagged(&server, ConnectorTag::ExternalEffect),
                 0,
                 "{}",
                 server.name
             );
-            assert!(allowances.is_empty(), "{}", server.name);
             assert!(server.credential_keys.is_empty(), "{}", server.name);
             let CustomTransport::Http { oauth, headers, .. } = &server.transport else {
                 panic!("{} is http", server.name);
@@ -1534,6 +1545,111 @@ mod tests {
             assert!(oauth.is_some(), "{} signs in", server.name);
             assert!(headers.is_empty(), "{}", server.name);
         }
+        assert_eq!(
+            external,
+            [
+                ("github".to_string(), "add_issue_comment".to_string()),
+                ("github".to_string(), "issue_write".to_string()),
+            ]
+        );
+    }
+
+    /// A role's service's allowances in its kit, by name.
+    fn allowances_of(role: Role, name: &str) -> BTreeMap<String, KitAllowance> {
+        let kit = load_kit(role).expect("a shipped kit");
+        for connector in kit.connectors {
+            if let KitConnector::Server {
+                entry, allowances, ..
+            } = connector
+                && entry.name.as_str() == name
+            {
+                return allowances;
+            }
+        }
+        panic!("the {role} kit has no {name}");
+    }
+
+    /// GitHub's official server, which both kits reach with a key the user pastes (ADR 0044).
+    const GITHUB_URL: &str = "https://api.githubcopilot.com/mcp/";
+
+    #[test]
+    fn github_for_the_product_manager_files_issues_only_when_asked() {
+        let (server, copy) = pm_service("github");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("github is http");
+        };
+        assert_eq!(url, GITHUB_URL);
+        assert!(oauth.is_none(), "a pasted key, not a sign-in");
+        assert_eq!(
+            headers,
+            &BTreeMap::from([
+                (
+                    "Authorization".to_string(),
+                    "Bearer {GITHUB_KEY}".to_string()
+                ),
+                ("X-MCP-Toolsets".to_string(), "issues,projects".to_string()),
+            ])
+        );
+        assert_eq!(server.credential_keys, ["GITHUB_KEY"]);
+        assert_eq!(
+            copy.key_page.as_deref(),
+            Some(
+                "https://github.com/settings/personal-access-tokens/new?name=Farik+Product+Manager\
+                 &description=Farik%27s+Product+Manager+reads+issues+and+files+the+issues+and+\
+                 comments+you+allow.&expires_in=366&issues=write"
+            )
+        );
+        assert!(
+            copy.setup
+                .contains("Farik asks you before each issue or comment it posts."),
+            "{}",
+            copy.setup
+        );
+        assert!(copy.setup.contains("single sign-on"), "{}", copy.setup);
+        assert_eq!(
+            network_names(&server),
+            sorted(&[
+                "issue_read",
+                "list_issues",
+                "search_issues",
+                "list_issue_types",
+                "list_issue_fields",
+                "get_label",
+                "projects_list",
+                "projects_get",
+            ])
+        );
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::ExternalEffect),
+            ["add_issue_comment", "issue_write"]
+        );
+        assert!(allowances_of(Role::ProductManager, "github").is_empty());
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Denied),
+            ["projects_write", "sub_issue_write", "update_issue_comment"]
+        );
+        assert_eq!(server.tools.len(), 13);
+        let labelled: Vec<&str> = copy.labels.keys().map(String::as_str).collect();
+        assert_eq!(
+            labelled,
+            sorted(&[
+                "issue_read",
+                "list_issues",
+                "search_issues",
+                "list_issue_types",
+                "list_issue_fields",
+                "get_label",
+                "projects_list",
+                "projects_get",
+                "issue_write",
+                "add_issue_comment",
+            ])
+        );
     }
 
     /// A guard: it passes with no connector at all.

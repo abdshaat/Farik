@@ -79,7 +79,7 @@ Tests (`kit.rs`):
 - `the_product_managers_kit_asks_before_it_writes` replaces `the_product_managers_kit_only_reads` (`kit.rs:1511`): the connectors are exactly `amplitude, linear, notion, github`; no connector has allowances; `amplitude`, `linear` and `notion` keep every assertion the old test made (no `external_effect`, `oauth`, no keys, no headers); the kit's only `external_effect` tools are `github`'s two. RED: the kit has three connectors.
 - `loads_every_shipped_kit`: the Product Manager has 4.
 
-- [ ] `feat(roles): give the Product Manager GitHub with a pasted key`
+- [x] `feat(roles): give the Product Manager GitHub with a pasted key`
 
 ### Task 2: GitHub for the Architect
 

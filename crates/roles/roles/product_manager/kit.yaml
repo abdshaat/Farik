@@ -1,6 +1,9 @@
-# The Product Manager's kit: five skills and three services it only reads, each signed in (route 1,
-# ADR 0035). Tool lists are from each service's documentation on 2026-10-02 (step 06's plan); the
-# live pin test compares them. A tool a service lists that is not here is never offered (`tool_not_tagged`) until a pin update tags it.
+# The Product Manager's kit: five skills and four services. Amplitude, Linear and Notion it only
+# reads, each signed in (route 1, ADR 0035). GitHub it reads and, only after the human allows the
+# call, writes an issue or a comment, with a key the user pastes until Farik Cloud signs users in
+# (ADR 0044, step 07c). Tool lists are from each service's documentation on 2026-10-02 (step 06's
+# plan) and, for GitHub, on 2026-10-06; the live pin test compares them. A tool a service lists
+# that is not here is never offered (`tool_not_tagged`) until a pin update tags it.
 role: product_manager
 skills:
   - asking-the-right-questions
@@ -184,3 +187,40 @@ connectors:
       notion-read-session-event: denied
       notion-create-comment: denied
       notion-get-async-task: denied
+  - name: github
+    transport: http
+    url: https://api.githubcopilot.com/mcp/
+    headers:
+      Authorization: "Bearer {GITHUB_KEY}"
+      X-MCP-Toolsets: "issues,projects"
+    credential_keys: [GITHUB_KEY]
+    key_page: "https://github.com/settings/personal-access-tokens/new?name=Farik+Product+Manager&description=Farik%27s+Product+Manager+reads+issues+and+files+the+issues+and+comments+you+allow.&expires_in=366&issues=write"
+    title: GitHub
+    about: "GitHub keeps your code and the work around it: issues, pull requests and project boards."
+    why: "So the Product Manager can turn an issue you already wrote into a request, read your project boards, and file an issue or a comment when you say yes."
+    setup: "“Get your key” opens GitHub's page with the key's name, a year's life and its access filled in. Under ‘Resource owner’, choose the owner of your issues; under ‘Repository access’, choose ‘Only select repositories’ and pick them. For an organisation's boards, also give ‘Projects’ read access. Choose ‘Generate token’ and paste the key here. An organisation may allow a shorter life, need you signed in to its single sign-on, or need its owner's approval. Farik asks you before each issue or comment it posts."
+    labels:
+      issue_read: "read an issue and its comments"
+      list_issues: "list issues"
+      search_issues: "search issues"
+      list_issue_types: "list issue types"
+      list_issue_fields: "list issue fields"
+      get_label: "read a label"
+      projects_list: "list project boards and their cards"
+      projects_get: "read a project board or a card"
+      issue_write: "file or change an issue"
+      add_issue_comment: "comment on an issue"
+    tools:
+      issue_read: network
+      list_issues: network
+      search_issues: network
+      list_issue_types: network
+      list_issue_fields: network
+      get_label: network
+      projects_list: network
+      projects_get: network
+      issue_write: external_effect
+      add_issue_comment: external_effect
+      sub_issue_write: denied
+      update_issue_comment: denied
+      projects_write: denied
