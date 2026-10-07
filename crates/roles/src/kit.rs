@@ -2577,7 +2577,7 @@ mod tests {
         );
         assert_eq!(
             copy.setup,
-            "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see the name and email on each payment; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under \u{2018}OAuth sessions\u{2019} in your Stripe user settings."
+            "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see your customers' names, emails, addresses and the last four digits of their cards; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under \u{2018}OAuth sessions\u{2019} in your Stripe user settings."
         );
     }
 
