@@ -4340,12 +4340,35 @@ mod tests {
         governor_result(&project, "FRK-1", "C1");
         note(&project, "FRK-1", "completion", "fin-1");
         note(&project, "FRK-1", "review", "maya");
-        project.moved(
+        project.record(
             "FRK-1",
-            "in_progress",
-            "verifying",
-            &json!({ "assignee": "fin-1", "reviewer": "maya" }),
-            at(11),
+            "criterion.recorded",
+            &json!({
+                "criterion_id": "C1",
+                "passed": true,
+                "evidence": "the books are in the folder",
+                "run_by": "assignee",
+                "recorded_by": "fin-1"
+            }),
+            at(10),
+        );
+        // The move into `verifying` goes through the governor, as it does in a run, so that
+        // `record_move` writes it: the files are named, and the move carries none of them.
+        let verifying = project.ask(
+            &a_request(
+                "FRK-1",
+                TaskStatus::Verifying,
+                TransitionActor::Assignee,
+                Some("fin-1"),
+            ),
+            &TransitionAsk {
+                workbooks: Some(vec!["books.xlsx".to_string()]),
+                ..TransitionAsk::default()
+            },
+        );
+        assert!(
+            matches!(verifying, TransitionOutcome::Moved(_)),
+            "{verifying:?}"
         );
 
         let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
@@ -4359,6 +4382,13 @@ mod tests {
         assert_eq!(
             moved_body(accepted).changed,
             Some(vec!["books.xlsx".to_string()])
+        );
+        // The move into `verifying` is among the earlier ones, and says nothing of the files.
+        assert!(
+            earlier
+                .iter()
+                .any(|moved| moved_body(moved).to == TaskStatusWire::Verifying),
+            "the governor's move into verifying is on the page's history"
         );
         for earlier in earlier {
             assert_eq!(moved_body(earlier).changed, None);
