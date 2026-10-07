@@ -21,6 +21,12 @@ import {
 	eventArrives,
 	renderApp,
 } from "../test/render-app.tsx";
+import {
+	SCRIPT_ROW,
+	MARKUP as SITE_MARKUP,
+	SITE_ROW,
+	TEAM as SITE_TEAM,
+} from "../test/sites.ts";
 import styles from "./PostGoingOut.module.css";
 import { Today } from "./Today.tsx";
 
@@ -982,5 +988,98 @@ describe("today's posts", () => {
 		// They are over: there is nothing to stop.
 		expect(within(section).queryByRole("button", { name: "Stop" })).toBeNull();
 		await expectNoAxeViolations(container);
+	});
+});
+
+describe("a site the Procurement Specialist asks to read", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it("today_lists_a_site_request", async () => {
+		const { container } = await todayWith({
+			waiting: [SITE_ROW, SCRIPT_ROW],
+			team: SITE_TEAM,
+		});
+
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const [plain, script] = within(list).getAllByRole("listitem");
+		expect(
+			screen.getByRole("heading", { name: "Waiting on you (2)" }),
+		).toBeTruthy();
+
+		// The host is in bold, and the address is text: nothing in the row opens it.
+		const host = within(plain as HTMLElement).getByText("pieboxpros.com", {
+			selector: "strong code",
+		});
+		expect(host.closest("strong")?.textContent).toBe(
+			"Ivo asks to read pieboxpros.com",
+		);
+		const address = within(plain as HTMLElement).getByText(SITE_ROW.url);
+		expect(address.closest("a")).toBeNull();
+		expect(
+			within(plain as HTMLElement)
+				.getAllByRole("link")
+				.map((link) => link.getAttribute("href")),
+		).toEqual(["/tasks/FRK-31"]);
+		expect(container.querySelector("a[href*='pieboxpros']")).toBeNull();
+		expect(
+			within(plain as HTMLElement).getByText(/The task waits until you decide/),
+		).toBeTruthy();
+		expect(
+			within(plain as HTMLElement).getByText(
+				/Allowing pieboxpros\.com lets it read any page there until you remove it\./,
+			),
+		).toBeTruthy();
+
+		// Why is the agent's own words, in a frame that says so, and markup in it stays text.
+		const why = within(plain as HTMLElement).getByRole("group", {
+			name: "Why, in Ivo’s words",
+		});
+		expect(why.getAttribute("data-trust")).toBe("untrusted");
+		expect(why.textContent).toContain("They print pie boxes with your logo");
+		expect(why.textContent).toContain(SITE_MARKUP);
+		expect(container.querySelector("b")).toBeNull();
+
+		// A name written in another alphabet is warned of, in its plain form, where the other is not.
+		expect(
+			within(plain as HTMLElement).queryByText(en.siteRequestScriptWhat),
+		).toBeNull();
+		expect(
+			within(script as HTMLElement).getByText(en.siteRequestScriptWhat),
+		).toBeTruthy();
+		expect(
+			within(script as HTMLElement).getByText("xn--ulne-m9d.com", {
+				selector: "strong code",
+			}),
+		).toBeTruthy();
+		expect(
+			within(script as HTMLElement).getByText(SCRIPT_ROW.url),
+		).toBeTruthy();
+		for (const row of [plain, script])
+			for (const name of ["Allow", "Don’t allow"])
+				expect(
+					within(row as HTMLElement).getByRole("button", { name }),
+				).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("a_site_request_shows_what_hides_as_text", async () => {
+		await todayWith({
+			waiting: [
+				{
+					...SITE_ROW,
+					url: "https://pieboxpros.com/a\u202eb",
+					why: "Quote \u202ethis",
+				},
+			],
+			team: SITE_TEAM,
+		});
+
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const row = within(list).getByRole("listitem");
+		// A character that reorders text is written out, so what is read is what was sent.
+		expect(
+			within(row).getByText("https://pieboxpros.com/a\\u{202e}b"),
+		).toBeTruthy();
+		expect(row.textContent).toContain("Quote \\u{202e}this");
 	});
 });

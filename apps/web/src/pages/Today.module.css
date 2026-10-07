@@ -202,6 +202,9 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 
 /* "Post it" and "Don't post", at the row's right end; below the words on a phone. */
 .decide {
+	min-width: 0;
+	padding: 0;
+	border: 0;
 	display: flex;
 	flex-wrap: wrap;
 	gap: var(--farik-space-2);
@@ -250,4 +253,36 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 	color: var(--farik-color-ink);
 	font-family: var(--farik-type-code-family);
 	font-variant-numeric: tabular-nums;
+}
+
+/* A site an agent asks to read: the site's name and the page are code, never links. */
+.host {
+	font-family: var(--farik-type-code-family);
+	font-weight: inherit;
+}
+
+.address {
+	font-family: var(--farik-type-code-family);
+	overflow-wrap: anywhere;
+}
+
+/* The agent's reason, in its own words, framed so it is never taken for Farik's. */
+.frame {
+	min-width: 0;
+	margin: 0;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	font-family: var(--farik-type-code-family);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-left: 3px solid var(--farik-color-ink);
+	border-radius: var(--farik-radius-control);
+}
+
+/* A name written in another alphabet: the warning stands out from the plain words around it. */
+.script {
+	margin: 0;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border-left: 3px solid var(--farik-color-status-waiting);
 }

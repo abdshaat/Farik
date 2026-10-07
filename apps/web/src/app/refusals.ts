@@ -61,6 +61,13 @@ const WORDS: Record<string, keyof typeof en> = {
 	unknown_post: "refusePostUnknown",
 	post_decided: "refusePostDecided",
 	post_in_the_past: "refusePostInThePast",
+	// The owner's decisions on the sites the Procurement Specialist reads (SPEC 6.10).
+	site_invalid: "refuseSiteInvalid",
+	site_already_allowed: "refuseSiteAlreadyAllowed",
+	site_not_allowed: "refuseSiteNotAllowed",
+	site_request_decided: "refuseSiteRequestDecided",
+	unknown_site_request: "refuseSiteRequestUnknown",
+	site_note_too_long: "refuseSiteNoteTooLong",
 	// A skill's refusals (SPEC 6.7), said at the field they belong to.
 	skill_runs_commands: "skillRunsCommands",
 	skill_attaches_files: "skillAttachesFiles",

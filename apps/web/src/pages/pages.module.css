@@ -615,3 +615,154 @@
 .warn {
 	color: var(--farik-color-status-waiting);
 }
+
+/* The dialog that asks about a site an agent wants to read. */
+.siteRequest {
+	display: grid;
+	gap: var(--farik-space-3);
+}
+
+.siteRequest p {
+	margin: 0;
+}
+
+/* A name written in another alphabet: the warning stands out from the plain words around it. */
+.siteScript {
+	padding: var(--farik-space-2) var(--farik-space-3);
+	background: var(--farik-color-surface);
+	border-left: 3px solid var(--farik-color-status-waiting);
+}
+
+/* The Procurement Specialist's sites: Farik's by kind of shop, then the ones the owner allowed. */
+.siteCategories,
+.siteShops,
+.siteOwn {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.siteCategories {
+	border-top: 1px solid var(--farik-color-rule);
+}
+
+.siteCategories > li {
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.siteCategory {
+	margin: 0;
+	font-size: inherit;
+}
+
+/* A kind of shop opens and closes: the button spans the row, the kind first, then what is in it. */
+.siteToggle {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-1) var(--farik-space-3);
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 44px;
+	align-items: center;
+	padding: var(--farik-space-2) 0;
+	font: inherit;
+	text-align: start;
+	color: inherit;
+	background: none;
+	border: 0;
+	cursor: pointer;
+}
+
+.siteToggle::before {
+	content: "\25B8";
+}
+
+.siteToggle[aria-expanded="true"]::before {
+	content: "\25BE";
+}
+
+.siteKind {
+	font-weight: var(--farik-type-heading-weight);
+}
+
+.siteToggle:focus-visible,
+.siteRemove:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.siteShops {
+	display: grid;
+	padding-inline-start: var(--farik-space-4);
+}
+
+.siteShops > li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--farik-space-1) var(--farik-space-3);
+	padding: var(--farik-space-2) 0;
+}
+
+.siteState {
+	color: var(--farik-color-ink-muted);
+}
+
+.siteOwn {
+	display: grid;
+	border-top: 1px solid var(--farik-color-rule);
+}
+
+.siteOwn > li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--farik-space-2) var(--farik-space-3);
+	padding: var(--farik-space-3) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.siteText {
+	display: grid;
+	gap: var(--farik-space-1);
+	min-width: 0;
+}
+
+.siteHost {
+	font-family: var(--farik-type-code-family);
+	overflow-wrap: anywhere;
+}
+
+/* The site just added is marked, so that it is found in the list. */
+.siteNew {
+	padding-inline-start: var(--farik-space-3);
+	border-left: 3px solid var(--farik-color-status-waiting);
+}
+
+.siteRemove {
+	min-height: 44px;
+	padding: 0 var(--farik-space-2);
+	font: inherit;
+	color: inherit;
+	text-decoration: underline;
+	background: none;
+	border: 0;
+	cursor: pointer;
+}
+
+.siteAdd {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: var(--farik-space-3);
+}
+
+.siteAdd > :first-child {
+	flex: 1 1 16rem;
+}
+
+.siteAdded {
+	font-weight: var(--farik-type-heading-weight);
+}

@@ -20,6 +20,7 @@ import { visibly } from "./dialogs/ToolApproval.tsx";
 import { KitConnect } from "./KitConnect.tsx";
 import styles from "./pages.module.css";
 import { useAdvanced } from "./Settings.tsx";
+import { SitesSection } from "./Sites.tsx";
 import {
 	type Agent,
 	type McpServer,
@@ -413,6 +414,8 @@ function Editor({
 					))}
 				</select>
 			</div>
+			{/* The Procurement Specialist reads only the sites it is given: they come before what it may do. */}
+			{saved.role === "procurement_specialist" && <SitesSection name={name} />}
 			<section className={styles.section} aria-labelledby="may-heading">
 				<h2 id="may-heading">{say("agentMay")}</h2>
 				<Switch

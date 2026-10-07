@@ -151,13 +151,14 @@ export const POST_ROW = {
 export async function todayWith(fields: {
 	posts?: unknown;
 	waiting?: unknown[];
+	team?: unknown;
 }) {
 	vi.useFakeTimers({ toFake: ["Date"] });
 	vi.setSystemTime(NOW);
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
-	await answerQuery(s, "team.get", { team: TEAM });
+	await answerQuery(s, "team.get", { team: fields.team ?? TEAM });
 	await answerQuery(s, "team.activity", { activity: [] });
 	await answerQuery(s, "waiting.list", { waiting: fields.waiting ?? [] });
 	await answerQuery(s, "moved.since", { moved: [] });

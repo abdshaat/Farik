@@ -10,8 +10,18 @@ import { t } from "../strings/t.ts";
 import { type Allowances, useAllowances } from "./allowances.tsx";
 import { type Backlog, moreWaits } from "./Board.tsx";
 import { ChannelPreview } from "./Channel.tsx";
+import {
+	isScript,
+	ScriptWarning,
+	type SiteAsk,
+	SiteRequest,
+} from "./dialogs/SiteRequest.tsx";
 import { useCommand } from "./dialogs/StartSprint.tsx";
-import { ToolApproval, type ToolAsk } from "./dialogs/ToolApproval.tsx";
+import {
+	ToolApproval,
+	type ToolAsk,
+	visibly,
+} from "./dialogs/ToolApproval.tsx";
 import { channelName, longRange, money } from "./marketing.ts";
 import {
 	GoingOut,
@@ -52,13 +62,19 @@ type PostAsk = {
 };
 type Waiting = {
 	taskId: string;
-	kind: Kind | "tool_approval" | "marketing_plan" | "social_post";
+	kind:
+		| Kind
+		| "tool_approval"
+		| "marketing_plan"
+		| "social_post"
+		| "site_request";
 	agentId: string | null;
 	title: string;
 	line: string;
 } & Partial<ToolAsk> &
 	Partial<PlanAsk> &
-	Partial<PostAsk>;
+	Partial<PostAsk> &
+	Partial<SiteAsk>;
 type Moved = { at: string; line: string };
 type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
@@ -134,6 +150,7 @@ export function Today() {
 				item.kind === "tool_approval" ||
 				item.kind === "marketing_plan" ||
 				item.kind === "social_post" ||
+				item.kind === "site_request" ||
 				item.kind in KINDS,
 		),
 	};
@@ -233,6 +250,12 @@ export function Today() {
 										item={item}
 										agent={agent(item.agentId)}
 										now={new Date()}
+									/>
+								) : item.kind === "site_request" ? (
+									<SiteRequestRow
+										key={`${item.kind}-${item.request}`}
+										item={item}
+										agent={agent(item.agentId)}
 									/>
 								) : (
 									<WaitingRow
@@ -509,6 +532,93 @@ function PostRequestRow({
 					{t("postItNo")}
 				</Button>
 			</div>
+		</li>
+	);
+}
+
+/**
+ * A site the Procurement Specialist asks to read: the site in bold, the page it wants as text
+ * (never a link: the agent wrote it), its reason in a frame that says whose words they are, and
+ * the owner's "Allow" or "Don't allow", each of which asks for a note (spec 6.10).
+ */
+function SiteRequestRow({
+	item,
+	agent,
+}: {
+	item: Waiting;
+	agent: Agent | undefined;
+}) {
+	const name = agent?.displayName ?? item.agentId ?? "";
+	const host = item.host ?? "";
+	const titleId = `waiting-site-${item.request}`;
+	const whyId = `${titleId}-why`;
+	const [dialog, setDialog] = useState<"allow" | "decline">();
+	// The host and the task are set apart in their own elements, in the places the words put them.
+	const [asks, asksEnd] = t("siteRequestLine", { name, host: "{host}" }).split(
+		"{host}",
+	);
+	const [forTask, forTaskEnd] = t("siteRequestTask", {
+		task: "{task}",
+	}).split("{task}");
+	const ask: SiteAsk = {
+		request: item.request ?? 0,
+		host,
+		url: item.url ?? "",
+		why: item.why ?? "",
+	};
+	return (
+		<li className={styles.row}>
+			{agent?.avatar && (
+				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
+			)}
+			<div className={styles.rowText}>
+				<strong id={titleId}>
+					{asks}
+					<code className={styles.host}>{host}</code>
+					{asksEnd}
+				</strong>
+				<span>
+					{forTask}
+					<Link to={`/tasks/${item.taskId}`}>
+						{item.taskId} {item.title}
+					</Link>
+					{forTaskEnd}
+				</span>
+				{isScript(host) && <ScriptWarning className={styles.script} />}
+				<span className={styles.muted}>{t("siteRequestPage", { name })}</span>
+				<code className={styles.address}>{visibly(ask.url)}</code>
+				<span className={styles.muted} id={whyId}>
+					{t("siteRequestWhy", { name })}
+				</span>
+				{/* The agent's own words: React renders them as text, never as markup. */}
+				<fieldset
+					aria-labelledby={whyId}
+					data-trust="untrusted"
+					className={styles.frame}
+				>
+					{visibly(ask.why)}
+				</fieldset>
+				<span className={styles.muted}>
+					{t("siteRequestWhat", { name, host })}
+				</span>
+			</div>
+			{/* The group names the site, so that each row's "Allow" is told from the others. */}
+			<fieldset className={styles.decide} aria-labelledby={titleId}>
+				<Button kind="primary" onClick={() => setDialog("allow")}>
+					{t("siteRequestAllow")}
+				</Button>
+				<Button onClick={() => setDialog("decline")}>
+					{t("siteRequestDecline")}
+				</Button>
+			</fieldset>
+			{dialog && (
+				<SiteRequest
+					ask={ask}
+					agent={name}
+					allow={dialog === "allow"}
+					onClose={() => setDialog(undefined)}
+				/>
+			)}
 		</li>
 	);
 }
