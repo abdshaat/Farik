@@ -15,7 +15,7 @@ use farik_runtime::connectors::{KEPT_ENV, own_program_for, program};
 use serde_json::Value;
 
 use crate::CliIo;
-use crate::daemon_client::exchange;
+use crate::daemon_client::{exchange, read_daemon_file};
 
 /// How long connecting, sending, and waiting for the daemon may each take: within Claude Code's
 /// ten seconds for a headers helper.
@@ -58,16 +58,15 @@ pub fn run(daemon_file: &Path, session: &str, server: &str, io: &mut CliIo<'_>) 
         let owned: Vec<String> = args.iter().map(ToString::to_string).collect();
         let own =
             own_program_for(command, &owned, io.own_program.as_deref()).map_err(str::to_string)?;
+        // A Farik connector that signs in calls the daemon this file names, with its ticket.
+        let port = read_daemon_file(daemon_file)
+            .map_err(|error| error.to_string())?
+            .port;
         // Farik's own connector is this executable, never a `farik` the PATH finds (ADR 0038).
         let mut process = std::process::Command::new(program(command, &owned, &own));
         // The folder Farik keeps for the server, never the worktree Claude Code started this in.
         process.args(args).current_dir(folder).env_clear();
-        for name in KEPT_ENV {
-            if let Some(value) = io.env.get(name) {
-                process.env(name, value);
-            }
-        }
-        process.envs(keys);
+        process.envs(environment(&answer, keys, port, &io.env));
         // Only returns when the server could not be started.
         Err(format!(
             "{command} could not be started: {}",
@@ -100,6 +99,37 @@ pub fn headers(daemon_file: &Path, session: &str, server: &str, io: &mut CliIo<'
     }
 }
 
+/// Serves Google Ads' shim (ADR 0038, ADR 0042) on standard input and output until its client
+/// leaves: it lists its tools, and forwards a call to the daemon at `FARIK_CONNECTOR_URL` with the
+/// ticket in `FARIK_CONNECTOR_TICKET`, both set by the launcher. With neither it still lists them,
+/// and a call says Google Ads runs only inside a Farik session. Answers 1, saying why on standard
+/// error, when it cannot run.
+pub fn google_ads(io: &mut CliIo<'_>) -> i32 {
+    let (url, ticket) = (
+        io.env.get(CONNECTOR_URL).cloned(),
+        io.env.get(CONNECTOR_TICKET).cloned(),
+    );
+    let served = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())
+        .and_then(|runtime| {
+            runtime
+                .block_on(farik_runtime::google_ads::serve_shim(
+                    url.as_deref(),
+                    ticket.as_deref(),
+                ))
+                .map_err(|error| error.to_string())
+        });
+    match served {
+        Ok(()) => 0,
+        Err(why) => {
+            let _ = writeln!(io.stderr, "farik connector google-ads: {why}");
+            1
+        }
+    }
+}
+
 /// Serves the OSV lookup server (ADR 0038) on standard input and output, at OSV's one address,
 /// until its client leaves. Answers 1, saying why on standard error, when it cannot.
 pub fn osv(io: &mut CliIo<'_>) -> i32 {
@@ -118,5 +148,99 @@ pub fn osv(io: &mut CliIo<'_>) -> i32 {
             let _ = writeln!(io.stderr, "farik connector osv: {why}");
             1
         }
+    }
+}
+
+/// The variables a Farik connector's shim reads: where the daemon is, and the session's ticket.
+pub const CONNECTOR_URL: &str = "FARIK_CONNECTOR_URL";
+/// See [`CONNECTOR_URL`].
+pub const CONNECTOR_TICKET: &str = "FARIK_CONNECTOR_TICKET";
+
+/// What the server's process is given: the variables Farik keeps from its own environment, the
+/// server's keys, and, for a Farik connector the daemon gave a ticket, the ticket and the
+/// address of the daemon's route on `port`; nothing else.
+fn environment(
+    answer: &Value,
+    keys: BTreeMap<String, String>,
+    port: u16,
+    env: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut given: BTreeMap<String, String> = KEPT_ENV
+        .iter()
+        .filter_map(|name| Some(((*name).to_string(), env.get(*name)?.clone())))
+        .collect();
+    given.extend(keys);
+    if let Some(ticket) = answer["ticket"].as_str() {
+        given.insert(CONNECTOR_TICKET.to_string(), ticket.to_string());
+        given.insert(
+            CONNECTOR_URL.to_string(),
+            format!("http://127.0.0.1:{port}/connector/call"),
+        );
+    }
+    given
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use serde_json::json;
+
+    use super::{CONNECTOR_TICKET, CONNECTOR_URL, environment};
+
+    fn session_env() -> BTreeMap<String, String> {
+        [
+            ("PATH", "/usr/bin"),
+            ("HOME", "/home/someone"),
+            ("LANG", "C.UTF-8"),
+            ("TMPDIR", "/tmp"),
+            ("ANTHROPIC_API_KEY", "sk-ant-model-secret"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", "oauth-model-secret"),
+            ("FARIK_OTHER", "anything"),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect()
+    }
+
+    #[test]
+    fn the_launcher_gives_the_shim_its_ticket_and_url() {
+        let answer = json!({ "command": "farik", "args": ["connector", "google-ads"], "env": {}, "cwd": "/x", "ticket": "ab12" });
+        let given = environment(&answer, BTreeMap::new(), 4242, &session_env());
+        // The four variables Farik keeps, and the two of the shim, and no others: not the model's
+        // credential, not another of Farik's.
+        assert_eq!(
+            given,
+            BTreeMap::from([
+                ("PATH".to_string(), "/usr/bin".to_string()),
+                ("HOME".to_string(), "/home/someone".to_string()),
+                ("LANG".to_string(), "C.UTF-8".to_string()),
+                ("TMPDIR".to_string(), "/tmp".to_string()),
+                (CONNECTOR_TICKET.to_string(), "ab12".to_string()),
+                (
+                    CONNECTOR_URL.to_string(),
+                    "http://127.0.0.1:4242/connector/call".to_string()
+                ),
+            ])
+        );
+        // No ticket, as for a server that is not a Farik connector that signs in: a key and the
+        // four, and neither variable.
+        let plain = json!({ "command": "env", "args": [], "env": { "API_KEY": "k" }, "cwd": "/x" });
+        let keys = BTreeMap::from([("API_KEY".to_string(), "k".to_string())]);
+        let given = environment(&plain, keys, 4242, &session_env());
+        assert_eq!(given.len(), 5, "{given:?}");
+        assert!(!given.contains_key(CONNECTOR_TICKET) && !given.contains_key(CONNECTOR_URL));
+        assert_eq!(given["API_KEY"], "k");
+        // A variable this process lacks is not passed at all, and not as an empty one.
+        let bare = BTreeMap::from([("PATH".to_string(), "/usr/bin".to_string())]);
+        let given = environment(&answer, BTreeMap::new(), 4242, &bare);
+        assert_eq!(
+            given.keys().map(String::as_str).collect::<Vec<_>>(),
+            [CONNECTOR_TICKET, CONNECTOR_URL, "PATH"]
+        );
+        // A key cannot stand in for the ticket.
+        let forged = BTreeMap::from([(CONNECTOR_TICKET.to_string(), "forged".to_string())]);
+        let given = environment(&answer, forged, 4242, &session_env());
+        assert_eq!(given[CONNECTOR_TICKET], "ab12");
     }
 }

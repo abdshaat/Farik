@@ -1122,6 +1122,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one case after another, so the spend read between them stays in view"
+    )]
     async fn changes_a_budget_and_a_status_inside_the_plan() {
         let ads = Ads::new("ads-budget-status").await;
         ads.plan("MP-1", None);

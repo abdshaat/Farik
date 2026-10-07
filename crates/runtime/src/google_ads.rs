@@ -6,10 +6,18 @@
 //! reads under the untrusted-content notice.
 
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::NaiveDate;
 use farik_core::marketing::{Amount, BudgetKind, parse_amount};
+use rmcp::model::{
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
+    Implementation, InitializeResult, JsonObject, ListToolsResult, PaginatedRequestParams,
+    ServerCapabilities, Tool, ToolAnnotations,
+};
+use rmcp::service::RequestContext;
+use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Value, json};
 
 use crate::claude::Secret;
@@ -1285,6 +1293,390 @@ impl StatusInput {
     }
 }
 
+/// What the shim answers with when it was started in no session: a call needs the daemon's address
+/// and the ticket the launch route gave it.
+const NO_SESSION: &str = "Google Ads runs only inside a Farik session";
+
+/// How long the shim waits for the daemon: the route makes up to four calls to Google of 25
+/// seconds each.
+const SHIM_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The shim `farik connector google-ads` runs (ADR 0038, ADR 0042): it lists the ten tools itself,
+/// so its list is pinned offline, and forwards each call to the daemon's `POST /connector/call`
+/// with the session's ticket. The daemon holds the grant and makes the call, so no token is ever
+/// in this process's environment, and a plan the owner ends takes effect at once.
+#[derive(Clone)]
+pub struct Shim {
+    url: Option<String>,
+    ticket: Option<String>,
+    client: reqwest::Client,
+    timeout: Duration,
+}
+
+/// Whether `url` is exactly `http://127.0.0.1:<port>/connector/call`: the daemon on this computer
+/// and the one route, nothing else a variable could name.
+fn is_the_daemon(url: &str) -> bool {
+    url.strip_prefix("http://127.0.0.1:")
+        .and_then(|rest| rest.strip_suffix("/connector/call"))
+        .and_then(|port| {
+            port.parse::<u16>()
+                .ok()
+                .filter(|number| *number > 0 && number.to_string() == port)
+        })
+        .is_some()
+}
+
+impl Shim {
+    /// A shim that forwards to `url` with `ticket`; with either missing, every call says that
+    /// Google Ads runs only inside a Farik session, and the list still answers.
+    ///
+    /// # Errors
+    ///
+    /// The web client could not be made.
+    pub fn new(url: Option<&str>, ticket: Option<&str>) -> Result<Self, GoogleAdsError> {
+        Self::with_timeout(url, ticket, SHIM_TIMEOUT)
+    }
+
+    fn with_timeout(
+        url: Option<&str>,
+        ticket: Option<&str>,
+        timeout: Duration,
+    ) -> Result<Self, GoogleAdsError> {
+        let client = reqwest::Client::builder()
+            // The daemon answers where it is; nothing it says sends Farik anywhere else, and
+            // nothing goes through a proxy.
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .timeout(timeout)
+            .build()
+            .map_err(|_| failed("the web client could not be made"))?;
+        Ok(Self {
+            url: url.map(str::to_string),
+            ticket: ticket.map(str::to_string),
+            client,
+            timeout,
+        })
+    }
+
+    /// Runs `tool` with `input` through the daemon: its answer as text, or the words it was
+    /// refused with.
+    ///
+    /// # Errors
+    ///
+    /// The words of the refusal: the daemon's own (`<code>: <words>`), or Farik's when the call
+    /// could not be made.
+    pub async fn call(&self, tool: &str, input: &Value) -> Result<String, String> {
+        let (Some(url), Some(ticket)) = (&self.url, &self.ticket) else {
+            return Err(NO_SESSION.to_string());
+        };
+        // Checked at each call: a variable is whatever the environment held.
+        if !is_the_daemon(url) {
+            return Err("Farik's daemon is not where this connector was told it is".to_string());
+        }
+        let mut response = self
+            .client
+            .post(url)
+            .bearer_auth(ticket)
+            .json(&json!({ "tool": tool, "arguments": input }))
+            .send()
+            .await
+            .map_err(|error| {
+                if error.is_timeout() {
+                    format!(
+                        "Farik did not answer within {} seconds",
+                        self.timeout.as_secs()
+                    )
+                } else {
+                    "Farik's daemon could not be reached".to_string()
+                }
+            })?;
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(
+                "Farik did not accept this session's ticket; the session may have ended"
+                    .to_string(),
+            );
+        }
+        if !status.is_success() {
+            return Err(format!("Farik answered with status {}", status.as_u16()));
+        }
+        let mut bytes: Vec<u8> = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| "Farik's answer was cut off".to_string())?
+        {
+            if chunk.len() > MAX_BODY - bytes.len() {
+                return Err("Farik's answer is too large".to_string());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let answer: Value =
+            serde_json::from_slice(&bytes).map_err(|_| "Farik's answer is not JSON".to_string())?;
+        match (answer.get("ok"), answer["error"].as_str()) {
+            (Some(ok), _) => Ok(ok.to_string()),
+            (None, Some(error)) => Err(error.to_string()),
+            (None, None) => {
+                Err("Farik's answer says neither what was done nor why not".to_string())
+            }
+        }
+    }
+}
+
+/// The name the shim gives itself.
+const SERVER_NAME: &str = "farik-google-ads";
+
+/// An ad account, as every tool writes it.
+fn account_schema() -> Value {
+    json!({
+        "type": "string", "pattern": "^[0-9]{3}-[0-9]{3}-[0-9]{4}$",
+        "description": "The ad account's number, written 123-456-7890."
+    })
+}
+
+/// A campaign's or an ad group's resource name, as a tool returns it.
+fn resource_schema(kind: &str, what: &str) -> Value {
+    json!({
+        "type": "string",
+        "pattern": format!("^customers/[0-9]{{10}}/{kind}/[0-9]{{1,20}}$"),
+        "description": format!("{what}, as a tool of this connector gave it: customers/1234567890/{kind}/123.")
+    })
+}
+
+/// The search words of `add_keywords` and `add_negative_keywords`.
+fn keywords_schema() -> Value {
+    json!({
+        "type": "array", "minItems": 1, "maxItems": 50,
+        "items": {
+            "type": "object",
+            "properties": {
+                "text": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "match": { "type": "string", "enum": ["exact", "phrase", "broad"] }
+            },
+            "required": ["text", "match"]
+        }
+    })
+}
+
+/// A list of at most `most` texts of at most `each` characters.
+fn texts_schema(least: usize, most: usize, each: usize) -> Value {
+    json!({
+        "type": "array", "minItems": least, "maxItems": most,
+        "items": { "type": "string", "minLength": 1, "maxLength": each }
+    })
+}
+
+/// Every tool, with what it takes and, for the three reads, that it changes nothing.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one entry for each of the ten tools, side by side, so a missing one is plain to see"
+)]
+fn descriptors() -> Vec<Tool> {
+    let amount = |what: &str| {
+        json!({
+            "type": "string", "pattern": "^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,2})?$",
+            "description": format!("{what}, in the plan's currency, as text such as 1.50.")
+        })
+    };
+    let schemas = [
+        (
+            "list_accounts",
+            "List the Google Ads accounts the owner's sign-in reaches, each with its currency and time zone.",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        (
+            "report",
+            "Read one report of an ad account's results: campaigns, ad_groups, keywords, search_terms or ads, with clicks, impressions, cost (in the account's currency) and conversions over two days at most 366 days apart. At most 500 rows.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "account": account_schema(),
+                    "kind": { "type": "string", "enum": ["campaigns", "ad_groups", "keywords", "search_terms", "ads"] },
+                    "from": { "type": "string", "description": "The first day, written 2026-10-01." },
+                    "to": { "type": "string", "description": "The last day, written 2026-10-31." }
+                },
+                "required": ["account", "kind", "from", "to"]
+            }),
+        ),
+        (
+            "keyword_ideas",
+            "Find search words related to the words given, each with how often it is searched a month, how competitive it is and what the bid for a click on top of the page costs.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "account": account_schema(),
+                    "words": texts_schema(1, 10, 80),
+                    "language": { "type": "integer", "minimum": 1, "description": "Google's numeric id of a language, such as 1000 for English." },
+                    "locations": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "type": "integer", "minimum": 1 }, "description": "Google's numeric ids of the places to find words for, such as 2840 for the United States." }
+                },
+                "required": ["account", "words", "language", "locations"]
+            }),
+        ),
+        (
+            "create_search_campaign",
+            "Make a Google Search campaign for one campaign of the active marketing plan. It is made paused, ends on the plan campaign's last day, and has a budget within the plan campaign's. Only inside the plan the owner approved.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "account": account_schema(),
+                    "plan_campaign": { "type": "string", "description": "The key of the plan's campaign this is for." },
+                    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+                    "bidding": { "type": "string", "enum": ["maximize_clicks", "maximize_conversions"], "description": "maximize_conversions only for an ad account that already tracks conversions." },
+                    "max_cpc": amount("The most a click may cost, with maximize_clicks only"),
+                    "locations": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "type": "integer", "minimum": 1 } },
+                    "languages": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "type": "integer", "minimum": 1 } }
+                },
+                "required": ["account", "plan_campaign", "name", "bidding", "locations", "languages"]
+            }),
+        ),
+        (
+            "add_ad_group",
+            "Add an ad group to a campaign this connector made for the active plan.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "campaign": resource_schema("campaigns", "The campaign"),
+                    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+                    "cpc_bid": amount("What a click may cost in this ad group")
+                },
+                "required": ["campaign", "name"]
+            }),
+        ),
+        (
+            "add_keywords",
+            "Add search words to an ad group, each matching exactly, as a phrase or broadly.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "ad_group": resource_schema("adGroups", "The ad group"),
+                    "keywords": keywords_schema()
+                },
+                "required": ["ad_group", "keywords"]
+            }),
+        ),
+        (
+            "add_negative_keywords",
+            "Rule out search words for a whole campaign: its ads do not show for them.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "campaign": resource_schema("campaigns", "The campaign"),
+                    "keywords": keywords_schema()
+                },
+                "required": ["campaign", "keywords"]
+            }),
+        ),
+        (
+            "add_responsive_search_ad",
+            "Write an ad for an ad group: 3 to 15 headlines of at most 30 characters, 2 to 4 descriptions of at most 90, and an https address it leads to.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "ad_group": resource_schema("adGroups", "The ad group"),
+                    "headlines": texts_schema(3, 15, 30),
+                    "descriptions": texts_schema(2, 4, 90),
+                    "final_url": { "type": "string", "description": "An https address with no user name or password." },
+                    "path1": { "type": "string", "maxLength": 15 },
+                    "path2": { "type": "string", "maxLength": 15 }
+                },
+                "required": ["ad_group", "headlines", "descriptions", "final_url"]
+            }),
+        ),
+        (
+            "set_campaign_budget",
+            "Change a campaign's budget to a new amount within the plan's: a total budget between what the campaign has spent and the plan campaign's budget, a daily one no larger than what is left divided by the days left.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "campaign": resource_schema("campaigns", "The campaign"),
+                    "amount": amount("The new amount")
+                },
+                "required": ["campaign", "amount"]
+            }),
+        ),
+        (
+            "set_campaign_status",
+            "Pause a campaign, or run it: only within the plan campaign's dates, with its budget not yet spent.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "campaign": resource_schema("campaigns", "The campaign"),
+                    "status": { "type": "string", "enum": ["paused", "enabled"] }
+                },
+                "required": ["campaign", "status"]
+            }),
+        ),
+    ];
+    schemas
+        .into_iter()
+        .map(|(name, about, schema)| {
+            let Value::Object(schema): Value = schema else {
+                unreachable!("each schema above is an object")
+            };
+            let tool = Tool::new(name, about, Arc::new(schema as JsonObject));
+            if READ_TOOLS.contains(&name) {
+                tool.with_annotations(ToolAnnotations::new().read_only(true))
+            } else {
+                tool
+            }
+        })
+        .collect()
+}
+
+impl ServerHandler for Shim {
+    fn get_info(&self) -> InitializeResult {
+        let mut info = InitializeResult::new(ServerCapabilities::builder().enable_tools().build());
+        info.server_info = Implementation::new(SERVER_NAME, env!("CARGO_PKG_VERSION"));
+        info
+    }
+
+    fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
+        std::future::ready(Ok(ListToolsResult::with_all_items(descriptors())
+            .with_ttl_ms(0)
+            .with_cache_scope(CacheScope::Private)))
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let input = request.arguments.map_or_else(|| json!({}), Value::Object);
+        let result = match self.call(&request.name, &input).await {
+            Ok(answer) => CallToolResult::success(vec![ContentBlock::text(answer)]),
+            Err(why) => CallToolResult::error(vec![ContentBlock::text(why)]),
+        };
+        Ok(result.into())
+    }
+}
+
+/// Serves on standard input and output until the client leaves. With neither `url` nor `ticket`
+/// the list still answers, so connecting and the offline pin run it bare; a call then says that
+/// Google Ads runs only inside a Farik session.
+///
+/// # Errors
+///
+/// The client could not be made, or the server stopped with an error.
+pub async fn serve_shim(url: Option<&str>, ticket: Option<&str>) -> Result<(), GoogleAdsError> {
+    use rmcp::ServiceExt as _;
+
+    let server = Shim::new(url, ticket)?;
+    let running = server
+        .serve(rmcp::transport::io::stdio())
+        .await
+        .map_err(|error| {
+            GoogleAdsError::Failed(format!("the Google Ads server stopped: {error}"))
+        })?;
+    running.waiting().await.map_err(|error| {
+        GoogleAdsError::Failed(format!("the Google Ads server stopped: {error}"))
+    })?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -2287,5 +2679,259 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    /// A stand-in for the daemon's `POST /connector/call` on this computer: what it was sent, and
+    /// what it answers with.
+    /// What the stand-in was sent: the bearer, and the body.
+    type Sent = Vec<(Option<String>, Value)>;
+
+    struct Daemon {
+        url: String,
+        seen: std::sync::Arc<std::sync::Mutex<Sent>>,
+    }
+
+    impl Daemon {
+        async fn start(status: u16, answer: Vec<u8>, redirect: bool) -> Self {
+            use axum::Router;
+            use axum::body::{Body, to_bytes};
+            use axum::http::{HeaderMap, Response};
+
+            let seen: std::sync::Arc<std::sync::Mutex<Sent>> = std::sync::Arc::default();
+            let record = seen.clone();
+            let app = Router::new().fallback(move |headers: HeaderMap, body: Body| {
+                let (record, answer) = (record.clone(), answer.clone());
+                async move {
+                    let bytes = to_bytes(body, usize::MAX).await.unwrap_or_default();
+                    record.lock().expect("the record").push((
+                        headers
+                            .get("authorization")
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_string),
+                        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+                    ));
+                    if redirect {
+                        return Response::builder()
+                            .status(302)
+                            .header("location", "http://127.0.0.1:9/elsewhere")
+                            .body(Body::empty())
+                            .expect("a response");
+                    }
+                    Response::builder()
+                        .status(status)
+                        .body(Body::from(answer))
+                        .expect("a response")
+                }
+            });
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("a port");
+            let url = format!(
+                "http://{}/connector/call",
+                listener.local_addr().expect("an address")
+            );
+            tokio::spawn(async move {
+                let _ = axum::serve(listener, app).await;
+            });
+            Self { url, seen }
+        }
+
+        fn requests(&self) -> Sent {
+            self.seen.lock().expect("the record").clone()
+        }
+    }
+
+    #[test]
+    fn the_shim_lists_ten_tools_offline() {
+        let listed = super::descriptors();
+        assert_eq!(
+            listed
+                .iter()
+                .map(|tool| tool.name.to_string())
+                .collect::<Vec<_>>(),
+            tool_names()
+        );
+        for tool in &listed {
+            assert_eq!(tool.input_schema["type"], json!("object"), "{}", tool.name);
+            assert!(
+                tool.description
+                    .as_deref()
+                    .is_some_and(|about| !about.is_empty())
+            );
+            let read = super::READ_TOOLS.contains(&&*tool.name);
+            assert_eq!(
+                tool.annotations
+                    .as_ref()
+                    .and_then(|notes| notes.read_only_hint),
+                read.then_some(true),
+                "{}",
+                tool.name
+            );
+        }
+        // Neither variable set: the list is the same, and building the shim asks nothing.
+        super::Shim::new(None, None).expect("a shim");
+    }
+
+    #[tokio::test]
+    async fn forwards_a_call_with_its_ticket() {
+        let daemon = Daemon::start(
+            200,
+            json!({ "ok": { "accounts": [] } }).to_string().into_bytes(),
+            false,
+        )
+        .await;
+        let shim = super::Shim::new(Some(&daemon.url), Some("ticket-1")).expect("a shim");
+        let answer = shim
+            .call("list_accounts", &json!({}))
+            .await
+            .expect("answered");
+        assert_eq!(
+            serde_json::from_str::<Value>(&answer).expect("JSON"),
+            json!({ "accounts": [] })
+        );
+        let sent = daemon.requests();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0.as_deref(), Some("Bearer ticket-1"));
+        assert_eq!(
+            sent[0].1,
+            json!({ "tool": "list_accounts", "arguments": {} })
+        );
+
+        // The daemon's refusal is the tool's error, in its words.
+        let daemon = Daemon::start(
+            200,
+            json!({ "error": "not_in_marketing_plan: the active plan has no campaign x" })
+                .to_string()
+                .into_bytes(),
+            false,
+        )
+        .await;
+        let shim = super::Shim::new(Some(&daemon.url), Some("ticket-1")).expect("a shim");
+        assert_eq!(
+            shim.call("create_search_campaign", &json!({ "a": 1 }))
+                .await,
+            Err("not_in_marketing_plan: the active plan has no campaign x".to_string())
+        );
+        assert_eq!(daemon.requests()[0].1["arguments"], json!({ "a": 1 }));
+    }
+
+    #[tokio::test]
+    async fn says_what_the_daemon_could_not() {
+        // A ticket the daemon does not accept, another status, an answer that is not JSON and
+        // one that says neither what was done nor why not.
+        for (status, body, says) in [
+            (401, "", "ticket"),
+            (500, "", "status 500"),
+            (200, "no", "not JSON"),
+            (200, "{}", "neither"),
+        ] {
+            let daemon = Daemon::start(status, body.as_bytes().to_vec(), false).await;
+            let shim = super::Shim::new(Some(&daemon.url), Some("t")).expect("a shim");
+            let error = shim.call("report", &json!({})).await.expect_err("refused");
+            assert!(error.contains(says), "{status} {body}: {error}");
+        }
+        // No redirect is followed, and an answer over 4 MiB is refused.
+        let daemon = Daemon::start(200, Vec::new(), true).await;
+        let shim = super::Shim::new(Some(&daemon.url), Some("t")).expect("a shim");
+        let error = shim.call("report", &json!({})).await.expect_err("302");
+        assert!(error.contains("status 302"), "{error}");
+        assert_eq!(daemon.requests().len(), 1);
+        let daemon = Daemon::start(200, vec![b' '; 4 * 1024 * 1024 + 1], false).await;
+        let shim = super::Shim::new(Some(&daemon.url), Some("t")).expect("a shim");
+        let error = shim
+            .call("report", &json!({}))
+            .await
+            .expect_err("too large");
+        assert!(error.contains("too large"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_call_without_a_session_says_so() {
+        let said = "Google Ads runs only inside a Farik session".to_string();
+        for (url, ticket) in [
+            (None, None),
+            (Some("http://127.0.0.1:1/connector/call"), None),
+            (None, Some("t")),
+        ] {
+            let shim = super::Shim::new(url, ticket).expect("a shim");
+            assert_eq!(
+                shim.call("list_accounts", &json!({})).await,
+                Err(said.clone())
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn refuses_a_url_that_is_not_the_daemon_s() {
+        let daemon = Daemon::start(200, json!({ "ok": 1 }).to_string().into_bytes(), false).await;
+        let port = daemon
+            .url
+            .split(':')
+            .nth(2)
+            .and_then(|rest| rest.split('/').next())
+            .expect("a port")
+            .to_string();
+        for url in [
+            "http://10.0.0.1:1/connector/call".to_string(),
+            "https://127.0.0.1:1/connector/call".to_string(),
+            "http://localhost:1/connector/call".to_string(),
+            "http://127.0.0.1:1/other".to_string(),
+            "http://127.0.0.1:1/connector/call/".to_string(),
+            "http://127.0.0.1:1/connector/call?x=1".to_string(),
+            "http://user@127.0.0.1:1/connector/call".to_string(),
+            "http://127.0.0.1:/connector/call".to_string(),
+            "http://127.0.0.1:0/connector/call".to_string(),
+            "http://127.0.0.1:01/connector/call".to_string(),
+            "http://127.0.0.1:65536/connector/call".to_string(),
+            "http://127.0.0.1.evil.test:1/connector/call".to_string(),
+            format!("http://127.0.0.1:{port}@10.0.0.1/connector/call"),
+            String::new(),
+        ] {
+            let shim = super::Shim::new(Some(&url), Some("t")).expect("a shim");
+            let error = shim
+                .call("list_accounts", &json!({}))
+                .await
+                .expect_err("refused");
+            assert!(error.contains("not where"), "{url}: {error}");
+        }
+        assert!(daemon.requests().is_empty(), "nothing was sent");
+    }
+
+    /// The environment's proxy is never used: a child copy of this test, with `HTTP_PROXY` set to
+    /// a stand-in that records, calls a second one directly.
+    #[tokio::test]
+    async fn the_shim_uses_no_proxy_from_the_environment() {
+        if let Ok(target) = std::env::var("FARIK_SHIM_PROXY_CHILD") {
+            super::Shim::new(Some(&target), Some("t"))
+                .expect("a shim")
+                .call("list_accounts", &json!({}))
+                .await
+                .expect("answered");
+            return;
+        }
+        let proxy = Daemon::start(200, json!({ "ok": 1 }).to_string().into_bytes(), false).await;
+        let target = Daemon::start(200, json!({ "ok": 1 }).to_string().into_bytes(), false).await;
+        let through = proxy.url.trim_end_matches("/connector/call").to_string();
+        let child = tokio::process::Command::new(std::env::current_exe().expect("this test"))
+            .args([
+                "--exact",
+                "google_ads::tests::the_shim_uses_no_proxy_from_the_environment",
+            ])
+            .env("FARIK_SHIM_PROXY_CHILD", &target.url)
+            .env("HTTP_PROXY", &through)
+            .env("http_proxy", &through)
+            .env("ALL_PROXY", &through)
+            .env_remove("NO_PROXY")
+            .env_remove("no_proxy")
+            .output()
+            .await
+            .expect("the child runs");
+        assert!(
+            child.status.success(),
+            "{}",
+            String::from_utf8_lossy(&child.stdout)
+        );
+        assert!(proxy.requests().is_empty(), "the proxy was used");
+        assert_eq!(target.requests().len(), 1);
     }
 }
