@@ -52,7 +52,9 @@ Forty-six hosts in ten categories, each the shop's primary domain (mostly its Un
 | `furniture` | IKEA `ikea.com`; Wayfair `wayfair.com`; National Business Furniture `nationalbusinessfurniture.com` |
 | `food_service` | WebstaurantStore `webstaurantstore.com`; KaTom Restaurant Supply `katom.com`; Central Restaurant Products `centralrestaurant.com` |
 | `printing` | Vistaprint `vistaprint.com`; MOO `moo.com`; 4imprint `4imprint.com` |
-| `software` | AWS Marketplace `aws.amazon.com`; Microsoft AppSource `appsource.microsoft.com`; Atlassian Marketplace `marketplace.atlassian.com` |
+| `software` | AWS Marketplace `aws.amazon.com`; Microsoft Marketplace `marketplace.microsoft.com`; Atlassian Marketplace `marketplace.atlassian.com` |
+
+Checked on 2026-10-07, since a redirect to another host leaves an entry unusable under the exact-match rule: `nbf.com` answers 301 to `www.nationalbusinessfurniture.com`, the shop's own pages, so `nationalbusinessfurniture.com` stays; `appsource.microsoft.com` answers 308 to `marketplace.microsoft.com` (Microsoft merged AppSource and Azure Marketplace into Microsoft Marketplace on 2025-09-25), so the entry is Microsoft Marketplace, and the approved mockups' "Microsoft AppSource" reads "Microsoft Marketplace". Both Microsoft hosts answer `WebFetch` 403 where a browser is let in; phase 11 step 02's check of each host meets it.
 
 Left out: software review sites (G2, Capterra, TrustRadius), which sell nothing and rank vendors partly by paid placement, so software is bought through the official marketplaces above or, by request, the vendor's own site; classifieds between private people (Craigslist, Facebook Marketplace), which are not shops; the cross-border marketplaces AliExpress, Temu, Shein and Wish, over regulators' recurring product-safety findings; makers that sell through dealers rather than a shop of their own. Left for the launch review: Alibaba.com, a directory of manufacturers more than a shop; USPS's prices (`postcalc.usps.com`, a host of its own) and the other carriers' regional sites; whether each host answers `WebFetch` (phase 11 step 02).
 
