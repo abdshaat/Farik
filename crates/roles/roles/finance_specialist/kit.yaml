@@ -1,5 +1,11 @@
-# The Finance Specialist's kit is empty until phase 7 step 10 adds its skills and its Stripe
-# connection (ADR 0019).
+# The Finance Specialist's kit (ADR 0019; phase 7 step 10): the six skills of its work. Its services
+# are added in the same step's later tasks, each read-only.
 role: finance_specialist
-skills: []
+skills:
+  - categorising-expenses
+  - closing-the-month
+  - forecasting
+  - unit-economics-and-pricing
+  - recommending-a-budget
+  - using-finance-sources
 connectors: []
