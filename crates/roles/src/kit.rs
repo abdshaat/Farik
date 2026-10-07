@@ -2742,6 +2742,53 @@ mod tests {
         }
     }
 
+    /// A guard over the six finance skills: a skill that names a tool its kit `denied` tells the
+    /// agent to call what the harness will always refuse (mutation M18: `using-finance-sources`
+    /// naming `stripe_api_write` in place of `stripe_api_read` passed every test). The tools a
+    /// skill does name must be found, or the check would pass by never matching.
+    #[test]
+    fn no_finance_skill_names_a_denied_tool() {
+        let kit = load_kit(Role::FinanceSpecialist).expect("the Finance Specialist's kit");
+        assert!(!kit.skills.is_empty());
+        let texts: Vec<(&str, &str)> = kit
+            .skills
+            .iter()
+            .flat_map(|skill| {
+                skill
+                    .session_files
+                    .values()
+                    .map(|text| (skill.name.as_str(), text.as_str()))
+            })
+            .collect();
+        let (mut denied, mut named) = (0, 0);
+        for connector in &kit.connectors {
+            let KitConnector::Server { entry, .. } = connector else {
+                panic!("{} is a server", connector.name());
+            };
+            let server = custom_server(entry).expect("a custom server");
+            for (tool, tag) in &server.tools {
+                let quoted = format!("`{tool}`");
+                if *tag == ConnectorTag::Denied {
+                    denied += 1;
+                    for (skill, text) in &texts {
+                        assert!(
+                            !text.contains(&quoted),
+                            "{skill} names {quoted}, which {} denies",
+                            server.name
+                        );
+                    }
+                } else {
+                    named += texts
+                        .iter()
+                        .filter(|(_, text)| text.contains(&quoted))
+                        .count();
+                }
+            }
+        }
+        assert!(denied > 0, "the kit denies a tool");
+        assert!(named > 0, "the skills name the tools they use in backticks");
+    }
+
     /// A guard: it passes with no marketing connector at all.
     #[test]
     fn every_spending_tool_of_the_marketing_kit_has_a_label() {
