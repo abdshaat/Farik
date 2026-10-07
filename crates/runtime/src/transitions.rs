@@ -42,7 +42,7 @@ use farik_protocol::event::{
     RejectionWire, TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
     TransitionActorWire, TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
 };
-use farik_store::baseline::changes_since_baseline;
+use farik_store::baseline::{changes_since_baseline, folder_in};
 use farik_store::files::{FilesError, ProjectFiles};
 pub use farik_store::git::integration_branch;
 pub(crate) use farik_store::waiting::{is_move_into, last_move_into, review_passed};
@@ -718,13 +718,15 @@ impl Transitions {
         named: &[String],
     ) -> Result<(WorkState, Vec<String>), TransitionError> {
         let root = self.files.root();
-        let changed: Vec<String> = changes_since_baseline(&root.join(folder), &contract.id)
-            .map_err(|error| TransitionError::Files {
-                detail: error.to_string(),
-            })?
-            .into_iter()
-            .map(|change| change.path)
-            .collect();
+        let files = |error: farik_store::StoreError| TransitionError::Files {
+            detail: error.to_string(),
+        };
+        let changed: Vec<String> =
+            changes_since_baseline(&folder_in(root, folder).map_err(files)?, &contract.id)
+                .map_err(files)?
+                .into_iter()
+                .map(|change| change.path)
+                .collect();
         let missing = named
             .iter()
             .filter(|path| !private_path(root, folder, path).is_ok_and(|file| file.is_file()))

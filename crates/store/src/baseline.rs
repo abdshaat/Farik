@@ -33,6 +33,37 @@ pub fn make_private_directory(path: &Path) -> Result<(), StoreError> {
         .map_err(|error| failed(&error, path))
 }
 
+/// The private folder `folder` of the project at `root`, `folder` being as the roles name it
+/// (`.farik/local/finance`, its parts joined by `/`). It is refused when any part from `root` down
+/// is a link, `.farik` and `.farik/local` included, since a folder reached through one is
+/// somewhere else, and what is read or written there is not the folder's. A part that is not
+/// there is no link.
+///
+/// # Errors
+///
+/// `Io` when a part is a link or cannot be looked at.
+pub fn folder_in(root: &Path, folder: &str) -> Result<PathBuf, StoreError> {
+    let mut at = root.to_path_buf();
+    for part in folder.split('/') {
+        at.push(part);
+        match fs::symlink_metadata(&at) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(StoreError::Io {
+                    detail: format!(
+                        "{} is a link, and a private folder is not reached through one",
+                        at.display()
+                    ),
+                });
+            }
+            Err(error) if error.kind() != io::ErrorKind::NotFound => {
+                return Err(failed(&error, &at));
+            }
+            _ => {}
+        }
+    }
+    Ok(at)
+}
+
 /// Where the copy of `folder` taken for `task` lies: `<folder>/.history/<task>`.
 #[must_use]
 pub fn baseline_of(folder: &Path, task: &TaskId) -> PathBuf {
@@ -241,7 +272,7 @@ mod tests {
 
     use farik_core::contract::TaskId;
 
-    use super::{changes_since_baseline, copy_baseline};
+    use super::{changes_since_baseline, copy_baseline, folder_in};
 
     fn a_folder(name: &str) -> PathBuf {
         let folder = std::env::temp_dir()
@@ -369,6 +400,38 @@ mod tests {
         let error = copy_baseline(&folder, &task("FRK-1")).expect_err("refused");
         assert!(error.to_string().contains("is a link"), "{error}");
         assert_eq!(fs::read_dir(&elsewhere).expect("read").count(), 0);
+    }
+
+    #[test]
+    fn finds_a_folder_reached_through_no_link() {
+        let root = std::env::temp_dir().join(format!("farik-folder-in-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("made");
+        // Not made yet: no link, so the path is answered for the caller to make.
+        assert_eq!(
+            folder_in(&root, ".farik/local/finance").expect("found"),
+            root.join(".farik/local/finance")
+        );
+        fs::create_dir_all(root.join(".farik/local/finance")).expect("made");
+        assert!(folder_in(&root, ".farik/local/finance").is_ok());
+        // A link at any level, from the project's root down, is refused.
+        let elsewhere = root.join("elsewhere");
+        fs::create_dir_all(elsewhere.join("local/finance")).expect("made");
+        for (linked, target) in [
+            (".farik", elsewhere.clone()),
+            (".farik/local", elsewhere.join("local")),
+            (".farik/local/finance", elsewhere.join("local/finance")),
+        ] {
+            let held = root.join("held");
+            let _ = fs::remove_dir_all(&held);
+            fs::create_dir_all(&held).expect("made");
+            let copy = held.join("project");
+            fs::create_dir_all(&copy).expect("made");
+            fs::create_dir_all(copy.join(linked).parent().expect("a parent")).expect("made");
+            symlink(&target, copy.join(linked)).expect("a link");
+            let error = folder_in(&copy, ".farik/local/finance").expect_err("refused");
+            assert!(error.to_string().contains("is a link"), "{linked}: {error}");
+        }
     }
 
     #[test]

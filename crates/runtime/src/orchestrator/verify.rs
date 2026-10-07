@@ -19,7 +19,7 @@ use farik_protocol::event::{
     CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody, EventIds, FarikEvent,
     NoteWrittenBodyKind, ReviewRecordedBody, new_event,
 };
-use farik_store::baseline::{FolderChangeKind, baseline_of, changes_since_baseline};
+use farik_store::baseline::{FolderChangeKind, baseline_of, changes_since_baseline, folder_in};
 use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::design::DESIGN_REVIEW_TOOLS;
@@ -172,12 +172,7 @@ async fn run_what_farik_runs(
     }
     // A task in a private folder has no worktree, branch or sandbox to run anything in (6.6).
     if let Some(folder) = task_private_folder(contract) {
-        return run_in_the_folder(
-            deps,
-            contract,
-            &pending,
-            &deps.tools.files.root().join(folder),
-        );
+        return run_in_the_folder(deps, contract, &pending, folder);
     }
     orchestrator.forget_sandbox(&contract.id);
     let base = integration_branch(team, &deps.tools.git)?;
@@ -268,7 +263,7 @@ fn run_in_the_folder(
     deps: &OrchestratorDeps,
     contract: &TaskContract,
     pending: &[&ExitCriterion],
-    folder: &Path,
+    folder: &str,
 ) -> Result<FarikRan, OrchestratorError> {
     for criterion in pending {
         if wire_method(&criterion.verification) != Some("artifact") {
@@ -279,7 +274,7 @@ fn run_in_the_folder(
             )));
         }
         if let CriterionOutcome::Result(result) =
-            check_artifact_in(folder, criterion, RunBy::Reviewer)
+            check_artifact_in(deps.tools.files.root(), folder, criterion, RunBy::Reviewer)
         {
             record_run(deps, contract, result)?;
         }
@@ -481,7 +476,7 @@ async fn review(
     // in the folder, and reads each beside its copy from the start of the task (6.6).
     let (diff, files);
     let changes = if let Some(folder) = task_private_folder(&contract) {
-        files = folder_changes(&deps.tools.files.root().join(folder), &contract.id)?;
+        files = folder_changes(&folder_in(deps.tools.files.root(), folder)?, &contract.id)?;
         Changes::Folder(&files)
     } else {
         let git = &deps.tools.git;

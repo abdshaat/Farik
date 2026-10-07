@@ -15,7 +15,7 @@ use farik_core::team::{Team, task_private_folder};
 use farik_protocol::clock::IdSource;
 use farik_protocol::command::{Command, CommandReply, ReplyKind};
 use farik_roles::{KitError, RoleError};
-use farik_store::baseline::make_private_directory;
+use farik_store::baseline::{folder_in, make_private_directory};
 use farik_store::files::FilesError;
 use farik_store::{GitError, StoreError};
 
@@ -738,7 +738,7 @@ fn session_dir(
     let Some(folder) = task_private_folder(contract) else {
         return Ok(worktree(deps, &contract.id));
     };
-    let folder = deps.tools.files.root().join(folder);
+    let folder = folder_in(deps.tools.files.root(), folder)?;
     make_private_directory(&folder)?;
     Ok(folder)
 }
@@ -1294,6 +1294,40 @@ mod tests {
             "no contract failed the Definition of Ready"
         );
         assert_eq!(adapter.transcripts_left(), 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_to_work_in_a_folder_reached_through_a_link() {
+        use std::os::unix::fs::symlink;
+
+        // A session in a folder that is a link would work where the link points (5.6, 6.6).
+        let harness = Harness::with_finance("orch-session-dir-link");
+        harness.finance_task("FRK-1", None);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let contract = orchestrator
+            .deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let folder = harness.finance_folder();
+        let outside = harness
+            .project
+            .repo
+            .path
+            .parent()
+            .expect("a parent")
+            .join(format!("{}-session-dir-outside", std::process::id()));
+        std::fs::create_dir_all(&outside).expect("made");
+        std::fs::create_dir_all(folder.parent().expect("a parent")).expect("made");
+        symlink(&outside, &folder).expect("a link");
+
+        let error = super::session_dir(&orchestrator.deps, &contract).expect_err("refused");
+
+        assert!(error.to_string().contains("is a link"), "{error}");
+        // Nothing was made where the link points.
+        assert_eq!(std::fs::read_dir(&outside).expect("read").count(), 0);
     }
 
     #[test]

@@ -10,6 +10,7 @@ use farik_core::contract::{ExitCriterion, TaskContract, TaskId, Verification};
 use farik_core::governor::done::{CriterionResult, RunBy};
 use farik_core::governor::paths::normalise;
 use farik_core::team::workbook_path_fault;
+use farik_store::baseline::folder_in;
 use farik_store::{Git, GitError};
 
 use crate::exec::{ExecError, ExecResult, Executor};
@@ -163,12 +164,15 @@ pub fn run_criteria(
 
 /// Judges an `artifact` criterion of a task in a private folder (`docs/SPEC.md` 5.4, 6.6) on the
 /// host, with no sandbox: the artifact is a workbook, named as the folder holds it (`books.xlsx`),
-/// and it passes when it is a regular file in `folder`, reached through no link. A workbook is not
-/// text, so a criterion that searches it for strings fails; a criterion that is not an artifact is
-/// not judged here and fails. The result is stamped `run_by`.
+/// and it passes when it is a regular file in `folder`, the folder's path from the project's
+/// `root` (`.farik/local/finance`), reached through no link: none of the folder's parts from `root`
+/// down is one, and none of the artifact's. A workbook is not text, so a criterion that searches
+/// it for strings fails; a criterion that is not an artifact is not judged here and fails. The
+/// result is stamped `run_by`.
 #[must_use]
 pub fn check_artifact_in(
-    folder: &Path,
+    root: &Path,
+    folder: &str,
     criterion: &ExitCriterion,
     run_by: RunBy,
 ) -> CriterionOutcome {
@@ -192,12 +196,14 @@ pub fn check_artifact_in(
              asks it to contain: nothing was read"
         ));
     }
-    let mut at = folder.to_path_buf();
-    if std::fs::symlink_metadata(folder).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-        return fail(format!(
-            "{path} lies in a folder that is a link: nothing was read"
-        ));
-    }
+    let mut at = match folder_in(root, folder) {
+        Ok(folder) => folder,
+        Err(error) => {
+            return fail(format!(
+                "{path} cannot be reached: {error}: nothing was read"
+            ));
+        }
+    };
     let parts: Vec<&str> = path.split('/').collect();
     for (index, part) in parts.iter().enumerate() {
         at.push(part);
@@ -687,9 +693,13 @@ mod tests {
         assert_eq!(counting.runs.load(Ordering::SeqCst), 0);
     }
 
-    /// The result of `check_artifact_in` on `criterion`, as its passed flag and its evidence.
-    fn checked_in(folder: &std::path::Path, criterion: &ExitCriterion) -> (bool, String) {
-        match check_artifact_in(folder, criterion, RunBy::Reviewer) {
+    /// The private folder of the projects these tests make.
+    const FOLDER: &str = ".farik/local/finance";
+
+    /// The result of `check_artifact_in` on `criterion`, in the project at `root`, as its passed
+    /// flag and its evidence.
+    fn checked_in(root: &std::path::Path, criterion: &ExitCriterion) -> (bool, String) {
+        match check_artifact_in(root, FOLDER, criterion, RunBy::Reviewer) {
             CriterionOutcome::Result(result) => {
                 assert_eq!(result.criterion_id, "C1");
                 assert_eq!(result.run_by, RunBy::Reviewer);
@@ -703,7 +713,9 @@ mod tests {
     fn checks_an_artifact_in_a_folder() {
         use std::os::unix::fs::symlink;
 
-        let folder = fresh_root("artifact-in-folder");
+        let root = fresh_root("artifact-in-folder");
+        let folder = root.join(FOLDER);
+        std::fs::create_dir_all(&folder).expect("made");
         std::fs::create_dir_all(folder.join("2026")).expect("made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
         std::fs::write(folder.join("2026/pricing.xlsx"), "pricing").expect("written");
@@ -712,7 +724,7 @@ mod tests {
         symlink(folder.join("2026"), folder.join("year")).expect("a link");
         // A file in the folder, at any depth the tools allow, passes, naming where it is.
         for path in ["books.xlsx", "2026/pricing.xlsx"] {
-            let (passed, evidence) = checked_in(&folder, &artifact(path, &[]));
+            let (passed, evidence) = checked_in(&root, &artifact(path, &[]));
             assert!(passed, "{path}: {evidence}");
             assert!(evidence.contains(path), "{evidence}");
         }
@@ -732,22 +744,49 @@ mod tests {
             ("notes.txt", vec![], "ends in `.xlsx`"),
             ("books.xlsx", vec!["total"], "is not text"),
         ] {
-            let (passed, evidence) = checked_in(&folder, &artifact(path, &must_contain));
+            let (passed, evidence) = checked_in(&root, &artifact(path, &must_contain));
             assert!(!passed, "{path}");
             assert!(evidence.contains(why), "{path}: {evidence}");
         }
         // A folder that is not there holds nothing.
-        let (passed, evidence) = checked_in(&folder.join("nowhere"), &artifact("books.xlsx", &[]));
+        let (passed, evidence) = checked_in(
+            &fresh_root("artifact-no-folder"),
+            &artifact("books.xlsx", &[]),
+        );
         assert!(!passed && evidence.contains("is not there"), "{evidence}");
         // Another method is not an artifact, and is not judged here.
         let (passed, evidence) = checked_in(
-            &folder,
+            &root,
             &criterion(&json!({ "method": "review", "rubric": ["Is it right?"] })),
         );
         assert!(
             !passed && evidence.contains("not an artifact"),
             "{evidence}"
         );
+    }
+
+    #[test]
+    fn refuses_an_artifact_in_a_folder_that_is_or_lies_below_a_link() {
+        use std::os::unix::fs::symlink;
+
+        // The books are real, in a tree outside the project, which a link at each level of the
+        // folder's path would let a criterion pass for: `.farik`, `.farik/local` and the folder.
+        for linked in [".farik", ".farik/local", ".farik/local/finance"] {
+            let name = linked.replace(['/', '.'], "-");
+            let root = fresh_root(&format!("artifact-linked{name}"));
+            let rest = ".farik/local/finance"
+                .strip_prefix(linked)
+                .expect("a prefix")
+                .trim_start_matches('/');
+            let target = fresh_root(&format!("artifact-outside{name}")).join("target");
+            std::fs::create_dir_all(target.join(rest)).expect("made");
+            std::fs::write(target.join(rest).join("books.xlsx"), "books").expect("written");
+            std::fs::create_dir_all(root.join(linked).parent().expect("a parent")).expect("made");
+            symlink(&target, root.join(linked)).expect("a link");
+            let (passed, evidence) = checked_in(&root, &artifact("books.xlsx", &[]));
+            assert!(!passed, "{linked}: {evidence}");
+            assert!(evidence.contains("link"), "{linked}: {evidence}");
+        }
     }
 
     #[test]

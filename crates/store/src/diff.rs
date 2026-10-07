@@ -6,7 +6,7 @@ use farik_core::contract::{TaskContract, TaskKind};
 use farik_core::team::{Team, task_private_folder};
 use farik_protocol::event::{EventBody, FarikEvent};
 
-use crate::baseline::changes_since_baseline;
+use crate::baseline::{changes_since_baseline, folder_in};
 use crate::git::{Git, integration_branch};
 
 /// A diff and what it touches.
@@ -43,7 +43,8 @@ pub fn diff_of(
 ) -> Result<TaskDiff, String> {
     // A task in a private folder has no branch, and its files are not shown: only which changed.
     if let Some(folder) = task_private_folder(contract) {
-        let changes = changes_since_baseline(&git.root().join(folder), &contract.id)
+        let changes = folder_in(git.root(), folder)
+            .and_then(|folder| changes_since_baseline(&folder, &contract.id))
             .map_err(|error| error.to_string())?;
         return Ok(TaskDiff {
             diff: String::new(),

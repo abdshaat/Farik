@@ -18,7 +18,7 @@ use farik_protocol::event::{
     EscalationAgedBody, EventBody, EventIds, EventKind, FarikEvent, SessionStartedBodyPurpose,
     Thread, new_event,
 };
-use farik_store::baseline::copy_baseline;
+use farik_store::baseline::{copy_baseline, folder_in};
 use farik_store::marketing::{marketing_plans, social_posts};
 use farik_store::{CostScope, EventQuery, Git, TaskProjection};
 
@@ -1336,7 +1336,7 @@ fn assigned(
     }
     let contract = deps.tools.files.read_contract(&row.task_id)?;
     let place = if let Some(folder) = task_private_folder(&contract) {
-        copy_baseline(&deps.tools.files.root().join(folder), &row.task_id)?;
+        copy_baseline(&folder_in(deps.tools.files.root(), folder)?, &row.task_id)?;
         format!("in its private folder {folder}")
     } else {
         let worktree = worktree(deps, &row.task_id);
