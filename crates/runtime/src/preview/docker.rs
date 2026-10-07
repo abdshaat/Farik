@@ -51,24 +51,41 @@ fn daemon_answers(program: &str, limit: Duration) -> bool {
     .is_ok_and(|finished| finished.exit_code == 0 && !finished.killed)
 }
 
-/// The last answer of `docker info`, and when it came.
-static AVAILABLE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
-
 /// Makes previews in containers of one image.
 pub struct DockerPreviewFactory {
     /// The image `prepare` and `start` run in, `SANDBOX_IMAGE` outside tests.
     pub image: String,
     /// The browser's image, the Playwright connector's pinned one outside tests.
     pub browser: String,
+    /// The client `available` asks, `docker` outside tests.
+    program: String,
+    /// How long that client has to answer, `INFO_LIMIT` outside tests.
+    info_limit: Duration,
+    /// The last answer of `docker info`, and when it came.
+    asked: Mutex<Option<(Instant, bool)>>,
+}
+
+impl DockerPreviewFactory {
+    /// A factory of previews in containers of `image`, with `browser` for the Designer.
+    #[must_use]
+    pub fn new(image: String, browser: String) -> Self {
+        Self {
+            image,
+            browser,
+            program: "docker".to_string(),
+            info_limit: INFO_LIMIT,
+            asked: Mutex::new(None),
+        }
+    }
 }
 
 impl PreviewFactory for DockerPreviewFactory {
     fn available(&self) -> bool {
-        let mut last = crate::locked(&AVAILABLE);
+        let mut last = crate::locked(&self.asked);
         match *last {
             Some((at, answer)) if at.elapsed() < AVAILABLE_FOR => answer,
             _ => {
-                let answer = daemon_answers("docker", INFO_LIMIT);
+                let answer = daemon_answers(&self.program, self.info_limit);
                 *last = Some((Instant::now(), answer));
                 answer
             }
@@ -297,7 +314,8 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
-    use super::daemon_answers;
+    use super::{DockerPreviewFactory, daemon_answers};
+    use crate::preview::PreviewFactory;
 
     /// A folder holding an executable `docker` that runs `body` under `sh`, answering its path.
     /// A child process writes it, so that no write descriptor lives in this process: another test
@@ -339,6 +357,49 @@ mod tests {
     fn says_docker_is_there_when_its_daemon_answers() {
         let docker = a_docker("answers", "[ \"$1\" = info ] && exit 0\nexit 1");
         assert!(daemon_answers(&docker, Duration::from_secs(30)));
+    }
+
+    /// A factory whose `docker` is `program`, giving it `limit` to answer `info`.
+    fn a_factory(program: String, limit: Duration) -> DockerPreviewFactory {
+        let mut factory = DockerPreviewFactory::new("image".to_string(), "browser".to_string());
+        factory.program = program;
+        factory.info_limit = limit;
+        factory
+    }
+
+    #[test]
+    fn asks_whether_docker_is_there_through_the_bounded_probe() {
+        // The wiring of `available` to `daemon_answers`: a `docker` that hangs is given its limit
+        // and no more, and one that answers `info` counts as there. Asking `docker info` bare
+        // would run the real client, which hangs without a limit or answers whatever the
+        // machine's docker does.
+        let hangs = a_factory(
+            a_docker("asks-hangs", "exec sleep 20"),
+            Duration::from_millis(200),
+        );
+        let started = Instant::now();
+        assert!(!hangs.available());
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the probe waited {:?}",
+            started.elapsed()
+        );
+        let answers = a_factory(
+            a_docker("asks-answers", "[ \"$1\" = info ] && exit 0\nexit 1"),
+            Duration::from_secs(30),
+        );
+        assert!(answers.available());
+    }
+
+    #[test]
+    fn asks_docker_once_for_a_minute_of_answers() {
+        // Each ask of the client leaves a line beside the script.
+        let docker = a_docker("asks-once", "echo asked >> \"$0.asked\"\nexit 0");
+        let factory = a_factory(docker.clone(), Duration::from_secs(30));
+        assert!(factory.available());
+        assert!(factory.available());
+        let asked = std::fs::read_to_string(format!("{docker}.asked")).expect("it was asked");
+        assert_eq!(asked.lines().count(), 1, "{asked}");
     }
 
     #[test]

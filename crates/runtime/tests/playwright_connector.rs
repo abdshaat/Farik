@@ -452,12 +452,9 @@ fn the_browser_reaches_only_the_preview() {
     };
 
     // (a) The preview's network is off, and the browser has neither the proxy nor the origins.
-    let preview = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: playwright().image,
-    }
-    .start(&project, &task(), &root, &serving(), "tree")
-    .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
+    let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
+        .start(&project, &task(), &root, &serving(), "tree")
+        .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let (page, direct, away) = browse(
         preview.as_ref(),
         &output,
@@ -523,10 +520,7 @@ fn stop_leaves_no_container() {
     let _cleanup = Cleanup(project.clone());
     let output = root.join("output");
     std::fs::create_dir_all(&output).expect("the output folder is made");
-    let factory = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: playwright().image,
-    };
+    let factory = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image);
     let preview = factory
         .start(&project, &task(), &root, &serving(), "tree")
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
@@ -559,12 +553,9 @@ fn the_task_cleanup_removes_the_preview() {
     let root = worktree("cleanup");
     let project = project("cleanup");
     let _cleanup = Cleanup(project.clone());
-    let preview = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: playwright().image,
-    }
-    .start(&project, &task(), &root, &serving(), "tree")
-    .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
+    let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
+        .start(&project, &task(), &root, &serving(), "tree")
+        .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let name = preview.container();
     assert_eq!(containers_named(&name), 1);
 
@@ -595,12 +586,9 @@ fn checks_a_page_on_the_pinned_image() {
     let _cleanup = Cleanup(project.clone());
     let output = root.join("screenshots");
     std::fs::create_dir_all(&output).expect("the output folder is made");
-    let preview = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: playwright().image,
-    }
-    .start(&project, &task(), &root, &serving(), "tree")
-    .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
+    let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
+        .start(&project, &task(), &root, &serving(), "tree")
+        .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let check = |theme: CheckTheme| {
         check_page(
             &playwright(),
@@ -653,12 +641,9 @@ fn a_page_cannot_hide_its_violations_from_the_check() {
     let _cleanup = Cleanup(project.clone());
     let output = root.join("screenshots");
     std::fs::create_dir_all(&output).expect("the output folder is made");
-    let preview = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: playwright().image,
-    }
-    .start(&project, &task(), &root, &serving(), "tree")
-    .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
+    let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
+        .start(&project, &task(), &root, &serving(), "tree")
+        .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let checked = check_page(
         &playwright(),
         preview.as_ref(),
@@ -686,10 +671,10 @@ fn refuses_to_start_without_the_browser_image() {
     let root = worktree("no-browser");
     let project = project("no-browser");
     let _cleanup = Cleanup(project.clone());
-    let refused = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: "farik-test/no-such-browser:absent".to_owned(),
-    }
+    let refused = DockerPreviewFactory::new(
+        ALPINE.to_owned(),
+        "farik-test/no-such-browser:absent".to_owned(),
+    )
     .start(&project, &task(), &root, &serving(), "tree")
     .err()
     .expect("no preview starts without the browser's image");
