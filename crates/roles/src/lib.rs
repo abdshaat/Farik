@@ -746,6 +746,20 @@ mod tests {
             .expect("the item");
         assert!(item.contains("`workbooks`"), "{item}");
         assert!(item.contains("fix what it names and ask again"), "{item}");
+        // Each `artifact` criterion is recorded before `verifying` is asked for, in the prompt's
+        // item and in the skill: the governor refuses a request while one has no result.
+        let recording = "record each `artifact` criterion with `farik_record_criterion_result` \
+                         before asking for `verifying`";
+        let third = ending
+            .split_once("3. the work is done")
+            .map(|(_, rest)| {
+                rest.split("do not end a session")
+                    .next()
+                    .unwrap_or_default()
+            })
+            .expect("the third item");
+        assert!(third.contains(recording), "{third}");
+        assert!(skill.contains(recording), "{skill}");
     }
 
     /// ADR 0042: the Marketing Specialist owns the brand kit, the brand persona, the marketing plan

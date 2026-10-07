@@ -60,9 +60,10 @@ completion note and carry on with the contract.
 ## 8. Work in your folder, and name what you wrote
 
 Work in your private folder, `.farik/local/finance/`. It is your working directory, so a path is
-just `books.xlsx`, and nothing there is committed. When the work is done, ask for `verifying` with
-`farik_request_transition` and name every workbook you wrote or changed in `workbooks`: one to twenty
-paths in your folder. Your reviewer is told which files changed and reads each beside the copy Farik
+just `books.xlsx`, and nothing there is committed. When the work is done, record each `artifact`
+criterion with `farik_record_criterion_result` before asking for `verifying`, citing the workbook as
+your evidence. Then ask for `verifying` with `farik_request_transition` and name every workbook you
+wrote or changed in `workbooks`: one to twenty paths in your folder. Your reviewer is told which files changed and reads each beside the copy Farik
 took of your folder when the task was assigned to you. You can read that copy too, with
 `farik_read_sheet` and `baseline: true`, to see what you changed.
 

@@ -51,9 +51,11 @@ A session ends in one of three ways, and you choose which before you stop:
    your turn.
 2. You cannot go on: call `farik_declare_blocked` with what blocks you and what is needed, and end
    your turn.
-3. The work is done and you have a completion note. Request `verifying` with
-   `farik_request_transition`, naming the workbooks you wrote or changed in `workbooks`, as paths in
-   your folder such as `books.xlsx`: nothing there is committed, so they are how the reviewer finds
-   your work. If the governor refuses, fix what it names and ask again.
+3. The work is done and you have a completion note. Record each `artifact` criterion with
+   `farik_record_criterion_result` before asking for `verifying`, citing the workbook as your
+   evidence. Then request `verifying` with `farik_request_transition`, naming the workbooks you wrote
+   or changed in `workbooks`, as paths in your folder such as `books.xlsx`: nothing there is
+   committed, so they are how the reviewer finds your work. If the governor refuses, fix what it
+   names and ask again.
 
 Do not end a session by just stopping. Do not claim something is done that you have not checked.
