@@ -441,6 +441,43 @@ fn serve_status_has_no_credential_under_a_given_engine() {
     );
 }
 
+/// What `team.get` says `sandboxed` is while `farik serve` runs in `repository`.
+fn sandboxed_while_serving(repository: &TempRepo) -> Value {
+    let out = SharedOut::default();
+    let serving = serving_into(&repository.path, &out);
+    until("the link is printed", || !links(&out.text()).is_empty());
+    let (port, code) = links(&out.text()).remove(0);
+    let cookie = connected(port, &code);
+    let got = call(
+        port,
+        &cookie,
+        "query",
+        json!({ "name": "team.get", "params": {} }),
+    );
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    got["result"]["sandboxed"].clone()
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn tells_the_page_whether_it_runs_in_the_sandbox_by_the_setting() {
+    // The setting, not Docker's answer: the Docker daemon may not be there at all, and the page
+    // is not held up asking it.
+    let unsandboxed = a_team("serve-sandboxed-none");
+    assert_eq!(sandboxed_while_serving(&unsandboxed), json!(false));
+
+    let sandboxed = a_team("serve-sandboxed-docker");
+    std::fs::write(
+        sandboxed.path.join(".farik/local/settings.json"),
+        r#"{"sandbox":"docker"}"#,
+    )
+    .expect("the settings are written");
+    assert_eq!(sandboxed_while_serving(&sandboxed), json!(true));
+}
+
 /// `farik serve <extra>` on a thread whose opener records what it is asked to open, and answers
 /// `opened`.
 fn serving_opening(

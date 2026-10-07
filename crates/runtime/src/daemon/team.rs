@@ -2455,21 +2455,23 @@ pub(super) mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn team_get_says_whether_sessions_run_in_the_sandbox() {
         // Without the sandbox an agent's command can reach a connector's keys, and the add page
-        // must not promise otherwise (re-review N5).
-        use crate::preview::NoPreviews;
-        use crate::preview::fixtures::FakePreviews;
+        // must not promise otherwise (re-review N5). The project's sandbox setting says it: asking
+        // Docker per request held up every other request of the page behind `docker info`, which
+        // `UnaskedPreviews` fails.
+        use crate::preview::fixtures::UnaskedPreviews;
+        use farik_store::files::Sandbox;
 
-        for (name, previews, sandboxed) in [
-            (
-                "team-get-sandboxed",
-                Arc::new(FakePreviews::ready()) as Arc<dyn crate::preview::PreviewFactory>,
-                true,
-            ),
-            ("team-get-no-sandbox", Arc::new(NoPreviews), false),
+        for (name, setting, sandboxed) in [
+            ("team-get-sandboxed", Some(Sandbox::Docker), true),
+            ("team-get-no-sandbox", Some(Sandbox::None), false),
+            ("team-get-not-told", None, false),
         ] {
             let mut harness = Harness::new(name, |_| {});
-            harness.previews = previews;
+            harness.previews = Arc::new(UnaskedPreviews);
             let _ = harness.orchestrator(harness.recorded(Vec::new()));
+            if let Some(setting) = setting {
+                harness.project.deps.transitions.set_sandbox(setting);
+            }
             let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
             assert_eq!(got["sandboxed"], json!(sandboxed), "{name}");
         }

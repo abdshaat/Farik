@@ -489,6 +489,7 @@ async fn start_listening(
     };
     let (sandboxes, previews) = factories(settings.sandbox, sandbox_image(io));
     tools.transitions.set_previews(Arc::clone(&previews));
+    tools.transitions.set_sandbox(settings.sandbox);
     let orchestrator = Arc::new(Orchestrator::new(OrchestratorDeps {
         tools,
         daemon: Arc::clone(&daemon),

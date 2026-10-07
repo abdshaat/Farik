@@ -553,6 +553,27 @@ pub(crate) mod fixtures {
         }
     }
 
+    /// A factory that is never to be asked: its `available` panics, as a slow `docker info` would
+    /// hold up the caller, so that a test finds the one that asks it.
+    pub(crate) struct UnaskedPreviews;
+
+    impl PreviewFactory for UnaskedPreviews {
+        fn available(&self) -> bool {
+            panic!("a preview factory was asked whether a preview can run");
+        }
+
+        fn start(
+            &self,
+            _project_id: &str,
+            _task_id: &TaskId,
+            _worktree: &Path,
+            _preview: &Preview,
+            _tree: &str,
+        ) -> Result<Box<dyn RunningPreview>, PreviewError> {
+            panic!("a preview factory was asked to start a preview");
+        }
+    }
+
     /// A preview whose page check prints `printed` and saves a screenshot where its arguments
     /// say, keeping each check's arguments.
     pub(crate) struct CheckedPreview {

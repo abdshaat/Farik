@@ -43,7 +43,7 @@ use farik_protocol::event::{
     TransitionActorWire, TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
 };
 use farik_store::baseline::{changes_since_baseline, folder_in};
-use farik_store::files::{FilesError, ProjectFiles};
+use farik_store::files::{FilesError, ProjectFiles, Sandbox};
 pub use farik_store::git::integration_branch;
 pub(crate) use farik_store::waiting::{is_move_into, last_move_into, review_passed};
 use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection};
@@ -68,6 +68,8 @@ pub struct Transitions {
     requests: Mutex<()>,
     /// What says whether a preview can run here, once the driver sets it (D4).
     previews: OnceLock<Arc<dyn PreviewFactory>>,
+    /// The project's sandbox setting, once the driver sets it.
+    sandbox: OnceLock<Sandbox>,
 }
 
 /// What the requester brings to a transition, and nothing else: every other fact is read from the
@@ -222,6 +224,7 @@ impl Transitions {
             ids,
             requests: Mutex::new(()),
             previews: OnceLock::new(),
+            sandbox: OnceLock::new(),
         }
     }
 
@@ -231,13 +234,20 @@ impl Transitions {
         let _ = self.previews.set(previews);
     }
 
-    /// Whether sessions run in Docker's sandbox: what runs previews is there and can run one.
-    /// False in no-sandbox mode, where an agent's command runs on the host as the user.
+    /// Sets the project's sandbox setting, which says whether sessions run in Docker's sandbox;
+    /// the first set holds.
+    pub fn set_sandbox(&self, sandbox: Sandbox) {
+        let _ = self.sandbox.set(sandbox);
+    }
+
+    /// Whether sessions run in Docker's sandbox: the project's sandbox setting is `docker`. False
+    /// in no-sandbox mode, where an agent's command runs on the host as the user, and until the
+    /// driver has set it. It is the setting and never Docker's answer, which can take as long as a
+    /// daemon likes and would hold up the page's other requests: with the setting `docker` and no
+    /// daemon, a session does not start, so no command runs outside the sandbox either way.
     #[must_use]
     pub fn sandboxed(&self) -> bool {
-        self.previews
-            .get()
-            .is_some_and(|previews| previews.available())
+        self.sandbox.get() == Some(&Sandbox::Docker)
     }
 
     /// Whether the team's Designer can have its browser. Until the driver has said what runs
