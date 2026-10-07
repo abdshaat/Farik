@@ -733,10 +733,11 @@ const SHEETS_CAP: usize = 256 * 1024;
 /// about it, which can quote the file) a refusal quotes.
 const NAMES_CAP: usize = 2 * 1024;
 
-/// The folder a `farik_read_sheet` call reads in (spec 6.6, 6.10): that of the caller's own role,
-/// in any session; the procurement folder, for the Finance Specialist alone, when `other` asks for
-/// it; and, in a verify session about a task whose assignee's role has a private folder, that
-/// folder, for the task's reviewer and for the Product Manager, who accepts the task.
+/// The folder a `farik_read_sheet` call reads in (spec 6.6, 6.10): the procurement folder, for the
+/// Finance Specialist alone, when `other` asks for it; in a verify session about a task whose
+/// assignee's role has a private folder, that folder, for the task's reviewer and for the Product
+/// Manager, who accepts the task, whatever folder the caller's own role has; and otherwise that of
+/// the caller's own role, in any session.
 fn folder_to_read(call: &Call<'_>, other: Option<OtherFolder>) -> Result<&'static str, ToolError> {
     if other == Some(OtherFolder::Procurement) {
         return match private_folder(Role::ProcurementSpecialist) {
@@ -747,9 +748,8 @@ fn folder_to_read(call: &Call<'_>, other: Option<OtherFolder>) -> Result<&'stati
             )),
         };
     }
-    if let Some(folder) = private_folder(call.role()) {
-        return Ok(folder);
-    }
+    // The reviewed task's folder comes before the caller's own: a reviewer that has a folder of its
+    // own reads the task's, and not its own register under the same name.
     if let Some(task) = &call.context.task_id
         && call.context.purpose == SessionPurpose::Verify
     {
@@ -760,6 +760,9 @@ fn folder_to_read(call: &Call<'_>, other: Option<OtherFolder>) -> Result<&'stati
         {
             return Ok(folder);
         }
+    }
+    if let Some(folder) = private_folder(call.role()) {
+        return Ok(folder);
     }
     Err(sheet_refused(
         "only a role with a private folder reads a workbook, and the reviewer of a task of such a \
@@ -2598,6 +2601,104 @@ mod tests {
         assert!(
             matches!(&finance, Err(ToolError::InvalidInput { .. })),
             "{finance:?}"
+        );
+    }
+
+    /// The founder's rule (readiness refuses any reviewer of a private-folder task but the Product
+    /// Manager, 5.3) means no such reviewer is ready; the tool does not rely on it, and holds the
+    /// folder of the task a verify session is about before the caller's own, so the session state
+    /// is built here directly.
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_reviewer_with_a_folder_reads_the_reviewed_folder() {
+        let project = a_procurement_project("sheets-reviewer-with-a-folder");
+        // Each folder holds a `vendors.xlsx` of its own, so that the wrong folder reads a
+        // different answer.
+        write_register(&project, &the_register()).expect("the procurement register");
+        write(
+            &project,
+            &one_sheet("vendors.xlsx", &json!([["finance", 1]])),
+        )
+        .expect("the finance folder's workbook");
+        // A finance task whose reviewer is the Procurement Specialist, which has a folder of its
+        // own, and the copy taken when it was assigned, then the task's own change.
+        project.filed_with("FRK-4", "verifying", "task", None, |wire| {
+            wire["assignee_role"] = json!("finance_specialist");
+            wire["reviewer_role"] = json!("procurement_specialist");
+        });
+        project.moved(
+            "FRK-4",
+            "assigned",
+            "verifying",
+            &json!({ "assignee": "fin", "reviewer": "proc" }),
+        );
+        let task: farik_core::contract::TaskId = "FRK-4".parse().expect("a task id");
+        farik_store::baseline::copy_baseline(&folder(&project), &task).expect("the copy");
+        write(
+            &project,
+            &one_sheet("vendors.xlsx", &json!([["finance", 2]])),
+        )
+        .expect("the task's change");
+        let mut verifying = project.context("proc", Some("FRK-4"));
+        verifying.purpose = SessionPurpose::Verify;
+        let first_row = |input: Value| {
+            let answer = run(&verifying, "farik_read_sheet", input)
+                .unwrap_or_else(|error| panic!("the reviewer reads: {error}"));
+            pages(&answer)[0]["rows"][1].clone()
+        };
+
+        // The reviewed task's folder, as it is now and as it was when the task was assigned, and
+        // not the reviewer's own.
+        assert_eq!(
+            first_row(json!({ "path": "vendors.xlsx" })),
+            json!(["finance", 2])
+        );
+        assert_eq!(
+            first_row(json!({ "path": "vendors.xlsx", "baseline": true })),
+            json!(["finance", 1])
+        );
+        // The same agent, working at its own task, reads its own folder.
+        let own = project
+            .call(
+                "proc",
+                Some("FRK-3"),
+                "farik_read_sheet",
+                json!({ "path": "vendors.xlsx" }),
+            )
+            .expect("its own register");
+        assert_eq!(pages(&own)[0]["rows"][1], json!(["Acme", 12]));
+        // `folder` is still the Finance Specialist's alone.
+        let reason = refusal_of(run(
+            &verifying,
+            "farik_read_sheet",
+            json!({ "folder": "procurement", "path": "vendors.xlsx" }),
+        ));
+        assert!(reason.starts_with("sheet_refused: "), "{reason}");
+    }
+
+    /// The register is read as it is now: a copy is the copy of a task in the caller's own folder,
+    /// which the register is not. The finance session below is about a procurement task whose copy
+    /// exists, so that only the refusal of `baseline` with `folder` stops the read.
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_register_is_never_read_as_a_copy() {
+        let project = a_procurement_project("sheets-register-no-baseline");
+        write_register(&project, &the_register()).expect("the register is written");
+        let task: farik_core::contract::TaskId = "FRK-3".parse().expect("a task id");
+        farik_store::baseline::copy_baseline(&procurement_folder(&project), &task)
+            .expect("the copy");
+        let input = json!({ "folder": "procurement", "path": "vendors.xlsx" });
+        // Without `baseline` the Finance Specialist reads the register, in a session about the
+        // procurement task as in any other.
+        let now = project.call("fin", Some("FRK-3"), "farik_read_sheet", input.clone());
+        assert!(now.is_ok(), "{now:?}");
+        let mut asking = input;
+        asking["baseline"] = json!(true);
+        let reason = refusal_of(project.call("fin", Some("FRK-3"), "farik_read_sheet", asking));
+        assert!(reason.starts_with("sheet_refused: "), "{reason}");
+        assert!(
+            reason.contains("in your own folder, and not the procurement folder's"),
+            "{reason}"
         );
     }
 
