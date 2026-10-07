@@ -55,7 +55,7 @@ packages/brand/assets/avatars/devops-engineer-256.png, docs/brand/assets/charact
 packages/brand/src/{assets.ts,assets.test.ts,contrast.ts,contrast.test.ts}, packages/brand/tokens/tokens.json   modifies (Task 3)
 packages/ui/src/{role.ts,strings.ts,avatars.ts,RoleTag.tsx,RoleTag.module.css,RoleTag.test.tsx}, packages/ui/gallery/Gallery.tsx   modifies (Task 3)
 apps/web/src/pages/{Team.tsx,setup/TeamSetup.tsx,setup/SetupTeam.tsx,setup/SetupPermissions.tsx}, apps/web/src/strings/en.ts   modifies (Task 4)
-apps/web/src/pages/{team.test.tsx,setup/team.test.tsx}, SetupPermissions' tests   tests (Task 4)
+apps/web/src/pages/{team.test.tsx,setup/team.test.tsx,setup/setup.test.tsx}   tests (Task 4)
 docs/SPEC.md, docs/plans/project-plan.md                              modifies (Task 5)
 ```
 
@@ -137,7 +137,7 @@ As the approved `DevOpsRole` board (the Team card's production line is step 11f'
 - `added_agents_draw_from_extra_2`: two hand-added Developers both get `extra-2`, never `extra-3`, and are named Sami and Rui. RED: the second gets `extra-3`.
 - `someone_never_draws_the_fifth_extra_for_another_role` expects `extra-2` three times. RED: the second is `extra-3`.
 - `the_team_page_adds_devops` (`team.test.tsx`; `the_team_page_adds_finance` then expects nine options). RED: no option.
-- `push_note_names_every_code_role` (`SetupPermissions`): with Theo alone, `mayPushNoteOne` names him; with Theo, Iris and Lena, `mayPushNoteMany` names the three and `mayPushDevops` names Lena; with no DevOps Engineer, no `mayPushDevops`. RED: the note says "the Developers".
+- `push_note_names_every_code_role` (`setup/setup.test.tsx`, at `/setup/permissions`): with Theo alone, `mayPushNoteOne` names him; with Theo, Iris and Lena, `mayPushNoteMany` names the three and `mayPushDevops` names Lena; with no DevOps Engineer, no `mayPushDevops`. RED: the note says "the Developers".
 
 - [ ] `feat(web): offer the DevOps Engineer in the team builder`
 
