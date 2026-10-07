@@ -299,7 +299,13 @@ impl Transitions {
         }
         match decided {
             Ok(decision) => {
-                self.record_move(request, ask, context.contract, &decision)?;
+                self.record_move(
+                    request,
+                    ask,
+                    context.contract,
+                    context.work.folder.as_ref(),
+                    &decision,
+                )?;
                 Ok(TransitionOutcome::Moved(decision))
             }
             Err(refusal) => {
@@ -317,12 +323,15 @@ impl Transitions {
         }
     }
 
-    /// Writes the moved contract, then records the move and any escalation it raises.
+    /// Writes the moved contract, then records the move and any escalation it raises. A move that
+    /// integrates nothing, a task in a private folder reaching `accepted` (6.6), records the files
+    /// the task changed in `folder`, so that its page keeps them whatever later tasks change.
     fn record_move(
         &self,
         request: &TransitionRequest,
         ask: &TransitionAsk,
         mut contract: TaskContract,
+        folder: Option<&FolderWork>,
         decision: &TransitionDecision,
     ) -> Result<(), TransitionError> {
         contract.status = decision.to;
@@ -359,6 +368,9 @@ impl Transitions {
                 reasons: rejection.reasons.clone(),
             }),
             reason: ask.reason.clone(),
+            changed: folder
+                .filter(|_| effects.contains(&TransitionEffect::NothingToIntegrate))
+                .map(|work| work.changed.clone()),
         };
         self.append(request, ask, EventBody::TaskTransitioned(body))?;
         let mut escalation = None;
@@ -4310,6 +4322,64 @@ mod tests {
             ),
             TransitionOutcome::Moved(_)
         ));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_acceptance_carries_the_changed_files() {
+        let project = Project::new("folder-accepted-changed", a_finance_team(), at(12));
+        a_finance_task(&project, "FRK-1", Some("in_progress"));
+        let folder = project.repo.path.join(".farik/local/finance");
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+        std::fs::write(folder.join("old.xlsx"), "an old one").expect("written");
+        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        // The task edited the books and left the old workbook alone.
+        std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "fin-1");
+        note(&project, "FRK-1", "review", "maya");
+        project.moved(
+            "FRK-1",
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "fin-1", "reviewer": "maya" }),
+            at(11),
+        );
+
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let (accepted, earlier) = moves.split_last().expect("the moves");
+        assert_eq!(
+            moved_body(accepted).changed,
+            Some(vec!["books.xlsx".to_string()])
+        );
+        for earlier in earlier {
+            assert_eq!(moved_body(earlier).changed, None);
+        }
+        // A task with a worktree changes no folder, and its acceptance says nothing of one.
+        let project = Project::new("worktree-accepted-changed", a_team(|_| {}), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "dev-a");
+        note(&project, "FRK-1", "review", "dev-b");
+        project.moved("FRK-1", "in_progress", "verifying", &people, at(11));
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        assert_eq!(moved_body(moves.last().expect("a move")).changed, None);
     }
 
     #[test]

@@ -1329,6 +1329,51 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_files_an_acceptance_changed() {
+        // A task in a private folder's move into `accepted` names the files it changed, so that
+        // its page keeps them (6.6). A move with none named, and every log from before the field,
+        // read it as absent; a move that changed nothing says so with an empty list, which is not
+        // the same.
+        let accepted = |changed: Option<serde_json::Value>| {
+            let mut wire = an_event_wire(EventKind::TaskTransitioned);
+            wire["body"]["from"] = json!("verifying");
+            wire["body"]["to"] = json!("accepted");
+            wire["body"]["effects"] = json!(["nothing_to_integrate"]);
+            if let Some(changed) = changed {
+                wire["body"]["changed"] = changed;
+            }
+            wire
+        };
+        let changed_of = |wire: &serde_json::Value| {
+            let EventBody::TaskTransitioned(body) = event_from_value(wire).expect("valid").body
+            else {
+                panic!("a task.transitioned event carries a task.transitioned body");
+            };
+            body.changed
+        };
+        assert_eq!(changed_of(&accepted(None)), None);
+        assert_eq!(
+            changed_of(&accepted(Some(json!(["books.xlsx", "evaluations/x.md"])))),
+            Some(vec![
+                "books.xlsx".to_string(),
+                "evaluations/x.md".to_string()
+            ])
+        );
+        assert_eq!(changed_of(&accepted(Some(json!([])))), Some(Vec::new()));
+        // Each is written back as it was read, an absent one with no key.
+        for wire in [
+            accepted(None),
+            accepted(Some(json!(["books.xlsx"]))),
+            accepted(Some(json!([]))),
+        ] {
+            let event = event_from_value(&wire).expect("valid");
+            assert_eq!(event_to_value(&event), wire);
+        }
+        assert!(!refusal(&accepted(Some(json!([1])))).is_empty());
+        assert!(!refusal(&accepted(Some(json!("books.xlsx")))).is_empty());
+    }
+
+    #[test]
     fn writes_a_summary_and_its_parent() {
         let mut input = an_event_wire(EventKind::ContractWritten);
         input["body"]["summary"]["parent"] = json!("FRK-3");

@@ -42,20 +42,28 @@ pub fn diff_of(
     children: &[(TaskContract, Vec<FarikEvent>)],
 ) -> Result<TaskDiff, String> {
     // A task in a private folder has no branch, and its files are not shown: only which changed.
-    // Until it is assigned it has no copy to differ from, so it has changed nothing.
+    // Once accepted, the move into `accepted` carries them, since the folder holds later tasks'
+    // changes too; before that, or in a log from before the move carried them, they are read from
+    // the folder. Until it is assigned it has no copy to differ from, so it has changed nothing.
     if let Some(folder) = task_private_folder(contract) {
-        let changes = folder_in(git.root(), folder)
-            .and_then(|folder| {
-                if baseline_of(&folder, &contract.id).is_dir() {
-                    changes_since_baseline(&folder, &contract.id)
-                } else {
-                    Ok(Vec::new())
-                }
-            })
-            .map_err(|error| error.to_string())?;
+        let files = match accepted_changes(history) {
+            Some(files) => files,
+            None => folder_in(git.root(), folder)
+                .and_then(|folder| {
+                    if baseline_of(&folder, &contract.id).is_dir() {
+                        changes_since_baseline(&folder, &contract.id)
+                    } else {
+                        Ok(Vec::new())
+                    }
+                })
+                .map_err(|error| error.to_string())?
+                .into_iter()
+                .map(|change| change.path)
+                .collect(),
+        };
         return Ok(TaskDiff {
             diff: String::new(),
-            files: changes.into_iter().map(|change| change.path).collect(),
+            files,
             added: 0,
             removed: 0,
             private_folder: true,
@@ -81,6 +89,17 @@ pub fn diff_of(
         }
     }
     Ok(counted(joined))
+}
+
+/// The files a task in a private folder changed, as its last move into `accepted` recorded them;
+/// none when it was not accepted, or was in a log from before the move recorded them.
+fn accepted_changes(history: &[FarikEvent]) -> Option<Vec<String>> {
+    history.iter().rev().find_map(|event| match &event.body {
+        EventBody::TaskTransitioned(body) if body.to.to_string() == "accepted" => {
+            body.changed.clone()
+        }
+        _ => None,
+    })
 }
 
 /// The number of a task id, which orders `FRK-9` before `FRK-10`.
@@ -168,5 +187,112 @@ fn counted(diff: String) -> TaskDiff {
         added,
         removed,
         private_folder: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use farik_core::contract::fixtures::a_contract_wire;
+    use farik_core::contract::{TaskContract, validate_contract};
+    use farik_core::team::fixtures::a_team_wire;
+    use farik_core::team::{Team, validate_team};
+    use farik_protocol::event::fixtures::an_event_wire;
+    use farik_protocol::event::{EventKind, FarikEvent, event_from_value};
+    use serde_json::{Value, json};
+
+    use super::diff_of;
+    use crate::baseline::copy_baseline;
+    use crate::git::fixtures::TempRepo;
+
+    const FOLDER: &str = ".farik/local/finance";
+
+    /// A Finance Specialist's task FRK-1, in its folder.
+    fn a_finance_task() -> TaskContract {
+        let mut wire = a_contract_wire();
+        wire["assignee_role"] = json!("finance_specialist");
+        wire["reviewer_role"] = json!("product_manager");
+        wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+        wire["exit_criteria"] = json!([{
+            "id": "C1",
+            "text": "The books exist.",
+            "satisfies": ["R1"],
+            "verification": { "method": "artifact", "path": "books.xlsx" }
+        }]);
+        validate_contract(&wire).expect("a contract")
+    }
+
+    fn a_team() -> Team {
+        validate_team(&a_team_wire()).expect("a team")
+    }
+
+    /// FRK-1's move into `accepted`, which integrates nothing, naming `changed` when it is given.
+    fn its_acceptance(changed: Option<&[&str]>) -> FarikEvent {
+        let mut wire = an_event_wire(EventKind::TaskTransitioned);
+        wire["body"] = json!({
+            "from": "verifying",
+            "to": "accepted",
+            "actor": "product_manager",
+            "requested_by": "maya-chen",
+            "gate": "definition_of_done",
+            "effects": ["nothing_to_integrate"],
+            "assignee": "fin",
+            "reviewer": "pm",
+            "iteration": 0
+        });
+        if let Some(changed) = changed {
+            wire["body"]["changed"] = Value::from(changed.to_vec());
+        }
+        event_from_value(&wire).expect("a schema-valid event")
+    }
+
+    fn files_of(repo: &TempRepo, history: &[FarikEvent]) -> Vec<String> {
+        let diff =
+            diff_of(&repo.adapter(), &a_team(), &a_finance_task(), history, &[]).expect("the diff");
+        assert!(diff.private_folder);
+        assert_eq!(diff.diff, "");
+        diff.files
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_accepted_tasks_changes_stay_its_own() {
+        // FRK-1 was accepted with `books.xlsx` changed; FRK-2 then changed `forecast.xlsx` in the
+        // same folder, which FRK-1's page does not show as its own.
+        let repo = TempRepo::new("diff-accepted-own");
+        let folder = repo.path.join(FOLDER);
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+        copy_baseline(&folder, &"FRK-1".parse().expect("a task id")).expect("the copy");
+        std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
+        let accepted = its_acceptance(Some(&["books.xlsx"]));
+        std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
+        std::fs::write(folder.join("books.xlsx"), "FRK-2's books").expect("written");
+
+        assert_eq!(files_of(&repo, &[accepted]), ["books.xlsx"]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_older_acceptance_reads_the_folder() {
+        // A log from before the acceptance carried `changed` holds a move to `accepted` with none:
+        // it is answered from the folder as it was, and so is a task not accepted yet.
+        let repo = TempRepo::new("diff-accepted-older");
+        let folder = repo.path.join(FOLDER);
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+        copy_baseline(&folder, &"FRK-1".parse().expect("a task id")).expect("the copy");
+        std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
+        std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
+
+        assert_eq!(
+            files_of(&repo, &[its_acceptance(None)]),
+            ["books.xlsx", "forecast.xlsx"]
+        );
+        assert_eq!(files_of(&repo, &[]), ["books.xlsx", "forecast.xlsx"]);
+        // An acceptance that changed nothing says so: no file, not the folder's.
+        assert_eq!(
+            files_of(&repo, &[its_acceptance(Some(&[]))]),
+            Vec::<String>::new()
+        );
     }
 }

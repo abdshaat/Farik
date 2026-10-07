@@ -404,7 +404,7 @@
     },
     "taskTransitionedBody": {
       "title": "Task Transitioned Body",
-      "description": "The governor moved a contract (docs/SPEC.md section 5.2). requested_by is the agent id that asked, or human, or governor; effects are what the decision recorded with the move; assignee, reviewer, and iteration are the contract's after it; blocker, blocker_resolution, and rejection are the evidence the move was judged on, when the requester brought any; reason is the human's words for a move they asked for.",
+      "description": "The governor moved a contract (docs/SPEC.md section 5.2). requested_by is the agent id that asked, or human, or governor; effects are what the decision recorded with the move; assignee, reviewer, and iteration are the contract's after it; blocker, blocker_resolution, and rejection are the evidence the move was judged on, when the requester brought any; reason is the human's words for a move they asked for; changed, on the move of a task in a private folder into accepted (docs/SPEC.md 5.4, 6.6), is the files the task changed in its folder, as paths in it, so that its page keeps them whatever later tasks change, and is absent from every other move and from a log written before it existed.",
       "type": "object",
       "additionalProperties": false,
       "required": ["from", "to", "actor", "requested_by", "gate", "effects", "iteration"],
@@ -424,7 +424,8 @@
         "blocker": { "$ref": "#/$defs/blockerWire" },
         "blocker_resolution": { "type": "string" },
         "rejection": { "$ref": "#/$defs/rejectionWire" },
-        "reason": { "type": "string" }
+        "reason": { "type": "string" },
+        "changed": { "type": ["array", "null"], "items": { "type": "string" } }
       }
     },
     "transitionRefusedBody": {
