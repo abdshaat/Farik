@@ -126,7 +126,7 @@ One commit: every construction of `SessionConnector` (`session.rs:216`, `session
 - `a_short_or_long_campaign_takes_a_daily_budget`: runs, from `<start>` to `ends_on` both included, of 2 and 91 days take a daily budget (left / days, rounded down), of 3 and 90 days a total one; a plan campaign whose `starts_on` is today starts tomorrow and is counted from there; in JPY a budget is whole yen, rounded down. RED.
 - `checks_each_write_against_the_plan` (`core::marketing`): one case per refusal of Decisions (another account, an unknown key, a second campaign for a key, a campaign of another plan, a raised total past the budget, a daily amount past the share, enabling past the dates or at the budget, a create whose `ends_on` is before `<start>`); a campaign of a plan two `replaces` back counts under the active plan; pausing passes for any campaign of the lineage, one whose key the active plan dropped included, and is refused for a campaign of no plan of the lineage. RED.
 
-- [ ] `feat(core): check a Google Ads change against the marketing plan`
+- [x] `feat(core): check a Google Ads change against the marketing plan`
 
 ### Task 4: Google's API, faked
 
