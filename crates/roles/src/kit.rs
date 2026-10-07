@@ -1329,6 +1329,18 @@ mod tests {
             assert!(text.contains("\n## 1. "), "{name} has numbered sections");
             assert!(text.contains(beside), "{name} does not name {beside}");
         }
+        // Farik's own stop at the plan's budget is step 08g's: until it arrives the budget held at
+        // Google is the limit, and the skill does not say Farik stops the ads.
+        let (_, text) = kit_skill(Role::MarketingSpecialist, "running-search-ads");
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            text.contains("The budget held at Google is the limit until Farik's own stop arrives"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("Farik stops them at the plan's budget"),
+            "the skill says a stop that has not arrived"
+        );
     }
 
     /// `writing-the-marketing-plan` names the tool that proposes the plan, from the commit that

@@ -6,8 +6,9 @@ description: Use when the active marketing plan has Google Ads campaigns.
 # Running search ads
 
 Search ads spend the owner's money at Google. You run them inside the marketing plan the owner
-approved, with the tools of the Google Ads connector, and Farik stops them at the plan's budget.
-The budget is the plan's, not yours: when the results say a campaign is wasting it, spend less.
+approved, with the tools of the Google Ads connector. The budget held at Google is the limit until
+Farik's own stop arrives, so never count on a stop to keep a campaign inside it. The budget is the
+plan's, not yours: when the results say a campaign is wasting it, spend less.
 
 ## 1. Look before you make anything
 
