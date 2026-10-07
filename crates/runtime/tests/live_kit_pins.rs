@@ -11,8 +11,15 @@
 //! the Marketing Specialist's Higgsfield (`FARIK_KIT_HIGGSFIELD_BEARER`) and Recraft
 //! (`FARIK_KIT_RECRAFT_BEARER`) since step 08, and its Buffer (`FARIK_KIT_BUFFER_BEARER`) and Kit
 //! (`FARIK_KIT_KIT_BEARER`) since step 08b. Recraft's nine names are those of its own package,
-//! whose remote server publishes none, so this run is where they are first checked. A
-//! connector Farik runs itself (`command: farik`, the Architect's OSV) is skipped, with a line
+//! whose remote server publishes none, so this run is where they are first checked. GitHub is in
+//! both the Product Manager's and the Architect's kit since step 07c, with a key the user pastes:
+//! one name, so one variable, `FARIK_KIT_GITHUB_GITHUB_KEY`, set to a fine-grained key, which
+//! lists every tool whatever it may do (one that reaches public repositories only is enough);
+//! each kit's headers narrow what the server lists, so the two lists are compared apart. From the
+//! web launch GitHub signs in through Farik Cloud and the variable is `FARIK_KIT_GITHUB_BEARER`
+//! (ADR 0044).
+//!
+//! A connector Farik runs itself (`command: farik`, the Architect's OSV) is skipped, with a line
 //! saying so: its pin is the offline test `osv_server_lists_the_kits_tools`, since its tools are
 //! Farik's own and change only with a Farik release. The comparison is also proven by
 //! `pin_drift`'s tests and `fixture_mcp.rs`.

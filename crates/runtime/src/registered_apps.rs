@@ -82,23 +82,11 @@ impl fmt::Debug for RegisteredApp {
     }
 }
 
-/// The client secret of Farik's Google app, set when Farik is built (`FARIK_GOOGLE_CLIENT_SECRET`),
-/// by the founder for builds of their own and from a repository secret for release builds. Google's
-/// token endpoint insists on it for a Desktop client in practice, and it protects nothing: it ships
-/// in every binary (ADR 0035's amendments). It is never committed, since GitHub's push protection
-/// blocks a Google OAuth client secret and reports one in a public repository to Google. A build
-/// without it, or with it empty (a repository secret that is not set expands to nothing), has no
-/// Google entry, and signing in with Google there is `sign_in_not_supported`.
-const GOOGLE_CLIENT_SECRET: Option<&str> = option_env!("FARIK_GOOGLE_CLIENT_SECRET");
-
-/// The client id of Farik's Google app, which is public: `None` until the founder registers the app
-/// in a Google Cloud project of their own and gives its id (step 08e's founder's actions), when it
-/// becomes `Some("<number>-<hash>.apps.googleusercontent.com")`. Without it no build has a Google
-/// entry, so a build with the secret cannot ship an id Google would refuse.
-const GOOGLE_CLIENT_ID: Option<&str> = None;
-
 /// Farik's Google app, which signs in for Farik's `google-ads` connector alone (ADR 0042) with
-/// the one scope it needs, `id` and `secret` being its client id and client secret.
+/// the one scope it needs, `id` and `secret` being its client id and client secret. No build holds
+/// either (ADR 0044): the tests make an entry from ids of their own, and phase 11's sign-in
+/// through Farik Cloud, which holds Farik's, builds on these facts.
+#[cfg(test)]
 const fn google(id: &'static str, secret: &'static str) -> RegisteredApp {
     RegisteredApp {
         id: "google",
@@ -121,27 +109,9 @@ const fn google(id: &'static str, secret: &'static str) -> RegisteredApp {
     }
 }
 
-/// Google's entry for a build with this client `id` and client `secret`: only when both are there
-/// and neither is empty. An entry with no id would only be refused by Google, and one built from an
-/// unset repository secret, which expands to nothing, would ship as if it worked.
-const fn shipped_google(
-    id: Option<&'static str>,
-    secret: Option<&'static str>,
-) -> Option<RegisteredApp> {
-    match (id, secret) {
-        (Some(id), Some(secret)) if !id.is_empty() && !secret.is_empty() => {
-            Some(google(id, secret))
-        }
-        _ => None,
-    }
-}
-
-/// Every app Farik has registered: Google's, in a build that has its client id and client secret.
-pub static REGISTERED_APPS: &[RegisteredApp] =
-    match shipped_google(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) {
-        Some(app) => &[app],
-        None => &[],
-    };
+/// Every app Farik has registered: none. No build carries an app of Farik's, and from phase 11
+/// Farik Cloud serves Farik's apps (ADR 0044); the tests pass tables of their own.
+pub static REGISTERED_APPS: &[RegisteredApp] = &[];
 
 /// The app of `apps` that serves the server at `url`, if one does.
 #[must_use]
@@ -320,11 +290,19 @@ mod tests {
         assert!(app_for(&table, "http://10.0.0.1:4000/mcp").is_none());
     }
 
-    /// Until the founder registers Farik's GitHub App (step 03b's Task 7), no entry serves an
-    /// address.
+    /// No build carries an app of Farik's (ADR 0044): the table is empty, so it holds no Google
+    /// entry and no entry for a connector of Farik's or for an address, whatever the build's
+    /// environment. A guard, proved by a mutation: a table built from `google(..)` fails it.
     #[test]
-    fn the_shipped_table_serves_no_address_yet() {
+    fn the_shipped_table_is_empty_in_every_build() {
+        assert_eq!(REGISTERED_APPS.len(), 0, "{REGISTERED_APPS:?}");
+        assert!(REGISTERED_APPS.iter().all(|app| app.id != "google"));
         assert!(REGISTERED_APPS.iter().all(|app| app.host.is_none()));
+        assert!(
+            REGISTERED_APPS
+                .iter()
+                .all(|app| app.farik_connector.is_none())
+        );
     }
 
     #[test]
@@ -353,74 +331,6 @@ mod tests {
         assert_eq!(
             google.settings_url,
             "https://myaccount.google.com/connections"
-        );
-    }
-
-    /// Which client id and client secret, if any, the build ships Google's entry with: both must be
-    /// there, and the secret must not be empty. Decided here from the constants and not by
-    /// `shipped_google`, so the table's test does not repeat the code it checks.
-    fn builds_google() -> Option<(&'static str, &'static str)> {
-        GOOGLE_CLIENT_ID
-            .zip(GOOGLE_CLIENT_SECRET)
-            .filter(|(id, secret)| !id.is_empty() && !secret.is_empty())
-    }
-
-    /// A build with Farik's Google client id and `FARIK_GOOGLE_CLIENT_SECRET` ships Google's entry
-    /// with them, and no other entry for a connector of Farik's; a build without either ships no
-    /// Google entry. Entries for addresses (step 03b's GitHub) may come beside it. The secret is
-    /// never printed, so each assertion here says what it checks and prints no value.
-    #[test]
-    fn the_shipped_table_names_google_for_google_ads_only() {
-        let google_entry = REGISTERED_APPS.iter().find(|app| app.id == "google");
-        let Some((id, secret)) = builds_google() else {
-            assert!(
-                google_entry.is_none(),
-                "a build without Google's client id and client secret has no Google entry"
-            );
-            return;
-        };
-        assert!(
-            id.ends_with(".apps.googleusercontent.com"),
-            "the client id is one Google gave an app"
-        );
-        assert!(
-            google_entry == Some(&google(id, secret)),
-            "the table has Google's entry with the build's client id and secret"
-        );
-        assert!(
-            REGISTERED_APPS
-                .iter()
-                .filter(|app| app.farik_connector.is_some())
-                .all(|app| app.id == "google" && app.farik_connector == Some("google-ads")),
-            "no other entry has a connector of Farik's"
-        );
-    }
-
-    /// Google's entry is shipped with a client id and a client secret that is not empty, and with
-    /// nothing less: an unset repository secret expands to an empty one, and a build with no id
-    /// has nothing Google would accept. The inputs are the decision's own, so the build's
-    /// environment does not matter.
-    #[test]
-    fn ships_google_only_with_a_client_id_and_a_secret() {
-        let id = "an-id.apps.googleusercontent.com";
-        assert!(
-            shipped_google(Some(id), Some("a-secret")) == Some(google(id, "a-secret")),
-            "an id and a secret give Google's entry"
-        );
-        let shipped_wrongly: Vec<&str> = [
-            (None, Some("a-secret"), "no client id"),
-            (Some(id), None, "no client secret"),
-            (Some(id), Some(""), "an empty client secret"),
-            (Some(""), Some("a-secret"), "an empty client id"),
-            (None, None, "neither"),
-        ]
-        .into_iter()
-        .filter(|(given_id, given_secret, _)| shipped_google(*given_id, *given_secret).is_some())
-        .map(|(_, _, why)| why)
-        .collect();
-        assert!(
-            shipped_wrongly.is_empty(),
-            "Google's entry was shipped with {shipped_wrongly:?}"
         );
     }
 
@@ -469,19 +379,6 @@ mod tests {
             "http://localhost:4000/mcp",
         ] {
             assert!(app_for(&table, url).is_none(), "{url}");
-        }
-    }
-
-    /// A guard: a build without Google's client id or client secret has no entry for a connector of
-    /// Farik's. No client id is committed yet, so no build has one.
-    #[test]
-    fn the_shipped_table_has_no_google_yet() {
-        if builds_google().is_none() {
-            assert!(
-                REGISTERED_APPS
-                    .iter()
-                    .all(|app| app.farik_connector.is_none())
-            );
         }
     }
 }

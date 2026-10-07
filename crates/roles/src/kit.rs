@@ -990,8 +990,7 @@ mod tests {
                 kit.connectors.len(),
                 match role {
                     Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
-                    Role::ProductManager | Role::Architect => 3,
-                    Role::MarketingSpecialist => 4,
+                    Role::ProductManager | Role::Architect | Role::MarketingSpecialist => 4,
                     _ => 0,
                 },
                 "{role}"
@@ -1238,6 +1237,67 @@ mod tests {
         assert!(!text.contains(" @"), "no @ after a space");
     }
 
+    /// A role's kit skill by name: its description and its `SKILL.md` as a session reads it.
+    fn kit_skill(role: Role, name: &str) -> (String, String) {
+        let kit = load_kit(role).expect("a shipped kit");
+        let skill = kit
+            .skills
+            .into_iter()
+            .find(|skill| skill.name == name)
+            .unwrap_or_else(|| panic!("the {role} kit has no skill {name}"));
+        let text = skill.session_files["SKILL.md"].clone();
+        (skill.description, text)
+    }
+
+    /// Step 07c: the Product Manager's sources skill no longer says the kit only reads, since an
+    /// issue and a comment on GitHub are written, each after the human allows the call.
+    #[test]
+    fn the_product_managers_sources_skill_asks_before_it_writes_to_github() {
+        let (description, text) = kit_skill(Role::ProductManager, "using-product-sources");
+        assert!(description.contains("GitHub"), "{description}");
+        for phrase in [
+            "GitHub",
+            "issue_write",
+            "add_issue_comment",
+            "farik_ask_human",
+            "## 4. You ask before you write",
+            "Never give either tool a pull request's number.",
+        ] {
+            assert!(
+                text.contains(phrase),
+                "the skill lacks \"{phrase}\":\n{text}"
+            );
+        }
+        assert!(
+            !text.contains("This kit has no way to change anything"),
+            "{text}"
+        );
+        assert!(text.len() < 6 * 1024, "{} bytes", text.len());
+        assert!(!text.contains(" @"), "no @ after a space");
+    }
+
+    /// Step 07c: the Architect's sources skill names GitHub and the two pull request reads its key
+    /// cannot make.
+    #[test]
+    fn the_architects_sources_skill_names_github() {
+        let (description, text) = kit_skill(Role::Architect, "using-architecture-sources");
+        assert!(description.contains("GitHub"), "{description}");
+        for phrase in [
+            "GitHub",
+            "search_code",
+            "pull_request_read",
+            "get_status",
+            "get_check_runs",
+        ] {
+            assert!(
+                text.contains(phrase),
+                "the skill lacks \"{phrase}\":\n{text}"
+            );
+        }
+        assert!(text.len() < 6 * 1024, "{} bytes", text.len());
+        assert!(!text.contains(" @"), "no @ after a space");
+    }
+
     /// A role's service's server, its copy and its tags, by name.
     fn service(role: Role, name: &str) -> (CustomServer, SetupCopy) {
         let kit = load_kit(role).expect("a shipped kit");
@@ -1468,7 +1528,7 @@ mod tests {
         assert_eq!(server.tools.len(), 3);
         let kit = load_kit(Role::Architect).expect("the Architect's kit");
         let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
-        assert_eq!(names, ["context7", "grep", "osv"]);
+        assert_eq!(names, ["context7", "grep", "osv", "github"]);
         for connector in &kit.connectors {
             let KitConnector::Server {
                 entry, allowances, ..
@@ -1508,10 +1568,11 @@ mod tests {
     }
 
     #[test]
-    fn the_product_managers_kit_only_reads() {
+    fn the_product_managers_kit_asks_before_it_writes() {
         let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
         let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
-        assert_eq!(names, ["amplitude", "linear", "notion"]);
+        assert_eq!(names, ["amplitude", "linear", "notion", "github"]);
+        let mut external: Vec<(String, String)> = Vec::new();
         for connector in &kit.connectors {
             let KitConnector::Server {
                 entry, allowances, ..
@@ -1520,13 +1581,22 @@ mod tests {
                 panic!("{} is a server", connector.name());
             };
             let server = custom_server(entry).expect("a custom server");
+            // An issue or a comment is published, so each asks: no connector has an allowance.
+            assert!(allowances.is_empty(), "{}", server.name);
+            external.extend(
+                names_tagged(&server, ConnectorTag::ExternalEffect)
+                    .into_iter()
+                    .map(|tool| (server.name.clone(), tool.to_string())),
+            );
+            if server.name == "github" {
+                continue;
+            }
             assert_eq!(
                 tagged(&server, ConnectorTag::ExternalEffect),
                 0,
                 "{}",
                 server.name
             );
-            assert!(allowances.is_empty(), "{}", server.name);
             assert!(server.credential_keys.is_empty(), "{}", server.name);
             let CustomTransport::Http { oauth, headers, .. } = &server.transport else {
                 panic!("{} is http", server.name);
@@ -1534,6 +1604,225 @@ mod tests {
             assert!(oauth.is_some(), "{} signs in", server.name);
             assert!(headers.is_empty(), "{}", server.name);
         }
+        assert_eq!(
+            external,
+            [
+                ("github".to_string(), "add_issue_comment".to_string()),
+                ("github".to_string(), "issue_write".to_string()),
+            ]
+        );
+    }
+
+    /// A role's service's allowances in its kit, by name.
+    fn allowances_of(role: Role, name: &str) -> BTreeMap<String, KitAllowance> {
+        let kit = load_kit(role).expect("a shipped kit");
+        for connector in kit.connectors {
+            if let KitConnector::Server {
+                entry, allowances, ..
+            } = connector
+                && entry.name.as_str() == name
+            {
+                return allowances;
+            }
+        }
+        panic!("the {role} kit has no {name}");
+    }
+
+    /// GitHub's official server, which both kits reach with a key the user pastes (ADR 0044).
+    const GITHUB_URL: &str = "https://api.githubcopilot.com/mcp/";
+
+    #[test]
+    fn github_for_the_product_manager_files_issues_only_when_asked() {
+        let (server, copy) = pm_service("github");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("github is http");
+        };
+        assert_eq!(url, GITHUB_URL);
+        assert!(oauth.is_none(), "a pasted key, not a sign-in");
+        assert_eq!(
+            headers,
+            &BTreeMap::from([
+                (
+                    "Authorization".to_string(),
+                    "Bearer {GITHUB_KEY}".to_string()
+                ),
+                ("X-MCP-Toolsets".to_string(), "issues,projects".to_string()),
+            ])
+        );
+        assert_eq!(server.credential_keys, ["GITHUB_KEY"]);
+        assert_eq!(
+            copy.key_page.as_deref(),
+            Some(
+                "https://github.com/settings/personal-access-tokens/new?name=Farik+Product+Manager\
+                 &description=Farik%27s+Product+Manager+reads+issues+and+files+the+issues+and+\
+                 comments+you+allow.&expires_in=366&issues=write"
+            )
+        );
+        assert!(
+            copy.setup
+                .contains("Farik asks you before each issue or comment it posts."),
+            "{}",
+            copy.setup
+        );
+        assert!(copy.setup.contains("single sign-on"), "{}", copy.setup);
+        assert_eq!(
+            network_names(&server),
+            sorted(&[
+                "issue_read",
+                "list_issues",
+                "search_issues",
+                "list_issue_types",
+                "list_issue_fields",
+                "get_label",
+                "projects_list",
+                "projects_get",
+            ])
+        );
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::ExternalEffect),
+            ["add_issue_comment", "issue_write"]
+        );
+        assert!(allowances_of(Role::ProductManager, "github").is_empty());
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Denied),
+            ["projects_write", "sub_issue_write", "update_issue_comment"]
+        );
+        assert_eq!(server.tools.len(), 13);
+        let labelled: Vec<&str> = copy.labels.keys().map(String::as_str).collect();
+        assert_eq!(
+            labelled,
+            sorted(&[
+                "issue_read",
+                "list_issues",
+                "search_issues",
+                "list_issue_types",
+                "list_issue_fields",
+                "get_label",
+                "projects_list",
+                "projects_get",
+                "issue_write",
+                "add_issue_comment",
+            ])
+        );
+    }
+
+    #[test]
+    fn github_for_the_architect_reads_code_and_pull_requests_only() {
+        let (server, copy) = service(Role::Architect, "github");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("github is http");
+        };
+        assert_eq!(url, GITHUB_URL);
+        assert!(oauth.is_none(), "a pasted key, not a sign-in");
+        assert_eq!(
+            headers,
+            &BTreeMap::from([
+                (
+                    "Authorization".to_string(),
+                    "Bearer {GITHUB_KEY}".to_string()
+                ),
+                (
+                    "X-MCP-Toolsets".to_string(),
+                    "repos,pull_requests".to_string()
+                ),
+                ("X-MCP-Readonly".to_string(), "true".to_string()),
+            ])
+        );
+        assert_eq!(server.credential_keys, ["GITHUB_KEY"]);
+        assert_eq!(
+            copy.key_page.as_deref(),
+            Some(
+                "https://github.com/settings/personal-access-tokens/new?name=Farik+Architect\
+                 &description=Farik%27s+Architect+reads+code+and+pull+requests+and+changes+\
+                 nothing.&expires_in=366&contents=read&pull_requests=read"
+            )
+        );
+        assert!(
+            copy.setup.contains("The Architect only reads."),
+            "{}",
+            copy.setup
+        );
+        assert!(copy.setup.contains("single sign-on"), "{}", copy.setup);
+        assert_eq!(
+            network_names(&server),
+            sorted(&[
+                "search_code",
+                "get_file_contents",
+                "list_branches",
+                "list_commits",
+                "get_commit",
+                "search_commits",
+                "list_tags",
+                "get_tag",
+                "list_releases",
+                "get_latest_release",
+                "get_release_by_tag",
+                "search_repositories",
+                "list_pull_requests",
+                "pull_request_read",
+                "search_pull_requests",
+            ])
+        );
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Denied),
+            ["list_repository_collaborators"]
+        );
+        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 0);
+        assert!(allowances_of(Role::Architect, "github").is_empty());
+        assert_eq!(server.tools.len(), 16);
+    }
+
+    /// A guard: the two roles' entries are one server and one key with their own narrowing.
+    #[test]
+    fn the_two_github_entries_differ_where_the_roles_do() {
+        let (pm_server, pm_copy) = pm_service("github");
+        let (architect_server, architect_copy) = service(Role::Architect, "github");
+        let (
+            CustomTransport::Http {
+                url: pm_url,
+                headers: pm_headers,
+                ..
+            },
+            CustomTransport::Http {
+                url: architect_url,
+                headers: architect_headers,
+                ..
+            },
+        ) = (&pm_server.transport, &architect_server.transport)
+        else {
+            panic!("both are http");
+        };
+        assert_eq!(pm_url, architect_url);
+        assert_eq!(pm_server.credential_keys, architect_server.credential_keys);
+        assert_eq!(pm_copy.about, architect_copy.about);
+        // One connector name, so one live variable; two hashes, so a team file cannot give one
+        // role the other's wider entry (`matches_kit`).
+        assert_ne!(pm_server, architect_server);
+        let page = "https://github.com/settings/personal-access-tokens/new?";
+        for copy in [&pm_copy, &architect_copy] {
+            let key_page = copy.key_page.as_deref().expect("a key page");
+            assert!(key_page.starts_with(page), "{key_page}");
+        }
+        let written = |copy: &SetupCopy| {
+            copy.key_page
+                .as_deref()
+                .unwrap_or_default()
+                .contains("issues=write")
+        };
+        assert!(written(&pm_copy));
+        assert!(!written(&architect_copy));
+        assert!(!pm_headers.contains_key("X-MCP-Readonly"));
+        assert!(architect_headers.contains_key("X-MCP-Readonly"));
     }
 
     /// A guard: it passes with no connector at all.

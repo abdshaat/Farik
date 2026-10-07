@@ -444,11 +444,14 @@ pub(crate) struct DesignReview {
 /// (oldest first) and the team as it is now. A review recorded since the task last entered
 /// `verifying` answers first, whatever has changed since; without one, the team's preview, the
 /// Designer's browser, and a Designer that is not paused are each waited for, in that order.
+/// `browser` says whether the Designer can have its browser, and is called only when the answer
+/// waits for that: it may ask Docker, which a page's request must not wait for when the answer
+/// does not depend on it.
 pub(crate) fn design_review(
     team: &Team,
     ui_change: bool,
     history: &[FarikEvent],
-    browser: DesignerBrowser,
+    browser: impl FnOnce() -> DesignerBrowser,
 ) -> DesignReview {
     let waiting = |state| DesignReview {
         state,
@@ -486,19 +489,16 @@ pub(crate) fn design_review(
                 .map(|agent| (agent, event.envelope.ids.session_id.clone())),
         };
     }
-    waiting(if team.preview().is_none() {
-        ReviewState::PreviewMissing
-    } else if matches!(
-        browser,
-        DesignerBrowser::NoSandbox | DesignerBrowser::NoPreview
-    ) {
-        ReviewState::DesignerNeedsSandbox
-    } else if browser == DesignerBrowser::NoConnector {
-        ReviewState::DesignerNeedsBrowser
-    } else if team.designer().is_none() {
-        ReviewState::WaitingOnDesigner
-    } else {
-        ReviewState::Waiting
+    if team.preview().is_none() {
+        return waiting(ReviewState::PreviewMissing);
+    }
+    waiting(match browser() {
+        DesignerBrowser::NoSandbox | DesignerBrowser::NoPreview => {
+            ReviewState::DesignerNeedsSandbox
+        }
+        DesignerBrowser::NoConnector => ReviewState::DesignerNeedsBrowser,
+        DesignerBrowser::Ready if team.designer().is_none() => ReviewState::WaitingOnDesigner,
+        DesignerBrowser::Ready => ReviewState::Waiting,
     })
 }
 

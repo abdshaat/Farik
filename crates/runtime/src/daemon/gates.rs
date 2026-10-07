@@ -1621,6 +1621,41 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_a_change_that_needs_no_design_review_without_asking_docker() {
+        // `UnaskedPreviews` panics when asked whether a preview can run, as a slow `docker info`
+        // would hold up the page: Today's three queries, the board and the task's page all read
+        // a design review, and a task that is not a UI change needs no answer from Docker.
+        let harness = Harness::new(
+            "gates-design-review-unasked",
+            crate::tools::fixtures::browsing,
+        );
+        harness
+            .project
+            .deps
+            .transitions
+            .set_previews(Arc::new(crate::preview::fixtures::UnaskedPreviews));
+        harness.verifying("FRK-1");
+
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(waiting["waiting"], json!([]));
+        let listed = query(&harness.daemon, "tasks.list", &json!({}), "tasksListResult");
+        assert_eq!(listed["tasks"][0]["task_id"], "FRK-1", "{listed}");
+        let got = query(
+            &harness.daemon,
+            "task.get",
+            &json!({ "task_id": "FRK-1" }),
+            "taskGetResult",
+        );
+        assert_eq!(got["task"]["task_id"], "FRK-1", "{got}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn an_open_approval_waits_on_the_human() {
         use farik_protocol::event::{NewEvent, event_from_value};
 

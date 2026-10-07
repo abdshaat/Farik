@@ -478,6 +478,70 @@ fn tells_the_page_whether_it_runs_in_the_sandbox_by_the_setting() {
     assert_eq!(sandboxed_while_serving(&sandboxed), json!(true));
 }
 
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn knows_the_sandbox_setting_from_the_moment_it_listens() {
+    // A tab that reconnects asks `team.get` the moment the daemon listens, and the engine is made
+    // right after that: a setting told only later would let that tab read `false` in between.
+    use farik::Engine;
+    use farik_core::budget::DEFAULT_SESSION_LIMITS;
+    use farik_runtime::SessionPurpose;
+    use farik_runtime::daemon::SessionRegistration;
+
+    let repository = a_team("serve-sandbox-at-listen");
+    std::fs::write(
+        repository.path.join(".farik/local/settings.json"),
+        r#"{"sandbox":"docker"}"#,
+    )
+    .expect("the settings are written");
+    let seen: Arc<Mutex<Option<bool>>> = Arc::default();
+    let kept = Arc::clone(&seen);
+    let port = free_port();
+    let root = repository.path.clone();
+    let serving = std::thread::spawn(move || {
+        run_with(&root, &["serve", "--port", &port], |io| {
+            let Engine::Given(engine) = recorded(Vec::new()) else {
+                unreachable!("`recorded` is a given engine");
+            };
+            io.engine = Engine::Given(Arc::new(move |daemon| {
+                // The engine is made once the daemon listens; what the governor's door knows
+                // then is what a page asked first would be told.
+                daemon.register_session(SessionRegistration {
+                    session_id: "probe".to_string(),
+                    agent_id: "probe".to_string(),
+                    task_id: None,
+                    purpose: SessionPurpose::Triage,
+                    in_reply_to: None,
+                    thread: None,
+                    skills: Vec::new(),
+                    skills_root: None,
+                    cwd: std::path::PathBuf::new(),
+                    executor: None,
+                    limits: DEFAULT_SESSION_LIMITS,
+                    farik_tools: Vec::new(),
+                    tiers: Vec::new(),
+                    connectors: Vec::new(),
+                    preview: None,
+                });
+                let sandboxed = daemon
+                    .tool_context("probe")
+                    .map(|context| context.deps.transitions.sandboxed());
+                daemon.end_session("probe");
+                *kept.lock().expect("the answer") = sandboxed;
+                engine(daemon)
+            }));
+        })
+    });
+    until("the engine is made", || {
+        seen.lock().expect("the answer").is_some()
+    });
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert_eq!(*seen.lock().expect("the answer"), Some(true));
+}
+
 /// `farik serve <extra>` on a thread whose opener records what it is asked to open, and answers
 /// `opened`.
 fn serving_opening(

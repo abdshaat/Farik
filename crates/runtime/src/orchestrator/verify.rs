@@ -361,12 +361,9 @@ async fn design_review_first(
         changed_paths,
         &team.rules().ui_paths,
     );
-    let review = design_review(
-        team,
-        ui_change,
-        history,
-        designer_browser(team, deps.previews.as_ref()),
-    );
+    let review = design_review(team, ui_change, history, || {
+        designer_browser(team, deps.previews.as_ref())
+    });
     let designer = match (review.state, &review.recorded_by) {
         (ReviewState::NotNeeded | ReviewState::Passed, _) => return Ok(None),
         (ReviewState::Failed, Some((designer, session_id))) => {

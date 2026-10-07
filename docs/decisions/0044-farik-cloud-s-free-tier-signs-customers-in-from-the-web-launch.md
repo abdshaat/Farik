@@ -2,6 +2,7 @@
 
 Date: 2026-10-06
 Status: accepted (the founder, 2026-10-06, asked to approve phase 7 step 03f's boards: "The github login must be done through a single click. Lets chat about this before moving forward"; after GitHub's manifest flow was discussed: "Lets change the customer's own app. Lets provide free cloud hosting tier for customers that will allow them to sign in from their local machine into the cloud that is managed by farik."; then four answers the same day: what the free tier does, "For free tier there will only be sign-ins. For paid customers we can provide full cloud support from running agents, workspace, google and github apps, etc."; an account, "Yes, a Farik account"; when, "At the web launch"; step 03f, "Drop it". The shape below settled by the controller the same day). Supersedes ADR 0043 in part: its route of the customer's own app, and its phase 15 date for Farik's own apps; its rule that the code carries no credential of Farik's stands, and now holds for good. Amends ADR 0017 (Farik hosts a third thing, Farik Cloud, from phase 11), ADR 0020 and ADR 0033 (where ADR 0043 amended them), ADR 0035 (routes 2 and 3 are Farik Cloud's from phase 11; GitHub takes a pasted key before then) and ADR 0042 (Google Ads signs in through Farik Cloud's Google app from phase 11).
+Amended 2026-10-06 by phase 7 step 07c (the founder's O1): the Product Manager files GitHub issues and comments, each asking first, so Farik's GitHub App asks for more than read-only permissions. See "Amendment of 2026-10-06" at the end.
 
 ## Context
 
@@ -75,3 +76,10 @@ Harder:
 - **Before the launch, GitHub needs a pasted token, and Google Ads cannot be signed in to at all.** The founder's live checks of Google Ads, and the kit check's Google Ads part, run only in phase 11. Phase 10's benchmark runs its kits, on both sides, without Google Ads.
 - **The `google-ads` connector ships in the Marketing Specialist's kit before anyone can sign in to it.** With no Google entry in any build, `KitConnect` answers `sign_in_not_supported`, whose words are written for a service that cannot sign in. Step 08f's readiness review settles what the kit's row says until the launch, that Google Ads comes with Farik's web launch, rather than leave the generic sentence.
 - Step 03f's design work, its boards and how-tos, is spent.
+
+## Amendment of 2026-10-06
+
+Phase 7 step 07c (the founder's O1, in conversation: the Product Manager files issues and comments on GitHub, each asking first, "Files, asking first"). The kits' GitHub is not read-only for the Product Manager:
+- Its pasted key holds repository Issues read and write, and, for an organisation's boards, organisation Projects read. The Architect's holds repository Contents and Pull requests read.
+- From phase 11, Farik's GitHub App asks for repository Contents and Pull requests read, Issues read and write, and organisation Projects read. This replaces ADR 0035's "read-only repository permissions" for GitHub; otherwise the Product Manager's two writes would stop at the switch from the key to the sign-in.
+- Each write still waits for the human, with no allowance (ADR 0037): an issue or a comment is published to everyone who can see the repository.

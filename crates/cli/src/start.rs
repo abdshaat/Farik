@@ -457,6 +457,8 @@ async fn start_listening(
         );
     }
     let tools = tool_deps(project, io)?;
+    // Before the daemon listens: a tab that reconnects asks `team.get` the moment it does.
+    tools.transitions.set_sandbox(settings.sandbox);
     let daemon = connected_daemon(&tools, io);
     let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
     let web = options
@@ -489,7 +491,6 @@ async fn start_listening(
     };
     let (sandboxes, previews) = factories(settings.sandbox, sandbox_image(io));
     tools.transitions.set_previews(Arc::clone(&previews));
-    tools.transitions.set_sandbox(settings.sandbox);
     let orchestrator = Arc::new(Orchestrator::new(OrchestratorDeps {
         tools,
         daemon: Arc::clone(&daemon),
@@ -547,10 +548,10 @@ fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn
                 image: image.to_string(),
             }),
             Arc::new(PolledPreviews::new(
-                Arc::new(DockerPreviewFactory {
-                    image: image.to_string(),
-                    browser: farik_runtime::computer::browser_image(),
-                }),
+                Arc::new(DockerPreviewFactory::new(
+                    image.to_string(),
+                    farik_runtime::computer::browser_image(),
+                )),
                 AVAILABLE_FOR,
             )),
         ),

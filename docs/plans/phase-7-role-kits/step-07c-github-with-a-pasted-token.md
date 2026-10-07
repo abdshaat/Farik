@@ -1,6 +1,6 @@
 # Phase 7, step 07c: GitHub with a pasted token
 
-Status: ready
+Status: executed 2026-10-07 (Tasks 1 to 5); the landing review and Task 6, the founder's live pin run and web-app check, wait, and the step is not done until the run passes
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.1, 6.3, 6.7; F9
 Depends on: steps 05 and 05b (the kit format, keys and `key_page`, the pins), 06 (the Product Manager's kit, at edd630f), 07 (the Architect's kit, at b24dabe and 4160280) and 03b (its table, empty before phase 11, and `ConnectorAdd`'s key fields; at 40e4480), all committed on this branch; it runs after step 08e's Task 8, as the project plan's ADR 0044 line orders, in sequence with it, since both edit `docs/SPEC.md` and `docs/plans/project-plan.md` (so the revision number may move past 0.63); phase 6 (merged in #19)
@@ -79,7 +79,7 @@ Tests (`kit.rs`):
 - `the_product_managers_kit_asks_before_it_writes` replaces `the_product_managers_kit_only_reads` (`kit.rs:1511`): the connectors are exactly `amplitude, linear, notion, github`; no connector has allowances; `amplitude`, `linear` and `notion` keep every assertion the old test made (no `external_effect`, `oauth`, no keys, no headers); the kit's only `external_effect` tools are `github`'s two. RED: the kit has three connectors.
 - `loads_every_shipped_kit`: the Product Manager has 4.
 
-- [ ] `feat(roles): give the Product Manager GitHub with a pasted key`
+- [x] `feat(roles): give the Product Manager GitHub with a pasted key`
 
 ### Task 2: GitHub for the Architect
 
@@ -95,7 +95,7 @@ Tests (`kit.rs`):
 - `the_two_github_entries_differ_where_the_roles_do` (a guard): the two entries have the same address, `credential_keys` and `about`; their `custom_server`s differ; both `key_page`s start `https://github.com/settings/personal-access-tokens/new?`, and the Product Manager's alone holds `issues=write`; the Architect's alone holds `X-MCP-Readonly`.
 - `loads_every_shipped_kit`: the Architect has 4. `every_network_tool_of_the_architect_has_a_label` is unchanged and must pass: the labels are the 15 `network` names exactly, the `denied` one unlabelled.
 
-- [ ] `feat(roles): give the Architect GitHub to read code and pull requests`
+- [x] `feat(roles): give the Architect GitHub to read code and pull requests`
 
 ### Task 3: The two skills learn GitHub
 
@@ -107,7 +107,7 @@ Files: the two `SKILL.md`; `kit.rs` tests. Each stays under 6 KB, with numbered 
 - `the_product_managers_sources_skill_asks_before_it_writes_to_github`: the kit's `using-product-sources` `SKILL.md` names GitHub, `issue_write` and `add_issue_comment` and `farik_ask_human`, holds the heading "You ask before you write" and the sentence "Never give either tool a pull request's number.", and no longer holds "This kit has no way to change anything"; its description names GitHub. RED: the skill says the kit only reads.
 - `the_architects_sources_skill_names_github`: `using-architecture-sources` names GitHub, `search_code`, `pull_request_read`, `get_status` and `get_check_runs`, and its description names GitHub. RED: it names three services.
 
-- [ ] `feat(roles): teach the Product Manager and the Architect to use GitHub`
+- [x] `feat(roles): teach the Product Manager and the Architect to use GitHub`
 
 ### Task 4: Connected by name
 
@@ -115,13 +115,13 @@ Files: `daemon/team.rs` tests; `live_kit_pins.rs`'s header comment, which names 
 
 - `connects_every_shipped_kit_connector_by_name` (`daemon/team.rs:3950`, extended, a guard): for the Product Manager and for the Architect, `kit_entry` of `github` is `Ok` and `matches_kit` true against its own role's kit; `matches_kit` of the Product Manager's `github` against the Architect's kit is false, and the reverse; `kit_entry` of `github` on the Developer is `connector_not_in_kit`.
 
-- [ ] `test(runtime): connect GitHub to the Product Manager and the Architect by name` (a guard, so no RED; it may be folded into Task 2's commit, said in the Execution notes)
+- [x] `test(runtime): connect GitHub to the Product Manager and the Architect by name` (a guard, so no RED; it may be folded into Task 2's commit, said in the Execution notes)
 
 ### Task 5: Spec and plan
 
 `docs/SPEC.md`: 6.1's Kit line, four services: three it only reads, and GitHub, which reads issues and an organisation's boards and files an issue or a comment only after the human allows the call; 6.3's Kit line drops "GitHub code search … is not in the kit" and adds GitHub, read only; 6.7's "The Product Manager's kit" paragraph says four services and scopes "signed in to by route 1, with nothing pasted", "The kit only reads" (with its "no tool is `external_effect`") and "A tool that changes anything at the service is `denied`" to Amplitude, Linear and Notion, naming GitHub as reached with a pasted key, asking before its two writes; 6.7's "The Architect's kit" paragraph says "Four services", names GitHub as reached with a pasted key, says "every tool is `network` but GitHub's `list_repository_collaborators`, which is `denied`", and its live pin test compares GitHub's list beside Context7's and Grep's; and 6.7 gains "GitHub with a pasted key (added in 0.63; ADR 0044)": the address, the headers and why neither `X-MCP-Tools` nor `X-MCP-Exclude-Tools`, `GITHUB_KEY` as a bearer, the two entries and their tags, the writes' reach to pull requests and the skill's rule against it, no allowance, the three fences, the template page, what a fine-grained key reaches, Copilot as found, and that phase 11 replaces the key with a sign-in through Farik Cloud. The revision line takes the next number of its day (0.63 at planning). `docs/design/role-kits.md`: the Product Manager's and the Architect's rows say what shipped; the GitHub row of the Signing-in table drops "No kit ships GitHub yet; … open for the founder" and, in place of "read-only repository permissions", says what ADR 0044's amendment says; the Steps table gains 07c. `docs/decisions/0044-farik-cloud-s-free-tier-signs-customers-in-from-the-web-launch.md` gains, under its Status, the line "Amended 2026-10-06 by phase 7 step 07c (the founder's O1)", and at its end an "Amendment of 2026-10-06" paragraph: the Product Manager files GitHub issues and comments, each asking first; its pasted key holds repository Issues read and write; from phase 11 Farik's GitHub App asks for repository Contents and Pull requests read, Issues read and write, and organisation Projects read, which replaces ADR 0035's "read-only repository permissions" for GitHub. `docs/plans/project-plan.md`: row 07c, what was executed; the "Open (the founder; ADR 0044)" line on GitHub before the launch becomes "Made", with "Yes, pasted token" and O1's "Files, asking first".
 
-- [ ] `docs(spec): record GitHub in the Product Manager's and the Architect's kits`
+- [x] `docs(spec): record GitHub in the Product Manager's and the Architect's kits`
 
 ### Task 6: The founder's live run
 
@@ -145,3 +145,29 @@ FARIK_LIVE_TESTS=1 cargo test -p farik-runtime --test live_kit_pins
 ```
 
 The step is not done until Task 6's run and check pass, or their drift is folded in under the mechanical rule, and the Execution notes record the result; Status stays "executed …; the founder's live run waits" until then.
+
+## Execution notes
+
+Corrections against the code, read at HEAD `f2cc535` on 2026-10-07 before Task 1 (the plan cites the code of `6978968`; the 09c fixes, the Docker probe fixes and step 08e's Task 8 have landed since). None of them touches a file or symbol this step builds on, and nothing here needed a decision.
+
+- **The revision is 0.65.** The latest on SPEC line 3 is 0.64 (2026-10-07, step 08e's Task 8), so Task 5's revision line takes 0.65 and its new 6.7 paragraph reads "GitHub with a pasted key (added in 0.65; ADR 0044)". Every "0.63" above (Depends on, Task 5) reads 0.65.
+- **`daemon/team.rs:3950` is `:3952`.** Line 3950 is the doc comment of `connects_every_shipped_kit_connector_by_name`; its `fn` is at 3952. `kit.rs:1456` (`osv_is_farik_s_own_server_and_only_reads`) and `:1511` (`the_product_managers_kit_only_reads`) are as the plan has them, and so are `launch_headers` at `connectors.rs:643`, `filled_headers` (:701, used by `list_tools` at :985), `service` (`kit.rs:1242`), `pm_service`, `tagged`, `network_names` and `marketing_service` (:1557). `kit_skills_name_only_tools_farik_lists` is in `daemon/team.rs`, not `kit.rs`.
+- **SPEC anchors.** 6.1's Kit line is at line 471, 6.3's at 495, 6.7's "The Product Manager's kit" paragraph at 587 and "The Architect's kit" at 589; the quoted sentences the plan changes are all there as quoted. 6.7's Farik Cloud paragraph (line 608) already says GitHub's server takes a pasted fine-grained token, and line 604 says `ConnectorAdd` falls to the key fields for GitHub's address: both agree with this step and stay.
+- **No shipped kit has a keyed entry yet.** `crates/roles/roles/*/kit.yaml` holds no `credential_keys` or `key_page` (SerpApi's and Render's are drafted only), so these two entries are the first, and `kit.rs`'s tests of keyed entries run on fixtures until Task 1. `"Authorization": "Bearer {KEY}"` on a custom entry has precedent in `daemon.rs:1931` and `orchestrator/session.rs:2358`; a header name `X-MCP-…` is not a credential word (`names_a_secret`), and header names are not word-checked in a kit.
+- **The setups' lengths are as measured**: 508 and 468 characters (maximum 600); with the Copilot sentence 558 and 518. `KitConnect`'s key field reads `kitKeyLabel`, "Your {service} key", with the kit's `title`, so "Your GitHub key"; its refusal words are `kitRefused` in `apps/web/src/strings/en.ts:1365`, as the plan quotes.
+- **`docs/design/role-kits.md`**: the Product Manager's row is line 41, the Architect's 43, the GitHub row of the Signing-in table 57; its Steps table has a row for 07 (line 96) and none for 07b, so 07c's row follows 07's. **`docs/plans/project-plan.md`**: row 07c is at line 520 and already reads "ready since its readiness review of 2026-10-06"; the "Open (the founder; ADR 0044)" line is 486. **ADR 0044**: the Status is one line (line 4), and the amendment line goes under it.
+- **Step 10h** (line 26) names this step's setup sentence and section 4's "each call waits for the human" as the lines it rewords, as Decisions says.
+
+Task 1: RED, three tests in one run, each for the right reason: `github_for_the_product_manager_files_issues_only_when_asked` panicked "the product_manager kit has no github"; `the_product_managers_kit_asks_before_it_writes` failed with left `["amplitude", "linear", "notion"]`, right `[..., "github"]`; `loads_every_shipped_kit` failed with "product_manager" left 3, right 4. `loads_every_shipped_kit`'s arm was split (Product Manager 4, Architect 3) for this commit and rejoined at 4 in Task 2. Test support beyond the plan: `allowances_of(role, name)`, which reads a service's allowances from the kit (the plan reads them "as `marketing_service` does"; that helper is the Marketing Specialist's), and the constant `GITHUB_URL`, both in `kit.rs`'s tests.
+
+Task 2: RED, four tests: `github_for_the_architect_reads_code_and_pull_requests_only` and `the_two_github_entries_differ_where_the_roles_do` panicked "the architect kit has no github"; `osv_is_farik_s_own_server_and_only_reads` failed with left `["context7", "grep", "osv"]`; `loads_every_shipped_kit` with "architect" left 3, right 4. `the_two_github_entries_differ_where_the_roles_do` is a guard (the plan says so): its RED is the missing entry, and its proof is the mutation below.
+
+Task 3: RED, two tests, each failing on its first assertion, the description: "Use when Amplitude, Linear or Notion is connected to the team, so that you read from them safely and use what they hold." (the Product Manager's) and "Use when Context7, Grep or OSV is connected to you, so that you look things up safely and say what you used." (the Architect's). The Product Manager's test asserts the heading as the file has it, "## 4. You ask before you write". Test support beyond the plan: `kit_skill(role, name)`, which returns a kit skill's description and its `SKILL.md` as a session reads it. `kit_skills_name_only_tools_farik_lists` (`daemon/team.rs`) passes with the new text: the only `farik_*` name added is `farik_ask_human`, as before.
+
+Mutations over Tasks 1 to 3, each reverted and caught by the tests named: the Architect's `X-MCP-Readonly` removed (`github_for_the_architect_reads_code_and_pull_requests_only`, `the_two_github_entries_differ_where_the_roles_do`); `issue_write` tagged `network` and `projects_write` tagged `external_effect` (`github_for_the_product_manager_files_issues_only_when_asked`, `the_product_managers_kit_asks_before_it_writes`); `list_repository_collaborators` tagged `network` (`every_network_tool_of_the_architect_has_a_label`, `github_for_the_architect_reads_code_and_pull_requests_only`); the Product Manager's `issues=write` made `issues=read` (`github_for_the_product_manager_files_issues_only_when_asked`, `the_two_github_entries_differ_where_the_roles_do`); the skill's pull request sentence removed (`the_product_managers_sources_skill_asks_before_it_writes_to_github`).
+
+Task 4: a guard, so no RED, and its own commit, not folded into Task 2's. It also asserts the two GitHub entries are not each other's (`matches_kit` of the Product Manager's against the Architect's kit is false, and the reverse) and refuses GitHub on the Developer beside OSV. Mutations, each reverted: the Architect's `github` renamed (`kit_entry` refused it `connector_not_in_kit`); `matches_kit` without its comparison of the entry (`!matches_kit(&architect, &pm_github)` failed). `live_kit_pins.rs`'s header comment now names GitHub in both kits and `FARIK_KIT_GITHUB_GITHUB_KEY`.
+
+Task 5: `docs/SPEC.md` 0.65 as the plan lists: 6.1's and 6.3's Kit lines; 6.7's two kit paragraphs, the Product Manager's scoping "signed in to by route 1, with nothing pasted", "only reads" and "denied" to Amplitude, Linear and Notion, and the Architect's "Four services"; the new paragraph "GitHub with a pasted key (added in 0.65; ADR 0044; phase 7 step 07c)", after the Farik Cloud paragraph; the revision line. `docs/design/role-kits.md`: both rows, the GitHub row of the Signing-in table (its permissions now those of ADR 0044's amendment) and a Steps row for 07c after 07. ADR 0044: the amendment line under Status and an "Amendment of 2026-10-06" at its end. `docs/plans/project-plan.md`: row 07c says it was executed, and the "Open (the founder; ADR 0044)" line is "Made", with "Yes, pasted token" and "Files, asking first". No token-shaped text was written in any file.
+
+Task 6 is the founder's run and is not executed: its three boxes stay open, and so does the step's last checkbox.

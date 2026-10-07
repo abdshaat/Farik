@@ -3983,7 +3983,8 @@ pub(super) mod tests {
         assert!(container[0].message.starts_with("connector_not_in_kit: "));
     }
 
-    /// A guard: each shipped service of the Product Manager, the Architect and the Developer connects by name.
+    /// A guard: each shipped service of the Product Manager, the Architect and the Developer connects
+    /// by name, GitHub being each of the first two's own entry (step 07c).
     #[test]
     fn connects_every_shipped_kit_connector_by_name() {
         use farik_core::contract::Role;
@@ -3999,7 +4000,7 @@ pub(super) mod tests {
             ));
         });
         let pm = farik_roles::load_kit(Role::ProductManager).expect("the Product Manager's kit");
-        for name in ["amplitude", "linear", "notion"] {
+        for name in ["amplitude", "linear", "notion", "github"] {
             let (_, server) = super::kit_entry(&pm, &team, "pm", name, &BTreeMap::new())
                 .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
             assert!(super::matches_kit(&pm, &server), "{name}");
@@ -4009,11 +4010,20 @@ pub(super) mod tests {
             .expect_err("the Scrum Master has no Notion");
         assert!(refused[0].message.starts_with("connector_not_in_kit: "));
         let architect = farik_roles::load_kit(Role::Architect).expect("the Architect's kit");
-        for name in ["context7", "grep", "osv"] {
+        for name in ["context7", "grep", "osv", "github"] {
             let (_, server) = super::kit_entry(&architect, &team, "archie", name, &BTreeMap::new())
                 .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
             assert!(super::matches_kit(&architect, &server), "{name}");
         }
+        // The two roles' GitHub entries share a name and a key and are not each other's: a team
+        // file that gives one role the other's entry runs nothing.
+        let (_, pm_github) = super::kit_entry(&pm, &team, "pm", "github", &BTreeMap::new())
+            .expect("the Product Manager's GitHub");
+        let (_, architect_github) =
+            super::kit_entry(&architect, &team, "archie", "github", &BTreeMap::new())
+                .expect("the Architect's GitHub");
+        assert!(!super::matches_kit(&architect, &pm_github));
+        assert!(!super::matches_kit(&pm, &architect_github));
         let refused = super::kit_entry(&pm, &team, "pm", "osv", &BTreeMap::new())
             .expect_err("the Product Manager has no OSV");
         assert!(refused[0].message.starts_with("connector_not_in_kit: "));
@@ -4023,9 +4033,14 @@ pub(super) mod tests {
             super::kit_entry(&developer, &team, "dev-a", "context7", &BTreeMap::new())
                 .unwrap_or_else(|refused| panic!("context7: {refused:?}"));
         assert!(super::matches_kit(&developer, &server), "context7");
-        let refused = super::kit_entry(&developer, &team, "dev-a", "osv", &BTreeMap::new())
-            .expect_err("the Developer has no OSV");
-        assert!(refused[0].message.starts_with("connector_not_in_kit: "));
+        for name in ["osv", "github"] {
+            let refused = super::kit_entry(&developer, &team, "dev-a", name, &BTreeMap::new())
+                .expect_err("the Developer has neither OSV nor GitHub");
+            assert!(
+                refused[0].message.starts_with("connector_not_in_kit: "),
+                "{name}: {refused:?}"
+            );
+        }
     }
 
     /// A guard: each of the Marketing Specialist's four services connects by name, carrying the

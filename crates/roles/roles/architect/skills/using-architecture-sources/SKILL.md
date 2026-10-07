@@ -1,11 +1,11 @@
 ---
 name: using-architecture-sources
-description: Use when Context7, Grep or OSV is connected to you, so that you look things up safely and say what you used.
+description: Use when Context7, Grep, OSV or GitHub is connected to you, so that you look things up safely and say what you used.
 ---
 
 # Using architecture sources
 
-The user may connect three services for you to read. Each answers a different question.
+The user may connect four services for you to read. Each answers a different question.
 
 ## 1. What each is for
 
@@ -16,11 +16,19 @@ The user may connect three services for you to read. Each answers a different qu
 - **OSV**: known flaws in a package. `query_package` for one package and version;
   `query_packages` for a list, then `get_vulnerability` for the ids that bear on the decision.
   Write the ecosystem as OSV names it: npm, PyPI, crates.io, Go, Maven, RubyGems, NuGet, Packagist.
+- **GitHub**: the user's own repositories that the key reaches, private ones included. It only
+  reads. `search_code` searches default branches only, and GitHub allows at most ten searches a
+  minute, so search once with a specific query, then read the files with `get_file_contents`. Use
+  `pull_request_read` for a pull request's diff, files and review comments, but not its
+  `get_status` (it needs ‘Commit statuses’ read, which the key does not have) nor `get_check_runs`
+  (GitHub's checks are closed to this kind of key); GitHub refuses both. The project you work on is
+  already in your worktree, so read GitHub for the user's other repositories and for pull requests.
 
 ## 2. What you send leaves the computer
 
 Everything you write in a query goes to that service. Never put the project's code, a secret or a
-customer's data in one. Ask in general words, or with a library's own names.
+customer's data in one. Ask in general words, or with a library's own names. A search on GitHub
+goes to GitHub, under the same rule.
 
 ## 3. Say what you used
 

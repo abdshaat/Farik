@@ -513,7 +513,7 @@ impl Transitions {
             row,
             (open_sprint, sprint_left),
             dependency_states(&contract, &board),
-            self.designer_browser(team),
+            || self.designer_browser(team),
         );
         if let Some(assignment) = assignment.as_mut() {
             assignment.private_folder_busy =
@@ -612,7 +612,7 @@ impl Transitions {
         );
         (
             ui_change,
-            design_review(team, ui_change, history, self.designer_browser(team)),
+            design_review(team, ui_change, history, || self.designer_browser(team)),
         )
     }
 
@@ -1153,8 +1153,10 @@ fn dependency_states(contract: &TaskContract, board: &[TaskProjection]) -> Vec<D
 
 /// The pair an assignment would name, from the ask's ids and the team's roles, when the ask names
 /// an assignee, with the sprint `row` and its epic are in, beside the open sprint and what is left
-/// of its budget, and whether the team's Designer can have its browser. `requested_by` is the
-/// governor's to set from the request's actor.
+/// of its budget, and whether the team's Designer can have its browser, which only an assignment
+/// to a Designer asks (`designer_browser` is called for that alone: it may ask Docker, and the
+/// governor reads the answer for a Designer only). `requested_by` is the governor's to set from
+/// the request's actor.
 fn assignment(
     ask: &TransitionAsk,
     team: &Team,
@@ -1162,7 +1164,7 @@ fn assignment(
     row: &TaskProjection,
     (open_sprint, sprint_left_usd): (Option<String>, f64),
     dependencies: Vec<DependencyState>,
-    designer_browser: DesignerBrowser,
+    designer_browser: impl FnOnce() -> DesignerBrowser,
 ) -> Option<AssignmentInput> {
     let assignee_id = ask.assignee_id.as_deref()?;
     let assignee_role = role_in(team, assignee_id);
@@ -1192,7 +1194,11 @@ fn assignment(
         }),
         plan_in_sprints: team.plans_in_sprints(),
         dependencies,
-        designer_browser,
+        designer_browser: if assignee_role == Role::UiUxDesigner {
+            designer_browser()
+        } else {
+            DesignerBrowser::Ready
+        },
         // Filled by `context`, which reads the contracts of the tasks that might hold the folder.
         private_folder_busy: false,
     })
@@ -2757,6 +2763,33 @@ mod tests {
         assert_eq!(row.status, TaskStatus::Assigned);
         assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
         assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn assigns_a_developer_without_asking_whether_the_designer_has_its_browser() {
+        // `UnaskedPreviews` panics when asked whether a preview can run: the answer is the
+        // Designer's alone, and asking Docker for it would hold up the lock every transition's
+        // judgment takes.
+        let project = Project::new("assign-developer-unasked", a_team(|_| {}), at(12));
+        project
+            .transitions
+            .set_previews(Arc::new(crate::preview::fixtures::UnaskedPreviews));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "ready");
+        let outcome = project.ask(
+            &a_request(
+                "FRK-1",
+                TaskStatus::Assigned,
+                TransitionActor::ProductManager,
+                Some("maya"),
+            ),
+            &assigning("dev-a", "dev-b"),
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
     }
 
     #[test]
