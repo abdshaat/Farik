@@ -26,6 +26,9 @@ ending on the plan campaign's last day, with a budget inside the plan campaign's
 ad account that already tracks conversions: Farik never sets tracking up, and without it Google
 has nothing to maximize.
 
+Prefer campaigns at a fixed price: 3 to 90 days, made at least two days before they start. Say in
+the plan's text what each campaign advertises, and which campaigns are not at a fixed price and why.
+
 ## 3. Build it by theme
 
 For each theme of the business, `add_ad_group`; then `add_keywords` with a match type for each word:

@@ -1355,6 +1355,21 @@ mod tests {
         );
     }
 
+    /// Both skills ask for campaigns at a fixed price, and the plan to say what each one
+    /// advertises (ADR 0042, amended 2026-10-07).
+    #[test]
+    fn the_skills_prefer_a_fixed_price() {
+        let wanted = "Prefer campaigns at a fixed price: 3 to 90 days, made at least two days \
+                      before they start. Say in the plan's text what each campaign advertises, and \
+                      which campaigns are not at a fixed price and why.";
+        for name in ["writing-the-marketing-plan", "running-search-ads"] {
+            let (_, text) = kit_skill(Role::MarketingSpecialist, name);
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(text.contains(wanted), "{name} lacks the sentence: {text}");
+            assert!(text.len() < 6 * 1024, "{name} is {} bytes", text.len());
+        }
+    }
+
     /// `writing-the-marketing-plan` names the tool that proposes the plan, from the commit that
     /// gives the Marketing Specialist the tool; `kit_skills_name_only_tools_farik_lists` (in the
     /// runtime) holds the name to a tool Farik lists.

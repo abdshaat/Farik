@@ -35,7 +35,11 @@ reasoning next to each amount, and put a smaller sum than a guess would suggest.
 
 Plan the posts as slots: a channel, a day and a topic each, kept to what the business can really
 make. A campaign is a paid search campaign with its own goal, budget and dates inside the plan's
-dates. If no ad account is connected, propose none.
+dates, and it says what it advertises: the product, service or offer, in 3 to 200 characters. If no
+ad account is connected, propose none.
+
+Prefer campaigns at a fixed price: 3 to 90 days, made at least two days before they start. Say in
+the plan's text what each campaign advertises, and which campaigns are not at a fixed price and why.
 
 ## 6. Propose it and end your turn
 

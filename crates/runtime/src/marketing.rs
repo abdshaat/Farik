@@ -9,7 +9,7 @@ use std::fmt::Display;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
-use farik_core::marketing::{EndReason, PlanRecord, PostDetails, plans_to_end};
+use farik_core::marketing::{EndReason, PlanRecord, PostDetails, plans_to_end, price_kind};
 use farik_protocol::event::{EventBody, EventIds, FarikEvent, new_event};
 use farik_store::marketing::{
     MarketingPlan, PlanState, PostState, SocialPost, marketing_plans, social_posts,
@@ -654,8 +654,19 @@ fn written_posts(plan: &str, posts: &[SocialPost]) -> Vec<Value> {
 /// posts written for it. `posts` in it are the plan's slots, `written_posts` what was written for
 /// them, taken from `written`, every post of the project.
 #[must_use]
-pub fn whole(plan: &MarketingPlan, state: PlanState, written: &[SocialPost]) -> Value {
+pub fn whole(
+    plan: &MarketingPlan,
+    state: PlanState,
+    written: &[SocialPost],
+    today: chrono::NaiveDate,
+) -> Value {
     let proposal = &plan.proposal;
+    // The price the owner saw: as of the day they approved the plan, and as of today until then.
+    let priced_on = plan
+        .decided
+        .as_ref()
+        .filter(|(approved, ..)| *approved)
+        .map_or(today, |(_, _, at)| at.date_naive());
     let time = |at: &chrono::DateTime<chrono::Utc>| {
         at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
     };
@@ -698,6 +709,8 @@ pub fn whole(plan: &MarketingPlan, state: PlanState, written: &[SocialPost]) -> 
             "channel": "google_ads",
             "name": campaign.name,
             "goal": campaign.goal,
+            "advertises": campaign.advertises,
+            "price": price_kind(campaign, &proposal.currency, priced_on).as_str(),
             "budget": campaign.budget.to_string(),
             "starts_on": campaign.starts_on.to_string(),
             "ends_on": campaign.ends_on.to_string(),

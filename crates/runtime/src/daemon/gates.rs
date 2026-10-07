@@ -288,7 +288,7 @@ fn marketing_plan_get(deps: &ToolDeps, id: &str) -> Result<Value, Failure> {
         .iter()
         .zip(states)
         .find(|(plan, _)| plan.record.id == id)
-        .map(|(plan, state)| whole(plan, state, &posts))
+        .map(|(plan, state)| whole(plan, state, &posts, deps.clock.now().date_naive()))
         .ok_or_else(|| Failure::new(NOT_FOUND, format!("there is no marketing plan {id}")))
 }
 
@@ -1055,6 +1055,125 @@ pub(super) mod tests {
             missing["error"]["code"],
             crate::daemon::web::NOT_FOUND,
             "{missing}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "plans proposed and approved side by side, each answer read whole"
+    )]
+    fn the_plan_says_each_campaign_s_price() {
+        // The fixture clock reads 2026-09-22: a campaign made today starts two days ahead.
+        let harness = Harness::new(
+            "gates-plan-price",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        let propose = |plan: &str, campaigns: Value| {
+            let mut body =
+                farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+            body["plan"] = json!(plan);
+            body["starts_on"] = json!("2026-09-20");
+            body["ends_on"] = json!("2027-01-31");
+            body["budget"] = json!({ "total": "2000.00", "google_ads": "1000.00" });
+            body["posts"] = json!([]);
+            body["campaigns"] = campaigns;
+            body["google_ads_account"] = json!("123-456-7890");
+            harness
+                .project
+                .record_by(Some("kai"), at(), "FRK-1", "marketing_plan.proposed", &body);
+        };
+        let campaign = |key: &str, starts_on: &str, ends_on: &str, advertises: Option<&str>| {
+            let mut wire = json!({
+                "key": key, "channel": "google_ads", "name": key, "goal": "Sales",
+                "budget": "300.00", "starts_on": starts_on, "ends_on": ends_on
+            });
+            if let Some(advertises) = advertises {
+                wire["advertises"] = json!(advertises);
+            }
+            wire
+        };
+        let get = |plan: &str| {
+            query(
+                &harness.daemon,
+                "marketing_plan.get",
+                &json!({ "plan": plan }),
+                "marketingPlanGetResult",
+            )
+        };
+        let shown = |plan: &Value| -> Vec<(String, String, String)> {
+            plan["campaigns"]
+                .as_array()
+                .expect("campaigns")
+                .iter()
+                .map(|campaign| {
+                    (
+                        campaign["key"].as_str().unwrap_or("").to_string(),
+                        campaign["advertises"].as_str().unwrap_or("?").to_string(),
+                        campaign["price"].as_str().unwrap_or("?").to_string(),
+                    )
+                })
+                .collect()
+        };
+
+        // While it waits, the price is as of today: from the 24th, three days are a total budget
+        // (fixed), two a daily one (not fixed). A plan proposed before the field existed has no
+        // words for it, and shows none.
+        propose(
+            "MP-1",
+            json!([
+                campaign(
+                    "three",
+                    "2026-09-23",
+                    "2026-09-26",
+                    Some("Handmade candles")
+                ),
+                campaign("two", "2026-09-23", "2026-09-25", Some("Gift boxes")),
+                campaign("older", "2026-09-23", "2026-09-26", None),
+            ]),
+        );
+        let waiting = get("MP-1");
+        assert_eq!(
+            shown(&waiting),
+            [
+                ("three".into(), "Handmade candles".into(), "fixed".into()),
+                ("two".into(), "Gift boxes".into(), "not_fixed".into()),
+                ("older".into(), String::new(), "fixed".into()),
+            ]
+        );
+
+        // Once approved, as of the day the owner approved it: on the 18th this one runs from the
+        // 22nd, four days and fixed, though today it would be two and daily.
+        propose(
+            "MP-2",
+            json!([campaign(
+                "shrinks",
+                "2026-09-22",
+                "2026-09-25",
+                Some("Candle gifts")
+            )]),
+        );
+        assert_eq!(
+            shown(&get("MP-2"))[0].2,
+            "not_fixed",
+            "as of today while it waits"
+        );
+        let approved_on = chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 9, 18, 9, 0, 0)
+            .single()
+            .expect("a time");
+        harness.project.record_by(
+            None,
+            approved_on,
+            "FRK-1",
+            "marketing_plan.approved",
+            &json!({ "plan": "MP-2", "note": "" }),
+        );
+        assert_eq!(
+            shown(&get("MP-2")),
+            [("shrinks".into(), "Candle gifts".into(), "fixed".into())],
+            "as of the day it was approved"
         );
     }
 

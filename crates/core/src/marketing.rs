@@ -124,6 +124,9 @@ pub struct PlanCampaign {
     pub name: String,
     /// What it is for.
     pub goal: String,
+    /// What it advertises: the product, service or offer, 3 to 200 characters. Empty for a plan
+    /// proposed before the field existed (ADR 0042).
+    pub advertises: String,
     /// What it may spend.
     pub budget: Amount,
     /// Its first day.
@@ -404,6 +407,14 @@ fn check_campaigns<'a>(proposal: &'a PlanProposal, keys: &mut Vec<&'a str>, faul
             &campaign.goal,
             1,
             300,
+        );
+        faults.length(
+            "marketing_plan_campaign",
+            "campaign's description of what it advertises",
+            &field("advertises"),
+            &campaign.advertises,
+            3,
+            200,
         );
         if campaign.budget.0 == 0 {
             faults.push(
@@ -824,6 +835,38 @@ pub fn campaign_budget(
     )
 }
 
+/// Whether the price of a campaign is fixed before the owner approves it (ADR 0042, amended
+/// 2026-10-07).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PriceKind {
+    /// A total budget, which Google never bills past.
+    Fixed,
+    /// A daily budget, which may spend past its cap for about an hour, since Google reports cost
+    /// that late.
+    NotFixed,
+}
+
+impl PriceKind {
+    /// The wire's word for it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fixed => "fixed",
+            Self::NotFixed => "not_fixed",
+        }
+    }
+}
+
+/// The price kind of a plan campaign made on `day`: `campaign_budget`'s kind, `Fixed` for a total
+/// budget and `NotFixed` for a daily one.
+#[must_use]
+pub fn price_kind(campaign: &PlanCampaign, currency: &str, day: NaiveDate) -> PriceKind {
+    match campaign_budget(campaign, currency, Amount(0), day).0 {
+        BudgetKind::Total => PriceKind::Fixed,
+        BudgetKind::Daily => PriceKind::NotFixed,
+    }
+}
+
 /// What Google holds for a campaign when it is enabled, read from Google for the call: its
 /// budget's amount as its kind keeps it (a total budget's total, a daily one's daily amount) and
 /// the days it runs, first and last. A replacing plan that lowers a key's budget or shortens its dates leaves
@@ -899,6 +942,8 @@ pub struct AdsPlanView<'a> {
     pub spent: &'a std::collections::BTreeMap<String, Amount>,
     /// Today's UTC date.
     pub today: NaiveDate,
+    /// The UTC date the owner approved the active plan, whose price kinds the owner saw.
+    pub approved_on: NaiveDate,
 }
 
 /// The ad account `write` is for.
@@ -989,6 +1034,16 @@ fn check_create(view: &AdsPlanView<'_>, key: &str) -> Result<(), String> {
         return Err(format!(
             "{key} ends on {}, before the first day it could start, {start}",
             campaign.ends_on
+        ));
+    }
+    // The owner approved a fixed price: a campaign made with a daily budget would not be it.
+    let currency = &view.plan.currency;
+    if price_kind(campaign, currency, view.approved_on) == PriceKind::Fixed
+        && price_kind(campaign, currency, view.today) == PriceKind::NotFixed
+    {
+        return Err(format!(
+            "{key} was approved at a fixed price, which Google keeps only for a run of 3 days or \
+             more; propose a new version"
         ));
     }
     Ok(())
@@ -1168,9 +1223,10 @@ mod tests {
 
     use super::{
         AdsPlanView, AdsWrite, Amount, BudgetKind, CreatedCampaign, EndReason, HeldAtGoogle,
-        PlanCampaign, PlanProposal, PlanRecord, PostChannel, PostSlot, ProposalRefusal, SlotCheck,
-        SlotRefusal, ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write, check_proposal,
-        check_slot, network_name, parse_amount, plans_to_end, text_fits, text_limit,
+        PlanCampaign, PlanProposal, PlanRecord, PostChannel, PostSlot, PriceKind, ProposalRefusal,
+        SlotCheck, SlotRefusal, ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write,
+        check_proposal, check_slot, network_name, parse_amount, plans_to_end, price_kind,
+        text_fits, text_limit,
     };
 
     fn day(text: &str) -> NaiveDate {
@@ -1196,6 +1252,7 @@ mod tests {
                 key: "search-launch".to_string(),
                 name: "Launch search".to_string(),
                 goal: "Bring people to the shop".to_string(),
+                advertises: "Handmade candles from the shop".to_string(),
                 budget: amount(80_000),
                 starts_on: day("2026-11-03"),
                 ends_on: day("2026-11-14"),
@@ -2003,6 +2060,7 @@ mod tests {
             key: "search".to_string(),
             name: "Search".to_string(),
             goal: "Sales".to_string(),
+            advertises: "Handmade candles".to_string(),
             budget: amount(budget),
             starts_on: day(starts_on),
             ends_on: day(ends_on),
@@ -2153,6 +2211,8 @@ mod tests {
         created: Vec<CreatedCampaign>,
         spent: std::collections::BTreeMap<String, Amount>,
         today: &'static str,
+        /// The day the owner approved the plan.
+        approved_on: &'static str,
     }
 
     impl Ads {
@@ -2171,6 +2231,7 @@ mod tests {
                 ],
                 spent: std::collections::BTreeMap::new(),
                 today: "2026-11-10",
+                approved_on: "2026-11-01",
             }
         }
 
@@ -2183,6 +2244,7 @@ mod tests {
                     created: &self.created,
                     spent: &self.spent,
                     today: day(self.today),
+                    approved_on: day(self.approved_on),
                 },
                 write,
             )
@@ -2325,8 +2387,10 @@ mod tests {
         let mut late = Ads::new();
         late.created.clear();
         late.today = "2026-11-30";
+        late.approved_on = "2026-11-30";
         late.passes(&create("search-b"));
         late.today = "2026-12-01";
+        late.approved_on = "2026-12-01";
         late.refuses(&create("search-b"), "before");
         // A campaign of the plan that starts later than two days ahead still starts when it says.
         late.today = "2026-11-02";
@@ -2510,5 +2574,100 @@ mod tests {
             "after the 2026-11-20",
         );
         ads.passes(&enabling(11, Some(30_000), Some("2026-11-20")));
+    }
+    #[test]
+    fn a_campaign_says_what_it_advertises() {
+        let field = "campaigns[0].advertises";
+        // None, nothing but spaces, two characters and 201 are refused.
+        for bad in ["", "   ", "ab", &"a".repeat(201)] {
+            assert_eq!(
+                after(|p| p.campaigns[0].advertises = bad.to_string()),
+                only("marketing_plan_campaign", field),
+                "{bad:?}"
+            );
+        }
+        // Three and 200 pass, counted on the trimmed text.
+        for good in ["abc", " abc ", &"a".repeat(200)] {
+            assert_eq!(
+                after(|p| p.campaigns[0].advertises = good.to_string()),
+                [],
+                "{good:?}"
+            );
+        }
+    }
+
+    /// The price kind of a campaign that starts on `starts_on` and runs `days` days from there,
+    /// made on 2026-11-02.
+    fn price_of_a_run(days: u64, starts_on: &str) -> PriceKind {
+        let last = day(starts_on)
+            .checked_add_days(Days::new(days - 1))
+            .expect("a date");
+        price_kind(
+            &a_campaign(30_000, starts_on, &last.to_string()),
+            "USD",
+            today(),
+        )
+    }
+
+    #[test]
+    fn price_kind_follows_the_total_budget_rule() {
+        // From two days ahead (the 4th): 3 and 90 days are a total budget, so fixed; 2 and 91 a
+        // daily one, so not.
+        assert_eq!(price_of_a_run(3, "2026-11-04"), PriceKind::Fixed);
+        assert_eq!(price_of_a_run(90, "2026-11-04"), PriceKind::Fixed);
+        assert_eq!(price_of_a_run(2, "2026-11-04"), PriceKind::NotFixed);
+        assert_eq!(price_of_a_run(91, "2026-11-04"), PriceKind::NotFixed);
+        // One that starts tomorrow is counted from today plus two: three days from the 3rd are
+        // two from the 4th, and four are three.
+        assert_eq!(price_of_a_run(3, "2026-11-03"), PriceKind::NotFixed);
+        assert_eq!(price_of_a_run(4, "2026-11-03"), PriceKind::Fixed);
+        // So is one that starts today.
+        assert_eq!(price_of_a_run(4, "2026-11-02"), PriceKind::NotFixed);
+        assert_eq!(price_of_a_run(5, "2026-11-02"), PriceKind::Fixed);
+        // The price kind is the budget kind's, whatever the day it is asked on.
+        let campaign = a_campaign(30_000, "2026-11-04", "2026-11-20");
+        for asked in ["2026-11-02", "2026-11-18", "2026-11-19"] {
+            let expected = match campaign_budget(&campaign, "USD", amount(0), day(asked)).0 {
+                BudgetKind::Total => PriceKind::Fixed,
+                BudgetKind::Daily => PriceKind::NotFixed,
+            };
+            assert_eq!(
+                price_kind(&campaign, "USD", day(asked)),
+                expected,
+                "{asked}"
+            );
+        }
+        assert_eq!(PriceKind::Fixed.as_str(), "fixed");
+        assert_eq!(PriceKind::NotFixed.as_str(), "not_fixed");
+    }
+
+    #[test]
+    fn a_fixed_price_is_never_made_daily() {
+        // search-b runs 2026-11-03 to 2026-12-02. Approved on the 1st it is 30 days, fixed.
+        let mut ads = Ads::new();
+        ads.created.retain(|made| made.key != "search-b");
+        ads.approved_on = "2026-11-01";
+        ads.today = "2026-11-10";
+        ads.passes(&create("search-b"));
+        // On the 30th it could start on the 2nd alone: a run of one day, a daily budget, which
+        // the owner did not see.
+        ads.today = "2026-11-30";
+        ads.refuses(&create("search-b"), "approved at a fixed price");
+        ads.refuses(&create("search-b"), "propose a new version");
+        // On the 29th it is two days, still a daily budget.
+        ads.today = "2026-11-29";
+        ads.refuses(&create("search-b"), "approved at a fixed price");
+        // On the 28th it is three, a total budget again.
+        ads.today = "2026-11-28";
+        ads.passes(&create("search-b"));
+
+        // A campaign the owner saw at a daily budget is created daily, as it was shown.
+        let mut daily = Ads::new();
+        daily.created.retain(|made| made.key != "search-b");
+        daily.plan.campaigns[1].starts_on = day("2026-11-04");
+        daily.plan.campaigns[1].ends_on = day("2026-11-05");
+        daily.approved_on = "2026-11-02";
+        daily.today = "2026-11-03";
+        daily.passes(&create("search-b"));
     }
 }

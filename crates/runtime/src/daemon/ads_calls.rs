@@ -254,6 +254,8 @@ struct ActivePlan {
     id: String,
     proposal: PlanProposal,
     lineage: Vec<String>,
+    /// The UTC day the owner approved it: the day whose price kinds they saw.
+    approved_on: NaiveDate,
 }
 
 /// The plan active on `today`, from the log, or the refusal that none is.
@@ -282,10 +284,17 @@ fn read_plan(deps: &ToolDeps, today: NaiveDate) -> Result<ActivePlan, Refusal> {
         next = proposal(&id).and_then(|plan| plan.replaces);
         lineage.push(id);
     }
+    let approved_on = plans
+        .iter()
+        .find(|plan| plan.record.id == active.id)
+        .and_then(|plan| plan.decided.as_ref())
+        .map(|(_, _, at)| at.date_naive())
+        .ok_or_else(none)?;
     Ok(ActivePlan {
         id: active.id.clone(),
         proposal: proposal(&active.id).ok_or_else(none)?,
         lineage,
+        approved_on,
     })
 }
 
@@ -386,6 +395,7 @@ impl Writing<'_> {
                 created: &created,
                 spent,
                 today: self.today,
+                approved_on: self.plan.approved_on,
             },
             write,
         )
@@ -891,6 +901,17 @@ mod tests {
 
         /// As `plan`, with `change` made to the proposal's wire.
         fn plan_with(&self, plan: &str, replaces: Option<&str>, change: impl FnOnce(&mut Value)) {
+            self.plan_approved_at(plan, replaces, change, crate::tools::fixtures::at());
+        }
+
+        /// As `plan_with`, the owner having approved it at `approved_at`.
+        fn plan_approved_at(
+            &self,
+            plan: &str,
+            replaces: Option<&str>,
+            change: impl FnOnce(&mut Value),
+            approved_at: chrono::DateTime<chrono::Utc>,
+        ) {
             let mut body =
                 farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
             body["plan"] = json!(plan);
@@ -920,7 +941,13 @@ mod tests {
                 "marketing_plan.proposed",
                 &body,
             );
-            self.harness.project.plan_approved("FRK-1", plan, "");
+            self.harness.project.record_by(
+                None,
+                approved_at,
+                "FRK-1",
+                "marketing_plan.approved",
+                &json!({ "plan": plan, "note": "" }),
+            );
         }
 
         fn made(&self) -> Vec<farik_protocol::event::FarikEvent> {
@@ -1001,6 +1028,43 @@ mod tests {
         }
         assert!(ads.mutates().is_empty(), "Google saw no change");
         assert!(ads.made().is_empty(), "nothing was recorded");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_campaign_approved_at_a_fixed_price_is_not_made_daily() {
+        use chrono::TimeZone as _;
+
+        let ads = Ads::new("ads-fixed-price").await;
+        // The owner approved the plan on the 18th. `search-launch` runs to the 24th, so it ran
+        // from the 22nd then, three days, a total budget: fixed. Today, the 22nd, it can start on
+        // the 24th alone: a daily budget, which the owner did not see.
+        let approved_on = chrono::Utc
+            .with_ymd_and_hms(2026, 9, 18, 9, 0, 0)
+            .single()
+            .expect("a time");
+        ads.plan_approved_at(
+            "MP-1",
+            None,
+            |body| body["campaigns"][0]["ends_on"] = json!("2026-09-24"),
+            approved_on,
+        );
+
+        let refused = ads
+            .call("create_search_campaign", create("search-launch"))
+            .await
+            .expect_err("a daily budget where the owner saw a fixed price");
+
+        assert!(refused.starts_with("not_in_marketing_plan: "), "{refused}");
+        assert!(refused.contains("approved at a fixed price"), "{refused}");
+        assert!(ads.mutates().is_empty(), "Google saw no change");
+        assert!(ads.made().is_empty(), "nothing was recorded");
+
+        // A campaign the owner saw at a daily budget is made at one, as it was shown.
+        ads.call("create_search_campaign", create("search-long"))
+            .await
+            .expect("made");
+        assert_eq!(ads.made().len(), 1);
     }
 
     /// The resource name Farik's answer to `create_search_campaign` gives the campaign.

@@ -84,6 +84,9 @@ pub struct PlanCampaignInput {
     name: String,
     /// What it is for, 1 to 300 characters.
     goal: String,
+    /// What it advertises: the product, service or offer, 3 to 200 characters. The owner reads it
+    /// beside the campaign's price before approving the plan.
+    advertises: String,
     /// What it may spend, as a decimal string above 0; the campaigns add up to at most the Google
     /// Ads budget.
     budget: String,
@@ -374,6 +377,7 @@ fn read_campaigns(
                 key: campaign.key.clone(),
                 name: campaign.name.clone(),
                 goal: campaign.goal.clone(),
+                advertises: campaign.advertises.clone(),
                 budget,
                 starts_on,
                 ends_on,
@@ -503,6 +507,7 @@ fn body_of(
             "channel": given.channel,
             "name": given.name,
             "goal": given.goal,
+            "advertises": given.advertises,
             "budget": given.budget,
             "starts_on": read.starts_on.to_string(),
             "ends_on": read.ends_on.to_string(),
@@ -588,6 +593,7 @@ mod tests {
                 "channel": "google_ads",
                 "name": "Launch search",
                 "goal": "Bring people to the shop",
+                "advertises": "Handmade candles from the shop",
                 "budget": "800.50",
                 "starts_on": "2026-09-23",
                 "ends_on": "2026-10-04"
@@ -778,6 +784,48 @@ mod tests {
         assert!(
             !worktree.join("docs/marketing/plans").exists(),
             "nothing is written"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_tool_asks_what_each_campaign_advertises() {
+        let project = a_marketing_project("tools-plan-advertises");
+        works_on(&project, "FRK-1");
+
+        // A campaign that does not say what it advertises is not a campaign this tool takes.
+        let mut plan = a_plan();
+        plan["campaigns"][0]
+            .as_object_mut()
+            .expect("a campaign")
+            .remove("advertises");
+        match propose(&project, "FRK-1", &plan).expect_err("no advertises") {
+            ToolError::InvalidInput { detail } => {
+                assert!(detail.contains("advertises"), "{detail}");
+            }
+            other => panic!("expected invalid input, got {other:?}"),
+        }
+        assert_eq!(proposed_events(&project), 0);
+
+        // One that says too little is refused by the plan's checks, by its field.
+        plan["campaigns"][0]["advertises"] = json!("ab");
+        let reason = refused(propose(&project, "FRK-1", &plan).expect_err("too short"));
+        assert!(
+            reason.starts_with("marketing_plan_campaign: campaigns[0].advertises:"),
+            "{reason}"
+        );
+        assert_eq!(proposed_events(&project), 0);
+
+        // And what it says is recorded as the agent wrote it.
+        plan["campaigns"][0]["advertises"] = json!("Handmade candles");
+        propose(&project, "FRK-1", &plan).expect("proposed");
+        let events = project.events(&[EventKind::MarketingPlanProposed]);
+        let EventBody::MarketingPlanProposed(body) = &events[0].body else {
+            panic!("a marketing plan was proposed");
+        };
+        assert_eq!(
+            body.campaigns[0].advertises.as_deref(),
+            Some("Handmade candles")
         );
     }
 

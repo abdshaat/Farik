@@ -3307,12 +3307,14 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["key", "channel", "name", "goal", "budget", "starts_on", "ends_on"],
+            "required": ["key", "channel", "name", "goal", "advertises", "price", "budget", "starts_on", "ends_on"],
             "properties": {
               "key": { "type": "string" },
               "channel": { "const": "google_ads" },
               "name": { "type": "string" },
               "goal": { "type": "string" },
+              "advertises": { "type": "string", "description": "What the campaign advertises; empty for a plan proposed before the field existed." },
+              "price": { "type": "string", "enum": ["fixed", "not_fixed"], "description": "fixed when Google keeps a total budget for the campaign, which it never bills past (3 to 90 days), else not_fixed: a daily budget, which may run over by about an hour's spend. As of today while the plan waits, and as of the day the owner approved it once it is approved." },
               "budget": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
               "starts_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
               "ends_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }

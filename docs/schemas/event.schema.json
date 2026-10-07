@@ -981,7 +981,7 @@
     },
     "marketingPlanCampaign": {
       "title": "Marketing Plan Campaign",
-      "description": "One paid campaign of a plan: key is unique across the plan's campaigns and posts, and its dates fall inside the plan's.",
+      "description": "One paid campaign of a plan: key is unique across the plan's campaigns and posts, and its dates fall inside the plan's. advertises is what the campaign advertises, the product, service or offer, 3 to 200 characters (docs/SPEC.md 6.5; ADR 0042, 2026-10-07); it is optional because a plan proposed before step 08g has none, and reads back empty.",
       "type": "object",
       "additionalProperties": false,
       "required": ["key", "channel", "name", "goal", "budget", "starts_on", "ends_on"],
@@ -990,6 +990,7 @@
         "channel": { "type": "string", "enum": ["google_ads"] },
         "name": { "type": "string" },
         "goal": { "type": "string" },
+        "advertises": { "type": "string" },
         "budget": { "$ref": "#/$defs/marketingPlanAmount" },
         "starts_on": { "type": "string", "format": "date" },
         "ends_on": { "type": "string", "format": "date" }

@@ -28,7 +28,7 @@ pub fn show(project: &Project, plan: Option<&str>, now: DateTime<Utc>) -> Result
         let posts = social_posts(&project.log).map_err(|error| error.to_string())?;
         return Ok(Report {
             lines: one_lines(found, state),
-            json: whole(found, state, &posts),
+            json: whole(found, state, &posts, now.date_naive()),
             json_lines: None,
         });
     }

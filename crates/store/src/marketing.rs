@@ -185,6 +185,7 @@ fn proposed(
                 key: campaign.key.as_str().to_string(),
                 name: campaign.name.clone(),
                 goal: campaign.goal.clone(),
+                advertises: campaign.advertises.clone().unwrap_or_default(),
                 budget: amount(campaign.budget.as_str())?,
                 starts_on: campaign.starts_on,
                 ends_on: campaign.ends_on,
@@ -853,6 +854,26 @@ mod tests {
         assert_eq!(waiting.decided, None);
         assert_eq!(waiting.record.approved_seq, None);
         assert!(!waiting.record.returned);
+    }
+
+    #[test]
+    fn reads_what_a_campaign_advertises_and_none_for_an_older_plan() {
+        let log = a_log();
+        append(&log, EventKind::MarketingPlanProposed, 9, |wire| {
+            wire["body"]["plan"] = json!("MP-1");
+            wire["body"]["campaigns"][0]["advertises"] = json!("Handmade candles");
+            wire["agent_id"] = json!("kai");
+            wire["session_id"] = json!("session-1");
+        });
+        // A plan proposed before the field existed has none: it reads back empty.
+        proposed(&log, "MP-2", 10);
+
+        let plans = marketing_plans(&log).expect("the plans fold");
+        assert_eq!(
+            plans[0].proposal.campaigns[0].advertises,
+            "Handmade candles"
+        );
+        assert_eq!(plans[1].proposal.campaigns[0].advertises, "");
     }
 
     #[test]
