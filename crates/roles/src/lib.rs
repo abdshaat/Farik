@@ -661,6 +661,32 @@ mod tests {
             ]
         );
         assert!(definition.system_prompt.contains("untrusted"));
+        // What the agent reads is what it may not do: the prompt carries every `forbidden` line
+        // (the two lists cannot drift), and the skill repeats the two rules that never bend, which
+        // keep it from buying and from writing to a seller in the founder's name.
+        let flatten = |text: &str| {
+            text.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        };
+        let prompt = flatten(&definition.system_prompt);
+        let skill = flatten(&definition.skills[0].body);
+        for line in &definition.forbidden {
+            assert!(
+                prompt.contains(&flatten(line)),
+                "the prompt lost the forbidden line \"{line}\": {prompt}"
+            );
+        }
+        for phrase in [
+            "never pay, bid, check out",
+            "never send a message the founder did not send",
+        ] {
+            assert!(
+                skill.contains(phrase),
+                "the skill lost \"{phrase}\": {skill}"
+            );
+        }
     }
 
     /// ADR 0019: its numbers are management accounting, and the role says so wherever it is
