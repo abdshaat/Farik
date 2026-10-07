@@ -9,8 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use chrono::{DateTime, Utc};
-use farik_core::contract::{TaskContract, TaskId};
+use farik_core::contract::{Role, TaskContract, TaskId};
 use farik_core::governor::permissions::PermissionTier;
+use farik_core::governor::sites::{WebAccess, web_access};
 use farik_core::team::{Team, task_private_folder};
 use farik_protocol::clock::IdSource;
 use farik_protocol::command::{Command, CommandReply, ReplyKind};
@@ -621,14 +622,17 @@ impl Orchestrator {
             .projections
             .task(task_id)?
             .and_then(|row| row.assignee_id);
+        // A role held to approved sites (8.6) gets no network in its sandbox, `network` or not: a
+        // command is not held to the sites a `WebFetch` is.
         let network = team
             .agents
             .iter()
             .find(|agent| Some(agent.id.as_str()) == assignee.as_deref())
             .is_some_and(|agent| {
-                agent
-                    .tiers(&team.permissions())
-                    .contains(&PermissionTier::Network)
+                web_access(Role::from(agent.role)) == WebAccess::Open
+                    && agent
+                        .tiers(&team.permissions())
+                        .contains(&PermissionTier::Network)
             });
         let sandbox: Arc<dyn Sandbox> = Arc::from(self.deps.sandboxes.create(
             &self.deps.tools.ids.project_id,

@@ -4899,6 +4899,47 @@ mod tests {
         assert_eq!(sandboxes.networks("FRK-1"), vec![false]);
     }
 
+    /// A role held to approved sites keeps `network` (6.10), and its `execute`, if the owner turns
+    /// it on, would run commands in the task's sandbox: that sandbox gets no network, for a
+    /// command is not held to the sites a `WebFetch` is (8.6).
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn gives_a_role_held_to_approved_sites_a_sandbox_with_no_network() {
+        use farik_core::governor::permissions::PermissionTier;
+
+        let harness = Harness::new("orch-sandbox-held-role", |wire| {
+            crate::tools::fixtures::with_the_procurement_specialist(wire);
+            let agents = wire["agents"].as_array_mut().expect("a list of agents");
+            agents.last_mut().expect("the specialist")["grants"] = json!(["execute"]);
+        });
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator =
+            harness.orchestrator_with(harness.recorded(Vec::new()), sandboxes.clone());
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        let tiers = team
+            .agents
+            .iter()
+            .find(|agent| agent.id.as_str() == "proc")
+            .expect("the specialist")
+            .tiers(&team.permissions());
+        assert!(
+            tiers.contains(&PermissionTier::Network) && tiers.contains(&PermissionTier::Execute),
+            "the premise: {tiers:?}"
+        );
+
+        orchestrator
+            .sandbox_for(&"FRK-1".parse().expect("a task id"), &team)
+            .expect("a sandbox is made");
+
+        assert_eq!(sandboxes.networks("FRK-1"), vec![false]);
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn reuses_an_assigned_tasks_worktree() {
