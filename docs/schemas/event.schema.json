@@ -232,14 +232,15 @@
     },
     "taskCreatedBody": {
       "title": "Task Created Body",
-      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once.",
+      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once. raises names the marketing plan whose budget the request raises (docs/SPEC.md 6.7; ADR 0042, step 08g): such a request skips the sprint queue and is worked on at once, outside any sprint (ADR 0028's exception).",
       "type": "object",
       "additionalProperties": false,
       "required": ["summary", "created_by"],
       "properties": {
         "summary": { "$ref": "#/$defs/contractSummary" },
         "created_by": { "type": "string", "description": "The agent id that filed the request, or human." },
-        "from_chat_message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+        "from_chat_message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "raises": { "$ref": "#/$defs/marketingPlanId" }
       }
     },
     "requestTriagedBody": {

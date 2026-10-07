@@ -761,6 +761,7 @@ mod tests {
             dependencies: Vec::new(),
             designer_browser: DesignerBrowser::Ready,
             private_folder_busy: false,
+            skips_sprints: false,
         }
     }
 

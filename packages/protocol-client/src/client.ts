@@ -52,7 +52,8 @@ export type MethodName =
 	| "connector.sign_in"
 	| "connector.sign_in_status"
 	| "connector.sign_in_cancel"
-	| "social_post.media";
+	| "social_post.media"
+	| "marketing_budget.raise";
 export type Status = "connecting" | "open" | "closed";
 
 /** The part of the browser `WebSocket` the client uses. */

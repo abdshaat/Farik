@@ -13,6 +13,9 @@ use farik_core::governor::gates::{ContractWriteActor, ContractWriteOutcome, chec
 use farik_core::governor::plain::plain_readiness;
 use farik_core::governor::readiness::{ReadinessFailure, evaluate_readiness, rules_evaluated};
 use farik_core::governor::transition_table::TransitionActor;
+use farik_core::marketing::{
+    CapScope, PlanSpend, RaiseAsk, Raised, active_plan, check_raise, parse_amount,
+};
 use farik_core::team::Team;
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{
@@ -21,10 +24,13 @@ use farik_protocol::event::{
 use farik_store::EventQuery;
 use farik_store::activity::{ActivityState, activity, moved_since};
 use farik_store::diff::diff_of;
-use farik_store::marketing::{marketing_plans, social_posts};
+use farik_store::marketing::{
+    BudgetReached, MarketingPlan, budgets_reached, marketing_plans, raises as marketing_raises,
+    social_posts,
+};
 use farik_store::requests::{
-    RequestError, TOO_SHORT, contract_write, file_request, placeholder_budget_usd,
-    request_from_text, summary_of,
+    RequestError, TOO_SHORT, contract_write, file_raise_request, file_request,
+    placeholder_budget_usd, request_from_brief, request_from_text, summary_of,
 };
 use farik_store::waiting::{name_of, waiting};
 use serde_json::{Value, json};
@@ -32,7 +38,7 @@ use serde_json::{Value, json};
 use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
 use crate::cost::extra_tries;
-use crate::marketing::{going_out, list_row, states_today, whole};
+use crate::marketing::{going_out, known_spend, list_row, states_today, whole};
 use crate::tools::ToolDeps;
 use crate::tools::contracts::changed_fields;
 use crate::tools::design::ReviewState;
@@ -40,7 +46,12 @@ use crate::tools::media::fetch_picture;
 use crate::transitions::last_move_into;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 3] = ["request.file", "contract.save", "social_post.media"];
+pub(super) const METHODS: [&str; 4] = [
+    "request.file",
+    "contract.save",
+    "social_post.media",
+    "marketing_budget.raise",
+];
 
 /// Who the human is in the log.
 const HUMAN: &str = "human";
@@ -565,6 +576,14 @@ pub(super) async fn call(
     if method == "social_post.media" {
         return post_picture(&deps, params).await;
     }
+    if method == "marketing_budget.raise" {
+        let plan = params["plan"].as_str().unwrap_or_default().to_string();
+        let spent = known_spend(state, &deps, &plan).map_err(|e| internal(&e))?;
+        let params = params.clone();
+        let filed = off_the_worker(move || raise_budget(&deps, &spent, &params)).await?;
+        state.wakes().notify_one();
+        return Ok(filed);
+    }
     if method == "request.file" {
         let text = params["text"].as_str().unwrap_or_default().to_string();
         let link = params["from_chat_message"].as_u64();
@@ -638,6 +657,161 @@ fn file_words(
         deps.clock.now(),
         &deps.ids,
         from_chat_message,
+    )
+    .map_err(|error| match error {
+        RequestError::Refused { reason } => Failure::new(REFUSED, format!("the request {reason}")),
+        other => internal(&other),
+    })?;
+    deps.projections.catch_up().map_err(|e| internal(&e))?;
+    Ok(json!({ "task_id": filed.id }))
+}
+
+/// A refusal of a raise, coded as `team.save`'s are, so that the page words it without matching
+/// words.
+fn raise_refusal(path: &str, code: &str, sentence: &str) -> Failure {
+    let mut failure = Failure::new(REFUSED, sentence);
+    failure.data = Some(json!({ "errors": [{ "path": path, "message": sentence, "code": code }] }));
+    failure
+}
+
+/// The plan `plan_id`, which a raise may only name when it is the one running now and has reached
+/// a budget, with the budgets it reached, and when no raise of it is open: a request that raises
+/// it, not yet `accepted` or `cancelled`.
+fn plan_to_raise(
+    deps: &ToolDeps,
+    plan_id: &str,
+) -> Result<(MarketingPlan, Vec<BudgetReached>), Failure> {
+    let plans = marketing_plans(&deps.log).map_err(|e| internal(&e))?;
+    let records: Vec<farik_core::marketing::PlanRecord> =
+        plans.iter().map(|plan| plan.record.clone()).collect();
+    let active = active_plan(&records, deps.clock.now().date_naive())
+        .filter(|record| record.id == plan_id)
+        .and_then(|record| plans.iter().find(|plan| plan.record.id == record.id))
+        .ok_or_else(|| {
+            raise_refusal(
+                "/plan",
+                "raise_refused",
+                &format!("{plan_id} is not the marketing plan that is running now."),
+            )
+        })?;
+    let reached: Vec<BudgetReached> = budgets_reached(&deps.log)
+        .map_err(|e| internal(&e))?
+        .into_iter()
+        .filter(|reached| reached.plan == plan_id)
+        .collect();
+    if reached.is_empty() {
+        return Err(raise_refusal(
+            "/plan",
+            "raise_refused",
+            &format!("{plan_id} has not reached a budget, so there is nothing to raise."),
+        ));
+    }
+    let board = deps.projections.board().map_err(|e| internal(&e))?;
+    let open = marketing_raises(&deps.log)
+        .map_err(|e| internal(&e))?
+        .into_iter()
+        .filter(|raise| raise.plan == plan_id)
+        .any(|raise| {
+            board.iter().any(|row| {
+                row.task_id == raise.task_id
+                    && !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)
+            })
+        });
+    if open {
+        return Err(raise_refusal(
+            "/plan",
+            "raise_open",
+            &format!("A new version of {plan_id} with a raised budget is being written already."),
+        ));
+    }
+    Ok((active.clone(), reached))
+}
+
+/// What the owner asked in a raise's params: the amounts, read.
+fn raise_asked(params: &Value) -> Result<RaiseAsk, Failure> {
+    let amount = |path: &str, text: &Value, example: &str| {
+        parse_amount(text.as_str().unwrap_or_default()).ok_or_else(|| {
+            raise_refusal(
+                path,
+                "raise_refused",
+                &format!("Give an amount such as {example}."),
+            )
+        })
+    };
+    Ok(RaiseAsk {
+        google_ads: amount("/google_ads", &params["google_ads"], "1200.00")?,
+        campaigns: params["campaigns"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|each| {
+                let key = each["key"].as_str().unwrap_or_default().to_string();
+                let budget = amount(&format!("/campaigns/{key}"), &each["budget"], "700.00")?;
+                Ok((key, budget))
+            })
+            .collect::<Result<Vec<_>, Failure>>()?,
+    })
+}
+
+/// The title and the words of the request for a new version of `plan_id` with `raised`, in
+/// `currency`: the agent proposes a plan that replaces `plan_id` from today with these budgets,
+/// keeps its campaigns and slots that are not over, and, once the owner approves it, raises each
+/// paused campaign's budget at Google and enables it. The plan's id stands for the plan, since the
+/// proposal names the plan it replaces by it.
+fn raise_words(plan_id: &str, currency: &str, raised: &Raised) -> (String, String) {
+    use std::fmt::Write as _;
+
+    let clauses = raised
+        .campaigns
+        .iter()
+        .fold(String::new(), |mut text, (key, budget)| {
+            let _ = write!(text, ", and {key}'s budget {budget}");
+            text
+        });
+    (
+        format!("New version of {plan_id} with a raised budget"),
+        format!(
+            "Propose a new version of {plan_id} that replaces it (replaces: {plan_id}), starting \
+             today, with its Google Ads budget {} {currency} and its total {}{clauses}; keep its \
+             campaigns and post slots that are not over, each with its key and what it advertises, \
+             their dates from today on. Once the owner approves it, raise each paused campaign's \
+             budget at Google with set_campaign_budget, then enable it.",
+            raised.google_ads, raised.total
+        ),
+    )
+}
+
+/// `marketing_budget.raise`: the owner raises the budget of the active marketing plan whose ads
+/// reached it. The plan must be the active one and have a `marketing_budget.reached`, no raise of
+/// it may be open, and the amounts must pass `check_raise` (`raise_refused`, `raise_open`). Files
+/// the request for a new version of the plan as a request of the human's that skips triage and the
+/// sprint queue (`file_raise_request`), and answers its task.
+fn raise_budget(deps: &ToolDeps, spent: &PlanSpend, params: &Value) -> Result<Value, Failure> {
+    let plan_id = params["plan"].as_str().unwrap_or_default();
+    let (plan, reached) = plan_to_raise(deps, plan_id)?;
+    let ask = raise_asked(params)?;
+    let capped: Vec<String> = reached
+        .iter()
+        .filter(|reached| reached.scope == CapScope::Campaign)
+        .filter_map(|reached| reached.key.clone())
+        .collect();
+    let raised = check_raise(&plan.proposal, spent, &capped, &ask).map_err(|faults| {
+        let mut failure = Failure::new(REFUSED, faults[0].message.clone());
+        failure.data = Some(json!({ "errors": faults.iter().map(|fault| json!({
+            "path": fault.path, "message": fault.message, "code": "raise_refused",
+        })).collect::<Vec<_>>() }));
+        failure
+    })?;
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    let (title, words) = raise_words(plan_id, &plan.proposal.currency, &raised);
+    let request = request_from_brief(&title, &words, placeholder_budget_usd(&team.rules()))
+        .map_err(|sentence| Failure::new(REFUSED, sentence))?;
+    let filed = file_raise_request(
+        &deps.files,
+        &deps.log,
+        request,
+        (HUMAN, plan_id),
+        (deps.clock.now(), &deps.ids),
     )
     .map_err(|error| match error {
         RequestError::Refused { reason } => Failure::new(REFUSED, format!("the request {reason}")),
@@ -1175,6 +1349,219 @@ pub(super) mod tests {
             [("shrinks".into(), "Candle gifts".into(), "fixed".into())],
             "as of the day it was approved"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the refusals one after another, then the request filed, then the second refused"
+    )]
+    fn raise_files_a_request_that_skips_triage() {
+        use farik_core::marketing::{Amount, PlanSpend};
+
+        use crate::daemon::SpendRead;
+
+        let harness = Harness::new(
+            "gates-raise",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        let project = &harness.project;
+        // MP-1, active: 2000.00 in all, 800.00 for Google Ads, two campaigns.
+        let mut body =
+            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+        body["plan"] = json!("MP-1");
+        body["starts_on"] = json!("2026-09-20");
+        body["ends_on"] = json!("2027-01-31");
+        body["budget"] = json!({ "total": "2000.00", "google_ads": "800.00" });
+        body["posts"] = json!([]);
+        body["google_ads_account"] = json!("123-456-7890");
+        let campaign = |key: &str, budget: &str| {
+            json!({
+                "key": key, "channel": "google_ads", "name": key, "goal": "Sales",
+                "budget": budget, "starts_on": "2026-09-22", "ends_on": "2026-12-22"
+            })
+        };
+        body["campaigns"] = json!([
+            campaign("search-launch", "500.00"),
+            campaign("search-long", "400.00")
+        ]);
+        project.record_by(Some("kai"), at(), "FRK-1", "marketing_plan.proposed", &body);
+        project.plan_approved("FRK-1", "MP-1", "");
+        let raise = |google_ads: &str, campaigns: &Value| {
+            rpc(
+                &harness.daemon,
+                "marketing_budget.raise",
+                &json!({ "plan": "MP-1", "google_ads": google_ads, "campaigns": campaigns }),
+            )
+        };
+        let code = |reply: &Value| {
+            reply["error"]["data"]["errors"][0]["code"]
+                .as_str()
+                .unwrap_or_else(|| panic!("a coded refusal: {reply}"))
+                .to_string()
+        };
+        let launch = |budget: &str| json!({ "key": "search-launch", "budget": budget });
+
+        // No budget reached yet: nothing to raise.
+        assert_eq!(code(&raise("1200.00", &json!([]))), "raise_refused");
+
+        // The plan and search-launch reached theirs, and Farik read 800.00 spent in all.
+        project.record(
+            "",
+            "marketing_budget.reached",
+            &json!({
+                "plan": "MP-1", "scope": "plan", "spent": "800.00", "budget": "800.00",
+                "currency": "USD", "paused": []
+            }),
+        );
+        project.record(
+            "",
+            "marketing_budget.reached",
+            &json!({
+                "plan": "MP-1", "scope": "campaign", "key": "search-launch", "spent": "500.00",
+                "budget": "500.00", "currency": "USD", "paused": []
+            }),
+        );
+        harness.daemon.spend_reads().insert(
+            "MP-1".to_string(),
+            SpendRead {
+                attempted_at: at(),
+                spend: Some((
+                    PlanSpend {
+                        by_key: [
+                            ("search-launch".to_string(), Amount(50_000)),
+                            ("search-long".to_string(), Amount(30_000)),
+                        ]
+                        .into(),
+                        total: Amount(80_000),
+                    },
+                    at(),
+                )),
+                failed: None,
+                unstopped: None,
+            },
+        );
+        // The same campaign reached its budget under a plan that ended, MP-0.
+        project.record(
+            "",
+            "marketing_budget.reached",
+            &json!({
+                "plan": "MP-0", "scope": "campaign", "key": "search-launch", "spent": "500.00",
+                "budget": "500.00", "currency": "USD", "paused": []
+            }),
+        );
+        let before = project.event_count();
+
+        // A plan that is not the one running now is refused, whatever it reached.
+        let reply = rpc(
+            &harness.daemon,
+            "marketing_budget.raise",
+            &json!({ "plan": "MP-0", "google_ads": "1200.00", "campaigns": [launch("700.00")] }),
+        );
+        assert_eq!(code(&reply), "raise_refused", "{reply}");
+
+        // Each of these is refused, and nothing is filed: Google Ads not above what is spent, a
+        // campaign not above its own spend, the campaigns above the Google Ads budget, the
+        // campaign at its cap left out, one that is not at its cap offered, one named twice.
+        for (google_ads, campaigns) in [
+            ("800.00", json!([launch("700.00")])),
+            ("1200.00", json!([launch("500.00")])),
+            ("1000.00", json!([launch("700.00")])),
+            ("1200.00", json!([])),
+            (
+                "1200.00",
+                json!([launch("700.00"), { "key": "search-long", "budget": "450.00" }]),
+            ),
+            ("1200.00", json!([launch("700.00"), launch("710.00")])),
+        ] {
+            let reply = raise(google_ads, &campaigns);
+            assert_eq!(
+                code(&reply),
+                "raise_refused",
+                "{google_ads} {campaigns}: {reply}"
+            );
+        }
+        assert_eq!(project.event_count(), before, "nothing was filed");
+
+        // The raise: 1200.00 for Google Ads, so the total rises by the 400.00 from 2000.00.
+        let reply = raise("1200.00", &json!([launch("700.00")]));
+        let task = reply["result"]["task_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("a task: {reply}"))
+            .to_string();
+        let contract = project
+            .deps
+            .files
+            .read_contract(&task.parse().expect("a task id"))
+            .expect("the request is a file");
+        assert_eq!(
+            contract.title.to_string(),
+            "New version of MP-1 with a raised budget"
+        );
+        assert_eq!(
+            contract.intent.as_str(),
+            "Propose a new version of MP-1 that replaces it (replaces: MP-1), starting today, \
+             with its Google Ads budget 1200.00 USD and its total 2400.00, and search-launch's \
+             budget 700.00; keep its campaigns and post slots that are not over, each with its \
+             key and what it advertises, their dates from today on. Once the owner approves it, \
+             raise each paused campaign's budget at Google with set_campaign_budget, then enable \
+             it."
+        );
+        let events = project.events(&[EventKind::TaskCreated, EventKind::RequestTriaged]);
+        let filed: Vec<&farik_protocol::event::FarikEvent> = events
+            .iter()
+            .filter(|event| {
+                event.envelope.ids.task_id.as_ref().map(|id| id.as_str()) == Some(task.as_str())
+            })
+            .collect();
+        assert_eq!(filed.len(), 2, "filed, then triaged at once");
+        let farik_protocol::event::EventBody::TaskCreated(created) = &filed[0].body else {
+            panic!("a task.created first");
+        };
+        assert_eq!(created.created_by, "human");
+        assert_eq!(
+            created.raises.as_ref().map(|plan| plan.as_str()),
+            Some("MP-1")
+        );
+        let farik_protocol::event::EventBody::RequestTriaged(triaged) = &filed[1].body else {
+            panic!("a request.triaged next");
+        };
+        assert_eq!(
+            (
+                triaged.size.to_string().as_str(),
+                triaged.reason.as_str(),
+                triaged.triaged_by.as_str()
+            ),
+            ("small", "a raised marketing budget for MP-1", "farik")
+        );
+        let row = harness.row(&task);
+        assert!(row.skips_sprints && row.triaged, "{row:?}");
+
+        // While it is open, no second one.
+        let reply = raise("1200.00", &json!([launch("700.00")]));
+        assert_eq!(code(&reply), "raise_open", "{reply}");
+        assert_eq!(
+            project.events(&[EventKind::TaskCreated]).len(),
+            2,
+            "FRK-1 and the raise"
+        );
+
+        // Once the owner cancels it, it is not open any more: another may be asked.
+        project.moved(&task, "draft", "cancelled", &json!({ "actor": "human" }));
+        let reply = raise("1200.00", &json!([launch("700.00")]));
+        let second = reply["result"]["task_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("a task: {reply}"))
+            .to_string();
+        assert_eq!(project.events(&[EventKind::TaskCreated]).len(), 3);
+
+        // Nor once it is accepted, the new version being written.
+        project.moved(&second, "draft", "accepted", &json!({ "actor": "human" }));
+        let reply = raise("1200.00", &json!([launch("700.00")]));
+        assert!(reply["result"]["task_id"].is_string(), "{reply}");
+        assert_eq!(project.events(&[EventKind::TaskCreated]).len(), 4);
     }
 
     #[test]

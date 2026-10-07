@@ -9,10 +9,12 @@ use std::fmt::Display;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
-use farik_core::marketing::{EndReason, PlanRecord, PostDetails, plans_to_end, price_kind};
+use farik_core::marketing::{
+    Amount, CapScope, EndReason, PlanRecord, PlanSpend, PostDetails, plans_to_end, price_kind,
+};
 use farik_protocol::event::{EventBody, EventIds, FarikEvent, new_event};
 use farik_store::marketing::{
-    MarketingPlan, PlanState, PostState, SocialPost, marketing_plans, social_posts,
+    MarketingPlan, PlanState, PostState, SocialPost, budgets_reached, marketing_plans, social_posts,
 };
 use serde_json::{Map, Value, json};
 
@@ -731,6 +733,44 @@ pub fn whole(
         "decided": decided,
         "ended": ended,
     })
+}
+
+/// What Farik knows of what the ads of `plan` have cost, for a raise and for Today's row: the last
+/// spend the watch read, kept in memory, else what the caps recorded for the plan say, which a
+/// restart leaves (a campaign's cap, its key's spend, and the plan's, the total, falling back to
+/// the sum of the campaigns' when no cap is the plan's).
+///
+/// # Errors
+///
+/// What the log refused.
+pub(crate) fn known_spend(
+    state: &crate::daemon::DaemonState,
+    tools: &ToolDeps,
+    plan: &str,
+) -> Result<PlanSpend, farik_store::StoreError> {
+    if let Some((spend, _)) = state
+        .spend_reads()
+        .get(plan)
+        .and_then(|read| read.spend.clone())
+    {
+        return Ok(spend);
+    }
+    let mut by_key = std::collections::BTreeMap::new();
+    let mut total = None;
+    for reached in budgets_reached(&tools.log)? {
+        if reached.plan != plan {
+            continue;
+        }
+        match (reached.scope, reached.key) {
+            (CapScope::Campaign, Some(key)) => {
+                by_key.insert(key, reached.spent);
+            }
+            (CapScope::Plan, _) => total = Some(reached.spent),
+            (CapScope::Campaign, None) => {}
+        }
+    }
+    let total = total.unwrap_or_else(|| Amount(by_key.values().map(|each| each.0).sum()));
+    Ok(PlanSpend { by_key, total })
 }
 
 /// The states of `plans`, in their order, given today: the one in force is active.

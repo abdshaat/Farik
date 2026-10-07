@@ -8342,6 +8342,46 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_raise_runs_during_a_sprint_it_is_not_in() {
+        let harness = Harness::new("orch-sprints-raise", in_sprints);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &["FRK-1"]);
+        // The owner's request to raise a marketing plan's budget, refined and ready.
+        harness.ready_raising("FRK-3", "MP-1");
+        assert!(!in_the_backlog_now(&harness, "FRK-3"));
+        let adapter = harness.recorded(vec![rewritten(&plan_assigns_frk_1(), "FRK-1", "FRK-3")]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator
+            .tick_within(&TickScope {
+                task_id: Some("FRK-3".parse().expect("a task id")),
+                ..TickScope::default()
+            })
+            .await
+            .expect("the tick runs");
+
+        // Assigned at once, with S1 open and the policy on, and in no sprint.
+        assert_eq!(acted_on(&report), Some("FRK-3"), "{report:?}");
+        let row = harness.row("FRK-3");
+        assert_eq!((row.status, row.sprint), (TaskStatus::Assigned, None));
+        // No plan of a sprint names it: the only one is S1's, with FRK-1.
+        let planned: Vec<String> = harness
+            .events(&[EventKind::SprintPlanned])
+            .iter()
+            .flat_map(|event| match &event.body {
+                EventBody::SprintPlanned(body) => body
+                    .task_ids
+                    .iter()
+                    .map(|task| task.as_str().to_string())
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect();
+        assert_eq!(planned, ["FRK-1"]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn stops_unfinished_work_of_an_ended_sprint() {
         let harness = Harness::new("orch-sprints-ended", in_sprints);
         harness.assigned("FRK-1", "dev-b", "dev-a");

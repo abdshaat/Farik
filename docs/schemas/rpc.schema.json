@@ -532,6 +532,9 @@
         },
         {
           "$ref": "#/$defs/socialPostMediaRequest"
+        },
+        {
+          "$ref": "#/$defs/marketingBudgetRaiseRequest"
         }
       ]
     },
@@ -3530,6 +3533,46 @@
           }
         }
       }
+    },
+    "marketingBudgetRaiseRequest": {
+      "title": "Marketing Budget Raise Request",
+      "description": "The owner raises the budget of the active marketing plan whose ads reached it (docs/SPEC.md 6.7; ADR 0042, step 08g): google_ads is the plan's new Google Ads budget, in the plan's currency, and campaigns the new budget of each campaign that reached its own, each more than what was spent. The plan's total rises by the same amount as google_ads. Farik files a request for a new version of the plan, triaged small at once and never held for a sprint, and answers marketingBudgetRaiseResult. Refused with errors, each a path, a message and a code: raise_refused (the plan is not the active one, has reached no budget, or an amount is not enough or does not fit) or raise_open (a raise of the plan is open already).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "marketing_budget.raise" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["plan", "google_ads", "campaigns"],
+          "properties": {
+            "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+            "google_ads": { "type": "string", "maxLength": 12 },
+            "campaigns": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["key", "budget"],
+                "properties": {
+                  "key": { "type": "string", "maxLength": 40 },
+                  "budget": { "type": "string", "maxLength": 12 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "marketingBudgetRaiseResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id"],
+      "properties": { "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" } }
     },
     "socialPostMediaResult": {
       "type": "object",

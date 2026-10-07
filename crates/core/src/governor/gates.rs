@@ -75,6 +75,10 @@ pub enum DesignerBrowser {
 
 /// Everything the assignment gate needs from the world.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent facts the gate reads, each a yes or no about the world"
+)]
 pub struct AssignmentInput {
     /// Who asked.
     pub requested_by: AssignmentRequester,
@@ -118,6 +122,10 @@ pub struct AssignmentInput {
     /// A task sent back, blocked or escalated still holds it, since `rejected -> in_progress` and
     /// `blocked -> in_progress` pass no assignment gate. `false` for a role with no folder.
     pub private_folder_busy: bool,
+    /// Whether the task skips the sprint queue: the request the owner files to raise a marketing
+    /// plan's budget (ADR 0042, ADR 0028's exception). It is worked on at once, in no sprint,
+    /// under the policy or not, and the sprint's budget does not pay for it.
+    pub skips_sprints: bool,
 }
 
 /// A row of the board as the sprint policy reads it (ADR 0028).
@@ -135,14 +143,18 @@ pub struct SprintHold<'a> {
     pub sprint: Option<&'a str>,
     /// Whether a sprint ended early left the task for the Backlog.
     pub left_for_the_backlog: bool,
+    /// Whether the task skips the sprint queue (see `AssignmentInput::skips_sprints`).
+    pub skips_sprints: bool,
 }
 
 /// Whether a task waits for a sprint to plan it: under the policy, a task outside the open sprint
 /// that is `ready` or that a sprint left for the Backlog. Work under way when the policy was
-/// switched on is not held, and an epic never is: its breakdown is preparation.
+/// switched on is not held, and an epic never is: its breakdown is preparation. Nor is a task that
+/// skips sprints, the owner's request to raise a marketing plan's budget.
 #[must_use]
 pub fn waits_for_a_sprint(hold: &SprintHold<'_>) -> bool {
     hold.plan_in_sprints
+        && !hold.skips_sprints
         && hold.kind == Kind::Task
         && outside(hold)
         && (hold.status == TaskStatus::Ready || hold.left_for_the_backlog)
@@ -175,6 +187,10 @@ fn outside(hold: &SprintHold<'_>) -> bool {
 /// task that does not wait for a sprint, read as `ready` with no mark: one in the open sprint.
 #[must_use]
 pub fn in_the_open_sprint(kind: Kind, input: &AssignmentInput) -> bool {
+    // A raise of a marketing plan's budget is worked on at once, whatever sprint is open (ADR 0042).
+    if input.skips_sprints {
+        return true;
+    }
     if input.plan_in_sprints {
         return !waits_for_a_sprint(&SprintHold {
             plan_in_sprints: true,
@@ -183,6 +199,7 @@ pub fn in_the_open_sprint(kind: Kind, input: &AssignmentInput) -> bool {
             status: TaskStatus::Ready,
             sprint: input.task_sprint.as_deref(),
             left_for_the_backlog: false,
+            skips_sprints: input.skips_sprints,
         });
     }
     let Some(open) = &input.open_sprint else {
@@ -202,6 +219,9 @@ pub fn fits_the_open_sprint(contract: &TaskContract, input: &AssignmentInput) ->
 /// Whether the open sprint's budget lets the row be assigned. Under the policy only a row in the
 /// open sprint is paid from it: an epic's breakdown outside it is preparation.
 fn the_sprint_pays(contract: &TaskContract, input: &AssignmentInput) -> bool {
+    if input.skips_sprints {
+        return true;
+    }
     let in_it = input.task_sprint.is_some() && input.task_sprint == input.open_sprint;
     (input.plan_in_sprints && !in_it)
         || fits_within(
@@ -1148,7 +1168,7 @@ mod tests {
         check_assignment, check_blocker_resolved, check_blocker_written, check_child_creation,
         check_children_done, check_contract_write, check_criteria_recorded, check_human_triage,
         check_product_doc_write, check_rejection_reasons, fits_the_open_sprint, in_the_backlog,
-        waits_for_a_sprint,
+        in_the_open_sprint, waits_for_a_sprint,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::ExitCriterionVerificationVariant0Expect;
@@ -1176,6 +1196,7 @@ mod tests {
             dependencies: Vec::new(),
             designer_browser: DesignerBrowser::Ready,
             private_folder_busy: false,
+            skips_sprints: false,
         }
     }
 
@@ -1518,6 +1539,7 @@ mod tests {
             status,
             sprint: None,
             left_for_the_backlog: false,
+            skips_sprints: false,
         }
     }
 
@@ -1558,6 +1580,48 @@ mod tests {
                 };
                 assert!(!waits_for_a_sprint(&off), "{status:?}");
             }
+        }
+    }
+
+    #[test]
+    fn a_raise_never_waits_for_a_sprint() {
+        // Under the policy a raise neither waits nor is in the Backlog, in any status it can be
+        // in, whether a sprint is open or not and whether or not it carries the Backlog's mark.
+        for open_sprint in [None, Some("S1")] {
+            for left_for_the_backlog in [false, true] {
+                for status in [
+                    TaskStatus::Ready,
+                    TaskStatus::Assigned,
+                    TaskStatus::InProgress,
+                    TaskStatus::Rejected,
+                ] {
+                    let raise = SprintHold {
+                        skips_sprints: true,
+                        open_sprint,
+                        left_for_the_backlog,
+                        ..a_hold(status)
+                    };
+                    assert!(!waits_for_a_sprint(&raise), "{status:?} {open_sprint:?}");
+                    assert!(!in_the_backlog(&raise), "{status:?} {open_sprint:?}");
+                }
+            }
+        }
+        // Assigned while another sprint is open, with the policy and without it, and with that
+        // sprint's budget spent; without the mark the same task is held.
+        for plan_in_sprints in [true, false] {
+            let mut input = an_assignment();
+            input.plan_in_sprints = plan_in_sprints;
+            input.open_sprint = Some("S2".to_string());
+            input.remaining_sprint_budget_usd = 0.0;
+            input.skips_sprints = true;
+            assert!(in_the_open_sprint(Kind::Task, &input), "{plan_in_sprints}");
+            assert!(
+                fits_the_open_sprint(&a_contract(), &input),
+                "the sprint's budget does not pay for it ({plan_in_sprints})"
+            );
+            input.skips_sprints = false;
+            assert!(!in_the_open_sprint(Kind::Task, &input), "{plan_in_sprints}");
+            assert!(!fits_the_open_sprint(&a_contract(), &input));
         }
     }
 

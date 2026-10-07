@@ -708,6 +708,40 @@ pub fn created_campaigns(log: &EventLog) -> Result<Vec<CreatedCampaign>, StoreEr
         .collect())
 }
 
+/// A request that raises the budget of a marketing plan (ADR 0042, step 08g).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Raise {
+    /// The plan whose budget it raises.
+    pub plan: String,
+    /// The task the request is.
+    pub task_id: TaskId,
+}
+
+/// Every request that raises a plan's budget, oldest first: each `task.created` that names a plan
+/// in `raises`.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn raises(log: &EventLog) -> Result<Vec<Raise>, StoreError> {
+    let events = log.read(&EventQuery {
+        kinds: vec![EventKind::TaskCreated],
+        ..EventQuery::default()
+    })?;
+    Ok(events
+        .iter()
+        .filter_map(|event| {
+            let EventBody::TaskCreated(body) = &event.body else {
+                return None;
+            };
+            Some(Raise {
+                plan: body.raises.as_ref()?.as_str().to_string(),
+                task_id: event.envelope.ids.task_id.clone()?,
+            })
+        })
+        .collect())
+}
+
 /// Why Farik paused a campaign it made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PausedWhy {

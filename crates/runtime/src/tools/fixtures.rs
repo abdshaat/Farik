@@ -305,6 +305,18 @@ impl TestProject {
         parent: Option<&str>,
         change: impl FnOnce(&mut Value),
     ) {
+        self.filed_raising(task, (status, kind, parent), None, change);
+    }
+
+    /// `filed_with`, the request one that raises the budget of marketing plan `raises`, when one
+    /// is named.
+    pub(crate) fn filed_raising(
+        &self,
+        task: &str,
+        (status, kind, parent): (&str, &str, Option<&str>),
+        raises: Option<&str>,
+        change: impl FnOnce(&mut Value),
+    ) {
         let mut wire = a_contract_wire();
         wire["id"] = json!(task);
         wire["status"] = json!(status);
@@ -327,11 +339,11 @@ impl TestProject {
         if let Some(parent) = parent {
             summary["parent"] = json!(parent);
         }
-        self.record(
-            task,
-            "task.created",
-            &json!({ "summary": summary, "created_by": "human" }),
-        );
+        let mut body = json!({ "summary": summary, "created_by": "human" });
+        if let Some(plan) = raises {
+            body["raises"] = json!(plan);
+        }
+        self.record(task, "task.created", &body);
     }
 
     /// `filed_with` and no change.

@@ -1341,17 +1341,32 @@ mod tests {
             assert!(text.contains("\n## 1. "), "{name} has numbered sections");
             assert!(text.contains(beside), "{name} does not name {beside}");
         }
-        // Farik's own stop at the plan's budget is step 08g's: until it arrives the budget held at
-        // Google is the limit, and the skill does not say Farik stops the ads.
+        // Farik's own stop at the plan's budget is step 08g's, and the skill says what it is and
+        // what it is not: it never counts as the limit, and a raise is asked of the agent in
+        // words the daemon files (the request's last sentence is the skill's).
         let (_, text) = kit_skill(Role::MarketingSpecialist, "running-search-ads");
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            text.contains("The budget held at Google is the limit until Farik's own stop arrives"),
+            text.contains(
+                "Farik reads what the ads have cost every 15 minutes while it runs and pauses a \
+                 campaign that reaches its budget"
+            ),
             "{text}"
         );
         assert!(
-            !text.contains("Farik stops them at the plan's budget"),
-            "the skill says a stop that has not arrived"
+            text.contains("the budget held at Google is the limit when Farik is not running"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("until Farik's own stop arrives"),
+            "the skill says a stop that has arrived is still to come"
+        );
+        assert!(
+            text.contains(
+                "Once the owner approves it, raise each paused campaign's budget at Google with \
+                 set_campaign_budget, then enable it."
+            ),
+            "{text}"
         );
     }
 

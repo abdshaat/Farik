@@ -382,6 +382,17 @@ impl Harness {
         self.file(task, "ready", |_| {});
     }
 
+    /// Files `task` `ready` as the request that raises the budget of marketing plan `plan`: one
+    /// that skips the sprint queue.
+    pub(crate) fn ready_raising(&self, task: &str, plan: &str) {
+        self.project
+            .filed_raising(task, ("ready", "task", None), Some(plan), |wire| {
+                wire["assignee_role"] = json!("software_developer");
+                wire["reviewer_role"] = json!("software_developer");
+                wire["allowed_paths"] = json!(["done.txt"]);
+            });
+    }
+
     /// Files `task` `ready` and moves it to `assigned` to `assignee`, reviewed by `reviewer`.
     pub(crate) fn assigned(&self, task: &str, assignee: &str, reviewer: &str) {
         self.ready(task);

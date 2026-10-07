@@ -1262,6 +1262,139 @@ pub struct Cap {
     pub campaigns: Vec<String>,
 }
 
+/// What the owner asks when they raise a plan's budget: the new Google Ads budget, and the new
+/// budget of each campaign that reached its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RaiseAsk {
+    /// The plan's new Google Ads budget.
+    pub google_ads: Amount,
+    /// Each campaign's key and its new budget, in the order asked.
+    pub campaigns: Vec<(String, Amount)>,
+}
+
+/// What a raise comes to: the plan's new Google Ads budget and total, which rises by the same
+/// amount, and the raised campaigns' budgets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Raised {
+    /// The new Google Ads budget.
+    pub google_ads: Amount,
+    /// The new total.
+    pub total: Amount,
+    /// Each raised campaign's key and new budget.
+    pub campaigns: Vec<(String, Amount)>,
+}
+
+/// One thing wrong with a raise, with the field it is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RaiseFault {
+    /// `/google_ads`, `/campaigns` or `/campaigns/<key>`.
+    pub path: String,
+    /// What is wrong and what would fix it, in plain words.
+    pub message: String,
+}
+
+/// Checks a raise of `plan`'s budget (ADR 0042, step 08g) against what `spent`: the new Google Ads
+/// budget is more than what was spent in all and not less than it is now; each campaign that
+/// reached its own budget (`capped`) is given a new one, more than its spend, and no other is; and
+/// the plan's campaigns, with the raised budgets in place of the old, add up to no more than the
+/// new Google Ads budget. The plan's total rises by the same amount as the Google Ads budget.
+///
+/// # Errors
+///
+/// Every fault, in the order of the fields.
+pub fn check_raise(
+    plan: &PlanProposal,
+    spent: &PlanSpend,
+    capped: &[String],
+    ask: &RaiseAsk,
+) -> Result<Raised, Vec<RaiseFault>> {
+    let mut faults = Vec::new();
+    let mut fault = |path: &str, message: String| {
+        faults.push(RaiseFault {
+            path: path.to_string(),
+            message,
+        });
+    };
+    let currency = &plan.currency;
+    if ask.google_ads <= spent.total {
+        fault(
+            "/google_ads",
+            format!(
+                "Make it more than the {} {currency} already spent.",
+                spent.total
+            ),
+        );
+    } else if ask.google_ads < plan.google_ads {
+        fault(
+            "/google_ads",
+            format!(
+                "Make it at least the {} {currency} it is now.",
+                plan.google_ads
+            ),
+        );
+    }
+    let mut named: Vec<&str> = Vec::new();
+    for (key, budget) in &ask.campaigns {
+        let path = format!("/campaigns/{key}");
+        if named.contains(&key.as_str()) {
+            fault(&path, format!("{key} is named twice."));
+        } else if !plan.campaigns.iter().any(|each| &each.key == key) {
+            fault(&path, format!("{key} is no campaign of the plan."));
+        } else if !capped.contains(key) {
+            fault(&path, format!("{key} has not reached its budget."));
+        } else {
+            let was = spent.by_key.get(key).copied().unwrap_or(Amount(0));
+            if *budget <= was {
+                fault(
+                    &path,
+                    format!("Make it more than the {was} {currency} already spent."),
+                );
+            }
+        }
+        named.push(key);
+    }
+    for key in capped {
+        if !named.contains(&key.as_str()) {
+            fault(
+                "/campaigns",
+                format!("{key} reached its budget: give it a new one."),
+            );
+        }
+    }
+    let sum: u64 = plan
+        .campaigns
+        .iter()
+        .map(|each| {
+            ask.campaigns
+                .iter()
+                .find(|(key, _)| key == &each.key)
+                .map_or(each.budget, |(_, budget)| *budget)
+                .0
+        })
+        .fold(0_u64, u64::saturating_add);
+    if sum > ask.google_ads.0 {
+        fault(
+            "/google_ads",
+            format!(
+                "The campaigns' budgets add up to {} {currency}: make this at least that.",
+                Amount(sum)
+            ),
+        );
+    }
+    if !faults.is_empty() {
+        return Err(faults);
+    }
+    Ok(Raised {
+        google_ads: ask.google_ads,
+        total: Amount(
+            plan.total
+                .0
+                .saturating_add(ask.google_ads.0.saturating_sub(plan.google_ads.0)),
+        ),
+        campaigns: ask.campaigns.clone(),
+    })
+}
+
 /// The active plan, as the spend watch reads it: its id, its proposal and its lineage.
 #[derive(Debug, Clone, Copy)]
 pub struct Lineage<'a> {
@@ -1365,9 +1498,10 @@ mod tests {
     use super::{
         AdsPlanView, AdsWrite, Amount, BudgetKind, Cap, CapScope, CreatedCampaign, EndReason,
         HeldAtGoogle, Lineage, PlanCampaign, PlanProposal, PlanRecord, PlanSpend, PostChannel,
-        PostSlot, PriceKind, ProposalRefusal, SlotCheck, SlotRefusal, ZERO_DECIMAL, active_plan,
-        campaign_budget, caps_reached, check_ads_write, check_proposal, check_slot, network_name,
-        parse_amount, plans_to_end, price_kind, text_fits, text_limit, to_pause_for_end,
+        PostSlot, PriceKind, ProposalRefusal, RaiseAsk, SlotCheck, SlotRefusal, ZERO_DECIMAL,
+        active_plan, campaign_budget, caps_reached, check_ads_write, check_proposal, check_raise,
+        check_slot, network_name, parse_amount, plans_to_end, price_kind, text_fits, text_limit,
+        to_pause_for_end,
     };
 
     fn day(text: &str) -> NaiveDate {
@@ -3007,6 +3141,144 @@ mod tests {
                 campaign(13),
                 "customers/9999999999/campaigns/15".to_string()
             ]
+        );
+    }
+
+    /// The plan, its spend and the two kinds of ask the raise tests share.
+    fn a_raise_to_check() -> (PlanProposal, PlanSpend) {
+        // an_ads_plan: 1000.00 for Google Ads, search-a 500.00 and search-b 400.00; its total is
+        // the proposal's 2000.00. 700.00 was spent, search-a's whole budget among it.
+        (
+            an_ads_plan(),
+            spent_of(&[("search-a", 50_000), ("search-b", 20_000)], 70_000),
+        )
+    }
+
+    fn raise_asks(google_ads: u64, campaigns: &[(&str, u64)]) -> RaiseAsk {
+        RaiseAsk {
+            google_ads: amount(google_ads),
+            campaigns: campaigns
+                .iter()
+                .map(|(key, budget)| ((*key).to_string(), amount(*budget)))
+                .collect(),
+        }
+    }
+
+    fn raise_faults(ask: &RaiseAsk) -> Vec<(String, String)> {
+        let (plan, spent) = a_raise_to_check();
+        check_raise(&plan, &spent, &["search-a".to_string()], ask)
+            .expect_err("refused")
+            .into_iter()
+            .map(|fault| (fault.path, fault.message))
+            .collect()
+    }
+
+    fn one_fault(path: &str, message: &str) -> Vec<(String, String)> {
+        vec![(path.to_string(), message.to_string())]
+    }
+
+    #[test]
+    fn checks_a_raise_against_what_was_spent() {
+        let (plan, spent) = a_raise_to_check();
+        let capped = ["search-a".to_string()];
+
+        // Good: Google Ads 1200.00 and search-a 700.00 (700.00 and 400.00 add up to 1100.00); the
+        // total rises by the 200.00 the Google Ads budget rises by.
+        let raised = check_raise(
+            &plan,
+            &spent,
+            &capped,
+            &raise_asks(120_000, &[("search-a", 70_000)]),
+        )
+        .expect("a raise");
+        assert_eq!(raised.google_ads, amount(120_000));
+        assert_eq!(raised.total, amount(plan.total.0 + 20_000));
+        assert_eq!(raised.campaigns, [("search-a".to_string(), amount(70_000))]);
+
+        // Google Ads: not more than was spent (the campaigns' budgets then also add up to more
+        // than it), then not less than it is now.
+        assert_eq!(
+            raise_faults(&raise_asks(70_000, &[("search-a", 60_000)])),
+            [
+                (
+                    "/google_ads".to_string(),
+                    "Make it more than the 700.00 USD already spent.".to_string()
+                ),
+                (
+                    "/google_ads".to_string(),
+                    "The campaigns' budgets add up to 1000.00 USD: make this at least that."
+                        .to_string()
+                ),
+            ]
+        );
+        assert_eq!(
+            raise_faults(&raise_asks(95_000, &[("search-a", 50_001)])),
+            one_fault("/google_ads", "Make it at least the 1000.00 USD it is now.")
+        );
+        // The campaigns together above the new Google Ads budget: 700.00 and 400.00 are 1100.00.
+        assert_eq!(
+            raise_faults(&raise_asks(100_000, &[("search-a", 70_000)])),
+            one_fault(
+                "/google_ads",
+                "The campaigns' budgets add up to 1100.00 USD: make this at least that."
+            )
+        );
+        // And exactly at it is enough.
+        assert!(
+            check_raise(
+                &plan,
+                &spent,
+                &capped,
+                &raise_asks(110_000, &[("search-a", 70_000)])
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn checks_each_campaign_a_raise_names() {
+        // Not more than its own spend, none left out, one that is not at its cap, one unknown,
+        // one twice.
+        assert_eq!(
+            raise_faults(&raise_asks(120_000, &[("search-a", 50_000)])),
+            one_fault(
+                "/campaigns/search-a",
+                "Make it more than the 500.00 USD already spent."
+            )
+        );
+        assert_eq!(
+            raise_faults(&raise_asks(120_000, &[])),
+            one_fault(
+                "/campaigns",
+                "search-a reached its budget: give it a new one."
+            )
+        );
+        assert_eq!(
+            raise_faults(&raise_asks(
+                120_000,
+                &[("search-a", 60_000), ("search-b", 45_000)]
+            )),
+            one_fault(
+                "/campaigns/search-b",
+                "search-b has not reached its budget."
+            )
+        );
+        assert_eq!(
+            raise_faults(&raise_asks(
+                120_000,
+                &[("search-a", 60_000), ("search-z", 45_000)]
+            )),
+            one_fault(
+                "/campaigns/search-z",
+                "search-z is no campaign of the plan."
+            )
+        );
+        assert_eq!(
+            raise_faults(&raise_asks(
+                120_000,
+                &[("search-a", 60_000), ("search-a", 61_000)]
+            )),
+            one_fault("/campaigns/search-a", "search-a is named twice.")
         );
     }
 }

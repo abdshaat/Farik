@@ -80,6 +80,9 @@ pub struct TaskProjection {
     /// `left`, cleared by the `sprint.planned` that puts the task in a sprint, and on every task by
     /// a `team.updated` with `plan_in_sprints: false`.
     pub left_for_the_backlog: bool,
+    /// Whether the task skips the sprint queue (ADR 0028, ADR 0042): set by a `task.created` with
+    /// `raises`, the request that raises a marketing plan's budget. It is never held for a sprint.
+    pub skips_sprints: bool,
 }
 
 /// A key that costs are summed by (`docs/SPEC.md` 5.5).
@@ -453,7 +456,7 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                   OR open_sites > 0), \
                                  awaiting_approval, verifications, \
                                  rejections, interventions, sprint, \
-                                 left_for_the_backlog \
+                                 left_for_the_backlog, skips_sprints \
                                  FROM task_projections";
 
 /// The board is ordered by the number in the task id, not by the id itself: `FRK-10` sorts before
@@ -496,6 +499,7 @@ type ProjectedRow = (
     i64,
     Option<String>,
     bool,
+    bool,
 );
 
 fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
@@ -521,6 +525,7 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
         row.get(18)?,
         row.get(19)?,
         row.get(20)?,
+        row.get(21)?,
     ))
 }
 
@@ -553,6 +558,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         interventions,
         sprint,
         left_for_the_backlog,
+        skips_sprints,
     ) = row;
     let refuse = |what: &str, value: &str| StoreError::InvalidEvent {
         detail: format!("the projection of {task_id} holds {value:?} as its {what}"),
@@ -587,6 +593,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
             .map_err(|_| refuse("interventions", &interventions.to_string()))?,
         sprint,
         left_for_the_backlog,
+        skips_sprints,
     })
 }
 
@@ -624,7 +631,18 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
     };
     let id = task_id.to_string();
     match &event.body {
-        EventBody::TaskCreated(body) => write_summary(transaction, &id, &body.summary, seq),
+        EventBody::TaskCreated(body) => {
+            write_summary(transaction, &id, &body.summary, seq)?;
+            // The request that raises a marketing plan's budget skips the sprint queue.
+            if body.raises.is_some() {
+                update(
+                    transaction,
+                    "UPDATE task_projections SET skips_sprints = 1 WHERE task_id = ?1",
+                    (&id,),
+                )?;
+            }
+            Ok(())
+        }
         EventBody::ContractWritten(body) => write_summary(transaction, &id, &body.summary, seq),
         EventBody::RequestTriaged(body) => {
             // Triage decides the kind as well as recording that it happened (5.16 item 1).
@@ -1177,6 +1195,7 @@ mod tests {
                 interventions: 0,
                 sprint: None,
                 left_for_the_backlog: false,
+                skips_sprints: false,
             }]
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -1224,6 +1243,7 @@ mod tests {
                 interventions: 0,
                 sprint: None,
                 left_for_the_backlog: false,
+                skips_sprints: false,
             }
         );
     }
@@ -1424,7 +1444,7 @@ mod tests {
         );
         assert_eq!(
             migrations::known_versions(),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
         );
     }
 
@@ -2577,6 +2597,35 @@ mod tests {
         assert!(marked(&projections, "FRK-2"));
         record(&log, &projections, &team_updated(Some(false)));
         assert!(!marked(&projections, "FRK-2"));
+    }
+
+    #[test]
+    fn the_mark_is_kept_on_the_row() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        let mut raise = about(EventKind::TaskCreated, "FRK-2");
+        let farik_protocol::event::EventBody::TaskCreated(body) = &mut raise.body else {
+            panic!("a task.created");
+        };
+        body.raises = Some("MP-1".to_string().try_into().expect("a plan id"));
+        record(&log, &projections, &raise);
+
+        assert!(!row_of(&projections, "FRK-1").skips_sprints);
+        assert!(row_of(&projections, "FRK-2").skips_sprints);
+        // The mark stays through what the contract is written as later, and is on the board.
+        record(
+            &log,
+            &projections,
+            &written("FRK-2", "Raise the budget", "refining", "low", None),
+        );
+        let board = projections.board().expect("the board reads");
+        assert_eq!(
+            board
+                .iter()
+                .map(|row| (row.task_id.to_string(), row.skips_sprints))
+                .collect::<Vec<_>>(),
+            [("FRK-1".to_string(), false), ("FRK-2".to_string(), true)]
+        );
     }
 
     #[test]

@@ -1213,6 +1213,7 @@ fn assignment(
         },
         // Filled by `context`, which reads the contracts of the tasks that might hold the folder.
         private_folder_busy: false,
+        skips_sprints: row.skips_sprints,
     })
 }
 

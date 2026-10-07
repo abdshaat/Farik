@@ -197,13 +197,78 @@ pub fn fields_not_the_authors(wire: &Value) -> Vec<&'static str> {
 pub fn file_request(
     files: &ProjectFiles,
     log: &EventLog,
-    mut wire: Value,
+    wire: Value,
     created_by: &str,
     parent: Option<&TaskId>,
     now: DateTime<Utc>,
     ids: &EventIds,
     from_chat_message: Option<u64>,
 ) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by,
+            parent,
+            from_chat_message,
+            raises: None,
+        },
+        (now, ids),
+    )
+}
+
+/// Files the request that raises the budget of marketing plan `plan` (ADR 0042, step 08g), as
+/// `file_request` files one for `created_by`: `task.created` names the plan in `raises`, so that
+/// the sprint policy never holds it, and `request.triaged { small }` follows at once, by `farik`,
+/// so that no triage session runs.
+///
+/// # Errors
+///
+/// As `file_request`.
+pub fn file_raise_request(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    (created_by, plan): (&str, &str),
+    (now, ids): (DateTime<Utc>, &EventIds),
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by,
+            parent: None,
+            from_chat_message: None,
+            raises: Some(plan),
+        },
+        (now, ids),
+    )
+}
+
+/// What a filing says besides the request itself.
+#[derive(Clone, Copy)]
+struct Filing<'a> {
+    created_by: &'a str,
+    parent: Option<&'a TaskId>,
+    from_chat_message: Option<u64>,
+    raises: Option<&'a str>,
+}
+
+fn file(
+    files: &ProjectFiles,
+    log: &EventLog,
+    mut wire: Value,
+    filing: Filing<'_>,
+    (now, ids): (DateTime<Utc>, &EventIds),
+) -> Result<TaskContract, RequestError> {
+    let Filing {
+        created_by,
+        parent,
+        from_chat_message,
+        ..
+    } = filing;
     // ponytail: one lock for the process; a second process (the command line) never links a chat.
     let _filing = FILING.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(seq) = from_chat_message {
@@ -276,10 +341,41 @@ pub fn file_request(
         task_id: Some(contract.id.clone()),
         ..ids.clone()
     };
+    let bodies = creation_bodies(&contract, filing)?;
+    for body in bodies {
+        let event = new_event(body, now, ids.clone()).map_err(|error| RequestError::Refused {
+            reason: format!("cannot be recorded: {error:?}"),
+        })?;
+        log.append(&event)?;
+    }
+    Ok(*contract)
+}
+
+/// The events a request is filed with: `task.created`, and the triage that follows at once for a
+/// task of an epic and for a request that raises a marketing plan's budget.
+fn creation_bodies(
+    contract: &TaskContract,
+    filing: Filing<'_>,
+) -> Result<Vec<EventBody>, RequestError> {
+    let Filing {
+        created_by,
+        parent,
+        from_chat_message,
+        raises,
+    } = filing;
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
-        summary: summary_of(&contract),
+        summary: summary_of(contract),
         from_chat_message: from_chat_message.and_then(NonZeroU64::new),
+        raises: raises
+            .map(|plan| {
+                plan.to_string()
+                    .try_into()
+                    .map_err(|_| RequestError::Refused {
+                        reason: format!("raises {plan:?}, which is no marketing plan's id"),
+                    })
+            })
+            .transpose()?,
     })];
     if let Some(parent) = parent {
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
@@ -288,13 +384,14 @@ pub fn file_request(
             triaged_by: created_by.to_string(),
         }));
     }
-    for body in bodies {
-        let event = new_event(body, now, ids.clone()).map_err(|error| RequestError::Refused {
-            reason: format!("cannot be recorded: {error:?}"),
-        })?;
-        log.append(&event)?;
+    if let Some(plan) = raises {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size: RequestTriagedBodySize::Small,
+            reason: format!("a raised marketing budget for {plan}"),
+            triaged_by: "farik".to_string(),
+        }));
     }
-    Ok(*contract)
+    Ok(bodies)
 }
 
 /// Held while a request is filed, so that a proposal's check and its filing are one step.
