@@ -35,7 +35,7 @@ It cannot:
 - change Farik's budgets or the books.
 
 The rest of its setup:
-- **Tiers:** `read` and `network`. No `write_workspace`, `execute`, git or `external_effect` tier.
+- **Tiers:** `read` and `network`. No `write_workspace`, `execute`, git or `external_effect` tier. Its web reading is held to approved sites, the ones Farik ships (`approved_sites.yaml`, 46 shops in ten categories, each the owner may turn off) and the ones the owner allows; `WebFetch` and every `url` and `urls` of a connector's call must name one, `WebSearch` is open, and the agent asks for another site with `farik_request_sites` while its task waits on the owner (step 10b2; spec 5.6, 5.7, 6.10, 8.6).
 - **Reviewer:** the Product Manager, who owns the need.
 - **Model:** the Marketing Specialist's default, Claude Sonnet 5.5 at medium effort.
 - **In the team builder:** optional, not suggested. Persona: "Finds the best seller at the right price". Picture `extra-5`, which leaves `extra-2` and `extra-3` for agents added by hand. Tag "PROC", colour `role-procurement-specialist` `#A6C3BF`, a pale sea green the brand's contrast test must pass.
@@ -93,6 +93,8 @@ The user keeps a procurement mailbox of their own, a second address or alias at 
 | `farik_read_sheet` | `read` | Procurement Specialist (its folder); Finance Specialist (`vendors.xlsx` only) | Step 09's tool, given the procurement folder | 10b |
 | `farik_write_sheet` | `read` | Procurement Specialist (its folder, not `orders/`) | Step 09's tool, with its formula refusals and `.history/` | 10b |
 | `farik_write_evaluation` | `read` | Procurement Specialist | Writes `evaluations/<name>.md` and keeps the previous version | 10b |
+| `farik_request_sites` | `read` | Procurement Specialist, in its own implement session | Asks the owner for one to ten sites with the reason, records `site.requested`; the task waits | 10b2 |
+| `farik_read_sites` | `read` | Procurement Specialist, in its implement session and its chat | The sites it may read, Farik's and the owner's, and for its task the ones waiting and the ones declined | 10b2 |
 | `farik_draft_purchase_order` | `read` | Procurement Specialist | Writes `orders/PO-<n>.xlsx`, records `purchase_order.drafted` | 10c |
 | `farik_read_purchase_orders` | `read` | Procurement Specialist | Every order and its state | 10c |
 | `farik_request_data_pipeline` | `read` | Procurement Specialist | Records `data_pipeline.requested` | 10e |
