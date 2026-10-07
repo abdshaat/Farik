@@ -168,7 +168,7 @@ Files: `tokens.json` (both themes), `contrast.ts` and its test, `packages/ui` ro
 - `procurement_has_a_role_colour` (`contrast.test.ts`): `role-procurement-specialist` exists in both themes, is in the list "gives every job its own colour" checks (line 71), and its pair with `role-ink` at 4.5 is among "pins the pairs the plan lists" (line 153). RED: no token.
 - `role_tag_names_procurement` (`RoleTag.test.tsx`): the tag for `procurement_specialist` reads "PROC" with its colour class. RED: no tag.
 
-- [ ] `feat(ui): add the Procurement Specialist's tag and colour`
+- [x] `feat(ui): add the Procurement Specialist's tag and colour`
 
 ### Task 8: The role in the web app
 

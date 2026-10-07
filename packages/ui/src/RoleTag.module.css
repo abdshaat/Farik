@@ -36,3 +36,7 @@
 .financeSpecialist {
 	background: var(--farik-color-role-finance-specialist);
 }
+
+.procurementSpecialist {
+	background: var(--farik-color-role-procurement-specialist);
+}

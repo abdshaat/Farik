@@ -15,6 +15,7 @@ const roles: Role[] = [
 	"marketing_specialist",
 	"ui_ux_designer",
 	"finance_specialist",
+	"procurement_specialist",
 ];
 
 describe("RoleTag", () => {
@@ -72,6 +73,29 @@ describe("RoleTag", () => {
 		);
 		expect(css).toMatch(
 			/\.financeSpecialist \{\s*background: var\(--farik-color-role-finance-specialist\);\s*\}/,
+		);
+	});
+
+	it("role_tag_names_procurement", () => {
+		const procurement: Role = "procurement_specialist";
+		const { container } = render(<RoleTag role={procurement} />);
+		const abbr = container.querySelector("abbr");
+		expect(abbr?.textContent).toBe("PROC");
+		expect(abbr?.getAttribute("title")).toBe("Procurement Specialist");
+		const tones = roles.map((role) => {
+			const { container: other, unmount } = render(<RoleTag role={role} />);
+			const tone = other.querySelector("abbr")?.className;
+			unmount();
+			return tone;
+		});
+		expect(new Set(tones).size).toBe(roles.length);
+		// And its class is drawn in its own token, pale sea green.
+		const css = readFileSync(
+			join(import.meta.dirname, "RoleTag.module.css"),
+			"utf8",
+		);
+		expect(css).toMatch(
+			/\.procurementSpecialist \{\s*background: var\(--farik-color-role-procurement-specialist\);\s*\}/,
 		);
 	});
 
