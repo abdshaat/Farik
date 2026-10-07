@@ -316,10 +316,8 @@ fn site_block(history: &[FarikEvent], event: &FarikEvent, agent_id: &str) -> Opt
         _ => return None,
     };
     let request = body.request?.get();
-    if !is_the_owners(event) {
-        return None;
-    }
-    // The first decision the owner recorded on the request is the only one.
+    // The first decision the owner recorded on the request is the only one, so a decision an
+    // agent's session recorded, which is not the owner's, is never it.
     let first = history.iter().find(|decided| {
         is_the_owners(decided)
             && match &decided.body {
