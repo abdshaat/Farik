@@ -93,7 +93,7 @@ Files: the five schemas; the role's folder; `lib.rs`, `kit.rs`, `skill_check.rs`
 - `procurement_does_not_change_code`: `changes_code(ProcurementSpecialist)` is false. RED: no such role.
 - `plain_role_names_procurement`: "Procurement Specialist". RED: no arm.
 - `its_kit_is_empty_until_step_10d`: `load_kit(ProcurementSpecialist)` has no skills and no connectors; `loads_every_shipped_kit` counts it with 0. RED: no kit.
-- `sourcing_a_service_passes_the_skill_checks`: the shipped skill passes `check_skill`, and names no `farik_*` tool that `tool_descriptors` lacks. RED: no skill.
+- `sourcing_a_product_passes_the_skill_checks`: the shipped skill passes `check_skill`, and names no `farik_*` tool that `tool_descriptors` lacks. RED: no skill.
 - `gives_the_scrum_master_half_the_tokens_and_every_other_role_the_team_default` (`crates/core/src/budget.rs`) and `keeps_farik_s_headings_the_only_top_level_ones_for_every_shipped_role` (`crates/runtime/src/prompt.rs`): each lists the role. RED: no such role.
 
 - [ ] `feat(roles): add the Procurement Specialist`
@@ -119,6 +119,7 @@ Files: `tools.rs` (`farik_read_sheet`'s input gains optional `folder: "procureme
 - `procurement_writes_its_register`: a Procurement Specialist's `farik_write_sheet { path: vendors.xlsx, … }` writes `.farik/local/procurement/vendors.xlsx`, and `farik_read_sheet` reads it back. RED: `folder_to_write` refuses every role but the Finance Specialist.
 - `finance_reads_the_register_and_nothing_else_there`: a Finance Specialist's `farik_read_sheet { folder: procurement, path: vendors.xlsx }` reads it; `path: evaluations/x.md` is `private_path_refused`; no `farik_write_sheet` reaches the procurement folder. RED: the input has no `folder`.
 - `other_roles_never_reach_the_register`: a Product Manager's, a Developer's and a Marketing Specialist's `farik_read_sheet { folder: procurement, path: vendors.xlsx }` are each refused with the code `sheet_refused`, the Product Manager in a `verify` session about a procurement task included; without `folder`, that verify session reads `vendors.xlsx`. RED: today `deny_unknown_fields` rejects `folder` with another code, and the test asserts the code.
+- `the_sheet_tools_read_workbooks_alone` (a guard: Task 2 kept `workbook_path_fault` in the sheet tools when it loosened `private_path`, and deleting that check fails it): a Procurement Specialist's `farik_read_sheet` and `farik_write_sheet` of `evaluations/x.md` in its own folder are `private_path_refused`, and nothing is written or read.
 - `procurement_is_not_given_the_costs` (a guard: the handler and `offered_tools` name the Finance Specialist alone today; it holds the founder's answer 2 while this task rekeys the sheet arms): a Procurement Specialist's `farik_read_costs` is refused `sheet_refused` by the handler (`costs.rs`), and its implement session is not offered the tool.
 - `procurement_is_offered_its_tools`: a procurement task's `implement` session is offered `farik_read_sheet` and `farik_write_sheet`, and not `farik_read_costs`, `farik_exec`, `farik_git_commit` or `farik_git_push`. RED: the sheet arms of `offered_tools` name the Finance Specialist.
 
