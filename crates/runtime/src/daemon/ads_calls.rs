@@ -448,6 +448,35 @@ impl Writing<'_> {
             .collect())
     }
 
+    /// Refuses unless the ad account bills in the plan's currency. The plan's figures are in it,
+    /// so a budget, or the running of a campaign that holds one, is for an ad account that bills
+    /// in it, whatever plan came before: a replacing plan in another currency would otherwise
+    /// send its amounts to Google as the account's.
+    async fn bills_in_the_plans_currency(&self, account: &str) -> Result<(), Refusal> {
+        let plan_currency = &self.plan.proposal.currency;
+        let rows = self
+            .ads
+            .search(self.token, account, CUSTOMER_CURRENCY_QUERY)
+            .await
+            .map_err(said)?;
+        let account_currency = rows
+            .first()
+            .and_then(|row| row["customer"]["currencyCode"].as_str())
+            .unwrap_or_default();
+        if account_currency == plan_currency {
+            return Ok(());
+        }
+        Err(format!(
+            "not_in_marketing_plan: the plan is in {plan_currency}, but the ad account {account} \
+             bills in {}",
+            if account_currency.is_empty() {
+                "a currency Farik could not read"
+            } else {
+                account_currency
+            }
+        ))
+    }
+
     /// The record of a campaign Farik made for the lineage.
     fn made(&self, campaign: &str) -> Result<&CreatedCampaign, Refusal> {
         self.created
@@ -480,30 +509,8 @@ impl Writing<'_> {
                     input.plan_campaign
                 )
             })?;
-        // The plan's figures are in its currency: a budget is sent only to an ad account that
-        // bills in it.
+        self.bills_in_the_plans_currency(&input.account).await?;
         let plan_currency = &self.plan.proposal.currency;
-        let rows = self
-            .ads
-            .search(self.token, &input.account, CUSTOMER_CURRENCY_QUERY)
-            .await
-            .map_err(said)?;
-        let account_currency = rows
-            .first()
-            .and_then(|row| row["customer"]["currencyCode"].as_str())
-            .unwrap_or_default();
-        if account_currency != plan_currency {
-            return Err(format!(
-                "not_in_marketing_plan: the plan is in {plan_currency}, but the ad account {} \
-                 bills in {}",
-                input.account,
-                if account_currency.is_empty() {
-                    "a currency Farik could not read"
-                } else {
-                    account_currency
-                }
-            ));
-        }
         let (kind, amount) = campaign_budget(planned, plan_currency, Amount(0), self.today);
         let start = first_day(planned, self.today);
         let made = self
@@ -604,6 +611,7 @@ impl Writing<'_> {
                 "amount is under one whole unit of a currency that has no minor unit".to_string(),
             )));
         }
+        self.bills_in_the_plans_currency(&account).await?;
         let spent = self.spend(&account).await?;
         self.covers(
             &AdsWrite::Budget {
@@ -628,6 +636,7 @@ impl Writing<'_> {
         // Enabling needs what the ads have spent; pausing needs nothing, so it always runs.
         match input.status {
             Status::Enabled => {
+                self.bills_in_the_plans_currency(&account).await?;
                 let spent = self.spend(&account).await?;
                 self.covers(
                     &AdsWrite::Enable {
@@ -1691,6 +1700,60 @@ mod tests {
             .await
             .expect_err("under a yen");
         assert_eq!(code(&refused), "google_ads_input", "{refused}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_plan_in_another_currency_changes_nothing() {
+        let ads = Ads::new("ads-currency").await;
+        ads.plan("MP-1", None);
+        let campaign = campaign_of(
+            &ads.call("create_search_campaign", create("search-launch"))
+                .await
+                .expect("made, in the dollars both bill in"),
+        );
+        // MP-2 replaces MP-1 in yen, a plan the proposal tool refuses to propose, so it is put in
+        // the log as it would be if one got there; the ad account still bills in dollars.
+        let mut yen = yen_plan("MP-2");
+        yen["replaces"] = json!("MP-1");
+        ads.harness.project.record_by(
+            Some("kai"),
+            crate::tools::fixtures::at(),
+            "FRK-1",
+            "marketing_plan.proposed",
+            &yen,
+        );
+        ads.harness.project.plan_approved("FRK-1", "MP-2", "");
+
+        for (tool, input) in [
+            (
+                "set_campaign_budget",
+                json!({ "campaign": campaign, "amount": "400" }),
+            ),
+            (
+                "set_campaign_status",
+                json!({ "campaign": campaign, "status": "enabled" }),
+            ),
+        ] {
+            let refused = ads.call(tool, input).await.expect_err("refused");
+            assert!(
+                refused.starts_with("not_in_marketing_plan: "),
+                "{tool}: {refused}"
+            );
+            assert!(
+                refused.contains("the plan is in JPY") && refused.contains("bills in USD"),
+                "{tool}: {refused}"
+            );
+        }
+        assert_eq!(ads.mutates().len(), 1, "only the create reached Google");
+        // Pausing moves no money, and still runs.
+        ads.call(
+            "set_campaign_status",
+            json!({ "campaign": campaign, "status": "paused" }),
+        )
+        .await
+        .expect("paused");
+        assert_eq!(ads.mutates().len(), 2);
     }
 
     /// A plan in yen with one campaign of 500.50 to 2026-10-22.

@@ -56,7 +56,8 @@ pub struct ProposeMarketingPlanInput {
     /// The Google Ads account the campaigns run in, as 123-456-7890. Give it when the plan has
     /// campaigns, and only then.
     google_ads_account: Option<String>,
-    /// The id of an approved plan this one supersedes, such as MP-1.
+    /// The id of an approved plan this one supersedes, such as MP-1. It is in the same currency as
+    /// this plan: a plan in another currency replaces nothing.
     replaces: Option<String>,
 }
 
@@ -174,18 +175,33 @@ pub(crate) fn propose_plan(
     let mut found = check_proposal(&proposal, deps.clock.now().date_naive())
         .err()
         .unwrap_or_default();
-    if let Some(replaced) = &proposal.replaces
-        && !plans.iter().any(|plan| {
+    if let Some(replaced) = &proposal.replaces {
+        let in_force = plans.iter().find(|plan| {
             &plan.record.id == replaced
                 && plan.record.approved_seq.is_some()
                 && plan.record.ended.is_none()
-        })
-    {
-        found.push(fault(
-            "marketing_plan_unknown",
-            "replaces",
-            format!("{replaced} is not an approved plan that is still in force"),
-        ));
+        });
+        match in_force {
+            None => found.push(fault(
+                "marketing_plan_unknown",
+                "replaces",
+                format!("{replaced} is not an approved plan that is still in force"),
+            )),
+            // The campaigns Farik made for the old plan hold its amounts in its currency, which
+            // the new plan's figures would be read as (ADR 0042, SPEC 6.7): a plan in another
+            // currency is a new plan, started when the old one has ended.
+            Some(plan) if plan.proposal.currency != proposal.currency => found.push(fault(
+                "marketing_plan_currency",
+                "currency",
+                format!(
+                    "{replaced} is in {}, and a plan replaces another only in the same currency, \
+                     not in {}; to change currency, wait for {replaced} to end and propose a plan \
+                     that replaces nothing",
+                    plan.proposal.currency, proposal.currency
+                ),
+            )),
+            Some(_) => {}
+        }
     }
     if !found.is_empty() {
         return Err(faults(found));
@@ -819,6 +835,42 @@ mod tests {
         newer["replaces"] = json!("MP-1");
         assert_eq!(
             propose(&project, "FRK-2", &newer).expect("replaces")["plan"],
+            "MP-2"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_plan_that_replaces_one_in_another_currency() {
+        let project = a_marketing_project("tools-plan-currency");
+        works_on(&project, "FRK-1");
+        propose(&project, "FRK-1", &a_plan()).expect("a plan in dollars");
+        project.record(
+            "FRK-1",
+            "marketing_plan.approved",
+            &json!({ "plan": "MP-1", "note": "" }),
+        );
+        works_on(&project, "FRK-2");
+        let mut yen = a_plan();
+        yen["currency"] = json!("JPY");
+        yen["replaces"] = json!("MP-1");
+
+        let reason = refused(propose(&project, "FRK-2", &yen).expect_err("another currency"));
+
+        assert!(
+            reason.contains("marketing_plan_currency: currency"),
+            "{reason}"
+        );
+        assert!(
+            reason.contains("MP-1 is in USD") && reason.contains("JPY"),
+            "{reason}"
+        );
+        assert_eq!(proposed_events(&project), 1, "only the plan in dollars");
+
+        // The same plan in the same currency replaces it.
+        yen["currency"] = json!("USD");
+        assert_eq!(
+            propose(&project, "FRK-2", &yen).expect("the same currency")["plan"],
             "MP-2"
         );
     }
