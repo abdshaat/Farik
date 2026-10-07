@@ -1,6 +1,6 @@
 # Phase 7, step 10b: Procurement Specialist role
 
-Status: ready. The founder's run in the web app is step 10b2's verification: this step leaves the role's web reading open, and 10b2 holds it to Farik's approved sites and the sites the owner adds or approves before the role is used.
+Status: executed 2026-10-07 (every task ticked); the landing review waits. The founder's run in the web app is step 10b2's verification: this step leaves the role's web reading open, and 10b2 holds it to Farik's approved sites and the sites the owner adds or approves before the role is used.
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 1, 5.3, 5.4, 5.6, 6.6, 6.10, 8.5, 8.6; F1
 Depends on: step 10 of this phase, its Tasks 1 to 5 committed (089cc4a..07933e1) and its landing review run (lands after fixes; the fixes in progress); steps 09, 09b and 09c (the folder's rules keyed by `private_folder(role)`, `farik_read_sheet`, `farik_write_sheet`); steps 05 to 07b (kits); phase 6 (merged in #19)
