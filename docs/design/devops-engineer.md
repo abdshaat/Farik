@@ -37,7 +37,7 @@ Skills, first cut: `deployment-checklists`, `reading-production-logs`, `incident
 
 A deployment is a deploy task, a contract whose `change` is `deploy` (a value phase 7 step 11 adds to the field), planned into a sprint like any other. Starting the sprint is the human's approval of its deploys.
 
-The deploy task depends on the tasks whose work it ships. It is assigned once they are all integrated. Its session may call `farik_deploy`, which takes no version: Farik deploys the commit the default branch holds after the last of those integrations, to the service the connector names.
+The deploy task depends on the tasks whose work it ships. It is assigned once they are all integrated. Its session may call `farik_deploy`, which takes no version: Farik deploys the commit the integration branch held after the last of those integrations, to the service the production settings kept on this computer name (ADR 0045) (corrected 2026-10-07 by phase 7 step 11b's readiness review: this line said the default branch, and the service the connector names).
 
 The task reaches `verifying` when the platform reports the deploy succeeded and the service stays healthy through the settling period, five minutes by default, set per project. Healthy means:
 - the platform reports the deployment live;
@@ -73,7 +73,7 @@ The human may stop any step. A stopped incident waits on Today.
 
 ## Safety
 
-The three Farik tools are `external_effect` (spec 5.6). Their approval comes only from the human's start of a sprint, for its deploy tasks, and from an open incident, for one restart and one rollback; every other call asks the human.
+The three Farik tools are `external_effect` (spec 5.6). Their pre-approval comes only from the human's start of a sprint, for the first deploy of each deploy task in it, and from an open incident, for one restart and one rollback. A call that cannot run (outside its task's session, with no production settings, while a deploy runs, or before the work it ships is in) is refused without asking. Any other deploy uses a grant the human gave on Today, or, when the team acts on its own (ADR 0041), runs and is listed under "Done on its own"; otherwise it asks the human. Acting on its own never lifts an incident's restart or rollback (step 11d) (corrected 2026-10-07 by phase 7 step 11b's readiness review: this line said every other call asks the human).
 
 The agent never calls a platform's write tool. The kit tags the platform's read tools (status, deployments, logs, metrics) `network`, and every other tool `denied`. Farik's own three tools call the platform's write tools with arguments Farik chooses: the service from the connection, the version from the log. The agent cannot name a different version or service, because the tools take neither.
 
