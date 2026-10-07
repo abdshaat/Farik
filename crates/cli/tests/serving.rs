@@ -762,8 +762,8 @@ fn answers_the_setup_page_while_docker_info_hangs() {
     let stopped = run(&repository.path, &["stop"]);
     let status = child.wait().expect("the binary ends");
 
-    // `docker info` is asked off the request's path: the page is answered before its 10 seconds
-    // are up, with the Designer as it is without Docker until Docker answers.
+    // `docker info` is asked before the daemon listens and never on a request's path: the page is
+    // answered at once, with the Designer as it is without the Docker that did not answer.
     assert!(
         waited < Duration::from_secs(5),
         "team.propose took {waited:?}"

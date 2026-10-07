@@ -163,8 +163,9 @@ pub const AVAILABLE_FOR: Duration = Duration::from_secs(60);
 /// A factory whose `available` never waits on `inner`'s, which for Docker is `docker info` and
 /// can take 10 seconds (8.3): it answers the last answer `inner` gave, and asks again on a thread
 /// of its own, one ask at a time, once that answer is older than `holds`. The first ask is made
-/// with it, and until its answer comes no preview can run, as without Docker, so that no page
-/// request waits on Docker; `settle` waits for that answer.
+/// with it, and until its answer comes no preview can run, as without Docker; `settle` waits for
+/// that answer, which the driver does before its daemon listens, so that no request waits on
+/// Docker and none is answered on the guess.
 pub struct PolledPreviews {
     inner: Arc<dyn PreviewFactory>,
     holds: Duration,
@@ -763,39 +764,6 @@ pub(crate) mod fixtures {
             _tree: &str,
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             panic!("a held factory was asked to start a preview");
-        }
-    }
-
-    /// A factory that answers whether it was settled, counting how often it was.
-    #[derive(Default)]
-    pub(crate) struct SettlingPreviews {
-        settles: Mutex<usize>,
-    }
-
-    impl SettlingPreviews {
-        pub(crate) fn settles(&self) -> usize {
-            *crate::locked(&self.settles)
-        }
-    }
-
-    impl PreviewFactory for SettlingPreviews {
-        fn available(&self) -> bool {
-            self.settles() > 0
-        }
-
-        fn settle(&self) {
-            *crate::locked(&self.settles) += 1;
-        }
-
-        fn start(
-            &self,
-            _project_id: &str,
-            _task_id: &TaskId,
-            _worktree: &Path,
-            _preview: &Preview,
-            _tree: &str,
-        ) -> Result<Box<dyn RunningPreview>, PreviewError> {
-            panic!("a settling factory was asked to start a preview");
         }
     }
 

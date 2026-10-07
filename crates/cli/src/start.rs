@@ -460,8 +460,7 @@ async fn start_listening(
     // Before the daemon listens: a tab that reconnects asks `team.get` the moment it does, and a
     // task in `verifying` or `team.propose` asks whether the Designer can have its browser.
     tools.transitions.set_sandbox(settings.sandbox);
-    let (sandboxes, previews) = factories(settings.sandbox, sandbox_image(io));
-    tools.transitions.set_previews(Arc::clone(&previews));
+    let (sandboxes, previews) = told_factories(&tools, settings.sandbox, sandbox_image(io)).await?;
     let daemon = connected_daemon(&tools, io);
     let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
     let web = options
@@ -526,6 +525,24 @@ async fn start_listening(
         handle,
         _lock: lock,
     })
+}
+
+/// `factories`, the preview's told to the governor's door once its first answer of whether a
+/// preview can run is in, which for Docker takes at most `docker info`'s 10 seconds. It is waited
+/// for here, before the daemon listens, and nowhere else: from then on the answer is what Docker
+/// said, and no request waits for it.
+async fn told_factories(
+    tools: &farik_runtime::tools::ToolDeps,
+    sandbox: Sandbox,
+    image: &str,
+) -> Result<(Arc<dyn SandboxFactory>, Arc<dyn PreviewFactory>), String> {
+    let (sandboxes, previews) = factories(sandbox, image);
+    tools.transitions.set_previews(Arc::clone(&previews));
+    let settling = Arc::clone(&previews);
+    tokio::task::spawn_blocking(move || settling.settle())
+        .await
+        .map_err(|error| format!("Docker could not be asked: {error}"))?;
+    Ok((sandboxes, previews))
 }
 
 /// The image Docker's sandbox and the preview run in: `SANDBOX_IMAGE`, or the end-to-end
