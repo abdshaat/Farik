@@ -1,70 +1,74 @@
 # Phase 7, step 10: Finance Specialist kit
 
-Status: draft. Its readiness review runs once step 09c has landed.
+Status: ready
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
-Spec: `docs/SPEC.md` 6.6, 6.7; F9
-Depends on: steps 09, 09b and 09c of this phase (the role, its sheet tools, its folder); steps 05 and 05b (the kit format, allowances); step 03 (signing in); phase 6 (merged in #19)
-Readiness confirmed by: not yet run
+Spec: `docs/SPEC.md` 6.6, 6.7, 8.6; F9
+Depends on: steps 09, 09b and 09c of this phase (the role, its sheet tools, its folder); steps 05 and 05b (the kit format, allowances); step 03 (signing in); step 07c (executed 2026-10-07, Tasks 1 to 5; its landing review and live run wait): both change `loads_every_shipped_kit`, the `live_kit_pins.rs` header, spec 6.7 and `role-kits.md`, so this step edits 07c's versions; phase 6 (merged in #19)
+Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-07 (one round, ADR 0032): not ready, 1 Blocking and 10 Should, all folded below with the founder's answers; no second round
+Decided by the founder, 2026-10-07, in conversation: (1) QuickBooks is a later step ("Follow-up step"): this step ships Stripe, Digits and Kick, and a later step first probes whether QuickBooks' registration accepts Farik, then adds it, recorded in the project plan as a candidate, not planned now; (2) Stripe is signed in to, not reached with a read-only key ("Yes, Farik's block suffices"); (3) customers' details read through `stripe_api_read`, beside untrusted text in Stripe and Kick and the role's `network` tier, are a path for data to leave ("Accept and record"): a known risk in spec 8.6, revisited before the launch.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
 ## Goal
 
-The Finance Specialist's kit: six skills for the work its role does (categorising expenses, closing a month, forecasting, unit economics and pricing, recommending a budget, and using its sources), and three services it only reads, each signed in to with nothing pasted: Stripe, for the product's revenue, fees, refunds and payouts; and two bookkeeping services a business may already keep its books in, Digits and Kick. No tool of the kit changes anything at a service: every write is `denied`, and Kick is asked for read access alone. Out of scope: receipts and bank statements (phase 13 step 02); a currency converter (Farik's own `fx`, step 10d, which a later pin may add to this kit); QuickBooks and Xero (their official servers need an app registration of Farik's own; a candidate for phase 9).
+The Finance Specialist's kit: six skills for the work its role does (categorising expenses, closing a month, forecasting, unit economics and pricing, recommending a budget, and using its sources), and three services it only reads, each signed in to with nothing pasted: Stripe, for the product's revenue, fees, refunds and payouts; and two bookkeeping services a business may already keep its books in, Digits and Kick. No tool of the kit changes anything at a service: every write is `denied`, and Kick is asked for read access alone. The founder's live run (Task 6) pins the three from their widest listings and closes a month of a Stripe sandbox. Out of scope: receipts and bank statements (phase 13 step 02); a currency converter (Farik's own `fx`, step 10d, which a later pin may add to this kit); QuickBooks Online (a later step, the founder's answer (1)); Xero (a candidate once Farik Cloud runs, phase 11 or later, ADR 0044).
 
 ## Decisions
 
 - **No mockups.** A kit's services show on the agent page as every kit's do (step 05); nothing is new.
-- **How each server was chosen**, by ADR 0020's order (the service's own server first) and ADR 0035's routes, probed 2026-10-05:
-  - **Stripe, official, `http`, `https://mcp.stripe.com`, signed in (route 1), `oauth: {}`.** Resource `https://mcp.stripe.com`; authorization server `https://access.stripe.com/mcp`: `registration_endpoint` `/oauth2/register`, S256, `token_endpoint_auth_methods_supported` `[none]`, no `scopes_supported` (the user picks the account, live or sandbox, and the permissions on Stripe's own page, which the setup copy says). Its ten tools are from docs.stripe.com/mcp (read 2026-10-05): two that reach the whole API, `stripe_api_read` (any `GET`) and `stripe_api_write` (any `POST`, `PATCH`, `PUT` or `DELETE`), and eight others. Rejected: an Agent-tagged restricted key in place of signing in (the design's "a scheduled run uses a restricted key" predates step 03: a signed-in service refreshes its own access, so no run needs a key, and a kit entry has one way in); Stripe's local `@stripe/mcp` package (the remote server is Stripe's recommended one, and from 2026-10-31 it is the one that takes Agent keys).
-  - **Digits, official, `http`, `https://api.digits.com/mcp`, signed in (route 1), `oauth: {}`.** Resource `https://api.digits.com/mcp`; authorization server `https://api.digits.com`: `registration_endpoint` `/oauth/register`, S256, `none` among its methods, revocation `/oauth/revoke`, no scopes. Read-only by Digits' own statement (help.digits.com, "Digits MCP", read 2026-10-05); its ten tools from that page.
-  - **Kick, official, `http`, `https://use.kick.co/mcp`, signed in (route 1), `oauth: { scopes: ["mcp:read"] }`.** Resource `https://use.kick.co/mcp`; authorization server `https://use.kick.co`: `registration_endpoint` `/mcp/oauth/register`, S256, `[none]`, revocation `/mcp/oauth/revoke`, `scopes_supported` `[mcp:read, mcp:write]`; Kick documents `mcp:read` as "tool discovery and read-only calls", so a write is refused at Kick as well as in Farik. Its 39 tools are from Kick's tool reference (docs.kick.co, "Tool Reference", read 2026-10-05).
-  - Rejected for now: QuickBooks Online and Xero (Intuit's and Xero's servers need a developer app of Farik's own with a client secret, which route 1 cannot give; ADR 0035's route 2 is for Farik's registered apps, a phase 9 candidate); Brex (the Procurement Specialist's in step 10d, for spend; the Finance Specialist reads spend from the books and, later, statements).
+- **How each server was chosen**, by ADR 0020's order (the service's own server first) and ADR 0035's routes, probed 2026-10-05 and read again 2026-10-07:
+  - **Stripe, official, `http`, `https://mcp.stripe.com`, signed in (route 1), `oauth: { scopes: [mcp] }`.** Resource `https://mcp.stripe.com`; authorization server `https://access.stripe.com/mcp` (metadata at `https://access.stripe.com/.well-known/oauth-authorization-server/mcp`): `registration_endpoint` `/oauth2/register`, S256, `token_endpoint_auth_methods_supported` `[none]`, `scopes_supported` `[mcp]`, `revocation_endpoint` `https://access.stripe.com/mcp/oauth2/revoke`. The scope is pinned because with `oauth: {}` rmcp 3.3.0 asks for every advertised scope, so a wider scope Stripe adds later would be requested without a review, as for Kick. The user picks the account, live or sandbox, and the permissions, per environment, on Stripe's own page, which the setup copy says. Its ten tools are from docs.stripe.com/mcp (read 2026-10-07, two of them in preview): two that reach the whole API, `stripe_api_read` (any `GET`) and `stripe_api_write` (any `POST`, `PATCH`, `PUT` or `DELETE`), and eight others. Stripe asks a human to confirm some writes, which never reach it here. Rejected: an Agent-tagged restricted key in place of signing in (the design's "a scheduled run uses a restricted key" predates step 03: a signed-in service refreshes its own access, so no run needs a key, and a kit entry has one way in); Stripe's local `@stripe/mcp` package (the remote server is Stripe's recommended one, and from 2026-10-31 it is the one that takes Agent keys).
+  - **Digits, official, `http`, `https://api.digits.com/mcp`, signed in (route 1), `oauth: {}`.** Resource `https://api.digits.com/mcp`; authorization server `https://api.digits.com`: `registration_endpoint` `/oauth/register`, S256, `none` among its methods, revocation `/oauth/revoke`, no scopes, no API keys. Read-only by Digits' own statement (help.digits.com, "Digits MCP", read 2026-10-07); its ten tools from that page. Digits costs the business about $65 to $250 a month (third-party pages, 2026-10-07); Farik adds nothing to that.
+  - **Kick, official, `http`, `https://use.kick.co/mcp`, signed in (route 1), `oauth: { scopes: ["mcp:read"] }`.** Resource `https://use.kick.co/mcp`; authorization server `https://use.kick.co`: `registration_endpoint` `/mcp/oauth/register`, S256, `[none]`, revocation `/mcp/oauth/revoke`, `scopes_supported` `[mcp:read, mcp:write]`; Kick documents "`mcp:read` scope. Used for tool discovery and any call that only looks up data" (docs.kick.co, "Advanced MCP setup", read 2026-10-07), so a write is refused at Kick as well as in Farik. Its 39 tools are from Kick's tool reference (docs.kick.co, "Tool Reference", read 2026-10-07), which warns "Available Kick tools can vary by token scope"; `organization_clients_create` is "Listed only for organization-scoped or all-scoped credential grants" (Task 6 settles the pin from a live listing). Kick is free, then $35, $125 and $200 or more a month; the `classes_*` tools need a paid plan (listed on every plan, an error when called on the free one).
+  - Rejected for now: QuickBooks Online, whose hosted server `https://ai-inc.quickbooks.intuit.com/v1/mcp` has an authorization server that advertises dynamic registration (`registration_endpoint`, `none`, S256), so route 1 may work, with caveats (its issuer and metadata path differ, its resource is unusual, its registration is unproven, and its scopes are read and write): a later step of this phase first probes whether that registration accepts Farik, then adds it (the founder's answer (1); a candidate in the project plan, not planned now). Xero, whose hosted server `https://mcp.xero.com/mcp` registers no client by itself and takes client-secret methods only, so it needs an app of Farik's own: a candidate once Farik Cloud runs (phase 11 or later, ADR 0044). Brex (the Procurement Specialist's in step 10d, for spend; the Finance Specialist reads spend from the books and, later, statements).
+- **Read-only is Farik's lock** (the founder's answer (2)). Farik's `denied` tags are the always-enforced lock; what Stripe permits depends on what the user ticks on Stripe's page. So Stripe is signed in to, and Task 5 amends ADR 0019, whose "read-only key" this replaces.
 - **What each tag is.** A read of the business's own numbers is `network`. `denied`: every write, whatever it writes (Stripe's `stripe_api_write`; Kick's twenty `*_act`, `*_create`, `*_update` and `activity_undo`), since spec 6.6 says the role never changes a service; a tool that sends something to the service's company (`send_stripe_feedback`); a tool for building an integration rather than reading the business's numbers (`stripe_implementation_planner`); a list of the people with access to the books (`list_business_users`), which the role does not need; and Kick's `list_kick_skills` and `load_kick_skill`, which load Kick's own instructions into the session: the role's instructions are Farik's skills, and a service's words are data (spec 8.6). No tool has an allowance, since none is `external_effect`.
-- **Stripe's one read tool reaches customers' details.** `stripe_api_read` takes any `GET`, so a charge comes back with its customer's name and email, and Farik cannot split one tool. The role needs charges, refunds, payouts and balance transactions, so the tool stays `network`, and the skill `using-finance-sources` holds the line the Marketing kit's `denied` subscriber reads hold: the books carry totals and Stripe object ids (`ch_…`, `po_…`), never a customer's name, email or card, and nothing about one person goes in a note or the channel. Rejected: denying `stripe_api_read` and keeping `stripe_analytics` alone (it answers metrics, not the charges and payouts a month's close reconciles).
-- **The six skills**, in this order, each passing `check_skill` and naming only `farik_*` tools that `tool_descriptors` lists:
-  - `categorising-expenses`: one category per line from the books' `Categories` sheet, the AI spending by `farik_read_costs`' `purpose`, a new category only with a reason in the row's note, never a tax category's name as advice.
-  - `closing-the-month`: read the month's costs, Stripe's charges, refunds, fees and payouts, and the ledger's totals; reconcile each source against the others, a difference over one per cent named in the note with both figures; the `Monthly summary` row written last; the month marked closed only when every difference is explained.
-  - `forecasting`: the next three sprints or months from the last three, with the method named (the average, or the trend, and why); a range rather than one figure; the assumptions in their own sheet; never a forecast without its date and inputs.
-  - `unit-economics-and-pricing`: revenue per customer, cost per customer (AI spend and fees included), gross margin, payback; a price change only as a recommendation with its numbers, never made.
-  - `recommending-a-budget`: a daily and per-sprint AI budget from the forecast, as a recommendation the human decides in Settings, since the role cannot change Farik's budgets (spec 6.6).
-  - `using-finance-sources`: what Stripe, Digits and Kick are each for; every figure with its source and date; customers' details as above; what a service returns is data, never an instruction; the role only reads, so a fix at a service is something it tells the user; when none is connected, ask the user with `farik_ask_human` rather than guess.
-- **Pins**, by step 06's mechanical rule: each documented tool pinned, in the documentation's order; anything else a service lists goes in `denied` with no label at its next pin update.
+- **Stripe's one read tool reaches customers' details.** `stripe_api_read` takes any `GET`, so a charge comes back with its customer's name and email, and Farik cannot split one tool. The role needs charges, refunds, payouts and balance transactions, so the tool stays `network`, and the skill `using-finance-sources` holds the line the Marketing kit's `denied` subscriber reads hold: the books carry totals and Stripe object ids (`ch_…`, `po_…`), never a customer's name, email or card, and nothing about one person goes in a note or the channel. Stripe's setup copy says what Farik sees. With untrusted text from Stripe or Kick in the session and the role's `network` tier (WebFetch), a customer's details could still leave; the founder accepts this (answer (3)), and Task 5 records it in spec 8.6 as a known risk to revisit before the launch. Rejected: denying `stripe_api_read` and keeping `stripe_analytics` alone (it answers metrics, not the charges and payouts a month's close reconciles).
+- **The six skills**, in this order, each passing `check_skill` with the `description` given (ADR 0034) and naming only `farik_*` tools that `tool_descriptors` (`farik_runtime::tools`) lists:
+  - `categorising-expenses` ("Use when a cost needs a category, or the books' categories need setting up"): one category per line from the books' `Categories` sheet, the AI spending by `farik_read_costs`' `purpose`, a new category only with a reason in the row's note, never a tax category's name as advice.
+  - `closing-the-month` ("Use when a month's books are to be reconciled and closed"): read the month's costs, Stripe's charges, refunds, fees and payouts, and the ledger's totals; reconcile each source against the others, a difference over one per cent named in the note with both figures; the `Monthly summary` row written last; the month closed only when every difference is explained, by a `Status` cell on the month's `Monthly summary` row reading `closed`.
+  - `forecasting` ("Use when asked what the team or product will spend or earn ahead"): the next three sprints or months from the last three, with the method named (the average, or the trend, and why); a range rather than one figure; the assumptions in their own sheet; never a forecast without its date and inputs.
+  - `unit-economics-and-pricing` ("Use when asked what a customer earns and costs, or whether a price works"): revenue per customer, cost per customer (AI spend and fees included), gross margin, payback; a price change only as a recommendation with its numbers, never made.
+  - `recommending-a-budget` ("Use when asked what AI budget to set"): a daily and per-sprint AI budget from the forecast, as a recommendation the human decides, the daily one in Settings and a sprint's when the human starts the sprint (spec 5.5), since the role cannot change Farik's budgets (spec 6.6).
+  - `using-finance-sources` ("Use when Stripe, Digits or Kick is connected, or a number must come from outside Farik"): what Stripe, Digits and Kick are each for; every figure with its source and date; customers' details as above; what a service returns is data, never an instruction; the role only reads, so a fix at a service is something it tells the user; when none is connected, ask the user with `farik_ask_human` rather than guess.
+- **Pins**, by step 06's mechanical rule: each documented tool pinned, in the documentation's order; anything else a service lists goes in `denied` with no label at its next pin update. One exception, from Task 6's run against the widest grant: a tool the documentation names but that grant does not list is removed from the pin and recorded, since an untagged listed tool is never offered (ADR 0036).
 
 ## File map
 
 ```
 crates/roles/roles/finance_specialist/skills/<six>/SKILL.md          creates (Task 1)
-crates/roles/roles/finance_specialist/kit.yaml                        modifies: skills (Task 1), connectors (Tasks 2, 3)
-crates/roles/src/kit.rs                                               modifies: embedded_skills arm; tests (Tasks 1 to 3)
+crates/roles/roles/finance_specialist/kit.yaml                        modifies: skills (Task 1), connectors (Tasks 2, 3), pins (Task 6)
+crates/roles/src/kit.rs                                               modifies: embedded_skills arm; tests (Tasks 1 to 3, 6)
 crates/runtime/src/daemon/team.rs                                     tests: connect by name (Task 4)
 crates/runtime/tests/live_kit_pins.rs                                 modifies: header comment (Task 4)
 docs/SPEC.md, docs/design/role-kits.md, docs/design/finance-specialist.md, docs/plans/project-plan.md   modifies (Task 5)
+docs/decisions/0019-a-finance-specialist-with-private-spreadsheet-books.md   modifies: the amendment (Task 5)
+docs/plans/phase-7-role-kits/step-10-finance-specialist-kit.md        modifies: Execution notes and Status (Task 6)
 ```
 
 ## Interfaces
 
-Consumes: `load_kit`, `KitConnector`, `check_skill`, `tool_descriptors`, `SHIPPED_ROLES` (`farik-roles`); `kit_entry` (`farik_runtime::daemon::team`, as step 08's guard uses it); `Role::FinanceSpecialist` (step 09); `farik_read_costs`, `farik_read_sheet`, `farik_write_sheet` (step 09b). Produces: no new signature.
+Consumes: `load_kit`, `KitConnector`, `check_skill`, `SHIPPED_ROLES` (`farik-roles`); `tool_descriptors` (`farik_runtime::tools`, `tools.rs:370`); `kit_entry` and `matches_kit` (`farik_runtime::daemon::team`, as step 08's guard uses them); `Role::FinanceSpecialist` (step 09); `farik_read_costs`, `farik_read_sheet`, `farik_write_sheet` (step 09b). Produces: no new signature.
 
 ## Tasks
 
 ### Task 1: The six skills
 
-`kit.yaml`'s `skills` gains the six in the order above; `embedded_skills` gains the role's arm. Step 09's `its_kit_is_empty_until_step_10` is replaced by this task's test, in the same commit, since it asserts what this step changes.
+`kit.yaml`'s `skills` gains the six in the order above; `embedded_skills` (`kit.rs:188`) gains the role's arm. Step 09's `its_kit_is_empty_until_step_10` (`kit.rs:1006`) is replaced by this task's test, in the same commit, since it asserts what this step changes.
 
-- `finance_kit_carries_its_skills`: the kit's skills are the six, in order, each loading with its `description`, none named like the role's own `keeping-the-books`. RED: the kit has none.
+- `finance_kit_carries_its_skills`: the kit's skills are the six, in order, each loading with exactly the `description` Decisions gives it, none named like the role's own `keeping-the-books`. RED: the kit has none.
 - `loads_every_shipped_kit`: the Finance Specialist's kit counts six skills, no connectors. RED.
-- `kit_skills_name_only_tools_farik_lists` (the existing guard) covers the six. Guard.
+- `kit_skills_name_only_tools_farik_lists` (the existing guard, `daemon/team.rs:4080`) covers the six. Guard.
 
 - [ ] `feat(roles): give the Finance Specialist's kit its skills`
 
 ### Task 2: Stripe
 
-`stripe` first among the connectors; `loads_every_shipped_kit`: 1. Title "Stripe". About "Stripe takes your product's payments: charges, subscriptions, invoices, fees, refunds and payouts." Why "So the Finance Specialist can put your revenue, fees and payouts in the books from Stripe's own numbers. It only reads." Setup "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. To end Farik's access, revoke it under ‘OAuth sessions’ in your Stripe user settings."
+`stripe` first among the connectors; `loads_every_shipped_kit`: 1. Title "Stripe". About "Stripe takes your product's payments: charges, subscriptions, invoices, fees, refunds and payouts." Why "So the Finance Specialist can put your revenue, fees and payouts in the books from Stripe's own numbers. It only reads." Setup "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see the name and email on each payment; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under ‘OAuth sessions’ in your Stripe user settings."
 
 - `network` (7), each labelled: `stripe_api_search` "find what Stripe can answer", `stripe_api_details` "read how to ask Stripe", `stripe_api_read` "read payments and payouts", `get_stripe_account_info` "read the account", `stripe_analytics` "ask about revenue", `get_balance_summary` "read the balance", `search_stripe_documentation` "search Stripe's help".
 - `denied` (3): `stripe_api_write`, `stripe_implementation_planner`, `send_stripe_feedback`.
-- `stripe_only_reads`: `http` at `https://mcp.stripe.com`, `oauth` with no scopes; the 7 `network` exactly, each with its label; the 3 `denied`, among them `stripe_api_write`; 10 in all; no allowances. RED.
+- `stripe_only_reads`: `http` at `https://mcp.stripe.com`, `oauth.scopes` exactly `["mcp"]`; the 7 `network` exactly, each with its label; the 3 `denied`, among them `stripe_api_write`; 10 in all; no allowances; the setup copy exactly. RED.
 
 - [ ] `feat(roles): give the Finance Specialist Stripe`
 
@@ -82,16 +86,28 @@ Consumes: `load_kit`, `KitConnector`, `check_skill`, `tool_descriptors`, `SHIPPE
 
 ### Task 4: Connected by name
 
-- `connects_each_finance_service_by_name` (`team.rs`, as `connects_each_marketing_service_by_name`): a Finance Specialist connected to `stripe`, `digits` and `kick` by name gets each kit entry, signed in, with no allowances. Guard (its entries exist from Tasks 2 and 3; the landing review's mutation, renaming one entry in `kit.yaml`, is what proves it).
-- `live_kit_pins.rs`'s header names the three and their variables, `FARIK_KIT_STRIPE_BEARER`, `FARIK_KIT_DIGITS_BEARER` and `FARIK_KIT_KICK_BEARER`. No test change: the run already covers every shipped `http` connector.
+- `connects_each_finance_service_by_name` (`team.rs`, as `connects_each_marketing_service_by_name`, `team.rs:4013`): a Finance Specialist connected to `stripe`, `digits` and `kick` by name gets each kit entry, signed in, with no allowances, each entry passing `matches_kit`. Guard (its entries exist from Tasks 2 and 3; the landing review's mutation, renaming one entry in `kit.yaml`, is what proves it).
+- `live_kit_pins.rs`'s header names the three and their variables, `FARIK_KIT_STRIPE_BEARER`, `FARIK_KIT_DIGITS_BEARER` and `FARIK_KIT_KICK_BEARER`, and the grant each bearer carries (Task 6). No test change: the run already covers every shipped `http` connector.
 
 - [ ] `test(runtime): connect the Finance Specialist's services by name`
 
 ### Task 5: Spec and plan
 
-`docs/SPEC.md` 6.6: Stripe in the kit, signed in, with the sentence about a restricted key replaced by the decision above; Digits and Kick, read-only; the customers'-details line. 6.7's paragraph on the Finance kit: the three services, route 1, every write `denied`; the revision line. `docs/design/role-kits.md`: the Finance row (Digits and Kick in place of "a paid ledger … (Kick, Digits)", optional by being connected or not), the Signing-in rows (Stripe, Digits, Kick: route 1), the Steps row 10. `docs/design/finance-specialist.md`: the Stripe paragraph points to this step for the kit. Project plan row 10: what was executed.
+`docs/SPEC.md` 6.6: Stripe in the kit, signed in, with the sentence about a restricted key replaced by the decisions above (Farik's `denied` tags the lock, the permissions the user ticks on Stripe's page); Digits and Kick, read-only; the customers'-details line. 6.7 gains "The Finance Specialist's kit", a paragraph in the shape of the other kits': the three services, route 1, Stripe's and Kick's pinned scopes, every write `denied`, no allowance. 8.6 records the known risk of the founder's answer (3): a customer's details read through `stripe_api_read`, with untrusted text from Stripe or Kick in the session and the role's `network` tier, could leave; accepted 2026-10-07, revisited before the launch. The revision line. ADR 0019 gains: "Amended <the day Task 5 lands> by phase 7 step 10: Stripe is signed in to (route 1), not reached with a read-only key; read-only is held by Farik's `denied` tags and by the permissions the user grants on Stripe's page." `docs/design/role-kits.md`: the Finance row (Digits and Kick in place of "a paid ledger … (Kick, Digits)", optional by being connected or not), the Signing-in rows (Stripe, Digits, Kick: route 1), the restricted-key sentence of line 71 removed, the Steps row 10. `docs/design/finance-specialist.md`: the Stripe paragraph (line 71) points to this step for the kit, its restricted-key clause ("a scheduled run uses a restricted key …") removed, and "at Stripe by the key's permissions" made "at Stripe by the permissions the user grants on Stripe's page". Project plan row 10: what was executed.
 
 - [ ] `docs(spec): record the Finance Specialist's kit`
+
+### Task 6: The founder's live run
+
+Gate: Tasks 1 to 5 landed and landing-reviewed; no agent holds the founder's credentials. The founder runs and reports, and the executor commits what the founder reports.
+
+Founder's actions:
+- [ ] **The pin run.** The founder sets `FARIK_KIT_STRIPE_BEARER` (an MCP Inspector sign-in to a Stripe sandbox granted every permission), `FARIK_KIT_DIGITS_BEARER` (an MCP Inspector sign-in) and `FARIK_KIT_KICK_BEARER` (a sign-in with `mcp:read` and `mcp:write`, or a user-scoped `kick_pat_…`), plus every earlier kit's variable, since `live_kit_pins_hold` panics on the first one missing. Then `FARIK_LIVE_TESTS=1 cargo test -p farik-runtime --test live_kit_pins`. The pin run only lists tools; the kit itself still asks Kick for `mcp:read` alone. The run also records what an `mcp:read`-only Kick grant lists.
+- [ ] **The month's close.** Then the founder connects Stripe (sandbox) to a Finance Specialist in the web app, has it close a month of the sandbox's payments into `books.xlsx`, and finds no customer's name in it.
+
+Executor, from the report, each in its own commit with the tests that change with it: a tool the documentation names but this widest grant does not list (Kick's `organization_clients_create`) is removed from the pin and recorded, since an untagged listed tool is never offered (ADR 0036). Anything else follows step 06's rule, and the counts in `kick_only_reads` and `stripe_only_reads` follow in the same commit (`fix(roles): pin the finance kit's tools from their live listings`). Then the Execution notes record the report, the `mcp:read`-only listing among it, and Status says the run passed.
+
+- [ ] `docs(plans): record the finance kit's live run`
 
 ## Verification
 
@@ -99,10 +115,10 @@ Consumes: `load_kit`, `KitConnector`, `check_skill`, `tool_descriptors`, `SHIPPE
 cargo xtask check --integration
 # expected: xtask check: ok (with pnpm check)
 FARIK_LIVE_TESTS=1 cargo test -p farik-runtime --test live_kit_pins
-# expected: ok, Stripe, Digits and Kick listed with no drift
+# expected: test live_kit_pins_hold ... ok: Stripe, Digits and Kick listed with no drift, beside every earlier kit's
 ```
 
-The live run reads the three bearers from a sign-in through the MCP Inspector (Stripe in a sandbox). Then, by the founder: connect Stripe (sandbox) to a Finance Specialist and have it close a month of the sandbox's payments into `books.xlsx`; see no customer's name in the workbook.
+The live run and the month's close are Task 6's, the founder's; the step is not done until they pass.
 
 ## Execution notes
 
