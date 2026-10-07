@@ -1,13 +1,15 @@
 //! The watch on a marketing plan's Google Ads spend (`docs/SPEC.md` 6.7, ADR 0042, step 08g): a
 //! task of its own beside the ticks, with no model, that reads each active plan's spend every 15
-//! minutes and pauses the campaigns that reached a budget. A tick waits for a running session to
-//! end, so none of this is a rule of the tick.
+//! minutes, pauses the campaigns that reached a budget, and pauses the campaigns of a plan that
+//! ended. A tick waits for a running session to end, so none of this is a rule of the tick.
+
+use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use farik_core::contract::Role;
 use farik_core::marketing::{
     Amount, Cap, CapScope, CreatedCampaign, Lineage, PlanRecord, PlanSpend, active_plan,
-    caps_reached, is_carried,
+    caps_reached, is_carried, to_pause_for_end,
 };
 use farik_protocol::event::{EventBody, new_event};
 use farik_store::marketing::{
@@ -28,8 +30,9 @@ const TRY_EVERY: Duration = Duration::minutes(15);
 impl Orchestrator {
     /// Watches the Google Ads spend of the marketing plans until `stop` is called: every minute
     /// (`RECHECK`, through the sleeper, so that a test's clock drives it) one wake reads the
-    /// active plan's spend when its last try is 15 minutes old and pauses the campaigns that
-    /// reached a budget. It starts no session and runs while the team is paused, since stopping spend is never paused. Until
+    /// active plan's spend when its last try is 15 minutes old, pauses the campaigns that
+    /// reached a budget, and pauses the campaigns an ended plan left running. It starts no
+    /// session and runs while the team is paused, since stopping spend is never paused. Until
     /// the first campaign is made there is nothing to read or to pause, and it waits for that
     /// without asking the sleeper. A Google, sign-in or team-file failure is that read's `failed`
     /// and the watch goes on.
@@ -89,6 +92,7 @@ impl Orchestrator {
             .and_then(|record| plans.iter().find(|plan| plan.record.id == record.id));
         let lineage = active.map(|plan| lineage_of(&plans, &plan.record.id));
         let watched = Watched {
+            plans: &plans,
             made: &made,
             active: active.zip(lineage.as_deref()),
             now,
@@ -96,7 +100,7 @@ impl Orchestrator {
         if let Some((plan, lineage)) = watched.active {
             self.read_the_active_plan(&watched, plan, lineage).await?;
         }
-        Ok(())
+        self.pause_what_ended(&watched).await
     }
 
     /// Reads the active plan's spend when it is due, pauses the campaigns of each cap it reached,
@@ -269,6 +273,61 @@ impl Orchestrator {
         Ok(())
     }
 
+    /// Pauses the campaigns no active plan carries, each plan's together, and records each as
+    /// paused for the plan's end. A refusal is kept as the plan's `unstopped`, tried again
+    /// fifteen minutes later.
+    async fn pause_what_ended(&self, watched: &Watched<'_>) -> Result<(), OrchestratorError> {
+        let (state, tools, now) = (&self.deps.daemon, &self.deps.tools, watched.now);
+        let for_end: Vec<String> = campaigns_paused(&tools.log)?
+            .into_iter()
+            .filter(|pause| pause.why == PausedWhy::PlanEnded)
+            .map(|pause| pause.campaign)
+            .collect();
+        let all: Vec<CreatedCampaign> = watched.made.iter().map(|(made, _)| made.clone()).collect();
+        let lineage = watched.active.map(|(plan, lineage)| Lineage {
+            id: plan.record.id.as_str(),
+            plan: &plan.proposal,
+            lineage,
+        });
+        let mut by_plan: BTreeMap<String, Vec<CreatedCampaign>> = BTreeMap::new();
+        for each in to_pause_for_end(lineage.as_ref(), &all, &for_end) {
+            by_plan.entry(each.plan.clone()).or_default().push(each);
+        }
+        for (plan_id, campaigns) in by_plan {
+            let waiting = state.spend_reads().get(&plan_id).is_some_and(|read| {
+                read.unstopped.is_some() && now - read.attempted_at < TRY_EVERY
+            });
+            if waiting {
+                continue;
+            }
+            let _writing = state.ads_writes().lock().await;
+            let plan = watched.plans.iter().find(|plan| plan.record.id == plan_id);
+            let refusal = match self.agents_for(plan) {
+                Ok(agents) => {
+                    let names: Vec<String> =
+                        campaigns.iter().map(|each| each.campaign.clone()).collect();
+                    let results = pause_campaigns(state, &agents, &names).await;
+                    let mut refusal = None;
+                    for ((_, result), each) in results.iter().zip(&campaigns) {
+                        match result {
+                            Ok(()) => self.record_paused(each, PausedWhy::PlanEnded)?,
+                            Err(why) => {
+                                refusal.get_or_insert_with(|| cut_reason(why));
+                            }
+                        }
+                    }
+                    refusal
+                }
+                Err(why) => Some(why),
+            };
+            let mut reads = state.spend_reads();
+            let entry = reads.entry(plan_id).or_insert_with(|| fresh(now));
+            entry.attempted_at = now;
+            entry.unstopped = refusal;
+        }
+        Ok(())
+    }
+
     /// The agents whose Google Ads connection Farik may use for `plan`: the plan's proposer when it
     /// is an active Marketing Specialist, then every other active Marketing Specialist, in the
     /// team file's order. The reason, when the team file cannot be read.
@@ -333,9 +392,10 @@ impl Orchestrator {
     }
 }
 
-/// What one wake looks at: the campaigns made with the day each was, the active plan with its
-/// lineage, and the time.
+/// What one wake looks at: the plans, the campaigns made with the day each was, the active plan
+/// with its lineage, and the time.
 struct Watched<'a> {
+    plans: &'a [MarketingPlan],
     made: &'a [(CreatedCampaign, NaiveDate)],
     active: Option<(&'a MarketingPlan, &'a [String])>,
     now: DateTime<Utc>,
@@ -377,6 +437,8 @@ mod tests {
 
     /// The ad account of the plans, ten digits.
     const CUSTOMER: &str = "1234567890";
+    /// Another ad account.
+    const OTHER: &str = "2345678901";
 
     /// Kai's Google Ads and a plan, and an orchestrator whose clock the test moves.
     struct Watching {
@@ -442,6 +504,34 @@ mod tests {
                     .statuses
                     .insert(campaign_name(customer, number), status.to_string());
             });
+        }
+
+        /// The owner ends `plan`.
+        fn ends(&self, plan: &str) {
+            self.ads.harness.project.record(
+                "",
+                "marketing_plan.ended",
+                &json!({ "plan": plan, "why": "by_owner" }),
+            );
+        }
+
+        /// The campaigns Farik recorded as paused for `why`, in order, as `(plan, key, campaign)`.
+        fn paused_for(&self, why: &str) -> Vec<(String, String, String)> {
+            self.events(EventKind::MarketingCampaignPaused)
+                .iter()
+                .filter_map(|event| match &event.body {
+                    EventBody::MarketingCampaignPaused(body) if body.why.to_string() == why => {
+                        assert_eq!(event.envelope.ids.agent_id, None, "Farik records it");
+                        assert_eq!(event.envelope.ids.session_id, None);
+                        Some((
+                            body.plan.as_str().to_string(),
+                            body.key.as_str().to_string(),
+                            body.campaign.as_str().to_string(),
+                        ))
+                    }
+                    _ => None,
+                })
+                .collect()
         }
 
         /// The queries of every `Search` Google was sent, in order.
@@ -1023,6 +1113,213 @@ mod tests {
             "{ended:?}"
         );
         assert!(watching.orchestrator.is_stopped());
+    }
+
+    /// MP-1 ended by the owner, with five of its campaigns made: 11 and 12 and 13 in the plan's
+    /// ad account, 21 in another.
+    fn an_ended_plan(watching: &Watching) {
+        watching.ads.plan("MP-1", None);
+        watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
+        watching.made(("MP-1", "search-long"), (CUSTOMER, 12));
+        watching.made(("MP-1", "search-extra"), (CUSTOMER, 13));
+        watching.made(("MP-1", "search-other"), (OTHER, 21));
+        watching.ends("MP-1");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one end through the wake that pauses, the refusal and the retry"
+    )]
+    async fn ending_a_plan_pauses_its_campaigns_within_a_minute() {
+        let watching = Watching::new("end-pauses").await;
+        an_ended_plan(&watching);
+        let (first, second, third, other) = (
+            campaign_name(CUSTOMER, 11),
+            campaign_name(CUSTOMER, 12),
+            campaign_name(CUSTOMER, 13),
+            campaign_name(OTHER, 21),
+        );
+        // Google reports the second paused already; the third it will not pause.
+        watching.status((CUSTOMER, 12), "PAUSED");
+        watching.ads.google.script(|script| {
+            script
+                .refuse_pause
+                .insert(campaign_name(CUSTOMER, 13), "nope".to_string());
+        });
+
+        // The very next wake, a minute on, not the next read of fifteen: one status read for each
+        // ad account, with no metrics, and a pause for each campaign reported running.
+        watching.at(1);
+        watching.wakes().await;
+        assert_eq!(
+            watching.status_reads(),
+            [
+                status_query(&[first.clone(), second.clone(), third.clone()]).expect("a query"),
+                status_query(std::slice::from_ref(&other)).expect("a query"),
+            ]
+        );
+        assert!(
+            watching.spend_reads().is_empty(),
+            "an ended plan's spend is not read"
+        );
+        assert_eq!(
+            watching.pauses(),
+            [first.clone(), third.clone(), other.clone()]
+        );
+        // Recorded for every campaign Google took or reported paused, the second included, and
+        // not for the one it refused.
+        let plan_ended = |campaigns: &[&str]| -> Vec<(String, String, String)> {
+            let keys = [
+                "search-launch",
+                "search-long",
+                "search-extra",
+                "search-other",
+            ];
+            let all = [&first, &second, &third, &other];
+            campaigns
+                .iter()
+                .map(|key| {
+                    let at = keys.iter().position(|each| each == key).expect("a key");
+                    ("MP-1".to_string(), (*key).to_string(), all[at].clone())
+                })
+                .collect()
+        };
+        assert_eq!(
+            watching.paused_for("plan_ended"),
+            plan_ended(&["search-launch", "search-long", "search-other"])
+        );
+        // The refusal is kept as the plan's `unstopped`, in Google's words.
+        assert_eq!(
+            watching
+                .ads
+                .state()
+                .spend_reads()
+                .get("MP-1")
+                .and_then(|read| read.unstopped.clone())
+                .as_deref(),
+            Some("Google answered “nope”")
+        );
+
+        // It is not tried again before fifteen minutes have passed since the try.
+        let sent = watching.ads.google.requests().len();
+        watching.at(15);
+        watching.wakes().await;
+        assert_eq!(watching.ads.google.requests().len(), sent);
+
+        // Fifteen minutes after it, Google takes it: the pause is recorded and the warning goes.
+        watching
+            .ads
+            .google
+            .script(|script| script.refuse_pause.clear());
+        watching.at(16);
+        watching.wakes().await;
+        assert_eq!(
+            watching.status_reads().last(),
+            Some(&status_query(std::slice::from_ref(&third)).expect("a query"))
+        );
+        assert_eq!(watching.pauses().last(), Some(&third));
+        assert_eq!(
+            watching.paused_for("plan_ended"),
+            plan_ended(&[
+                "search-launch",
+                "search-long",
+                "search-other",
+                "search-extra"
+            ])
+        );
+        assert_eq!(
+            watching
+                .ads
+                .state()
+                .spend_reads()
+                .get("MP-1")
+                .and_then(|read| read.unstopped.clone()),
+            None
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_new_version_keeps_its_carried_campaigns() {
+        let watching = Watching::new("end-carried").await;
+        watching.ads.plan("MP-1", None);
+        watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
+        watching.costs(CUSTOMER, &[(11, 100)]);
+        // MP-2 replaces it with the same key in the same ad account: the campaign runs on.
+        watching.ads.plan_with("MP-2", Some("MP-1"), |_| {});
+        watching.ends("MP-1");
+        watching.at(1);
+        watching.wakes().await;
+        assert!(
+            watching.status_reads().is_empty(),
+            "{:?}",
+            watching.searches()
+        );
+        assert!(watching.pauses().is_empty());
+        assert!(watching.paused_for("plan_ended").is_empty());
+
+        // MP-3 replaces that in another ad account: the campaign is not its own.
+        watching.ads.plan_with("MP-3", Some("MP-2"), |body| {
+            body["google_ads_account"] = json!("234-567-8901");
+        });
+        watching.ends("MP-2");
+        watching.at(2);
+        watching.wakes().await;
+        assert_eq!(
+            watching.status_reads(),
+            [status_query(&[campaign_name(CUSTOMER, 11)]).expect("a query")]
+        );
+        assert_eq!(watching.pauses(), [campaign_name(CUSTOMER, 11)]);
+        assert_eq!(
+            watching.paused_for("plan_ended"),
+            [(
+                "MP-1".to_string(),
+                "search-launch".to_string(),
+                campaign_name(CUSTOMER, 11)
+            )]
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_ended_plan_all_paused_is_not_looked_at_again() {
+        let watching = Watching::new("end-once").await;
+        an_ended_plan(&watching);
+        watching.at(1);
+        watching.wakes().await;
+        assert_eq!(watching.paused_for("plan_ended").len(), 4, "each recorded");
+
+        // Every campaign is recorded paused for the plan's end: no wake sends anything for it.
+        let sent = watching.ads.google.requests().len();
+        for minutes in [2, 16, 61, 600] {
+            watching.at(minutes);
+            watching.wakes().await;
+        }
+        assert_eq!(watching.ads.google.requests().len(), sent);
+        assert_eq!(watching.paused_for("plan_ended").len(), 4);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_end_pause_holds_the_ads_lock() {
+        let watching = Watching::new("end-lock").await;
+        an_ended_plan(&watching);
+        watching.at(1);
+
+        let held = watching.ads.state().ads_writes().lock().await;
+        let wake = {
+            let orchestrator = Arc::clone(&watching.orchestrator);
+            tokio::spawn(async move { orchestrator.marketing_spend_wake().await })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(watching.searches().is_empty(), "{:?}", watching.searches());
+        assert!(!wake.is_finished());
+
+        drop(held);
+        wake.await.expect("joined").expect("the wake runs");
+        assert_eq!(watching.paused_for("plan_ended").len(), 4);
     }
 
     #[tokio::test(flavor = "multi_thread")]
