@@ -3,6 +3,7 @@
 Date: 2026-10-05
 Status: accepted. The founder asked for the role on 2026-10-05 ("Add and plan a procurement agent and plan all its tools and connectors as well as skills"), set its research focus and the data pipeline request the same day, and answered the design's O1 to O6 ("the agent never directly buy[s], he just compiles list of sellers, look for price, contact manufacturer or sellers. Get prices. And set up a purchase order but the final decision is the founder['s]"; "all the data are and spreadsheets are to stay local"; "any product whether technical or non technical"; "after the finance specialist and before devops"; "the PM must escalate any process that cost money").
 Amended 2026-10-05 by ADR 0041: a team the user runs on auto sends the agent's messages to sellers as drafted, within the daily cap, and approves escalated data pipelines; purchase orders still wait for the founder. Phase numbers after the web launch moved up by one (ADR 0040).
+Amended 2026-10-07 by the founder's answers to phase 7 step 10b's readiness review: the Procurement Specialist fetches only the sites the owner approved ("Restrict its web access"), in a new step 10b2; and it is not offered `farik_read_costs` ("No"). See "Amendment of 2026-10-07" at the end.
 
 ## Context
 
@@ -59,3 +60,18 @@ Harder:
 - SerpApi spends the user's searches; its allowance asks the founder past 50 a sprint.
 - AWS Pricing needs the program `uv` and a narrow AWS key; Brex's and Exa's tool lists may change, which the live pin test catches.
 - `recalls` covers the United States only until a pipeline brings the EU's or Canada's lists.
+
+## Amendment of 2026-10-07
+
+The role reads sellers' pages, which are untrusted (spec 8.6), while it holds quotes, prices and the register, and its `network` tier let it fetch any address. A page could steer it to fetch an address of the page's choosing with the business's details in it. Asked at step 10b's readiness review whether to accept and record that risk, "or restrict its web access (it may only browse addresses you approve)?", the founder answered "Restrict its web access". Asked whether the role should read the team's AI costs, the founder answered "No".
+
+Decision:
+- **It fetches only sites the owner approved.** A site is a host reached over `https`, matched exactly or as its `www.` twin, never its other subdomains and never an IP address. The agent asks with `farik_request_sites`, each site with the reason, and its task waits, as for a marketing plan (ADR 0042), until the owner allows or refuses each on Today. The owner removes a site, and may add one (an open question of step 10b2), on the agent's page. Approvals are kept in this computer's event log, per team, never in the committed team file, which a pull could change.
+- **The hook holds the fetch, not the search.** `WebFetch`, and every `url` and `urls` field of a connector's call, must name an approved site. `WebSearch` stays open: its query goes only to the search service Claude Code uses, through the model provider, which already sees the whole session, and never to an address a page chooses.
+- **`auto` does not approve a site.** Under ADR 0041's `auto` a request still waits for the owner: the list is a limit the owner sets, as the spending limits are, and under `auto` the limits are the only guard against a steered agent.
+- **No `farik_read_costs`.** The team's AI costs stay the Finance Specialist's (spec 6.6); spec 6.10's line giving the role the tool is withdrawn by step 10b.
+- **Step 10b2**, after 10b and before 10c, builds it; the kit (10d) and the role's first live run come after it.
+
+Consequences:
+- Easier: a seller's page can no longer have the agent send the business's details to an address the page names.
+- Harder: the owner answers a request before the agent reads a new seller's site, under `auto` too. Some paths stay open, and spec 8.6 records them: data can still reach an approved site inside an address; a connector's address in a field not named `url` or `urls` is not judged; a search query still leaves the computer for the search service; and what a session read before a site was removed stays in that session.

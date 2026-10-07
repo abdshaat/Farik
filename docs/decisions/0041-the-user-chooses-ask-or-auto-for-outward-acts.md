@@ -3,6 +3,7 @@
 Date: 2026-10-05
 Status: accepted (the founder, 2026-10-05, answering ADR 0040's G6: "no the user can configure whether he needs to approve everything or set it on auto mode"). Amends spec 5.6 and 6.7 (an `external_effect` call, a send and a post always asking) and ADRs 0031, 0037 and 0039 where they say a call or a message waits for the human.
 Amended 2026-10-05 by ADR 0042: an approved marketing plan approves the posts and Google Ads changes in it under `ask` and `auto` alike; approving a marketing plan stays the owner's under `auto`, as a purchase order does; Google Ads writes outside the plan are refused, never asked or run on auto; and the marketing budget is a limit no mode passes.
+Amended 2026-10-07 by ADR 0039's amendment of that day: a site the Procurement Specialist asks to read (phase 7 step 10b2) waits for the owner under `auto` as under `ask`; the approved sites are a limit that holds in both positions, as the spending limits do.
 
 ## Context
 
