@@ -110,6 +110,8 @@ pub struct SiteAsk { pub url: String, pub why: String }
 
 ## Tasks
 
+A test after Task 2 that needs one of Farik's sites takes it from `farik_sites()`, never as a written host, so the launch review edits the YAML alone; the hosts these lines name (`grainger.com`, `mcmaster.com`) stand for such an entry.
+
 ### Task 0: Mockups
 
 Files: `TodaySiteRequest.dc.html`, `PhoneSiteRequest.dc.html` (Today's gate: two requests of one task, one an `xn--` name, a note, "Allow" and "Don't allow", the line naming Farik's approved sites), `AgentSites.dc.html`, `PhoneAgentSites.dc.html` (the Procurement Specialist's page, "Sites it may read": Farik's approved sites by category, two categories open, one shop turned off; "Sites you allowed" with three sites, Remove and its question, "Add a site"), `canvas.json`. The founder approves them before Task 8; the approval, with its date and canvas version, is written into this plan's Execution notes in the same commit.
