@@ -140,6 +140,46 @@ pub fn site_requests(log: &EventLog) -> Result<Vec<SiteRequest>, StoreError> {
     Ok(requests)
 }
 
+/// A site the owner did not allow for a task, with their own words when they said any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclinedSite {
+    /// The site, in its ASCII form.
+    pub host: String,
+    /// What the owner said, when they said anything.
+    pub note: Option<String>,
+}
+
+/// The sites the owner did not allow for `task`, oldest decision first: its owner-recorded
+/// `site.declined` of a host, unless a later owner-recorded `site.approved` of that host, for any
+/// task or for none, allowed it after all. A later decline of the same host replaces the earlier.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn declined_sites(log: &EventLog, task: &TaskId) -> Result<Vec<DeclinedSite>, StoreError> {
+    let events = log.read(&EventQuery {
+        kinds: vec![EventKind::SiteDeclined, EventKind::SiteApproved],
+        ..EventQuery::default()
+    })?;
+    let mut declined: Vec<DeclinedSite> = Vec::new();
+    for event in events.iter().filter(|event| is_the_owners(event)) {
+        match &event.body {
+            EventBody::SiteDeclined(body) if event.envelope.ids.task_id.as_ref() == Some(task) => {
+                declined.retain(|site| site.host != body.host.as_str());
+                declined.push(DeclinedSite {
+                    host: body.host.to_string(),
+                    note: Some(body.note.to_string()).filter(|note| !note.is_empty()),
+                });
+            }
+            EventBody::SiteApproved(body) => {
+                declined.retain(|site| site.host != body.host.as_str());
+            }
+            _ => {}
+        }
+    }
+    Ok(declined)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;

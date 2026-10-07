@@ -678,13 +678,15 @@ const CONVERSATION_TOOLS: &[&str] = &[
     "farik_read_decisions",
 ];
 
-/// The Farik tools a chat session is offered (ADR 0026): the reading tools and its one reply.
+/// The Farik tools a chat session is offered (ADR 0026): the reading tools and its one reply, and
+/// the list of sites, which `offered_tools` keeps for a role held to approved sites alone.
 pub(super) const CHAT_TOOLS: &[&str] = &[
     "farik_read_task",
     "farik_read_board",
     "farik_read_rules",
     "farik_read_criteria",
     "farik_read_decisions",
+    "farik_read_sites",
     "farik_chat_reply",
 ];
 
@@ -5087,8 +5089,9 @@ mod tests {
         let tiers = default_tiers(Role::ProductManager);
         // The Designer's page check and design review are offered in its own sessions alone, a
         // chat's reply in a chat alone, the books' tools to the Finance Specialist and, to read
-        // a workbook, a verify session about a finance task, an evaluation to the Procurement
-        // Specialist in an implement session, and a post to the Marketing Specialist in one.
+        // a workbook, a verify session about a finance task, an evaluation and the sites to the
+        // Procurement Specialist in an implement session, and a post to the Marketing Specialist
+        // in one.
         let expected: Vec<String> = tool_descriptors()
             .iter()
             .filter(|tool| tiers.contains(&tool.tier))
@@ -5101,6 +5104,8 @@ mod tests {
                     "farik_write_sheet",
                     "farik_read_sheet",
                     "farik_write_evaluation",
+                    "farik_request_sites",
+                    "farik_read_sites",
                     "farik_schedule_post",
                 ]
                 .contains(&tool.name)
@@ -7688,7 +7693,14 @@ mod tests {
         );
         let spec = &adapter.started()[0];
         assert_eq!(spec.purpose, SessionPurpose::Chat);
-        assert_eq!(spec.farik_tools, super::CHAT_TOOLS);
+        // The list of sites is the Procurement Specialist's alone, so a Developer's chat has the
+        // rest.
+        let developers_chat: Vec<&str> = super::CHAT_TOOLS
+            .iter()
+            .copied()
+            .filter(|tool| *tool != "farik_read_sites")
+            .collect();
+        assert_eq!(spec.farik_tools, developers_chat);
         assert_eq!(
             spec.builtin_tools,
             allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
@@ -7697,7 +7709,7 @@ mod tests {
         assert_eq!(witness.given_tiers(), [vec![PermissionTier::Read]]);
         assert_eq!(
             witness.given_tools(),
-            [super::CHAT_TOOLS
+            [developers_chat
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()]

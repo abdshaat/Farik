@@ -45,6 +45,7 @@ mod reading;
 pub(crate) mod refusal;
 mod retro;
 pub(crate) mod sheets;
+pub(crate) mod sites;
 mod work;
 
 use refusal::Refusal;
@@ -328,6 +329,16 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "Write a comparison as a Markdown note, evaluations/<name>.md, in your private folder, replacing the note of that name. Every previous version is kept.",
         ),
+        tool::<sites::RequestSitesInput>(
+            "farik_request_sites",
+            Read,
+            "Ask the owner to let you read sellers' sites you may not yet: 1 to 10 sites, each with the first page you want and why. Each is answered allowed (you may read it now), waiting (you asked already), declined (with the owner's note) or asked; when any was asked, end your turn, and the owner's decision starts your next session.",
+        ),
+        tool::<NoInput>(
+            "farik_read_sites",
+            Read,
+            "List the sites you may read, Farik's with each shop's category and then the owner's, and for this task the sites waiting for the owner and the ones the owner did not allow, with their notes.",
+        ),
         tool::<exec::ExecInput>(
             "farik_exec",
             Execute,
@@ -457,6 +468,8 @@ pub async fn call_tool(
         "farik_write_sheet" => sheets::write_sheet(&call, &parse(input)?),
         "farik_read_sheet" => sheets::read_sheet(&call, &parse(input)?),
         "farik_write_evaluation" => evaluation::write_evaluation(&call, &parse(input)?),
+        "farik_request_sites" => sites::request_sites(&call, &parse(input)?),
+        "farik_read_sites" => nothing_in(input).and_then(|()| sites::read_sites(&call)),
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -678,6 +691,8 @@ mod tests {
             "farik_write_sheet",
             "farik_read_sheet",
             "farik_write_evaluation",
+            "farik_request_sites",
+            "farik_read_sites",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -702,7 +717,7 @@ mod tests {
             tier("farik_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..30] {
+        for tool in &tools[..32] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

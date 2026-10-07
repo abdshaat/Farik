@@ -179,12 +179,14 @@ pub(super) fn request_transition(
     }
     let (contract, _) = call.contract(&task)?;
     let actor = actor_for(call, &contract, to)?;
-    // A marketing plan that waits for the owner is not handed in: its assignee ends its turn.
+    // A marketing plan or a site that waits for the owner is not handed in on: its assignee ends
+    // its turn.
     if to == TaskStatus::Verifying
         && contract.status == TaskStatus::InProgress
         && actor == TransitionActor::Assignee
     {
         super::marketing::refuse_while_waiting(call, &task)?;
+        super::sites::refuse_while_waiting(call, &task)?;
     }
     let ask = TransitionAsk {
         blocker: input.blocker.map(|blocker| Blocker {
@@ -1109,6 +1111,70 @@ mod tests {
         }
         assert!(
             project.event_count() > after_approval,
+            "the governor recorded its answer"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn cannot_hand_in_while_a_site_waits() {
+        let project = TestProject::new(
+            "tools-site-no-verifying",
+            &a_team_of_three(crate::tools::fixtures::with_the_procurement_specialist),
+        );
+        project.filed_with("FRK-1", "in_progress", "task", None, |wire| {
+            wire["assignee_role"] = json!("procurement_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+        });
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "proc", "reviewer": "pm" }),
+        );
+        let asked = project
+            .call(
+                "proc",
+                Some("FRK-1"),
+                "farik_request_sites",
+                json!({ "sites": [{ "url": "https://shop.example/boxes", "why": "A maker." }] }),
+            )
+            .expect("the site is asked for");
+        let request = asked["sites"][0]["request"].as_u64().expect("its number");
+        let before = project.event_count();
+        let verify = || {
+            project.call(
+                "proc",
+                Some("FRK-1"),
+                "farik_request_transition",
+                json!({ "to": "verifying" }),
+            )
+        };
+
+        let reason = refused_with(verify(), "site_request_waiting");
+        assert_eq!(
+            reason,
+            "site_request_waiting: shop.example waits for the owner; end your turn"
+        );
+        assert_eq!(project.event_count(), before, "nothing is recorded");
+
+        // The owner's decision lifts it: the same call now reaches the governor, which records its
+        // own answer, whatever that is.
+        project.record(
+            "FRK-1",
+            "site.declined",
+            &json!({ "request": request, "host": "shop.example", "note": "" }),
+        );
+        let after_decision = project.event_count();
+        match verify() {
+            Ok(_) => {}
+            Err(ToolError::Refused { reason }) => {
+                assert!(!reason.starts_with("site_request_waiting"), "{reason}");
+            }
+            other => panic!("the governor answers: {other:?}"),
+        }
+        assert!(
+            project.event_count() > after_decision,
             "the governor recorded its answer"
         );
     }

@@ -123,6 +123,9 @@ pub(crate) enum Refusal {
     /// A refusal of one of the Finance Specialist's tools under the code it names: another role's
     /// call, a range of costs, a workbook, a formula, a path (6.6).
     Finance { code: &'static str, detail: String },
+    /// A refusal of one of the Procurement Specialist's site tools, or of a hand-in while a site
+    /// waits, under the code it names (6.10).
+    Sites { code: &'static str, detail: String },
 }
 
 impl Refusal {
@@ -220,9 +223,9 @@ impl Refusal {
             Self::CheckPageRefused { detail } => ("check_page_refused", detail.clone()),
             Self::DesignReviewRefused { detail } => ("design_review_refused", detail.clone()),
             Self::ChatReplyRefused { detail } => ("chat_reply_refused", detail.clone()),
-            Self::MarketingPlan { code, detail } | Self::Finance { code, detail } => {
-                (*code, detail.clone())
-            }
+            Self::MarketingPlan { code, detail }
+            | Self::Finance { code, detail }
+            | Self::Sites { code, detail } => (*code, detail.clone()),
             // Each fault on a line of its own, the first one's code leading the reason.
             Self::MarketingPlanFaults { faults } => {
                 return faults

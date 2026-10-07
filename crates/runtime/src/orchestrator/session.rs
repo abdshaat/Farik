@@ -11,6 +11,7 @@ use farik_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
 use farik_core::contract::{Role, TaskContract, TaskStatus};
 use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
+use farik_core::governor::sites::{WebAccess, web_access};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::pricing::Usage;
@@ -815,6 +816,9 @@ const READ_SHEET_TOOL: &str = "farik_read_sheet";
 const WRITE_SHEET_TOOL: &str = "farik_write_sheet";
 /// The tool that writes a comparison as a note, the Procurement Specialist's alone (step 10b).
 const WRITE_EVALUATION_TOOL: &str = "farik_write_evaluation";
+/// The Procurement Specialist's request for a site, and the list of what it may read.
+const REQUEST_SITES_TOOL: &str = "farik_request_sites";
+const READ_SITES_TOOL: &str = "farik_read_sites";
 
 /// The Farik tools a read-only session is not offered: the command runner, which has no
 /// executor there, and the git writes, which only the assignee may make.
@@ -862,6 +866,15 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                 ask.agent.role == RoleWire::ProcurementSpecialist
                     && ask.purpose == SessionPurpose::Implement
                     && ask.contract.is_some()
+            }
+            // The sites are the held role's: it asks in the implement session of a task, the one
+            // session that can wait for the owner, and reads the list there and in its chat.
+            REQUEST_SITES_TOOL | READ_SITES_TOOL => {
+                let in_its_task =
+                    ask.purpose == SessionPurpose::Implement && ask.contract.is_some();
+                web_access(Role::from(ask.agent.role)) == WebAccess::ApprovedSites
+                    && (in_its_task
+                        || (tool.name == READ_SITES_TOOL && ask.purpose == SessionPurpose::Chat))
             }
             READ_SHEET_TOOL => {
                 private_folder(Role::from(ask.agent.role)).is_some()
@@ -2220,6 +2233,109 @@ mod tests {
                 Vec::<&str>::new(),
                 "{who} {purpose:?}"
             );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_the_site_tools_to_a_held_role() {
+        use crate::tools::fixtures::{
+            with_the_finance_specialist, with_the_marketing_specialist,
+            with_the_procurement_specialist,
+        };
+        let harness = Harness::new("session-sites-offer", |wire| {
+            with_the_finance_specialist(wire);
+            with_the_marketing_specialist(wire);
+            with_the_procurement_specialist(wire);
+        });
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.finance_task("FRK-2", Some("in_progress"));
+        harness.in_progress("FRK-3", "dev-a", "dev-b");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let read = |task: &str| {
+            deps.tools
+                .files
+                .read_contract(&task.parse().expect("an id"))
+                .expect("the contract")
+        };
+        let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
+        let site_tools = ["farik_read_sites", "farik_request_sites"];
+        let offered = |who: &str, purpose: SessionPurpose, about| {
+            let mut ask = asked(deps, agent(&team, who), purpose, about);
+            ask.read_only = purpose == SessionPurpose::Verify;
+            let given = session_spec(deps, &team, &ask)
+                .expect("the spec")
+                .farik_tools;
+            site_tools
+                .into_iter()
+                .filter(|tool| given.iter().any(|one| one == tool))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            offered("proc", SessionPurpose::Implement, Some(&procurement)),
+            site_tools,
+            "its task's implement session is offered both"
+        );
+        assert_eq!(
+            offered("proc", SessionPurpose::Chat, None),
+            ["farik_read_sites"],
+            "its chat reads the list and asks for nothing"
+        );
+        for (who, purpose, about, what) in [
+            (
+                "proc",
+                SessionPurpose::Implement,
+                None,
+                "an implement session about no task",
+            ),
+            (
+                "proc",
+                SessionPurpose::Verify,
+                Some(&procurement),
+                "a verify session",
+            ),
+            (
+                "fin",
+                SessionPurpose::Implement,
+                Some(&finance),
+                "a Finance Specialist's implement session",
+            ),
+            (
+                "fin",
+                SessionPurpose::Chat,
+                None,
+                "a Finance Specialist's chat",
+            ),
+            (
+                "kai",
+                SessionPurpose::Implement,
+                Some(&procurement),
+                "a Marketing Specialist's implement session",
+            ),
+            (
+                "kai",
+                SessionPurpose::Chat,
+                None,
+                "a Marketing Specialist's chat",
+            ),
+            (
+                "dev-a",
+                SessionPurpose::Implement,
+                Some(&developers),
+                "a Developer's implement session",
+            ),
+            ("dev-a", SessionPurpose::Chat, None, "a Developer's chat"),
+            (
+                "pm",
+                SessionPurpose::Implement,
+                Some(&procurement),
+                "the Product Manager's implement session about its task",
+            ),
+        ] {
+            assert_eq!(offered(who, purpose, about), Vec::<&str>::new(), "{what}");
         }
     }
 
