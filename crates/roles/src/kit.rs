@@ -1237,6 +1237,67 @@ mod tests {
         assert!(!text.contains(" @"), "no @ after a space");
     }
 
+    /// A role's kit skill by name: its description and its `SKILL.md` as a session reads it.
+    fn kit_skill(role: Role, name: &str) -> (String, String) {
+        let kit = load_kit(role).expect("a shipped kit");
+        let skill = kit
+            .skills
+            .into_iter()
+            .find(|skill| skill.name == name)
+            .unwrap_or_else(|| panic!("the {role} kit has no skill {name}"));
+        let text = skill.session_files["SKILL.md"].clone();
+        (skill.description, text)
+    }
+
+    /// Step 07c: the Product Manager's sources skill no longer says the kit only reads, since an
+    /// issue and a comment on GitHub are written, each after the human allows the call.
+    #[test]
+    fn the_product_managers_sources_skill_asks_before_it_writes_to_github() {
+        let (description, text) = kit_skill(Role::ProductManager, "using-product-sources");
+        assert!(description.contains("GitHub"), "{description}");
+        for phrase in [
+            "GitHub",
+            "issue_write",
+            "add_issue_comment",
+            "farik_ask_human",
+            "## 4. You ask before you write",
+            "Never give either tool a pull request's number.",
+        ] {
+            assert!(
+                text.contains(phrase),
+                "the skill lacks \"{phrase}\":\n{text}"
+            );
+        }
+        assert!(
+            !text.contains("This kit has no way to change anything"),
+            "{text}"
+        );
+        assert!(text.len() < 6 * 1024, "{} bytes", text.len());
+        assert!(!text.contains(" @"), "no @ after a space");
+    }
+
+    /// Step 07c: the Architect's sources skill names GitHub and the two pull request reads its key
+    /// cannot make.
+    #[test]
+    fn the_architects_sources_skill_names_github() {
+        let (description, text) = kit_skill(Role::Architect, "using-architecture-sources");
+        assert!(description.contains("GitHub"), "{description}");
+        for phrase in [
+            "GitHub",
+            "search_code",
+            "pull_request_read",
+            "get_status",
+            "get_check_runs",
+        ] {
+            assert!(
+                text.contains(phrase),
+                "the skill lacks \"{phrase}\":\n{text}"
+            );
+        }
+        assert!(text.len() < 6 * 1024, "{} bytes", text.len());
+        assert!(!text.contains(" @"), "no @ after a space");
+    }
+
     /// A role's service's server, its copy and its tags, by name.
     fn service(role: Role, name: &str) -> (CustomServer, SetupCopy) {
         let kit = load_kit(role).expect("a shipped kit");

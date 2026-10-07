@@ -107,7 +107,7 @@ Files: the two `SKILL.md`; `kit.rs` tests. Each stays under 6 KB, with numbered 
 - `the_product_managers_sources_skill_asks_before_it_writes_to_github`: the kit's `using-product-sources` `SKILL.md` names GitHub, `issue_write` and `add_issue_comment` and `farik_ask_human`, holds the heading "You ask before you write" and the sentence "Never give either tool a pull request's number.", and no longer holds "This kit has no way to change anything"; its description names GitHub. RED: the skill says the kit only reads.
 - `the_architects_sources_skill_names_github`: `using-architecture-sources` names GitHub, `search_code`, `pull_request_read`, `get_status` and `get_check_runs`, and its description names GitHub. RED: it names three services.
 
-- [ ] `feat(roles): teach the Product Manager and the Architect to use GitHub`
+- [x] `feat(roles): teach the Product Manager and the Architect to use GitHub`
 
 ### Task 4: Connected by name
 
