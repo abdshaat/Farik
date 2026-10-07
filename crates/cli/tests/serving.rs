@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 use tokio::sync::Semaphore;
 
 use project::{
-    Ran, a_team, events, filed, hold_the_run_lock, joined, recorded, run, run_with, scratch,
+    Ran, a_team, events, filed, hold_the_run_lock, joined, record, recorded, run, run_with, scratch,
 };
 
 #[path = "../../runtime/tests/support/ports.rs"]
@@ -257,6 +257,58 @@ fn waits_on_the_injected_clock_when_idle() {
         .expect("serve waits on its sleeper when the board is idle");
     // The day's wait, capped at the minute's recheck, both from the clock serve was given.
     assert_eq!(until, now + chrono::Duration::seconds(60));
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+}
+
+/// A campaign Farik made for a plan, recorded in the project's log: the watch on the ad spend has
+/// something to look at once it is there.
+fn a_campaign_was_made(repository: &TempRepo) {
+    record(
+        repository,
+        "",
+        "marketing_campaign.created",
+        &json!({
+            "plan": "MP-1", "key": "search-launch", "account": "123-456-7890",
+            "campaign": "customers/1234567890/campaigns/11",
+            "budget": "customers/1234567890/campaignBudgets/12",
+            "budget_kind": "total", "amount": "500.00"
+        }),
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn watches_the_ad_spend_beside_its_ticks() {
+    let repository = a_team("serve-ad-watch");
+    a_campaign_was_made(&repository);
+    let now = project::at() + chrono::Duration::days(365);
+    let (entered, waiting) = channel();
+    let gate = Arc::new(Semaphore::new(0));
+    let sleeper = Arc::new(GatedSleeper {
+        entered: Mutex::new(entered),
+        gate: Arc::clone(&gate),
+    });
+    let root = repository.path.clone();
+    let port = free_port();
+    let serving = std::thread::spawn(move || {
+        run_with(&root, &["serve", "--port", &port], |io| {
+            io.engine = recorded(Vec::new());
+            io.clock = Arc::new(FixedClock::new(now));
+            io.sleeper = Some(sleeper);
+        })
+    });
+
+    // Two waits on the sleeper, both a minute from the clock serve was given: the board's idle
+    // wait, and the watch's, which has looked at the campaign and waits for its next wake.
+    for _ in 0..2 {
+        let until = waiting
+            .recv_timeout(Duration::from_secs(30))
+            .expect("serve and its ad watch each wait on the sleeper");
+        assert_eq!(until, now + chrono::Duration::seconds(60));
+    }
     let stopped = run(&repository.path, &["stop"]);
     assert_eq!(stopped.code, 0, "{}", stopped.err);
     let ran = joined(serving, "the serve");

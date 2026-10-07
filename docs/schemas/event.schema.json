@@ -129,6 +129,8 @@
         "social_post.missed",
         "social_post.failed",
         "marketing_campaign.created",
+        "marketing_budget.reached",
+        "marketing_campaign.paused",
         "site.requested",
         "site.approved",
         "site.declined",
@@ -205,6 +207,8 @@
         { "$ref": "#/$defs/socialPostMissedBody" },
         { "$ref": "#/$defs/socialPostFailedBody" },
         { "$ref": "#/$defs/marketingCampaignCreatedBody" },
+        { "$ref": "#/$defs/marketingBudgetReachedBody" },
+        { "$ref": "#/$defs/marketingCampaignPausedBody" },
         { "$ref": "#/$defs/siteRequestedBody" },
         { "$ref": "#/$defs/siteDecisionBody" }
       ]
@@ -1218,6 +1222,40 @@
         "budget": { "type": "string", "pattern": "^customers/[0-9]{10}/campaignBudgets/[0-9]{1,20}$" },
         "budget_kind": { "type": "string", "enum": ["total", "daily"] },
         "amount": { "$ref": "#/$defs/marketingPlanAmount" }
+      }
+    },
+    "marketingBudgetReachedBody": {
+      "title": "Marketing Budget Reached Body",
+      "description": "A budget of the active marketing plan was reached, and Farik paused the campaigns concerned itself (docs/SPEC.md 6.7; ADR 0042, step 08g): plan is the active plan; scope is campaign (a plan campaign's own budget, named by key) or plan (the plan's Google Ads budget); spent and budget are what Google reported against what the plan allows, in currency; paused lists the resource names of the campaigns Google accepted a pause for or reported already paused, and failed carries the first refusal's words, cut at 300 characters, when a pause was refused. Recorded by Farik: the envelope names no agent, no session and no task, and the event is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "scope", "spent", "budget", "currency", "paused"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "scope": { "type": "string", "enum": ["campaign", "plan"] },
+        "key": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 },
+        "spent": { "$ref": "#/$defs/marketingPlanAmount" },
+        "budget": { "$ref": "#/$defs/marketingPlanAmount" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "paused": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "pattern": "^customers/[0-9]{10}/campaigns/[0-9]{1,20}$" }
+        },
+        "failed": { "type": "string", "maxLength": 300 }
+      }
+    },
+    "marketingCampaignPausedBody": {
+      "title": "Marketing Campaign Paused Body",
+      "description": "Farik paused a Google Ads campaign it made, on its own and not on an agent's call (docs/SPEC.md 6.7; ADR 0042, step 08g): plan is the plan the campaign was made under, key its plan campaign's key, campaign its resource name, and why is plan_ended (no active plan carries it), budget_reached (a later read found it running after its cap) or connection_removed (the owner removed Google Ads). Recorded by Farik: the envelope names no agent, no session and no task, and the event is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "key", "campaign", "why"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "key": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 },
+        "campaign": { "type": "string", "pattern": "^customers/[0-9]{10}/campaigns/[0-9]{1,20}$" },
+        "why": { "type": "string", "enum": ["plan_ended", "budget_reached", "connection_removed"] }
       }
     },
     "siteRequestedBody": {

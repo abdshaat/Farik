@@ -1275,7 +1275,8 @@ pub struct Lineage<'a> {
 
 /// Whether the active plan carries `made`: its plan is in the lineage, the active plan has its
 /// key, and it is in the active plan's ad account.
-fn is_carried(active: &Lineage<'_>, made: &CreatedCampaign) -> bool {
+#[must_use]
+pub fn is_carried(active: &Lineage<'_>, made: &CreatedCampaign) -> bool {
     active.lineage.contains(&made.plan)
         && active
             .plan

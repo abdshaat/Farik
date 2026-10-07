@@ -17,8 +17,8 @@ use farik_runtime::daemon::{
 };
 use farik_runtime::forge::Forge;
 use farik_runtime::orchestrator::{
-    CommandError, CommandReport, Orchestrator, OrchestratorDeps, RecoveryReport, command_handler,
-    result_of,
+    CommandError, CommandReport, Orchestrator, OrchestratorDeps, OrchestratorError, RecoveryReport,
+    command_handler, result_of,
 };
 use farik_runtime::sleep::{Sleeper, TokioSleeper};
 use farik_runtime::{
@@ -346,7 +346,22 @@ pub(crate) struct Driver {
     /// The first connect code, when the browser routes are on.
     pub(crate) connect_code: Option<String>,
     handle: DaemonHandle,
+    /// The watch on the marketing plans' Google Ads spend, which runs beside the ticks.
+    watch: tokio::task::JoinHandle<Result<(), OrchestratorError>>,
     _lock: RunLock,
+}
+
+/// What the end of the spend watch says of the run, when it ended on its own with an error (a
+/// store error, which stopped the orchestrator): the sentence to report, so that `farik serve`
+/// ends saying why. `None` when it was still watching, or ended without a fault.
+fn watch_failure(
+    ended: Option<Result<Result<(), OrchestratorError>, tokio::task::JoinError>>,
+) -> Option<String> {
+    match ended? {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => Some(format!("the ad spend watch stopped the run: {error}")),
+        Err(error) => Some(format!("the ad spend watch failed: {error}")),
+    }
 }
 
 impl Driver {
@@ -361,8 +376,23 @@ impl Driver {
     ///
     /// A sentence saying the daemon could not be shut down.
     pub(crate) async fn finish(self) -> Result<(), String> {
-        let Driver { handle, _lock, .. } = self;
-        handle.shutdown().await.map_err(|error| error.to_string())
+        let Driver {
+            handle,
+            watch,
+            _lock,
+            ..
+        } = self;
+        let ended = if watch.is_finished() {
+            Some(watch.await)
+        } else {
+            watch.abort();
+            None
+        };
+        let shut = handle.shutdown().await.map_err(|error| error.to_string());
+        match watch_failure(ended) {
+            Some(failure) => Err(failure),
+            None => shut,
+        }
     }
 }
 
@@ -515,6 +545,7 @@ async fn start_listening(
         }
     };
     Ok(Driver {
+        watch: watching(&orchestrator),
         orchestrator,
         daemon,
         interrupts: tokio::sync::mpsc::unbounded_channel().1,
@@ -525,6 +556,16 @@ async fn start_listening(
         handle,
         _lock: lock,
     })
+}
+
+/// The watch on the marketing plans' Google Ads spend, started once recovery is done and running
+/// beside the ticks: a tick waits for a running session to end, and the spend is read every
+/// fifteen minutes whatever runs (spec 6.7).
+fn watching(
+    orchestrator: &Arc<Orchestrator>,
+) -> tokio::task::JoinHandle<Result<(), OrchestratorError>> {
+    let orchestrator = Arc::clone(orchestrator);
+    tokio::spawn(async move { orchestrator.watch_marketing_spend().await })
 }
 
 /// `factories`, the preview's told to the governor's door once its first answer of whether a
@@ -696,8 +737,34 @@ mod tests {
     use farik_runtime::connectors::{ConnectorSecrets, MemoryConnectorSecrets};
     use farik_store::git::fixtures::TempRepo;
 
-    use super::command_deps;
+    use farik_runtime::orchestrator::OrchestratorError;
+
+    use super::{command_deps, watch_failure};
     use crate::{CliIo, open_project, run_cli};
+
+    #[tokio::test]
+    async fn says_why_the_ad_spend_watch_ended_the_run() {
+        // Still watching, or ended without a fault: nothing to say.
+        assert_eq!(watch_failure(None), None);
+        assert_eq!(watch_failure(Some(Ok(Ok(())))), None);
+        // A fault it ended on, which stopped the orchestrator, is the run's end.
+        let refused = OrchestratorError::Refused {
+            reason: "marketing_event_not_recorded: no".to_string(),
+        };
+        assert_eq!(
+            watch_failure(Some(Ok(Err(refused)))),
+            Some(
+                "the ad spend watch stopped the run: refused: marketing_event_not_recorded: no"
+                    .to_string()
+            )
+        );
+        // And so is a panic in it.
+        let panicked = tokio::spawn(async { panic!("the watch broke") })
+            .await
+            .map(|()| Ok(()));
+        let said = watch_failure(Some(panicked)).expect("a panic is a fault");
+        assert!(said.starts_with("the ad spend watch failed: "), "{said}");
+    }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]

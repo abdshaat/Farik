@@ -76,6 +76,18 @@ pub struct Script {
     /// A `googleAds:search` waits this long before it answers, so that something else can happen
     /// while a call reads.
     pub search_delay: Option<std::time::Duration>,
+    /// The rows a `googleAds:search` of anything but a customer or a status answers with for a
+    /// customer (ten digits), in place of `rows`: each ad account has its own campaigns' cost.
+    pub customer_rows: BTreeMap<String, Vec<Value>>,
+    /// The status each campaign (a resource name) has at Google, as a status read answers it:
+    /// `ENABLED` for a campaign not named here, and no row at all for `MISSING`. A mutate that
+    /// sets a status changes it.
+    pub statuses: BTreeMap<String, String>,
+    /// Campaigns whose pause Google refuses, with the words it refuses in (a `400`).
+    pub refuse_pause: BTreeMap<String, String>,
+    /// Access tokens Google does not allow into any account: a request bearing one is a `403
+    /// PERMISSION_DENIED`, as a sign-in that does not reach the account is.
+    pub deny_tokens: Vec<String>,
 }
 
 impl Default for Script {
@@ -104,6 +116,10 @@ impl Default for Script {
             fail_mutate: None,
             mutate_delay: None,
             search_delay: None,
+            customer_rows: BTreeMap::new(),
+            statuses: BTreeMap::new(),
+            refuse_pause: BTreeMap::new(),
+            deny_tokens: Vec::new(),
         }
     }
 }
@@ -217,8 +233,8 @@ impl Fixture {
                     if let Some(delay) = delay {
                         tokio::time::sleep(delay).await;
                     }
-                    let script = rules.lock().expect("the script");
-                    answer(&script, &one, &next)
+                    let mut script = rules.lock().expect("the script");
+                    answer(&mut script, &one, &next)
                 }
             },
         );
@@ -255,7 +271,46 @@ impl Fixture {
     }
 }
 
-fn answer(script: &Script, seen: &Seen, next: &AtomicU64) -> Response<Body> {
+/// The campaigns a query's `IN ('…', '…')` names.
+fn named_in(query: &str) -> Vec<String> {
+    let Some((_, rest)) = query.split_once(" IN (") else {
+        return Vec::new();
+    };
+    let list = rest.split_once(')').map_or(rest, |(list, _)| list);
+    list.split(',')
+        .map(|name| name.trim().trim_matches('\'').to_string())
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// The campaign status changes a mutate asks for: a campaign and the status it is to have.
+fn status_changes(body: &Value) -> Vec<(String, String)> {
+    body["mutateOperations"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|operation| {
+            let update = &operation["campaignOperation"]["update"];
+            Some((
+                update["resourceName"].as_str()?.to_string(),
+                update["status"].as_str()?.to_string(),
+            ))
+        })
+        .collect()
+}
+
+fn answer(script: &mut Script, seen: &Seen, next: &AtomicU64) -> Response<Body> {
+    let bearer = seen
+        .headers
+        .get("authorization")
+        .and_then(|value| value.strip_prefix("Bearer "));
+    if bearer.is_some_and(|token| script.deny_tokens.iter().any(|denied| denied == token)) {
+        return error_answer(
+            403,
+            "PERMISSION_DENIED",
+            "The caller does not have permission",
+        );
+    }
     match &script.mode {
         Mode::Normal => {}
         Mode::LongError(length) => {
@@ -308,11 +363,42 @@ fn answer(script: &Script, seen: &Seen, next: &AtomicU64) -> Response<Body> {
                     .collect();
                 return json_answer(&json!({ "results": rows }));
             }
-            json_answer(&json!({ "results": script.rows }))
+            if query.starts_with("SELECT campaign.resource_name, campaign.status FROM campaign")
+                && !query.contains("metrics.")
+            {
+                let rows: Vec<Value> = named_in(query)
+                    .into_iter()
+                    .filter_map(|name| {
+                        let status = script
+                            .statuses
+                            .get(&name)
+                            .map_or("ENABLED", String::as_str)
+                            .to_string();
+                        (status != "MISSING").then(
+                            || json!({ "campaign": { "resourceName": name, "status": status } }),
+                        )
+                    })
+                    .collect();
+                return json_answer(&json!({ "results": rows }));
+            }
+            let customer = seen.customer().unwrap_or_default();
+            let rows = script.customer_rows.get(&customer).unwrap_or(&script.rows);
+            json_answer(&json!({ "results": rows }))
         }
         ("POST", "mutate") => {
             if let Some(status) = script.fail_mutate {
                 return error_answer(status, "INVALID_ARGUMENT", "the mutate failed");
+            }
+            let changes = status_changes(&seen.body);
+            for (campaign, status) in &changes {
+                if status == "PAUSED"
+                    && let Some(words) = script.refuse_pause.get(campaign)
+                {
+                    return error_answer(400, "INVALID_ARGUMENT", words);
+                }
+            }
+            for (campaign, status) in changes {
+                script.statuses.insert(campaign, status);
             }
             mutate_answer(&seen.customer().unwrap_or_default(), &seen.body, next)
         }

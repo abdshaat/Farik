@@ -5,11 +5,12 @@
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use farik_core::contract::TaskId;
 use farik_core::marketing::{
-    BudgetKind, CreatedCampaign, EndReason, PlanCampaign, PlanProposal, PlanRecord, PostChannel,
-    PostDetails, PostSlot, parse_amount,
+    Amount, BudgetKind, CapScope, CreatedCampaign, EndReason, PlanCampaign, PlanProposal,
+    PlanRecord, PostChannel, PostDetails, PostSlot, parse_amount,
 };
 use farik_protocol::event::{
-    EventBody, EventKind, FarikEvent, MarketingCampaignCreatedBodyBudgetKind,
+    EventBody, EventKind, FarikEvent, MarketingBudgetReachedBodyScope,
+    MarketingCampaignCreatedBodyBudgetKind, MarketingCampaignPausedBodyWhy,
     MarketingPlanEndedBodyWhy, MarketingPlanProposedBody, SocialPostMediaKind,
     SocialPostMissedBodyWhy, SocialPostScheduledBodyApprovedBy, SocialPostStoppedBodyBy,
 };
@@ -707,6 +708,155 @@ pub fn created_campaigns(log: &EventLog) -> Result<Vec<CreatedCampaign>, StoreEr
         .collect())
 }
 
+/// Why Farik paused a campaign it made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PausedWhy {
+    /// No active plan carries it.
+    PlanEnded,
+    /// A later read found it running after its cap.
+    BudgetReached,
+    /// The owner removed Google Ads.
+    ConnectionRemoved,
+}
+
+impl PausedWhy {
+    /// The wire's word for it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PlanEnded => "plan_ended",
+            Self::BudgetReached => "budget_reached",
+            Self::ConnectionRemoved => "connection_removed",
+        }
+    }
+}
+
+/// A budget of the active plan that was reached, as `marketing_budget.reached` says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BudgetReached {
+    /// The plan.
+    pub plan: String,
+    /// A campaign's budget or the plan's.
+    pub scope: CapScope,
+    /// The plan campaign's key, for a campaign's.
+    pub key: Option<String>,
+    /// What Google reported spent.
+    pub spent: Amount,
+    /// The budget it reached.
+    pub budget: Amount,
+    /// The plan's currency.
+    pub currency: String,
+    /// The campaigns Google accepted a pause for, or reported paused already.
+    pub paused: Vec<String>,
+    /// The first refusal's words, when a pause was refused.
+    pub failed: Option<String>,
+    /// When it was recorded.
+    pub at: DateTime<Utc>,
+}
+
+/// A campaign Farik paused on its own, as `marketing_campaign.paused` says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CampaignPaused {
+    /// The plan the campaign was made under.
+    pub plan: String,
+    /// Its plan campaign's key.
+    pub key: String,
+    /// Its resource name.
+    pub campaign: String,
+    /// Why.
+    pub why: PausedWhy,
+    /// When it was recorded.
+    pub at: DateTime<Utc>,
+}
+
+/// Every budget reached, oldest first. Only Farik records one: an event with an agent or a
+/// session on its envelope is not read.
+///
+/// # Errors
+///
+/// What the log refused, or `InvalidEvent` for an amount that cannot be read.
+pub fn budgets_reached(log: &EventLog) -> Result<Vec<BudgetReached>, StoreError> {
+    let events = log.read(&EventQuery {
+        kinds: vec![EventKind::MarketingBudgetReached],
+        ..EventQuery::default()
+    })?;
+    let mut reached = Vec::new();
+    for event in &events {
+        let ids = &event.envelope.ids;
+        let EventBody::MarketingBudgetReached(body) = &event.body else {
+            continue;
+        };
+        if ids.agent_id.is_some() || ids.session_id.is_some() {
+            continue;
+        }
+        let amount = |text: &str| {
+            parse_amount(text).ok_or_else(|| StoreError::InvalidEvent {
+                detail: format!(
+                    "event {} records a budget reached with an amount that cannot be read",
+                    event.envelope.seq
+                ),
+            })
+        };
+        reached.push(BudgetReached {
+            plan: body.plan.as_str().to_string(),
+            scope: match body.scope {
+                MarketingBudgetReachedBodyScope::Campaign => CapScope::Campaign,
+                MarketingBudgetReachedBodyScope::Plan => CapScope::Plan,
+            },
+            key: body.key.as_ref().map(|key| key.as_str().to_string()),
+            spent: amount(body.spent.as_str())?,
+            budget: amount(body.budget.as_str())?,
+            currency: body.currency.as_str().to_string(),
+            paused: body
+                .paused
+                .iter()
+                .map(|campaign| campaign.as_str().to_string())
+                .collect(),
+            failed: body.failed.as_ref().map(|words| words.as_str().to_string()),
+            at: event.envelope.recorded_at,
+        });
+    }
+    Ok(reached)
+}
+
+/// Every pause Farik made on its own, oldest first. An event with an agent or a session on its
+/// envelope is not read.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn campaigns_paused(log: &EventLog) -> Result<Vec<CampaignPaused>, StoreError> {
+    let events = log.read(&EventQuery {
+        kinds: vec![EventKind::MarketingCampaignPaused],
+        ..EventQuery::default()
+    })?;
+    Ok(events
+        .iter()
+        .filter_map(|event| {
+            let ids = &event.envelope.ids;
+            let EventBody::MarketingCampaignPaused(body) = &event.body else {
+                return None;
+            };
+            if ids.agent_id.is_some() || ids.session_id.is_some() {
+                return None;
+            }
+            Some(CampaignPaused {
+                plan: body.plan.as_str().to_string(),
+                key: body.key.as_str().to_string(),
+                campaign: body.campaign.as_str().to_string(),
+                why: match body.why {
+                    MarketingCampaignPausedBodyWhy::PlanEnded => PausedWhy::PlanEnded,
+                    MarketingCampaignPausedBodyWhy::BudgetReached => PausedWhy::BudgetReached,
+                    MarketingCampaignPausedBodyWhy::ConnectionRemoved => {
+                        PausedWhy::ConnectionRemoved
+                    }
+                },
+                at: event.envelope.recorded_at,
+            })
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -1389,5 +1539,92 @@ mod tests {
             ["2026-11-01", "2026-11-02"],
             "the UTC day it was made on"
         );
+    }
+
+    #[test]
+    fn the_store_folds_the_budgets_reached_and_the_pauses() {
+        use farik_core::marketing::CapScope;
+
+        use super::{PausedWhy, budgets_reached, campaigns_paused};
+
+        let log = a_log();
+        assert_eq!(budgets_reached(&log).expect("reads"), []);
+        assert_eq!(campaigns_paused(&log).expect("reads"), []);
+        append(&log, EventKind::MarketingBudgetReached, 9, |wire| {
+            wire["body"]["scope"] = json!("plan");
+            wire["body"].as_object_mut().expect("a body").remove("key");
+            wire["body"]["spent"] = json!("1000.00");
+            wire["body"]["budget"] = json!("1000.00");
+            wire["body"]["paused"] = json!([
+                "customers/1234567890/campaigns/11",
+                "customers/1234567890/campaigns/12"
+            ]);
+            wire["body"]["failed"] = json!("Google answered “quota”");
+        });
+        append(&log, EventKind::MarketingBudgetReached, 10, |_| {});
+        // Only Farik records one: an agent's, or a session's, is not read.
+        append(&log, EventKind::MarketingBudgetReached, 11, |wire| {
+            wire["agent_id"] = json!("kai");
+        });
+        append(&log, EventKind::MarketingCampaignPaused, 12, |wire| {
+            wire["body"]["why"] = json!("budget_reached");
+        });
+        append(&log, EventKind::MarketingCampaignPaused, 13, |wire| {
+            wire["session_id"] = json!("session-1");
+        });
+        append(&log, EventKind::MarketingCampaignPaused, 14, |wire| {
+            wire["body"]["why"] = json!("connection_removed");
+            wire["body"]["campaign"] = json!("customers/1234567890/campaigns/12");
+        });
+
+        let reached = budgets_reached(&log).expect("reads");
+        assert_eq!(reached.len(), 2, "the agent's is not Farik's");
+        assert_eq!(reached[0].scope, CapScope::Plan);
+        assert_eq!(reached[0].key, None);
+        assert_eq!(reached[0].spent, Amount(100_000));
+        assert_eq!(reached[0].budget, Amount(100_000));
+        assert_eq!(reached[0].currency, "USD");
+        assert_eq!(
+            reached[0].paused,
+            [
+                "customers/1234567890/campaigns/11",
+                "customers/1234567890/campaigns/12"
+            ]
+        );
+        assert_eq!(
+            reached[0].failed.as_deref(),
+            Some("Google answered “quota”")
+        );
+        assert_eq!(reached[0].plan, "MP-1");
+        assert_eq!(reached[0].at, at(9));
+        assert_eq!(reached[1].scope, CapScope::Campaign);
+        assert_eq!(reached[1].key.as_deref(), Some("search-launch"));
+        assert_eq!(reached[1].failed, None);
+
+        let paused = campaigns_paused(&log).expect("reads");
+        assert_eq!(
+            paused
+                .iter()
+                .map(|pause| (pause.why, pause.campaign.as_str(), pause.at))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    PausedWhy::BudgetReached,
+                    "customers/1234567890/campaigns/11",
+                    at(12)
+                ),
+                (
+                    PausedWhy::ConnectionRemoved,
+                    "customers/1234567890/campaigns/12",
+                    at(14)
+                ),
+            ],
+            "the session's is not Farik's"
+        );
+        assert_eq!(
+            (paused[0].plan.as_str(), paused[0].key.as_str()),
+            ("MP-1", "search-launch")
+        );
+        assert_eq!(PausedWhy::PlanEnded.as_str(), "plan_ended");
     }
 }

@@ -19,11 +19,12 @@ use farik_core::marketing::{
     AdsPlanView, AdsWrite, Amount, BudgetKind, CreatedCampaign, HeldAtGoogle, PlanProposal,
     PlanRecord, ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write, first_day,
 };
-use farik_core::team::{CustomServer, custom_server};
+use farik_core::team::{CustomServer, Team, custom_server};
 use farik_protocol::event::{
     EventBody, EventIds, MarketingCampaignCreatedBody, MarketingCampaignCreatedBodyBudgetKind,
 };
 use farik_store::marketing::{created_campaigns_on, marketing_plans};
+use farik_store::waiting::name_of;
 use serde_json::{Value, json};
 
 use super::hooks::append;
@@ -34,9 +35,9 @@ use crate::google_ads::{
     AdGroupInput, AdInput, BudgetInput, CUSTOMER_CURRENCY_QUERY, CampaignInput, GoogleAds,
     GoogleAdsError, KeywordsInput, NewCampaign, READ_TOOLS, Status, StatusInput, WRITE_TOOLS,
     ad_group_campaign_query, ad_group_operations, ad_operations, budget_operations,
-    campaign_operations, customer_of, dashed, held_by_campaign, keyword_ideas, keyword_operations,
+    campaign_operations, dashed, held_by_campaign, keyword_ideas, keyword_operations,
     list_accounts, negative_keyword_operations, report, resource_customer, spend_by_campaign,
-    spend_query, status_operations,
+    spend_query, status_operations, status_query,
 };
 use crate::tools::ToolDeps;
 
@@ -127,7 +128,12 @@ pub(crate) async fn ads_call(
         created,
         today,
     };
-    writing.run(tool, &arguments).await
+    let answer = writing.run(tool, &arguments).await;
+    if tool == "create_search_campaign" && answer.is_ok() {
+        // The spend watch waits for the first campaign: it has something to read now.
+        state.campaign_made().notify_one();
+    }
+    answer
 }
 
 /// The session's connector, the agent's entry and the tool, checked.
@@ -155,31 +161,14 @@ fn access_of(
         .files
         .read_team()
         .map_err(|error| format!("team_unreadable: {error}"))?;
-    let agent = team
+    if !team
         .agents
         .iter()
-        .find(|agent| agent.id.as_str() == held.agent_id)
-        .ok_or_else(not_in_session)?;
-    // A custom entry naming the same command, whatever its tags, is not the kit's and reaches
-    // nothing: only the kit's own entry is trusted to be Farik's server (ADR 0038).
-    let not_kit = || {
-        format!(
-            "google_ads_not_kit: {GOOGLE_ADS} is not exactly as the kit has it; connect it again \
-             from the agent's page"
-        )
-    };
-    let definition = agent
-        .mcp_servers
-        .iter()
-        .flatten()
-        .filter(|entry| entry.name.as_str() == GOOGLE_ADS)
-        .find_map(custom_server)
-        .ok_or_else(not_kit)?;
-    let kit =
-        (deps.kits)(Role::from(agent.role)).map_err(|error| format!("kit_unreadable: {error}"))?;
-    if !matches_kit(&kit, &definition) {
-        return Err(not_kit());
+        .any(|agent| agent.id.as_str() == held.agent_id)
+    {
+        return Err(not_in_session());
     }
+    let definition = kit_definition(deps, &team, &held.agent_id)?;
     let write = WRITE_TOOLS.contains(&tool);
     match connector.tools.get(tool) {
         None => {
@@ -216,6 +205,294 @@ fn access_of(
         at,
         write,
     })
+}
+
+/// The agent's `google-ads` entry, which must be exactly the kit's. A custom entry naming the same
+/// command, whatever its tags, is not the kit's and reaches nothing: only the kit's own entry is
+/// trusted to be Farik's server (ADR 0038).
+fn kit_definition(deps: &ToolDeps, team: &Team, agent_id: &str) -> Result<CustomServer, Refusal> {
+    let not_kit = || {
+        format!(
+            "google_ads_not_kit: {GOOGLE_ADS} is not exactly as the kit has it; connect it again \
+             from the agent's page"
+        )
+    };
+    let agent = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == agent_id)
+        .ok_or_else(not_kit)?;
+    let definition = agent
+        .mcp_servers
+        .iter()
+        .flatten()
+        .filter(|entry| entry.name.as_str() == GOOGLE_ADS)
+        .find_map(custom_server)
+        .ok_or_else(not_kit)?;
+    let kit =
+        (deps.kits)(Role::from(agent.role)).map_err(|error| format!("kit_unreadable: {error}"))?;
+    if !matches_kit(&kit, &definition) {
+        return Err(not_kit());
+    }
+    Ok(definition)
+}
+
+/// What Farik uses of an agent's Google Ads connection for a call it makes itself, with no session
+/// and so no ticket (step 08g's spend read and pause): the agent's `google-ads` entry, which must
+/// be exactly the kit's, and where its keys are kept. The refusal starts with its code;
+/// `google_ads_not_connected` is an agent with no entry at all.
+fn agent_access(
+    state: &Arc<DaemonState>,
+    deps: &ToolDeps,
+    agent_id: &str,
+) -> Result<Access, Refusal> {
+    let team = deps
+        .files
+        .read_team()
+        .map_err(|error| format!("team_unreadable: {error}"))?;
+    let connected = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == agent_id)
+        .is_some_and(|agent| {
+            agent
+                .mcp_servers
+                .iter()
+                .flatten()
+                .any(|entry| entry.name.as_str() == GOOGLE_ADS)
+        });
+    if !connected {
+        return Err(format!(
+            "google_ads_not_connected: {agent_id} has {GOOGLE_ADS} connected on no entry"
+        ));
+    }
+    let definition = kit_definition(deps, &team, agent_id)?;
+    let at = state
+        .secret_at(deps.files.root(), agent_id, GOOGLE_ADS)
+        .map_err(|error| format!("secret_store_unavailable: {error}"))?;
+    Ok(Access {
+        definition,
+        at,
+        write: false,
+    })
+}
+
+/// Why no sign-in could be used, when no agent has one connected at all.
+const NOT_CONNECTED: &str = "no Marketing Specialist on the team has Google Ads connected";
+
+/// The most characters of a reason the owner reads.
+const REASON_CAP: usize = 300;
+
+/// `words` cut at [`REASON_CAP`] characters.
+pub(crate) fn cut_reason(words: &str) -> String {
+    words.chars().take(REASON_CAP).collect()
+}
+
+/// Google's answer or fault in the owner's words: Google's own message, quoted, after "Google
+/// answered", or Farik's sentence when Google gave none.
+fn google_words(error: &GoogleAdsError) -> String {
+    match error {
+        GoogleAdsError::Google(words) | GoogleAdsError::NotAllowed(words) => {
+            // The variant's sentence quotes Google's message in “ ”; the owner reads the message.
+            match (words.find('“'), words.rfind('”')) {
+                (Some(start), Some(end)) if start < end => {
+                    format!("Google answered {}", &words[start..end + '”'.len_utf8()])
+                }
+                _ => words.clone(),
+            }
+        }
+        GoogleAdsError::Failed(words) | GoogleAdsError::Input(words) => words.clone(),
+    }
+}
+
+/// Why an agent's sign-in could not be used, in the owner's words: `refusal` is what
+/// `agent_access` or `grant_of` said, `name` the agent's.
+fn unusable(name: &str, refusal: &str) -> String {
+    let (code, words) = refusal.split_once(": ").unwrap_or((refusal, ""));
+    match code {
+        "google_ads_not_connected" => NOT_CONNECTED.to_string(),
+        "sign_in_again" => {
+            format!("{name}'s sign-in to Google has ended; sign {name} in again on {name}'s page")
+        }
+        "google_ads_not_kit" | "connector_not_confirmed" => format!(
+            "{name}'s Google Ads is not as it was connected on this computer; connect it again on \
+             {name}'s page"
+        ),
+        "sign_in_failed" => format!("{name}'s sign-in to Google could not be renewed: {words}"),
+        _ => refusal.to_string(),
+    }
+}
+
+/// The reason to give when no agent could read: the last that is more than "none is connected",
+/// else that.
+fn last_reason(reasons: &[String]) -> String {
+    let reason = reasons
+        .iter()
+        .rev()
+        .find(|reason| reason.as_str() != NOT_CONNECTED)
+        .map_or(NOT_CONNECTED, String::as_str);
+    cut_reason(reason)
+}
+
+/// One `Search` of `query` in `account`, made with the grant of the first of `agents` that has
+/// one that works: an agent is passed over when its grant cannot be had (no entry, not the kit's,
+/// a sign-in that has ended, is not confirmed or cannot be renewed) or when Google answers that
+/// the sign-in does not reach the account. Any other answer of Google's ends the read, since
+/// another sign-in meets the same and spends more of the quota. The rows, and the token that
+/// worked, which the pause that follows a status read uses.
+async fn search_as_an_agent(
+    state: &Arc<DaemonState>,
+    deps: &ToolDeps,
+    ads: &GoogleAds,
+    agents: &[String],
+    (account, query): (&str, &str),
+) -> Result<(Vec<Value>, Secret), String> {
+    let mut reasons = Vec::new();
+    for agent in agents {
+        let name = || {
+            deps.files
+                .read_team()
+                .map_or_else(|_| agent.clone(), |team| name_of(&team, agent))
+        };
+        let access = match agent_access(state, deps, agent) {
+            Ok(access) => access,
+            Err(refusal) => {
+                reasons.push(unusable(&name(), &refusal));
+                continue;
+            }
+        };
+        let token = match grant_of(state, &access).await {
+            Ok(token) => token,
+            Err(refusal) => {
+                reasons.push(unusable(&name(), &refusal));
+                continue;
+            }
+        };
+        match ads.search(&token, account, query).await {
+            Ok(rows) => return Ok((rows, token)),
+            Err(error @ GoogleAdsError::NotAllowed(_)) => {
+                reasons.push(format!(
+                    "{}'s sign-in to Google does not reach the ad account: {}",
+                    name(),
+                    google_words(&error)
+                ));
+            }
+            Err(error) => return Err(cut_reason(&google_words(&error))),
+        }
+    }
+    Err(last_reason(&reasons))
+}
+
+/// The campaigns in `names`, grouped by the ten digits of their ad account.
+fn by_customer<'a>(names: impl Iterator<Item = &'a String>) -> BTreeMap<String, Vec<String>> {
+    let mut grouped: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for name in names {
+        if let Some(customer) = resource_customer(name, "campaigns") {
+            grouped.entry(customer).or_default().push(name.clone());
+        }
+    }
+    grouped
+}
+
+/// What each of `campaigns` has cost, in micros, from `from` to `to`: one `Search` of `spend_query`
+/// for each ad account they are in, made with the first of `agents` whose sign-in reaches it
+/// (`search_as_an_agent`).
+///
+/// # Errors
+///
+/// The reason no read could be made, in the owner's words and cut at 300 characters.
+pub(crate) async fn read_spend(
+    state: &Arc<DaemonState>,
+    agents: &[String],
+    campaigns: &[CreatedCampaign],
+    from: NaiveDate,
+    to: NaiveDate,
+) -> Result<BTreeMap<String, u64>, String> {
+    let deps = state
+        .deps()
+        .ok_or_else(|| format!("no_project: {}", super::NO_PROJECT))?
+        .clone();
+    let ads = GoogleAds::new(state.google_ads_api()).map_err(|error| google_words(&error))?;
+    let mut cost = BTreeMap::new();
+    for (customer, names) in by_customer(campaigns.iter().map(|made| &made.campaign)) {
+        let query = spend_query(&names, from, to).map_err(|error| google_words(&error))?;
+        let (rows, _) =
+            search_as_an_agent(state, &deps, &ads, agents, (&dashed(&customer), &query)).await?;
+        cost.extend(spend_by_campaign(&rows));
+    }
+    Ok(cost)
+}
+
+/// Pauses `campaigns` at Google, each answered `Ok` when it is paused, and `Err` with the reason
+/// when it is not: one `Search` of `status_query` for each ad account, made as `read_spend`'s
+/// are, then one `googleAds:mutate` of `PAUSED` for each campaign Google reports running, or does
+/// not report at all, each on its own, since one mutate is atomic. A campaign reported `PAUSED`
+/// or `REMOVED` counts as paused, with no call. Farik's own fixed act, which no hook judges and
+/// no plan covers: the caller has decided that these stop.
+pub(crate) async fn pause_campaigns(
+    state: &Arc<DaemonState>,
+    agents: &[String],
+    campaigns: &[String],
+) -> Vec<(String, Result<(), String>)> {
+    let mut answers: BTreeMap<String, Result<(), String>> = BTreeMap::new();
+    let Some(deps) = state.deps().cloned() else {
+        let why = format!("no_project: {}", super::NO_PROJECT);
+        return campaigns
+            .iter()
+            .map(|campaign| (campaign.clone(), Err(why.clone())))
+            .collect();
+    };
+    let ads = match GoogleAds::new(state.google_ads_api()) {
+        Ok(ads) => ads,
+        Err(error) => {
+            let why = google_words(&error);
+            return campaigns
+                .iter()
+                .map(|campaign| (campaign.clone(), Err(why.clone())))
+                .collect();
+        }
+    };
+    for (customer, names) in by_customer(campaigns.iter()) {
+        let account = dashed(&customer);
+        let read = match status_query(&names) {
+            Ok(query) => search_as_an_agent(state, &deps, &ads, agents, (&account, &query)).await,
+            Err(error) => Err(google_words(&error)),
+        };
+        let (rows, token) = match read {
+            Ok(read) => read,
+            Err(why) => {
+                for name in names {
+                    answers.insert(name, Err(why.clone()));
+                }
+                continue;
+            }
+        };
+        for name in names {
+            let status = rows
+                .iter()
+                .find(|row| row["campaign"]["resourceName"].as_str() == Some(name.as_str()))
+                .and_then(|row| row["campaign"]["status"].as_str());
+            let answer = if matches!(status, Some("PAUSED" | "REMOVED")) {
+                Ok(())
+            } else {
+                ads.mutate(&token, &account, status_operations(&name, Status::Paused))
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| cut_reason(&google_words(&error)))
+            };
+            answers.insert(name, answer);
+        }
+    }
+    campaigns
+        .iter()
+        .map(|campaign| {
+            let answer = answers
+                .get(campaign)
+                .cloned()
+                .unwrap_or_else(|| Err(format!("{campaign} is not a campaign Farik can pause")));
+            (campaign.clone(), answer)
+        })
+        .collect()
 }
 
 /// The agent's access token, its sign-in refreshed first when it will not last the call.
@@ -258,6 +535,44 @@ struct ActivePlan {
     approved_on: NaiveDate,
 }
 
+/// The lineage of the plan `id`: itself and every plan it replaces, `replaces` followed through
+/// the whole chain.
+pub(crate) fn lineage_of(plans: &[farik_store::marketing::MarketingPlan], id: &str) -> Vec<String> {
+    let replaces = |id: &str| {
+        plans
+            .iter()
+            .find(|plan| plan.record.id == id)
+            .and_then(|plan| plan.proposal.replaces.clone())
+    };
+    let mut lineage = vec![id.to_string()];
+    let mut next = replaces(id);
+    while let Some(id) = next {
+        if lineage.contains(&id) {
+            break;
+        }
+        next = replaces(&id);
+        lineage.push(id);
+    }
+    lineage
+}
+
+/// What each plan campaign's key has spent, in hundredths rounded up from the micros each
+/// campaign of `campaigns` cost.
+pub(crate) fn spent_by_key<'a>(
+    campaigns: impl Iterator<Item = &'a CreatedCampaign>,
+    micros: &BTreeMap<String, u64>,
+) -> BTreeMap<String, Amount> {
+    let mut spent: BTreeMap<String, u64> = BTreeMap::new();
+    for made in campaigns {
+        *spent.entry(made.key.clone()).or_insert(0) +=
+            micros.get(&made.campaign).copied().unwrap_or(0);
+    }
+    spent
+        .into_iter()
+        .map(|(key, cost)| (key, Amount(cost.div_ceil(10_000))))
+        .collect()
+}
+
 /// The plan active on `today`, from the log, or the refusal that none is.
 fn read_plan(deps: &ToolDeps, today: NaiveDate) -> Result<ActivePlan, Refusal> {
     let plans = marketing_plans(&deps.log)
@@ -275,15 +590,7 @@ fn read_plan(deps: &ToolDeps, today: NaiveDate) -> Result<ActivePlan, Refusal> {
             .find(|plan| plan.record.id == id)
             .map(|plan| plan.proposal.clone())
     };
-    let mut lineage = vec![active.id.clone()];
-    let mut next = proposal(&active.id).and_then(|plan| plan.replaces);
-    while let Some(id) = next {
-        if lineage.contains(&id) {
-            break;
-        }
-        next = proposal(&id).and_then(|plan| plan.replaces);
-        lineage.push(id);
-    }
+    let lineage = lineage_of(&plans, &active.id);
     let approved_on = plans
         .iter()
         .find(|plan| plan.record.id == active.id)
@@ -437,43 +744,41 @@ impl Writing<'_> {
     }
 
     /// What each plan campaign's key has spent so far, in all the campaigns of the lineage in
-    /// `account`: one `Search` of their cost from the day before the first was made to tomorrow,
-    /// rounded up from micros to hundredths; and what budget and end Google holds for each
-    /// campaign, which the same rows say.
-    async fn spend(&self, account: &str) -> Result<Spend, Refusal> {
-        let customer = customer_of(account).map_err(said)?;
+    /// every ad account they are in: one `Search` of their cost for each account, over the days
+    /// from the day before the first was made to tomorrow, rounded up from micros to hundredths;
+    /// and what budget and end Google holds for each campaign, which the same rows say. The watch
+    /// of step 08g reads the same, so that enabling a campaign and the cap count one spend.
+    async fn spend(&self) -> Result<Spend, Refusal> {
         let ours: Vec<&(CreatedCampaign, NaiveDate)> = self
             .created
             .iter()
-            .filter(|(made, _)| {
-                self.plan.lineage.contains(&made.plan)
-                    && resource_customer(&made.campaign, "campaigns").as_deref() == Some(&customer)
-            })
+            .filter(|(made, _)| self.plan.lineage.contains(&made.plan))
             .collect();
         let Some(first) = ours.iter().map(|(_, day)| *day).min() else {
             return Ok(Spend::default());
         };
-        let names: Vec<String> = ours.iter().map(|(made, _)| made.campaign.clone()).collect();
         let unread = |why: GoogleAdsError| {
             format!(
                 "not_in_marketing_plan: Farik could not read what the plan's ads have spent, so it \
                  cannot check the budget: {why}"
             )
         };
-        let query = spend_query(&names, first - Days::days(1), self.today + Days::days(1))
-            .map_err(unread)?;
-        let rows = self
-            .ads
-            .search(self.token, account, &query)
-            .await
-            .map_err(unread)?;
-        let micros = spend_by_campaign(&rows);
-        let mut spent: BTreeMap<String, u64> = BTreeMap::new();
+        let mut micros: BTreeMap<String, u64> = BTreeMap::new();
+        let mut rows_held = BTreeMap::new();
+        for (customer, names) in by_customer(ours.iter().map(|(made, _)| &made.campaign)) {
+            let query = spend_query(&names, first - Days::days(1), self.today + Days::days(1))
+                .map_err(unread)?;
+            let rows = self
+                .ads
+                .search(self.token, &dashed(&customer), &query)
+                .await
+                .map_err(unread)?;
+            micros.extend(spend_by_campaign(&rows));
+            rows_held.extend(held_by_campaign(&rows));
+        }
+        let by_key = spent_by_key(ours.iter().map(|(made, _)| made), &micros);
         let mut held = BTreeMap::new();
-        let rows_held = held_by_campaign(&rows);
         for (made, _) in ours {
-            *spent.entry(made.key.clone()).or_insert(0) +=
-                micros.get(&made.campaign).copied().unwrap_or(0);
             // A total budget's amount is its total, a daily one's its daily amount.
             let row = rows_held.get(&made.campaign).copied().unwrap_or_default();
             let amount = match made.kind {
@@ -489,13 +794,7 @@ impl Writing<'_> {
                 },
             );
         }
-        Ok(Spend {
-            by_key: spent
-                .into_iter()
-                .map(|(key, cost)| (key, Amount(cost.div_ceil(10_000))))
-                .collect(),
-            held,
-        })
+        Ok(Spend { by_key, held })
     }
 
     /// Refuses unless the ad account bills in the plan's currency. The plan's figures are in it,
@@ -662,7 +961,7 @@ impl Writing<'_> {
             )));
         }
         self.bills_in_the_plans_currency(&account).await?;
-        let spent = self.spend(&account).await?;
+        let spent = self.spend().await?;
         self.covers(
             &AdsWrite::Budget {
                 account: account.clone(),
@@ -687,7 +986,7 @@ impl Writing<'_> {
         match input.status {
             Status::Enabled => {
                 self.bills_in_the_plans_currency(&account).await?;
-                let spent = self.spend(&account).await?;
+                let spent = self.spend().await?;
                 let held = spent.held.get(&input.campaign).copied().unwrap_or_default();
                 self.covers(
                     &AdsWrite::Enable {
@@ -729,250 +1028,24 @@ fn account_of(resource: &str) -> Result<String, Refusal> {
 }
 
 #[cfg(test)]
+pub(crate) mod fixtures;
+
+#[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::time::Duration;
 
-    use farik_core::budget::DEFAULT_SESSION_LIMITS;
-    use farik_core::contract::Role;
-    use farik_core::governor::permissions::{PermissionTier, SessionConnector};
-    use farik_core::team::CustomServer;
+    use farik_core::governor::permissions::SessionConnector;
     use farik_protocol::event::{EventBody, EventKind};
     use serde_json::{Value, json};
 
+    use super::fixtures::{ACCOUNT, Ads, SESSION, code, create, register};
     use super::{GOOGLE_ADS, ads_call};
-    use crate::connectors::{ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt};
+    use crate::connectors::ConnectorSecrets as _;
     use crate::daemon::own_calls::fixtures::keep_a_sign_in;
-    use crate::daemon::{DaemonState, SessionRegistration, plan_tools_of};
+    use crate::daemon::plan_tools_of;
     use crate::google_ads::WRITE_TOOLS;
-    use crate::google_ads_fixture::{Fixture as Google, Seen};
-    use crate::oauth_fixture::Fixture as OAuth;
-    use crate::orchestrator::fixtures::Harness;
-    use crate::session::SessionPurpose;
-    use crate::tools::fixtures::with_the_marketing_specialist;
-
-    const ACCOUNT: &str = "123-456-7890";
-    const SESSION: &str = "session-ads";
-
-    /// Kai's kit: Google Ads as `farik connector google-ads`, signing in, its three reads
-    /// `network` and its seven writes `external_effect` marked as approved by the plan.
-    fn ads_kit() -> farik_roles::Kit {
-        let mut tools = serde_json::Map::new();
-        for read in crate::google_ads::READ_TOOLS {
-            tools.insert(read.to_string(), json!("network"));
-        }
-        for write in WRITE_TOOLS {
-            tools.insert(write.to_string(), json!("external_effect"));
-        }
-        let kit = json!({
-            "role": "marketing_specialist", "skills": [],
-            "connectors": [{
-                "name": GOOGLE_ADS, "transport": "stdio", "command": "farik",
-                "args": ["connector", "google-ads"],
-                "oauth": { "scopes": ["https://www.googleapis.com/auth/adwords"] },
-                "title": "Google Ads", "about": "Shows your ads on Google.",
-                "why": "To run the ads in your plan.", "setup": "Sign in with Google.",
-                "tools": tools, "plan_approved": WRITE_TOOLS
-            }]
-        });
-        farik_roles::parse_fixture_kit(Role::MarketingSpecialist, &kit.to_string(), &[], &[])
-            .expect("the fixture kit loads")
-    }
-
-    /// Registers Kai's session, given `connector`, and gives its Google Ads server a ticket.
-    fn register(harness: &Harness, connector: SessionConnector) -> String {
-        harness.daemon.register_session(SessionRegistration {
-            session_id: SESSION.to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
-            agent_id: "kai".to_string(),
-            task_id: Some("FRK-1".parse().expect("a task id")),
-            purpose: SessionPurpose::Implement,
-            in_reply_to: None,
-            thread: None,
-            skills: Vec::new(),
-            skills_root: None,
-            cwd: harness.project.repo.path.clone(),
-            executor: None,
-            limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
-            tiers: vec![PermissionTier::Read],
-            connectors: vec![connector],
-            preview: None,
-        });
-        harness
-            .daemon
-            .issue_ticket(SESSION, GOOGLE_ADS)
-            .expect("a ticket")
-            .expect("a live session")
-    }
-
-    /// Kai, connected to Google Ads as the kit has it and signed in, a session of Kai's holding
-    /// the connector and its ticket, and Google Ads' API as a fixture.
-    struct Ads {
-        harness: Harness,
-        google: Google,
-        oauth: OAuth,
-        store: Arc<MemoryConnectorSecrets>,
-        server: CustomServer,
-        at: SecretAt,
-        kit: farik_roles::Kit,
-        grant: crate::sign_in::OAuthGrant,
-        ticket: String,
-    }
-
-    impl Ads {
-        async fn new(name: &str) -> Self {
-            Self::with(name, |_, _| {}).await
-        }
-
-        /// As `new`, with `change` made to the team's wire of Kai's entry and to the tags the
-        /// session is given.
-        async fn with(name: &str, change: impl FnOnce(&mut Value, &mut CustomServer)) -> Self {
-            let google = Google::start().await;
-            let oauth = OAuth::start().await;
-            let harness = Harness::new(name, with_the_marketing_specialist);
-            assert!(harness.daemon.set_google_ads_api(google.address.clone()));
-            let kit = ads_kit();
-            harness.project.set_kit(kit.clone());
-            let files = &harness.project.deps.files;
-            let team = files.read_team().expect("the team");
-            let (entry, mut server) =
-                crate::daemon::kit_entry(&kit, &team, "kai", GOOGLE_ADS, &BTreeMap::new())
-                    .expect("the kit's service is kai's");
-            let mut entry = entry;
-            change(&mut entry, &mut server);
-            let team = crate::daemon::with_server(&team, "kai", GOOGLE_ADS, Some(&entry))
-                .expect("the entry is the team's");
-            files.write_team(&team).expect("the team is written");
-            let store = Arc::new(MemoryConnectorSecrets::default());
-            assert!(
-                harness
-                    .daemon
-                    .set_connector_secrets(Arc::clone(&store) as _)
-            );
-            let at = harness
-                .daemon
-                .secret_at(files.root(), "kai", GOOGLE_ADS)
-                .expect("an address");
-            let custom = farik_core::team::custom_server(
-                &serde_json::from_value(entry).expect("a wire entry"),
-            )
-            .expect("a custom server");
-            let grant = keep_a_sign_in(&store, (&custom, &at), &oauth, chrono::Duration::hours(1));
-            let ticket = register(
-                &harness,
-                SessionConnector {
-                    server: GOOGLE_ADS.to_string(),
-                    origin: None,
-                    tools: server.tools.clone(),
-                    allowances: BTreeMap::new(),
-                    plan_tools: plan_tools_of(&kit, &server),
-                },
-            );
-            Self {
-                harness,
-                google,
-                oauth,
-                store,
-                server: custom,
-                at,
-                kit,
-                grant,
-                ticket,
-            }
-        }
-
-        fn state(&self) -> &Arc<DaemonState> {
-            &self.harness.daemon
-        }
-
-        async fn call(&self, tool: &str, arguments: Value) -> Result<Value, String> {
-            ads_call(self.state(), &self.ticket, tool, arguments).await
-        }
-
-        /// MP-`n`, proposed by Kai and approved by the owner, for the day of the fixture clock,
-        /// 2026-09-22: `search-launch` of 500.00 to 2026-10-22 (a total budget, from two days
-        /// ahead), and `search-long` of 400.00 to 2027-01-20 (a daily one), out of 1000.00 for
-        /// Google Ads.
-        fn plan(&self, plan: &str, replaces: Option<&str>) {
-            self.plan_with(plan, replaces, |_| {});
-        }
-
-        /// As `plan`, with `change` made to the proposal's wire.
-        fn plan_with(&self, plan: &str, replaces: Option<&str>, change: impl FnOnce(&mut Value)) {
-            self.plan_approved_at(plan, replaces, change, crate::tools::fixtures::at());
-        }
-
-        /// As `plan_with`, the owner having approved it at `approved_at`.
-        fn plan_approved_at(
-            &self,
-            plan: &str,
-            replaces: Option<&str>,
-            change: impl FnOnce(&mut Value),
-            approved_at: chrono::DateTime<chrono::Utc>,
-        ) {
-            let mut body =
-                farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
-            body["plan"] = json!(plan);
-            body["starts_on"] = json!("2026-09-20");
-            body["ends_on"] = json!("2027-01-31");
-            body["budget"] = json!({ "total": "1000.00", "google_ads": "1000.00" });
-            body["posts"] = json!([]);
-            body["google_ads_account"] = json!(ACCOUNT);
-            if let Some(replaces) = replaces {
-                body["replaces"] = json!(replaces);
-            }
-            let campaign = |key: &str, budget: &str, ends_on: &str| {
-                json!({
-                    "key": key, "channel": "google_ads", "name": key, "goal": "Sales",
-                    "budget": budget, "starts_on": "2026-09-22", "ends_on": ends_on
-                })
-            };
-            body["campaigns"] = json!([
-                campaign("search-launch", "500.00", "2026-10-22"),
-                campaign("search-long", "400.00", "2027-01-20"),
-            ]);
-            change(&mut body);
-            self.harness.project.record_by(
-                Some("kai"),
-                crate::tools::fixtures::at(),
-                "FRK-1",
-                "marketing_plan.proposed",
-                &body,
-            );
-            self.harness.project.record_by(
-                None,
-                approved_at,
-                "FRK-1",
-                "marketing_plan.approved",
-                &json!({ "plan": plan, "note": "" }),
-            );
-        }
-
-        fn made(&self) -> Vec<farik_protocol::event::FarikEvent> {
-            self.harness
-                .project
-                .events(&[EventKind::MarketingCampaignCreated])
-        }
-
-        fn mutates(&self) -> Vec<Seen> {
-            self.google.requests_of("mutate")
-        }
-    }
-
-    fn create(key: &str) -> Value {
-        json!({
-            "account": ACCOUNT, "plan_campaign": key, "name": "Launch",
-            "bidding": "maximize_clicks", "max_cpc": "1.50",
-            "locations": [2840], "languages": [1000]
-        })
-    }
-
-    /// The refusal's code, before its colon.
-    fn code(refusal: &str) -> &str {
-        refusal.split(':').next().unwrap_or(refusal)
-    }
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
@@ -1395,6 +1468,130 @@ mod tests {
         assert_eq!(
             sent[sent.len() - 1].body["mutateOperations"][0]["campaignOperation"]["update"]["status"],
             json!("PAUSED")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_enable_after_the_cap_is_refused() {
+        let ads = Ads::new("ads-enable-after-cap").await;
+        ads.plan("MP-1", None);
+        let campaign = campaign_of(
+            &ads.call("create_search_campaign", create("search-launch"))
+                .await
+                .expect("made"),
+        );
+        // The read spend has reached the campaign's 500.00: nothing enables it, as nothing in the
+        // plan does, whatever the watch has or has not paused.
+        ads.google.script(|script| {
+            script.rows = vec![json!({
+                "campaign": {
+                    "resourceName": campaign,
+                    "startDateTime": "2026-09-24 00:00:00",
+                    "endDateTime": "2026-10-22 23:59:59"
+                },
+                "campaignBudget": { "totalAmountMicros": "500000000" },
+                "metrics": { "costMicros": "500000000" }
+            })];
+        });
+
+        let refused = ads
+            .call(
+                "set_campaign_status",
+                json!({ "campaign": campaign, "status": "enabled" }),
+            )
+            .await
+            .expect_err("at its budget");
+
+        assert!(refused.starts_with("not_in_marketing_plan: "), "{refused}");
+        assert!(
+            refused.contains("has spent 500.00 of its 500.00"),
+            "{refused}"
+        );
+        assert_eq!(ads.mutates().len(), 1, "only the create was sent");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "two plans, two accounts and two enabling calls, side by side"
+    )]
+    async fn sums_the_spend_of_every_ad_account() {
+        use super::super::ads_calls::fixtures::{campaign_name, spend_row};
+
+        const A: &str = "1234567890";
+        const B: &str = "2345678901";
+        let ads = Ads::new("ads-two-accounts").await;
+        // Both ad accounts bill in the plan's dollars.
+        ads.google.script(|script| {
+            for (_, fields) in &mut script.customers {
+                fields["currencyCode"] = json!("USD");
+            }
+        });
+        // MP-1 made `search-launch` in the first account; MP-2 replaces it, drops that key, and
+        // runs in the second, where it made `search-long`.
+        ads.plan("MP-1", None);
+        ads.made_campaign(("MP-1", "search-launch"), (A, 11), ("total", "500.00"));
+        ads.plan_with("MP-2", Some("MP-1"), |body| {
+            body["google_ads_account"] = json!("234-567-8901");
+            body["campaigns"] = json!([{
+                "key": "search-long", "channel": "google_ads", "name": "search-long",
+                "goal": "Sales", "budget": "800.00",
+                "starts_on": "2026-09-22", "ends_on": "2027-01-20"
+            }]);
+        });
+        ads.made_campaign(("MP-2", "search-long"), (B, 21), ("daily", "3.36"));
+        let held = Some(("2026-09-24", "2027-01-20", "3360000"));
+        let rows = |first: u64, second: u64| {
+            ads.google.script(|script| {
+                script
+                    .customer_rows
+                    .insert(A.to_string(), vec![spend_row((A, 11), first, None)]);
+                script
+                    .customer_rows
+                    .insert(B.to_string(), vec![spend_row((B, 21), second, held)]);
+            });
+        };
+        let enable = || {
+            ads.call(
+                "set_campaign_status",
+                json!({ "campaign": campaign_name(B, 21), "status": "enabled" }),
+            )
+        };
+
+        // 600.00 in the first account and 300.00 in the second: 900.00 of the plan's 1000.00,
+        // though neither account's own sum is anywhere near it.
+        rows(600_000_000, 300_000_000);
+        enable().await.expect("under the plan's budget");
+        let queries: Vec<String> = ads
+            .google
+            .requests_of("search")
+            .iter()
+            .map(|seen| seen.body["query"].as_str().unwrap_or("").to_string())
+            .filter(|query| query.contains("metrics.cost_micros"))
+            .collect();
+        let window = |campaign: String| {
+            crate::google_ads::spend_query(
+                &[campaign],
+                "2026-09-21".parse().expect("a date"),
+                "2026-09-23".parse().expect("a date"),
+            )
+            .expect("a query")
+        };
+        assert_eq!(
+            queries,
+            [window(campaign_name(A, 11)), window(campaign_name(B, 21))],
+            "one read of each account, over the same days"
+        );
+
+        // 700.00 and 300.00 make the plan's 1000.00: the second account's campaign is refused.
+        rows(700_000_000, 300_000_000);
+        let refused = enable().await.expect_err("at the plan's budget");
+        assert!(refused.starts_with("not_in_marketing_plan: "), "{refused}");
+        assert!(
+            refused.contains("the plan's Google Ads spend is 1000.00 of its 1000.00"),
+            "{refused}"
         );
     }
 

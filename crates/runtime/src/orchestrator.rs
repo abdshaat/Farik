@@ -44,6 +44,7 @@ mod recover;
 mod requests;
 mod rules;
 mod session;
+mod spend;
 mod verify;
 
 pub use crate::session::TRIAGE_MODEL;

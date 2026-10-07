@@ -23,12 +23,13 @@ pub use crate::generated::event::{
     DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody, DriftDetectedBody,
     DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
     EscalationResolvedBody, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer,
-    MarketingCampaignCreatedBody, MarketingCampaignCreatedBodyBudgetKind,
-    MarketingPlanApprovedBody, MarketingPlanBudget, MarketingPlanCampaign,
-    MarketingPlanCampaignChannel, MarketingPlanEndedBody, MarketingPlanEndedBodyWhy,
-    MarketingPlanPost, MarketingPlanPostChannel, MarketingPlanProposedBody,
-    MarketingPlanReturnedBody, MemoryWrittenBody, MessagePostedBody, NoteWrittenBody,
-    NoteWrittenBodyKind, PageCheckedBody, PreviewPreparedBody, PreviewStartedBody,
+    MarketingBudgetReachedBody, MarketingBudgetReachedBodyScope, MarketingCampaignCreatedBody,
+    MarketingCampaignCreatedBodyBudgetKind, MarketingCampaignPausedBody,
+    MarketingCampaignPausedBodyWhy, MarketingPlanApprovedBody, MarketingPlanBudget,
+    MarketingPlanCampaign, MarketingPlanCampaignChannel, MarketingPlanEndedBody,
+    MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
+    MarketingPlanProposedBody, MarketingPlanReturnedBody, MemoryWrittenBody, MessagePostedBody,
+    NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody, PreviewPreparedBody, PreviewStartedBody,
     ProductDocWrittenBody, ProjectScannedBody, ProposedRequest, PullRequestOpenedBody,
     QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody, RequestTriagedBody,
     RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody, SessionEndedBody,
@@ -186,6 +187,8 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::SocialPostMissed => "socialPostMissedBody",
         EventKind::SocialPostFailed => "socialPostFailedBody",
         EventKind::MarketingCampaignCreated => "marketingCampaignCreatedBody",
+        EventKind::MarketingBudgetReached => "marketingBudgetReachedBody",
+        EventKind::MarketingCampaignPaused => "marketingCampaignPausedBody",
         EventKind::SiteRequested => "siteRequestedBody",
         EventKind::SiteApproved | EventKind::SiteDeclined | EventKind::SiteRemoved => {
             "siteDecisionBody"
@@ -335,6 +338,8 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::SocialPostMissed(_)
         | EventBody::SocialPostFailed(_)
         | EventBody::MarketingCampaignCreated(_)
+        | EventBody::MarketingBudgetReached(_)
+        | EventBody::MarketingCampaignPaused(_)
         | EventBody::SiteRequested(_)
         | EventBody::SiteApproved(_)
         | EventBody::SiteDeclined(_)
@@ -344,7 +349,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 76] = [
+pub const EVERY_KIND: [EventKind; 78] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -417,6 +422,8 @@ pub const EVERY_KIND: [EventKind; 76] = [
     EventKind::SocialPostMissed,
     EventKind::SocialPostFailed,
     EventKind::MarketingCampaignCreated,
+    EventKind::MarketingBudgetReached,
+    EventKind::MarketingCampaignPaused,
     EventKind::SiteRequested,
     EventKind::SiteApproved,
     EventKind::SiteDeclined,
@@ -677,6 +684,12 @@ pub enum EventBody {
     /// Farik made a Google Ads campaign, paused, for a plan campaign of the active plan.
     #[serde(rename = "marketing_campaign.created")]
     MarketingCampaignCreated(MarketingCampaignCreatedBody),
+    /// A budget of the active marketing plan was reached, and Farik paused the campaigns itself.
+    #[serde(rename = "marketing_budget.reached")]
+    MarketingBudgetReached(MarketingBudgetReachedBody),
+    /// Farik paused a campaign it made, on its own.
+    #[serde(rename = "marketing_campaign.paused")]
+    MarketingCampaignPaused(MarketingCampaignPausedBody),
     /// The Procurement Specialist asked to read a site that is not approved.
     #[serde(rename = "site.requested")]
     SiteRequested(SiteRequestedBody),
@@ -768,6 +781,8 @@ impl EventBody {
             Self::SocialPostMissed(_) => EventKind::SocialPostMissed,
             Self::SocialPostFailed(_) => EventKind::SocialPostFailed,
             Self::MarketingCampaignCreated(_) => EventKind::MarketingCampaignCreated,
+            Self::MarketingBudgetReached(_) => EventKind::MarketingBudgetReached,
+            Self::MarketingCampaignPaused(_) => EventKind::MarketingCampaignPaused,
             Self::SiteRequested(_) => EventKind::SiteRequested,
             Self::SiteApproved(_) => EventKind::SiteApproved,
             Self::SiteDeclined(_) => EventKind::SiteDeclined,
@@ -1067,7 +1082,7 @@ mod tests {
     use super::fixtures::{a_body_wire, a_contract_summary_wire, a_full_event_wire, an_event_wire};
     use super::{
         EVERY_KIND, EventBody, EventError, EventIds, EventKind, ValidationError, event_from_value,
-        event_to_value, new_event,
+        event_to_value, is_about_one_contract, new_event,
     };
 
     fn refusal(input: &serde_json::Value) -> Vec<ValidationError> {
@@ -1775,7 +1790,40 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 76);
+        assert_eq!(EVERY_KIND.len(), 78);
+    }
+
+    #[test]
+    fn round_trips_the_budget_events() {
+        for kind in [
+            EventKind::MarketingBudgetReached,
+            EventKind::MarketingCampaignPaused,
+        ] {
+            assert!(EVERY_KIND.contains(&kind), "{kind} is counted");
+            let wire = an_event_wire(kind);
+            let event = event_from_value(&wire).expect("a valid budget event");
+            assert_eq!(event.body.kind(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+            // Farik records it, about no contract: it needs no task on its envelope.
+            assert!(
+                !is_about_one_contract(kind),
+                "{kind} is about no one contract"
+            );
+        }
+        // A cap is of a campaign or of the plan; a pause says why in one of three words.
+        let mut reached = an_event_wire(EventKind::MarketingBudgetReached);
+        reached["body"]["scope"] = json!("channel");
+        assert_eq!(refusal(&reached).len(), 1);
+        let mut paused = an_event_wire(EventKind::MarketingCampaignPaused);
+        paused["body"]["why"] = json!("the owner asked");
+        assert_eq!(refusal(&paused).len(), 1);
+        // A refusal of Google is kept in words, and a pause that was refused lists what was.
+        let mut failed = an_event_wire(EventKind::MarketingBudgetReached);
+        failed["body"]["failed"] = json!("Google answered \"quota\"");
+        failed["body"]["paused"] = json!([]);
+        event_from_value(&failed).expect("a refused pause");
+        failed["body"]["failed"] = json!("x".repeat(301));
+        assert_eq!(refusal(&failed).len(), 1, "words are cut at 300");
     }
 
     #[test]
@@ -1905,7 +1953,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 76);
+        assert_eq!(EVERY_KIND.len(), 78);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

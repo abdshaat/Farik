@@ -1203,25 +1203,49 @@ pub fn spend_query(
     from: NaiveDate,
     to: NaiveDate,
 ) -> Result<String, GoogleAdsError> {
-    if campaigns.is_empty()
-        || campaigns
-            .iter()
-            .any(|name| resource_customer(name, "campaigns").is_none())
-    {
-        return Err(GoogleAdsError::Input(
-            "a spend read names one or more campaigns, each a resource name such as \
-             customers/1234567890/campaigns/123"
-                .to_string(),
-        ));
-    }
-    let names: Vec<String> = campaigns.iter().map(|name| format!("'{name}'")).collect();
     Ok(format!(
         "SELECT campaign.resource_name, campaign.start_date_time, campaign.end_date_time, \
          campaign_budget.amount_micros, campaign_budget.total_amount_micros, metrics.cost_micros \
          FROM campaign WHERE campaign.resource_name IN ({}) AND segments.date BETWEEN '{from}' \
          AND '{to}'",
-        names.join(", ")
+        quoted_campaigns(campaigns, "a spend read")?
     ))
+}
+
+/// The query that reads the status of `campaigns`, with no metrics, so that a campaign with no
+/// cost still has its row (step 08g): Farik's pause reads it first, and sends nothing for a
+/// campaign that is paused or removed already.
+///
+/// # Errors
+///
+/// `Input` for no campaign, or a name that is not a campaign's resource name.
+pub fn status_query(campaigns: &[String]) -> Result<String, GoogleAdsError> {
+    Ok(format!(
+        "SELECT campaign.resource_name, campaign.status FROM campaign WHERE \
+         campaign.resource_name IN ({})",
+        quoted_campaigns(campaigns, "a status read")?
+    ))
+}
+
+/// `campaigns` as the quoted, comma-separated list a query's `IN` takes.
+///
+/// # Errors
+///
+/// `Input` for no campaign, or a name that is not a campaign's resource name: `what` is the read
+/// that needs them.
+fn quoted_campaigns(campaigns: &[String], what: &str) -> Result<String, GoogleAdsError> {
+    if campaigns.is_empty()
+        || campaigns
+            .iter()
+            .any(|name| resource_customer(name, "campaigns").is_none())
+    {
+        return Err(GoogleAdsError::Input(format!(
+            "{what} names one or more campaigns, each a resource name such as \
+             customers/1234567890/campaigns/123"
+        )));
+    }
+    let names: Vec<String> = campaigns.iter().map(|name| format!("'{name}'")).collect();
+    Ok(names.join(", "))
 }
 
 /// What a spend read's row says Google holds for a campaign: its budget's amounts in micros, a
@@ -1733,7 +1757,7 @@ mod tests {
         ad_group_campaign_query, ad_group_operations, ad_operations, budget_operations,
         campaign_operations, held_by_campaign, keyword_ideas, keyword_operations, list_accounts,
         negative_keyword_operations, report, resource_customer, spend_by_campaign, spend_query,
-        status_operations, tool_names,
+        status_operations, status_query, tool_names,
     };
     use crate::claude::Secret;
     use crate::google_ads_fixture::{Fixture, Mode};
@@ -2595,6 +2619,35 @@ mod tests {
         );
         assert!(proxy.requests().is_empty(), "the proxy was used");
         assert_eq!(target.requests().len(), 1);
+    }
+
+    #[test]
+    fn asks_the_status_of_campaigns_with_no_metrics() {
+        let campaigns = vec![
+            "customers/1234567890/campaigns/11".to_string(),
+            "customers/1234567890/campaigns/12".to_string(),
+        ];
+        // No metrics and no date: a campaign that cost nothing has its row all the same.
+        assert_eq!(
+            status_query(&campaigns),
+            Ok(
+                "SELECT campaign.resource_name, campaign.status FROM campaign WHERE \
+                campaign.resource_name IN ('customers/1234567890/campaigns/11', \
+                'customers/1234567890/campaigns/12')"
+                    .to_string()
+            )
+        );
+        for bad in [
+            vec![],
+            vec!["customers/1234567890/campaigns/11' OR '1'='1".to_string()],
+            vec!["customers/1234567890/adGroups/1".to_string()],
+            vec!["x".to_string()],
+        ] {
+            assert!(
+                matches!(status_query(&bad), Err(GoogleAdsError::Input(_))),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]

@@ -192,6 +192,21 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "budget_kind": "total",
             "amount": "800.00",
         }),
+        EventKind::MarketingBudgetReached => json!({
+            "plan": "MP-1",
+            "scope": "campaign",
+            "key": "search-launch",
+            "spent": "800.00",
+            "budget": "800.00",
+            "currency": "USD",
+            "paused": ["customers/1234567890/campaigns/11"],
+        }),
+        EventKind::MarketingCampaignPaused => json!({
+            "plan": "MP-1",
+            "key": "search-launch",
+            "campaign": "customers/1234567890/campaigns/11",
+            "why": "plan_ended",
+        }),
     }
 }
 

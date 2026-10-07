@@ -145,6 +145,17 @@ impl Harness {
         adapter: Arc<dyn RuntimeAdapter>,
         clock: Arc<MovableClock>,
     ) -> Orchestrator {
+        let sleeper = Arc::new(MovingSleeper(Arc::clone(&clock)));
+        self.orchestrator_sleeping(adapter, clock, sleeper)
+    }
+
+    /// `orchestrator_on`, waiting on `sleeper`.
+    pub(crate) fn orchestrator_sleeping(
+        &self,
+        adapter: Arc<dyn RuntimeAdapter>,
+        clock: Arc<MovableClock>,
+        sleeper: Arc<dyn Sleeper>,
+    ) -> Orchestrator {
         let deps = &self.project.deps;
         let tools = Arc::new(ToolDeps {
             log: Arc::clone(&deps.log),
@@ -159,7 +170,7 @@ impl Harness {
                 deps.ids.clone(),
             )),
             git: self.project.repo.adapter(),
-            clock: Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
+            clock: clock as Arc<dyn Clock + Send + Sync>,
             ids: deps.ids.clone(),
             kits: Arc::clone(&deps.kits),
         });
@@ -172,7 +183,7 @@ impl Harness {
             previews: Arc::clone(&self.previews),
             session_ids: Arc::new(LaterIds(SequentialIds::new())),
             forge: Arc::new(self.gh.forge(&self.project.repo.path)),
-            sleeper: Arc::new(MovingSleeper(clock)),
+            sleeper,
         })
     }
 

@@ -718,6 +718,8 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::SocialPostMissed(_)
         | EventBody::SocialPostFailed(_)
         | EventBody::MarketingCampaignCreated(_)
+        | EventBody::MarketingBudgetReached(_)
+        | EventBody::MarketingCampaignPaused(_)
         // A removal is about no task, and a site is folded from the log when it is asked for.
         | EventBody::SiteRemoved(_) => Ok(()),
     }

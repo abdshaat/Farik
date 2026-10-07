@@ -44,7 +44,7 @@ use crate::preview::RunningPreview;
 use crate::session::SessionPurpose;
 use crate::tools::{ToolContext, ToolDeps};
 
-mod ads_calls;
+pub(crate) mod ads_calls;
 mod app;
 mod board;
 #[cfg(test)]
@@ -221,6 +221,29 @@ pub struct DaemonState {
     ads_writes: tokio::sync::Mutex<()>,
     /// The address of Google's Ads API, when a test sets one; until then `GOOGLE_ADS_API`.
     google_ads_api: OnceLock<String>,
+    /// What the spend watch knows of each plan's Google Ads spend and of the ads it could not
+    /// stop, by plan id, in memory only (step 08g).
+    spend_reads: Mutex<BTreeMap<String, SpendRead>>,
+    /// Woken when a campaign is made, so that the spend watch, which waits for the first, reads.
+    campaign_made: tokio::sync::Notify,
+}
+
+/// What the spend watch knows of one plan (step 08g): when it last tried, what it last read, why
+/// it last could not, and why an ad it meant to pause is still running.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SpendRead {
+    /// When the watch last tried to read or to pause for this plan: a failed try counts.
+    pub(crate) attempted_at: chrono::DateTime<chrono::Utc>,
+    /// The last spend read and when, kept beside a later failure.
+    pub(crate) spend: Option<(
+        farik_core::marketing::PlanSpend,
+        chrono::DateTime<chrono::Utc>,
+    )>,
+    /// Why the last read failed and when, until a read works.
+    pub(crate) failed: Option<(String, chrono::DateTime<chrono::Utc>)>,
+    /// Why a pause Farik meant to make was refused, or could not be tried, until a later pause of
+    /// the plan works.
+    pub(crate) unstopped: Option<String>,
 }
 
 /// What a kept entry says of the agent's sign-in to the service.
@@ -293,6 +316,8 @@ impl DaemonState {
             allowance_counts: Mutex::default(),
             ads_writes: tokio::sync::Mutex::new(()),
             google_ads_api: OnceLock::new(),
+            spend_reads: Mutex::default(),
+            campaign_made: tokio::sync::Notify::new(),
         }
     }
 
@@ -319,6 +344,8 @@ impl DaemonState {
             allowance_counts: Mutex::default(),
             ads_writes: tokio::sync::Mutex::new(()),
             google_ads_api: OnceLock::new(),
+            spend_reads: Mutex::default(),
+            campaign_made: tokio::sync::Notify::new(),
         }
     }
 
@@ -369,6 +396,18 @@ impl DaemonState {
     /// The lock every write to Google Ads holds.
     pub(crate) fn ads_writes(&self) -> &tokio::sync::Mutex<()> {
         &self.ads_writes
+    }
+
+    /// What the spend watch knows of each plan, by plan id.
+    pub(crate) fn spend_reads(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, SpendRead>> {
+        self.spend_reads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The notice the first campaign made wakes.
+    pub(crate) fn campaign_made(&self) -> &tokio::sync::Notify {
+        &self.campaign_made
     }
 
     /// Sets Farik's own executable; answers whether it was not set before.
