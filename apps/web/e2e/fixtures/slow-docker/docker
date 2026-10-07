@@ -1,0 +1,10 @@
+#!/bin/sh
+# The real Docker, except that the first `info` of a serve answers late, as a cold daemon's does
+# on a CI runner: Farik asks `docker info` once, when the first page needs to know, and a page that
+# waits for that answer shows an empty team. Every other command passes straight through.
+# FARIK_E2E_DOCKER is the real docker; FARIK_E2E_INFO_ASKED is a path no earlier `info` of this
+# serve has made, and `mkdir` makes only the first take the delay.
+if [ "$1" = info ] && mkdir "$FARIK_E2E_INFO_ASKED" 2>/dev/null; then
+	sleep "${FARIK_E2E_INFO_DELAY:-8}"
+fi
+exec "$FARIK_E2E_DOCKER" "$@"

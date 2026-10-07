@@ -114,7 +114,8 @@ export function gitProject(
  * `farik-e2e-serve` on a free port. By default on a new project with its team, sandboxing off.
  * With `project: false` it starts in an empty folder, for the first-run wizard: `HOME` is `home`,
  * which holds Farik's state folder too, the fake `claude` and `docker` come first on `PATH`, no
- * key is in the environment, and the key is kept in a file, never the keychain.
+ * key is in the environment, and the key is kept in a file, never the keychain. A team with a
+ * Designer runs in Docker's sandbox, and its first `docker info` answers after 8 seconds.
  */
 export async function startServe(o: {
 	transcripts: string[];
@@ -158,7 +159,20 @@ export async function startServe(o: {
 		setUp(project, o.setupPending === true, docker);
 		if (o.team) writeTeam(project, docker, o.sprints === true);
 		// The Designer has no browser without Docker's sandbox (D3), so its team runs in it.
-		if (docker) args.push("--sandbox-image", SANDBOX_IMAGE);
+		if (docker) {
+			args.push("--sandbox-image", SANDBOX_IMAGE);
+			// Today must not wait for Docker: the first `info` answers after 8 seconds.
+			const asked = mkdtempSync(join(tmpdir(), "farik-e2e-docker-"));
+			made.push(asked);
+			serveEnv = {
+				...env,
+				PATH: `${resolve(import.meta.dirname, "slow-docker")}:${process.env.PATH}`,
+				FARIK_E2E_DOCKER: execFileSync("sh", ["-c", "command -v docker"], {
+					encoding: "utf8",
+				}).trim(),
+				FARIK_E2E_INFO_ASKED: join(asked, "asked"),
+			};
+		}
 	}
 
 	const port = await freePort();
