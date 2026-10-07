@@ -62,7 +62,7 @@ The workbooks are `.xlsx`, which Excel, Google Sheets, Numbers and LibreOffice a
 Access:
 - Only a Finance Specialist session and the Product Manager, as the reviewer of a finance task, can read the folder.
 - Every other agent is refused the folder as it is today: it lies outside a task's worktree, and `.farik/local/**` is one of the default protected paths, which also keeps it from a conversation session in the project root.
-- That protection stays for every session. A finance session gets one narrow exception, for `.farik/local/finance/**` alone.
+- That protection stays for every session, with no exception. A finance task's sessions run with the folder as their working directory, which the hook already holds every session to, so they reach the folder and nothing outside it (spec 5.6, 6.6; as built in step 09c).
 
 ## Phase 7 step 09: the role, the books, the AI spending, and Stripe
 
@@ -86,9 +86,9 @@ The web app's team builder gains the role, with a short setup: the Stripe sign-i
 
 A finance task is an ordinary contract: a month's close, a forecast, a pricing analysis, or the first AI-spend books. It is filed, triaged, made ready, assigned, reviewed and accepted, with these differences.
 
-- **Where its session runs.** The session runs with the finance folder as its working directory, not a git worktree, much as a conversation session runs in the project root. Claude Code's built-in `Read`, `Glob` and `Grep` then work on the folder and nothing outside it. The task's `allowed_paths` are under the folder. Two readiness rules stand in the way today, and each gets one exception for this role, recorded in spec 5.3: the document-paths rule, and the rule that no `allowed_paths` entry reaches under `.farik/` at all (`no_farik_paths`). The task may carry no `command` or `test` criterion, since it has no worktree to run one in; its criteria are `artifact`, `review` and `human`.
-- **No branch and nothing to integrate.** Three more rules take an exception. When the task is assigned, Farik copies every workbook to `.history/<task-id>/`. It reaches `verifying` when every workbook in the `workbooks` list the assignee gives `farik_request_transition` exists (spec 5.2). Its reviewer receives each changed workbook beside that copy in place of a diff (spec 5.4). Once `accepted` it is finished, with nothing to integrate, and it counts as integrated for any task that depends on it (spec 5.14).
-- **One session in the folder at a time.** No sweep starts while a finance task is `in_progress` or `verifying`, and no finance task is assigned while a sweep runs or while another finance task is `in_progress` or `verifying`, whatever the WIP limit and however many Finance Specialists the team has, so the folder changes under one session only, as a worktree does for code.
+- **Where its session runs.** The session runs with the finance folder as its working directory, not a git worktree, much as a conversation session runs in the project root. Claude Code's built-in `Read`, `Glob` and `Grep` then work on the folder and nothing outside it. The task's `allowed_paths` are under the folder. One readiness rule, `private_folder_task` (spec 5.3), takes the place of the document-paths rule and the ceiling for such a task, and `no_farik_paths` accepts entries within the folder and nothing else under `.farik/`. The task may carry no `command` or `test` criterion, since it has no worktree to run one in, and no search of a workbook's text; its criteria are `artifact`, `review` and `human`.
+- **No branch and nothing to integrate.** When the task is assigned, Farik copies every file of the folder but `.history/` to `.history/<task-id>/`, once; the copy is kept, and is the restore point of a cancelled task, whose changes stay in the folder. It reaches `verifying` when every workbook in the `workbooks` list the assignee gives `farik_request_transition` is a file in the folder (spec 5.2). Its reviewer is told which files changed, and reads each beside its copy with `farik_read_sheet` and `baseline: true`, in place of a diff (spec 5.4). Once `accepted` it is finished, with nothing to integrate, and it counts as integrated for any task that depends on it (spec 5.14).
+- **One piece of work in the folder at a time.** A finance task is not assigned while another task holds the folder: one assigned to an agent, in any status but `accepted` and `cancelled`, so one sent back, blocked, escalated or waiting in the Backlog holds it too (spec 5.2). When receipts intake ships (phase 13), no sweep starts while a task holds the folder, and no finance task is assigned while a sweep runs. This is whatever the WIP limit and however many Finance Specialists the team has, so the folder changes under one piece of work only, as a worktree does for code.
 
 The explanation for the human goes in the task's completion note, which already opens with a plain-language summary (spec 5.4).
 
@@ -149,7 +149,7 @@ Phase 13 step 02:
 - Email text and a filed attachment reach the agent under the untrusted-content notice.
 - An attachment that is not a PDF or an image, or is over 10 MB, is not filed.
 - A receipt-derived cell comes back as a value.
-- A sweep runs once a day while a process drives the project, never without an active Finance Specialist and a connected mailbox, and never while a finance task is in progress; no finance task is assigned while a sweep runs.
-- A second finance task is not assigned while one is `in_progress` or `verifying`, even under a WIP limit of two or with two Finance Specialists.
+- A sweep runs once a day while a process drives the project, never without an active Finance Specialist and a connected mailbox, and never while a task holds the folder; no finance task is assigned while a sweep runs.
+- A second finance task is not assigned while another task holds the folder (any status but `accepted` and `cancelled`), even under a WIP limit of two or with two Finance Specialists.
 - A sweep with no new messages starts no session and still records its events.
 - A statement line with no receipt and a receipt with no statement line each show in the reconciliation.
