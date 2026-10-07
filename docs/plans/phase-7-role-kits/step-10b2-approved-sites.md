@@ -135,7 +135,7 @@ Files: `crates/core/Cargo.toml` (`url`), `governor.rs` (`pub mod sites`), `gover
 - `holds_every_url_field_to_the_sites`: with `a.com` approved, `{ url: "https://a.com/x" }` and `{ q: { urls: ["https://www.a.com/"] } }` pass; `{ url: "https://b.com/" }`, `{ deep: [{ url: "https://b.com/" }] }`, `{ urls: ["https://a.com/", "https://b.com/"] }`, `{ url: 7 }` and `{ urls: "https://a.com/" }` are refused, each naming the address or the field's JSON. RED: no such function.
 - `only_procurement_is_held`: `web_access` is `ApprovedSites` for the Procurement Specialist and `Open` for the eight other roles. RED: no such function.
 
-- [ ] `feat(core): say what an approved site is`
+- [x] `feat(core): say what an approved site is`
 
 ### Task 2: Farik's approved sites
 
@@ -242,3 +242,4 @@ Then, in the web app, by the founder (step 10b's run, moved here): add a Procure
   - `url = "=2.5.8"` is in the workspace's `[workspace.dependencies]` (`Cargo.toml:52`) and only `farik-runtime` uses it today; `farik-core` adds `url.workspace = true`.
   - The latest revision of the spec at HEAD is 0.70, so Task 9's is 0.71.
   - Task 0's approval is in this plan's header (the founder, 2026-10-07, "Approved, We will improve the Ui/ UX later"); `canvas.json` has no version field, so the commit that wrote it is the version.
+- **Task 1.** The plan's file map says `permissions.rs` gains `check_site_urls` beside `check_urls`, and its Produces block lists the function with `site_of` under `farik_core::governor::sites`. It lives in `governor/sites.rs`, with `site_of` and `SiteRefusal`; `permissions.rs` is unchanged, since `evaluate_connector_call`'s signature does not change and the hook calls the check on its own. A `urls` that is not an array is refused naming the field's JSON (its quotes included), an address naming the string itself. `SiteFault` has a hand-written `Display` (the words `farik_request_sites` gives after `site_invalid: <url>`).

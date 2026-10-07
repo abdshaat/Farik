@@ -18,6 +18,8 @@ pub mod plain;
 /// The Definition of Ready of `docs/SPEC.md` section 5.3 as one function over a contract and a
 /// context.
 pub mod readiness;
+/// Which sites a role may read on the web (`docs/SPEC.md` sections 5.6, 6.10 and 8.6).
+pub mod sites;
 /// The lifecycle's statuses and which of them are terminal.
 pub mod task_status;
 /// Team rules of `docs/SPEC.md` section 5.12 and their defaults.
