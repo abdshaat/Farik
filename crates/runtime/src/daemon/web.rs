@@ -26,6 +26,7 @@ use farik_store::EventQuery;
 use farik_store::projections::TaskProjection;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use super::setup::list_folders;
@@ -447,8 +448,10 @@ pub(super) async fn rpc(
 /// How often a subscription reads the log for new events.
 const POLL: Duration = Duration::from_millis(500);
 
-/// One browser's socket, until it or the daemon closes (`cancel`): each request answered in turn,
-/// and, while it is subscribed, every event past the last one it was sent.
+/// One browser's socket, until it or the daemon closes (`cancel`): each request answered as soon
+/// as its answer is ready, so that a slow one holds up neither the others nor the events, and,
+/// while it is subscribed, every event past the last one it was sent. `subscribe` and
+/// `unsubscribe` are answered in the order they came, before the next frame is read.
 async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: CancellationToken) {
     // The seq of the last event sent to the subscription, or `None` while there is none.
     let mut sent: Option<u64> = None;
@@ -458,27 +461,62 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
     // in-process `EventLog::subscribe` channel misses those; a cross-process notify replaces the
     // poll if 500 ms ever shows.
     let mut poll = tokio::time::interval(POLL);
-    // ponytail: a request is answered before the next frame is read, so a long command holds up
-    // this socket's other requests and its events; spawning each answer and sending it back through
-    // a channel lifts that if a page ever waits on it.
+    // The answers under way. Each runs on a task of its own, which a socket that closes does not
+    // end: a request read is carried out, as one answered in turn was.
+    let mut answering: JoinSet<Value> = JoinSet::new();
     loop {
         tokio::select! {
+            // The daemon's close is heard first, and then the answers ready before new frames.
+            biased;
+            () = cancel.cancelled() => {
+                // The answers under way are sent before the close, as one answered in turn was:
+                // the request that closes the daemon, as `project.open` closes setup mode's, may
+                // be among them, and its page needs the answer.
+                while let Some(done) = answering.join_next().await {
+                    if let Ok(answer) = done
+                        && socket.send(Message::Text(answer.to_string().into())).await.is_err()
+                    {
+                        return;
+                    }
+                }
+                let _ = socket.send(Message::Close(None)).await;
+                return;
+            }
+            Some(Ok(answer)) = answering.join_next() => {
+                if socket.send(Message::Text(answer.to_string().into())).await.is_err() {
+                    return;
+                }
+            }
             message = socket.recv() => {
                 let text = match message {
                     Some(Ok(Message::Text(text))) => text,
                     Some(Ok(Message::Close(_)) | Err(_)) | None => return,
                     Some(Ok(_)) => continue,
                 };
-                let answer = answer(&state, text.as_str(), &mut sent).await;
-                if socket.send(Message::Text(answer.to_string().into())).await.is_err() {
-                    return;
+                let (id, subscription) = read_frame(text.as_str());
+                if subscription {
+                    let answer = answer(&state, text.as_str(), &mut sent).await;
+                    if socket.send(Message::Text(answer.to_string().into())).await.is_err() {
+                        return;
+                    }
+                } else {
+                    let state = Arc::clone(&state);
+                    let answered =
+                        tokio::spawn(async move { answer(&state, text.as_str(), &mut None).await });
+                    answering.spawn(async move {
+                        answered.await.unwrap_or_else(|error| {
+                            failure(
+                                &id,
+                                Failure::new(
+                                    INTERNAL_ERROR,
+                                    format!("the request's task failed: {error}"),
+                                ),
+                            )
+                        })
+                    });
                 }
             }
             _ = poll.tick(), if sent.is_some() => {}
-            () = cancel.cancelled() => {
-                let _ = socket.send(Message::Close(None)).await;
-                return;
-            }
         }
         if !push(&mut socket, &state, &mut sent, &mut failed).await {
             return;
@@ -583,6 +621,26 @@ const SETUP_METHODS: [&str; 5] = [
 /// quote the whole frame.
 const SECRET_METHODS: [&str; 3] = ["account.connect", "connector.connect", "connector.tools"];
 
+/// The id a response to `request` carries: its own when it is an integer, else `null`.
+fn id_of(request: &Value) -> Value {
+    request
+        .get("id")
+        .filter(|id| id.is_i64() || id.is_u64())
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// The id a response to the frame `text` carries, and whether it is a `subscribe` or an
+/// `unsubscribe`, which change what the socket streams.
+fn read_frame(text: &str) -> (Value, bool) {
+    let request = serde_json::from_str::<Value>(text).unwrap_or(Value::Null);
+    let method = request.get("method").and_then(Value::as_str);
+    (
+        id_of(&request),
+        matches!(method, Some("subscribe" | "unsubscribe")),
+    )
+}
+
 /// The response to one text frame. A `subscribe` sets `sent` to its `from_seq`, and an
 /// `unsubscribe` clears it.
 pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) -> Value {
@@ -592,11 +650,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
             Failure::new(PARSE_ERROR, "the frame is not JSON"),
         );
     };
-    let id = request
-        .get("id")
-        .filter(|id| id.is_i64() || id.is_u64())
-        .cloned()
-        .unwrap_or(Value::Null);
+    let id = id_of(&request);
     let (Some("2.0"), false, Some(method)) = (
         request.get("jsonrpc").and_then(Value::as_str),
         id.is_null(),
@@ -2470,6 +2524,116 @@ mod tests {
         // The socket still answers after every error.
         let answer = call(&mut socket, 11, "unsubscribe", &json!({})).await;
         assert_eq!(answer["result"], json!({}), "{answer}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_frame_while_an_earlier_one_is_still_being_answered() {
+        let daemon = TestDaemon::new("rpc-concurrent", |_| {});
+        // A command whose answer waits until the test lets it go.
+        let held = Arc::new(tokio::sync::Semaphore::new(0));
+        let waits = Arc::clone(&held);
+        daemon.state.set_command_handler(Arc::new(move |_| {
+            let waits = Arc::clone(&waits);
+            Box::pin(async move {
+                let _ = waits.acquire().await;
+                Ok(CommandReport {
+                    said: "handled".to_string(),
+                    events: Vec::new(),
+                })
+            })
+        }));
+        let newest = paused_through(&daemon.project.deps.log);
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        let pause = json!({ "command": { "command": "team_pause", "body": {} } });
+        let request = json!({ "jsonrpc": "2.0", "id": 1, "method": "command", "params": pause });
+        send_text(&mut socket, request.to_string()).await;
+        // Another request is answered, and the subscription streams, while the command waits.
+        let status = json!({ "name": "serve.status", "params": {} });
+        let answer = call(&mut socket, 2, "query", &status).await;
+        assert_eq!(answer["id"], 2, "{answer}");
+        assert!(answer.get("result").is_some(), "{answer}");
+        let from = json!({ "from_seq": newest - 1 });
+        let answer = call(&mut socket, 3, "subscribe", &from).await;
+        assert_eq!(answer, json!({ "jsonrpc": "2.0", "id": 3, "result": {} }));
+        let note = next(&mut socket).await;
+        assert_eq!(note["params"]["event"]["seq"], newest, "{note}");
+
+        held.add_permits(1);
+        let answer = next(&mut socket).await;
+        assert_eq!(answer["id"], 1, "{answer}");
+        assert_eq!(answer["result"]["said"], "handled", "{answer}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_the_request_that_closes_the_daemon_before_the_socket_closes() {
+        // As `project.open` ends setup mode's daemon: the daemon closes while the request that
+        // closed it is still being answered, and the page needs that answer.
+        let daemon = TestDaemon::new("rpc-answers-then-closes", |_| {});
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let closing = handle.cancel.clone();
+        assert!(daemon.state.set_command_handler(Arc::new(move |_| {
+            closing.cancel();
+            Box::pin(async {
+                Ok(CommandReport {
+                    said: "handled".to_string(),
+                    events: Vec::new(),
+                })
+            })
+        })));
+        let mut socket = open(handle.info.port, &secret).await;
+
+        let pause = json!({ "command": { "command": "team_pause", "body": {} } });
+        let answer = call(&mut socket, 1, "command", &pause).await;
+        assert_eq!(answer["result"]["said"], "handled", "{answer}");
+        let ended = tokio::time::timeout(BOUND, socket.next())
+            .await
+            .expect("the socket ends within the bound");
+        assert!(
+            matches!(ended, Some(Ok(WsMessage::Close(_)) | Err(_)) | None),
+            "the socket still talks: {ended:?}"
+        );
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_the_subscription_in_the_order_its_frames_came() {
+        let daemon = TestDaemon::new("rpc-subscription-order", |_| {});
+        let newest = paused_through(&daemon.project.deps.log);
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        // Sent together: a subscription with nothing past it, its end, and one with the newest
+        // event past it, which alone is streamed, after all three are answered in turn.
+        let frames = [
+            ("subscribe", json!({ "from_seq": newest })),
+            ("unsubscribe", json!({})),
+            ("subscribe", json!({ "from_seq": newest - 1 })),
+        ];
+        for (id, (method, params)) in frames.into_iter().enumerate() {
+            let request =
+                json!({ "jsonrpc": "2.0", "id": id + 1, "method": method, "params": params });
+            send_text(&mut socket, request.to_string()).await;
+        }
+        for id in 1..=3 {
+            let answer = next(&mut socket).await;
+            assert_eq!(
+                answer,
+                json!({ "jsonrpc": "2.0", "id": id, "result": {} }),
+                "{answer}"
+            );
+        }
+        let note = next(&mut socket).await;
+        assert_eq!(note["params"]["event"]["seq"], newest, "{note}");
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
     }
