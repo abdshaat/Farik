@@ -95,7 +95,7 @@ Tests (`kit.rs`):
 - `the_two_github_entries_differ_where_the_roles_do` (a guard): the two entries have the same address, `credential_keys` and `about`; their `custom_server`s differ; both `key_page`s start `https://github.com/settings/personal-access-tokens/new?`, and the Product Manager's alone holds `issues=write`; the Architect's alone holds `X-MCP-Readonly`.
 - `loads_every_shipped_kit`: the Architect has 4. `every_network_tool_of_the_architect_has_a_label` is unchanged and must pass: the labels are the 15 `network` names exactly, the `denied` one unlabelled.
 
-- [ ] `feat(roles): give the Architect GitHub to read code and pull requests`
+- [x] `feat(roles): give the Architect GitHub to read code and pull requests`
 
 ### Task 3: The two skills learn GitHub
 
