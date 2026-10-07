@@ -721,6 +721,36 @@ describe("team setup", () => {
 		expect(second.displayName).toBe("Ivo");
 	});
 
+	it("someone_never_draws_the_fifth_extra_for_another_role", () => {
+		// With no Procurement Specialist among the agents, nothing else holds `extra-5` for it, so
+		// the pictures an added agent draws from must not include it. The team is the six, so that
+		// the third agent's picture is the fallback's first, as `added_agents_draw_from_two_extras`
+		// holds through the page.
+		const developer: Agent = {
+			id: "",
+			displayName: "",
+			role: "software_developer",
+			status: "active",
+		};
+		let team = SIX.map(
+			(a): Agent => ({
+				id: a.id,
+				displayName: a.display_name,
+				role: a.role as Agent["role"],
+				avatar: a.avatar,
+				status: "active",
+			}),
+		);
+		expect(team.some((a) => a.role === "procurement_specialist")).toBe(false);
+		const pictures: (string | undefined)[] = [];
+		for (let added = 0; added < 3; added++) {
+			const next = someone(team, developer);
+			pictures.push(next.avatar);
+			team = [...team, next];
+		}
+		expect(pictures).toEqual(["extra-2", "extra-3", "extra-2"]);
+	});
+
 	it("says_what_the_finance_specialist_does_in_its_row", async () => {
 		const { socket } = await renderApp("/setup/team");
 		const s = socket as FakeSocket;
