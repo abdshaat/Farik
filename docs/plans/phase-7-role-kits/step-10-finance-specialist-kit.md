@@ -1,9 +1,9 @@
 # Phase 7, step 10: Finance Specialist kit
 
-Status: ready
+Status: executed 2026-10-07 (Tasks 1 to 5); the landing review and Task 6, the founder's live pin run and a month's close of a Stripe sandbox, wait, and the step is not done until the run passes
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.6, 6.7, 8.6; F9
-Depends on: steps 09, 09b and 09c of this phase (the role, its sheet tools, its folder); steps 05 and 05b (the kit format, allowances); step 03 (signing in); step 07c (executed 2026-10-07, Tasks 1 to 5; its landing review and live run wait): both change `loads_every_shipped_kit`, the `live_kit_pins.rs` header, spec 6.7 and `role-kits.md`, so this step edits 07c's versions; phase 6 (merged in #19)
+Depends on: steps 09, 09b and 09c of this phase (the role, its sheet tools, its folder); steps 05 and 05b (the kit format, allowances); step 03 (signing in); step 07c (executed and landing-reviewed 2026-10-07; its live run waits): both change `loads_every_shipped_kit`, the `live_kit_pins.rs` header, spec 6.7 and `role-kits.md`, so this step edits 07c's versions; phase 6 (merged in #19)
 Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-07 (one round, ADR 0032): not ready, 1 Blocking and 10 Should, all folded below with the founder's answers; no second round
 Decided by the founder, 2026-10-07, in conversation: (1) QuickBooks is a later step ("Follow-up step"): this step ships Stripe, Digits and Kick, and a later step first probes whether QuickBooks' registration accepts Farik, then adds it, recorded in the project plan as a candidate, not planned now; (2) Stripe is signed in to, not reached with a read-only key ("Yes, Farik's block suffices"); (3) customers' details read through `stripe_api_read`, beside untrusted text in Stripe and Kick and the role's `network` tier, are a path for data to leave ("Accept and record"): a known risk in spec 8.6, revisited before the launch.
 
@@ -60,7 +60,7 @@ Consumes: `load_kit`, `KitConnector`, `check_skill`, `SHIPPED_ROLES` (`farik-rol
 - `loads_every_shipped_kit`: the Finance Specialist's kit counts six skills, no connectors. RED.
 - `kit_skills_name_only_tools_farik_lists` (the existing guard, `daemon/team.rs:4080`) covers the six. Guard.
 
-- [ ] `feat(roles): give the Finance Specialist's kit its skills`
+- [x] `feat(roles): give the Finance Specialist's kit its skills`
 
 ### Task 2: Stripe
 
@@ -70,7 +70,7 @@ Consumes: `load_kit`, `KitConnector`, `check_skill`, `SHIPPED_ROLES` (`farik-rol
 - `denied` (3): `stripe_api_write`, `stripe_implementation_planner`, `send_stripe_feedback`.
 - `stripe_only_reads`: `http` at `https://mcp.stripe.com`, `oauth.scopes` exactly `["mcp"]`; the 7 `network` exactly, each with its label; the 3 `denied`, among them `stripe_api_write`; 10 in all; no allowances; the setup copy exactly. RED.
 
-- [ ] `feat(roles): give the Finance Specialist Stripe`
+- [x] `feat(roles): give the Finance Specialist Stripe`
 
 ### Task 3: Digits and Kick
 
@@ -82,20 +82,20 @@ Consumes: `load_kit`, `KitConnector`, `check_skill`, `SHIPPED_ROLES` (`farik-rol
 - `kick_only_reads`: `http` at `https://use.kick.co/mcp`, `oauth.scopes` exactly `["mcp:read"]`; the 17 `network` exactly, each labelled; the 22 `denied`; 39 in all. RED.
 - `the_finance_kit_never_changes_a_service`: no tool of any of the kit's connectors is `external_effect`, and none has an allowance. Guard over Tasks 2 and 3 (vacuous before Task 2).
 
-- [ ] `feat(roles): give the Finance Specialist Digits and Kick`
+- [x] `feat(roles): give the Finance Specialist Digits and Kick`
 
 ### Task 4: Connected by name
 
 - `connects_each_finance_service_by_name` (`team.rs`, as `connects_each_marketing_service_by_name`, `team.rs:4013`): a Finance Specialist connected to `stripe`, `digits` and `kick` by name gets each kit entry, signed in, with no allowances, each entry passing `matches_kit`. Guard (its entries exist from Tasks 2 and 3; the landing review's mutation, renaming one entry in `kit.yaml`, is what proves it).
 - `live_kit_pins.rs`'s header names the three and their variables, `FARIK_KIT_STRIPE_BEARER`, `FARIK_KIT_DIGITS_BEARER` and `FARIK_KIT_KICK_BEARER`, and the grant each bearer carries (Task 6). No test change: the run already covers every shipped `http` connector.
 
-- [ ] `test(runtime): connect the Finance Specialist's services by name`
+- [x] `test(runtime): connect the Finance Specialist's services by name`
 
 ### Task 5: Spec and plan
 
 `docs/SPEC.md` 6.6: Stripe in the kit, signed in, with the sentence about a restricted key replaced by the decisions above (Farik's `denied` tags the lock, the permissions the user ticks on Stripe's page); Digits and Kick, read-only; the customers'-details line. 6.7 gains "The Finance Specialist's kit", a paragraph in the shape of the other kits': the three services, route 1, Stripe's and Kick's pinned scopes, every write `denied`, no allowance. 8.6 records the known risk of the founder's answer (3): a customer's details read through `stripe_api_read`, with untrusted text from Stripe or Kick in the session and the role's `network` tier, could leave; accepted 2026-10-07, revisited before the launch. The revision line. ADR 0019 gains: "Amended <the day Task 5 lands> by phase 7 step 10: Stripe is signed in to (route 1), not reached with a read-only key; read-only is held by Farik's `denied` tags and by the permissions the user grants on Stripe's page." `docs/design/role-kits.md`: the Finance row (Digits and Kick in place of "a paid ledger … (Kick, Digits)", optional by being connected or not), the Signing-in rows (Stripe, Digits, Kick: route 1), the restricted-key sentence of line 71 removed, the Steps row 10. `docs/design/finance-specialist.md`: the Stripe paragraph (line 71) points to this step for the kit, its restricted-key clause ("a scheduled run uses a restricted key …") removed, and "at Stripe by the key's permissions" made "at Stripe by the permissions the user grants on Stripe's page". Project plan row 10: what was executed.
 
-- [ ] `docs(spec): record the Finance Specialist's kit`
+- [x] `docs(spec): record the Finance Specialist's kit`
 
 ### Task 6: The founder's live run
 
@@ -122,4 +122,23 @@ The live run and the month's close are Task 6's, the founder's; the step is not 
 
 ## Execution notes
 
-None yet.
+Corrections against the code, read at HEAD `1760373` on 2026-10-07 before Task 1 (after step 07c's landing-review fixes, `3ebd554` to `1760373`). Every file, line and symbol the plan cites holds: `embedded_skills` is at `kit.rs:188` (its last arm today is `_ => Vec::new()`, which the Finance Specialist falls to), `its_kit_is_empty_until_step_10` at `:1006`, `connects_each_marketing_service_by_name` at `daemon/team.rs:4013`, `kit_skills_name_only_tools_farik_lists` at `:4080`, `tool_descriptors` at `tools.rs:370`, `kit_entry` and `matches_kit` at `daemon/team.rs:564` and `:635`, the Stripe paragraph of `docs/design/finance-specialist.md` at line 71, the Finance row and the restricted-key sentence of `docs/design/role-kits.md` at lines 47 and 71, ADR 0019's "read-only key" in its Decision, `farik_read_costs`' `purpose`, and the project plan's row 10 (line 532) and its record of the QuickBooks candidate (line 490, "Made"). None needed a decision.
+
+- **The spec's revision is 0.67.** Step 07c's landing-review fix S3 took 0.66 (`b70c098`), so Task 5's revision line is 0.67.
+- **`loads_every_shipped_kit` (`kit.rs:985`) counts connectors, not skills.** Task 1's line for it ("counts six skills") cannot be RED, so Task 1's RED is `finance_kit_carries_its_skills` alone, which asserts the six names in order. The test's Finance arm changes in Task 2 (`FinanceSpecialist` joins the arm of 1) and in Task 3 (its own arm of 3), each RED there.
+- **Two sentences that say the kit is empty until this step**, which the plan does not name: SPEC 6.6's "As built so far" paragraph ("Its kit is empty until phase 7 step 10 (6.7)", line 555), which Task 5 changes with the Stripe paragraph (line 571), and the header comment of `finance_specialist/kit.yaml`, which Task 1 replaces. `role-kits.md` has a Steps row 10 already (line 105), which Task 5 rewrites, not adds.
+- **`live_kit_pins.rs`'s header** already carries step 07c's GitHub paragraph; Task 4 adds the three services after it.
+- **What the loader enforces, which the plan states only in passing.** Stripe's setup quotes ‘OAuth sessions’ in curly quotes (U+2018 and U+2019), the one place `oauth` may appear: `quoted_labels` never opens a quote on an ASCII apostrophe, so with one the word is refused as `copy_word_refused`; and no title, about, why or label may contain `mcp`, `oauth` or `token`. `check_skill` refuses an `@` after anything but a letter, a digit or `._%+-`, and a command fence. The only `farik_*` names the six skills may use are those `tool_descriptors` lists; the ones they need are `farik_read_costs`, `farik_read_sheet`, `farik_write_sheet`, `farik_ask_human`, `farik_record_criterion_result`, `farik_request_transition`, `farik_write_note` and `farik_declare_blocked`. A kit skill may not be named like a skill of `role.yaml` (`keeping-the-books`, `kit_skill_in_role`).
+- **A guard's proof.** `the_finance_kit_never_changes_a_service` and `connects_each_finance_service_by_name` pass when written; each is proved by the mutation its task names, recorded in its task's note.
+
+Task 1: RED, `finance_kit_carries_its_skills` failed on its one assertion with left `[]` (the kit had no skills) and right the six names with their descriptions. The six `SKILL.md` files and the role's arm of `embedded_skills` make it pass; `its_kit_is_empty_until_step_10` is replaced by it. The descriptions are the plan's, each ending in a full stop as every shipped skill's does (the plan's quotes leave it off). Test support beyond the plan: `the_finance_skills_say_what_protects_the_user`, which pins the phrases the founder's accepted risk and the close rest on (the customers' details rule of `using-finance-sources`, the close's one-per-cent and `closed` rules, and that a budget is recommended and never set); a guard, proved by two mutations, each reverted: the customers' details section deleted from `using-finance-sources` (failed with `using-finance-sources lacks "Never write a customer's name, email or card in a"`) and the close made to read `closed` whatever (`closing-the-month lacks "`Status` cell reads `closed` only when every"`). `kit_skills_name_only_tools_farik_lists` passes over the six and was not mutated, since proving it would put a name `tool_descriptors` does not list into a shipped file. `loads_every_shipped_kit` is unchanged here, as the notes above say.
+
+Task 2: RED, two tests, each for the right reason: `stripe_only_reads` panicked "the finance_specialist kit has no stripe", and `loads_every_shipped_kit` failed with left 0, right 1 at "finance_specialist" (the Finance Specialist joined the arm of 1). `stripe_only_reads` asserts the address, the one scope `mcp`, the seven `network` tools with their seven labels and no other label, the three `denied`, ten in all, no allowance and the four copy texts exactly. The setup's ‘OAuth sessions’ is in curly quotes, as the loader needs. The kit's header comment now says what the kit holds and why Stripe's scope is pinned.
+
+Task 3: RED, four tests, each for the right reason: `digits_only_reads` and `kick_only_reads` panicked "the finance_specialist kit has no digits" and "no kick", `loads_every_shipped_kit` failed with left 1, right 3 at "finance_specialist" (the Finance Specialist has an arm of its own), and `the_finance_kits_services_in_order`, test support beyond the plan (the order the page lists the services in, each signed in to with no key), failed with left `["stripe"]`, right `["stripe", "digits", "kick"]`. `the_finance_kit_never_changes_a_service` is a guard that passes when written (it has Stripe to look at since Task 2); its mutation, Kick's `transactions_act` tagged `external_effect` in `kit.yaml`, failed it with left 1, right 0 at "kick", reverted. Digits' tools are nine `network` and one `denied`, Kick's seventeen and twenty-two, each count and each label asserted; the kit's header comment says why Kick's two instruction-loading tools are `denied`.
+
+Task 4: a guard, so no RED, in its own commit. `connects_each_finance_service_by_name` also asserts each entry's scopes (`mcp`, none, `mcp:read`) and that the Developer's kit and role have none of the three. Mutation, reverted: Kick's entry renamed `kickx` in `kit.yaml` failed it with `kick: ... connector_not_in_kit: the finance_specialist's kit has no service kick to connect`. `live_kit_pins.rs`'s header names the three variables and the grant each bearer carries; the run needed no code change, since it already lists every shipped `http` connector and takes a bearer for each that signs in.
+
+Task 5: `docs/SPEC.md` 0.67 as the plan lists, with the two sentences the corrections above name. 6.6: the "As built so far" paragraph says the kit now holds six skills and three services, and the Stripe paragraph is replaced by "Stripe, Digits and Kick": signed in to by route 1, read-only as Farik's own lock whatever the user ticks on Stripe's page, the restricted key of 0.54 withdrawn, Digits and Kick read the same way, and the customers' details line. 6.7: "The Finance Specialist's kit", after the Marketing Specialist's posting and email paragraph so that the kits stay together; it says Kick is a bookkeeping service and not Kit, the email service. 8.6: "A customer's details through Stripe", the known risk of the founder's answer (3), accepted for now and to be revisited before the web launch. The revision line. ADR 0019 gains its amendment line, dated 2026-10-07. `docs/design/role-kits.md`: the Finance row, a Signing-in row for Stripe, Digits and Kick (route 1) before Brex's, the restricted-key sentence and Stripe's name removed from the "every other service" row, and Steps row 10 rewritten, not added. `docs/design/finance-specialist.md`: its Stripe paragraph (line 71) points to the kit, with no restricted key and the permissions the user grants on Stripe's page. The project plan's row 10 says what was executed and that the landing review and the founder's run wait. No token-shaped text was written in any file.
+
+Task 6 is the founder's run and is not executed: its three boxes stay open, and so does the step's last checkbox.

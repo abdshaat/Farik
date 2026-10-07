@@ -4111,6 +4111,56 @@ pub(super) mod tests {
         }
     }
 
+    /// A guard: each of the Finance Specialist's three services connects by name, signed in to,
+    /// with the scope the kit pins and no allowance, and is no other role's (step 10).
+    #[test]
+    fn connects_each_finance_service_by_name() {
+        use farik_core::contract::Role;
+        use farik_core::team::CustomTransport;
+        let team = crate::tools::fixtures::a_team_of_three(|wire| {
+            wire["agents"].as_array_mut().expect("agents").push(
+                farik_core::team::fixtures::an_agent_wire("fin", "finance_specialist"),
+            );
+        });
+        let finance =
+            farik_roles::load_kit(Role::FinanceSpecialist).expect("the Finance Specialist's kit");
+        for (name, scopes) in [
+            ("stripe", vec!["mcp".to_string()]),
+            ("digits", Vec::new()),
+            ("kick", vec!["mcp:read".to_string()]),
+        ] {
+            let (_, server) = super::kit_entry(&finance, &team, "fin", name, &BTreeMap::new())
+                .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
+            assert!(super::matches_kit(&finance, &server), "{name}");
+            let CustomTransport::Http { oauth, .. } = &server.transport else {
+                panic!("{name} is http");
+            };
+            assert_eq!(
+                oauth.as_ref().map(|settings| settings.scopes.clone()),
+                Some(scopes),
+                "{name} signs in"
+            );
+            assert!(server.allowances.is_empty(), "{name}");
+        }
+        // None is the Developer's: not by its role, and not by its kit.
+        let developer =
+            farik_roles::load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
+        for name in ["stripe", "digits", "kick"] {
+            let refused = super::kit_entry(&finance, &team, "dev-a", name, &BTreeMap::new())
+                .expect_err("the Developer is not the Finance Specialist");
+            assert!(
+                refused[0].message.starts_with("connector_not_in_kit: "),
+                "{name}: {refused:?}"
+            );
+            let refused = super::kit_entry(&developer, &team, "fin", name, &BTreeMap::new())
+                .expect_err("the Developer's kit has no finance service");
+            assert!(
+                refused[0].message.starts_with("connector_not_in_kit: "),
+                "{name}: {refused:?}"
+            );
+        }
+    }
+
     /// A guard: every `farik_*` tool a role's skill or a kit's skill names is one Farik lists.
     #[test]
     fn kit_skills_name_only_tools_farik_lists() {
