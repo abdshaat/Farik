@@ -19,6 +19,14 @@
 //! web launch GitHub signs in through Farik Cloud and the variable is `FARIK_KIT_GITHUB_BEARER`
 //! (ADR 0044).
 //!
+//! The Finance Specialist's three services are signed in to, each with a bearer: Stripe's
+//! (`FARIK_KIT_STRIPE_BEARER`) from an MCP Inspector sign-in to a Stripe sandbox granted every
+//! permission, Digits' (`FARIK_KIT_DIGITS_BEARER`) from an MCP Inspector sign-in, and Kick's
+//! (`FARIK_KIT_KICK_BEARER`) from a sign-in granted `mcp:read` and `mcp:write` or from a
+//! user-scoped personal key. The run only lists tools, so a wide grant is what shows every tool
+//! each service has; the kit itself asks Kick for `mcp:read` alone. Kick lists fewer tools to a
+//! narrower grant, so the run also records what an `mcp:read` grant lists.
+//!
 //! A connector Farik runs itself (`command: farik`, the Architect's OSV) is skipped, with a line
 //! saying so: its pin is the offline test `osv_server_lists_the_kits_tools`, since its tools are
 //! Farik's own and change only with a Farik release. The comparison is also proven by
