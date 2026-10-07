@@ -1091,6 +1091,7 @@ mod tests {
                 "Never make a difference disappear by changing a figure",
                 "`Monthly summary` after every other row",
                 "`Status` cell reads `closed` only when every",
+                "difference named above is explained",
                 "never a customer's name, email or card",
             ],
         );

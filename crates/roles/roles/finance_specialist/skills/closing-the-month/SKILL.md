@@ -38,7 +38,7 @@ leave the month open and say in your completion note which difference stopped yo
 
 Write the month's row of `Monthly summary` after every other row: revenue, fees, refunds, costs
 and what is left, each with its source. Its `Status` cell reads `closed` only when every
-difference is explained. Otherwise it reads `open`.
+difference named above is explained. Otherwise it reads `open`.
 
 ## 6. Values, and no one's details
 
