@@ -287,6 +287,31 @@ async fn http_server_watched(sleeping: Arc<std::sync::atomic::AtomicBool>) -> St
     format!("http://{address}/mcp")
 }
 
+/// An http server that refuses every request with 401, its body quoting the `Authorization` it
+/// was sent, as a server echoing what it was sent might. Answers its `/mcp` address.
+async fn refusing_server() -> String {
+    let router = axum::Router::new().route(
+        "/mcp",
+        axum::routing::any(|headers: axum::http::HeaderMap| async move {
+            let sent = headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("none")
+                .to_string();
+            (
+                axum::http::StatusCode::UNAUTHORIZED,
+                format!("refused the credential {sent}"),
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a local port");
+    let address = listener.local_addr().expect("its address");
+    tokio::spawn(async move { axum::serve(listener, router).await });
+    format!("http://{address}/mcp")
+}
+
 /// The fixture server at `url`, with no header, key or sign-in of its own.
 fn http_fixture_at(url: String) -> CustomServer {
     CustomServer {
@@ -452,6 +477,43 @@ async fn a_servers_own_error_text_is_not_repeated() {
     );
     assert!(!said.contains("k-secret-value"), "{said}");
     assert!(!said.contains("bad key"), "{said}");
+}
+
+#[tokio::test]
+async fn a_servers_refusal_at_connect_is_not_repeated() {
+    // The server refuses the handshake and quotes the key it was sent; the reply a person reads
+    // says only that it did not answer as an MCP server.
+    let server = CustomServer {
+        name: "fixture".to_string(),
+        transport: CustomTransport::Http {
+            url: refusing_server().await,
+            headers: BTreeMap::from([(
+                "Authorization".to_string(),
+                "Bearer {API_KEY}".to_string(),
+            )]),
+            oauth: None,
+        },
+        credential_keys: vec!["API_KEY".to_string()],
+        tools: BTreeMap::new(),
+        kit: false,
+        allowances: BTreeMap::new(),
+    };
+    let failed = list_tools(
+        &server,
+        &keys(&[("API_KEY", "k-secret-value")]),
+        None,
+        &own_folder(),
+        std::path::Path::new("farik"),
+    )
+    .await
+    .expect_err("the connection fails");
+    assert_eq!(
+        failed,
+        ConnectorError::Failed("fixture did not answer as an MCP server".to_string())
+    );
+    let said = format!("{failed:?}");
+    assert!(!said.contains("k-secret-value"), "{said}");
+    assert!(!said.contains("refused the credential"), "{said}");
 }
 
 /// No arguments for a tool that takes none.
