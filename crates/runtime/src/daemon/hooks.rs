@@ -424,8 +424,9 @@ fn judge_fetch(
     }
 }
 
-/// A held session's connector call: every field named `url` or `urls` must name an approved site,
-/// whatever the connector, its tool and its tag.
+/// A held session's connector call: every field named `url` or `urls`, and every string anywhere in
+/// the input that is an address with a host, must name an approved site, whatever the connector,
+/// its tool and its tag.
 fn judge_sites_of_call(
     input: &Value,
     registration: &SessionRegistration,

@@ -23,8 +23,8 @@ const WWW: &str = "www.";
 pub enum WebAccess {
     /// Any address the role's tiers allow.
     Open,
-    /// Only the approved sites: a `WebFetch`, and every `url` or `urls` field of a connector's
-    /// call, must name one.
+    /// Only the approved sites: a `WebFetch`, and every `url` or `urls` field and every string
+    /// that is an address in a connector's call, must name one.
     ApprovedSites,
 }
 
@@ -125,8 +125,11 @@ pub struct SiteRefusal {
 
 /// Holds a call's addresses to the approved sites: every field named `url`, at any depth of
 /// `input`, must be a string whose site is in `approved`, and so must each item of every field
-/// named `urls`, which must be an array of strings. An address in a field of another name is not
-/// judged (spec 8.6).
+/// named `urls`, which must be an array of strings. Besides, whatever the name of its field and
+/// however deep, a string that is itself an address, one that parses as a URL with a host, must
+/// name an approved site too, so that `webhook_url`, `href` or `image_url` is held as `url` is. A
+/// string that is no address as a whole (a sentence that holds one, a name with no scheme, a
+/// `mailto:` or a `data:` URL, which have no host) is not judged (spec 5.6, 8.6).
 ///
 /// # Errors
 ///
@@ -155,8 +158,15 @@ pub fn check_site_urls(input: &Value, approved: &BTreeSet<String>) -> Result<(),
         Value::Array(items) => items
             .iter()
             .try_for_each(|item| check_site_urls(item, approved)),
+        Value::String(text) if names_a_host(text) => check_address(input, approved),
         _ => Ok(()),
     }
+}
+
+/// Whether `text` is an address as a whole that has a host, whatever its scheme: `mailto:` and
+/// `data:` URLs have none, and a word, a path or a sentence is no URL.
+fn names_a_host(text: &str) -> bool {
+    Url::parse(text).is_ok_and(|url| url.host().is_some())
 }
 
 /// One address: a string on an approved site.
@@ -321,6 +331,43 @@ mod tests {
         ] {
             let refused = check_site_urls(&input, &sites).expect_err(&input.to_string());
             assert_eq!(refused.address, address, "{input}");
+        }
+    }
+
+    #[test]
+    fn holds_an_address_in_any_field() {
+        let sites = approved(&["a.com"]);
+        for input in [
+            json!({ "URL": "https://b.com/" }),
+            json!({ "webhook_url": "https://b.com/hook" }),
+            json!({ "link": "https://b.com/" }),
+            json!({ "requests": [{ "href": "https://b.com/" }] }),
+            json!({ "uri": "https://b.com/" }),
+            json!({ "params": { "engine": "google_reverse_image", "image_url": "https://b.com/i.png" } }),
+            json!({ "list": ["https://a.com/", "https://b.com/"] }),
+            json!({ "link": "http://a.com/" }),
+            json!({ "link": "https://127.0.0.1/" }),
+            json!({ "link": "https://a.com:8443/" }),
+            json!({ "link": " https://b.com/ " }),
+        ] {
+            assert!(check_site_urls(&input, &sites).is_err(), "{input}");
+        }
+        let refused = check_site_urls(
+            &json!({ "params": { "image_url": "https://b.com/i.png" } }),
+            &sites,
+        )
+        .expect_err("an unapproved address");
+        assert_eq!(refused.address, "https://b.com/i.png");
+
+        for input in [
+            json!({ "link": "https://a.com/x" }),
+            json!({ "requests": [{ "href": "https://www.a.com/" }] }),
+            json!({ "note": "see https://b.com/ for prices", "limit": 3 }),
+            json!({ "query": "boxes", "sku": "ABC:123", "email": "mailto:me@b.com" }),
+            json!({ "name": "a.com", "path": "/etc/hosts", "file": "file:///etc/hosts" }),
+            json!({ "blob": "data:text/plain;base64,aGk=", "empty": "", "n": 7, "ok": true }),
+        ] {
+            assert_eq!(check_site_urls(&input, &sites), Ok(()), "{input}");
         }
     }
 
