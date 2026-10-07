@@ -42,7 +42,7 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         }
         ReadinessRule::NoFarikPaths => "The plan reaches into Farik's own files.",
         ReadinessRule::PrivateFolderTask => {
-            "A finance task works only in the private folder: no commands, no tests, no text searched in a workbook, and no parent epic."
+            "A task in a private folder works only there: no commands, no tests, no text searched in a workbook or a note, and no parent epic."
         }
         ReadinessRule::PrivateFolderReviewer => {
             "A task in a private folder is reviewed by the Product Manager alone, and this plan names someone else."
@@ -125,6 +125,17 @@ mod tests {
             | JudgmentRecorded
             | JudgmentAnswers => {}
         }
+    }
+
+    /// The rule holds the Finance Specialist's tasks and the Procurement Specialist's alike, so its
+    /// plain words name neither.
+    #[test]
+    fn the_private_folder_sentence_names_no_role() {
+        let plain = plain_readiness(PrivateFolderTask).to_lowercase();
+        for role in ["finance", "procurement"] {
+            assert!(!plain.contains(role), "{plain}");
+        }
+        assert!(plain.contains("private folder"), "{plain}");
     }
 
     #[test]
