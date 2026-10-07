@@ -808,6 +808,24 @@
       "title": "Phone: renewals coming up (step 10c)",
       "page": "procurement",
       "is_interactive": true
+    },
+    "TodayDataPipeline.dc.html": {
+      "x": 12900,
+      "y": 0,
+      "w": 1280,
+      "h": 4649,
+      "title": "Today: Ivo asks for two data sources Mira passed to you, Approve or Decline (step 10e)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneDataPipeline.dc.html": {
+      "x": 14380,
+      "y": 0,
+      "w": 390,
+      "h": 4133,
+      "title": "Phone: Ivo asks for a data source (step 10e)",
+      "page": "procurement",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -930,9 +948,9 @@
     },
     "t_procurement": {
       "kind": "title1",
-      "maxW": 12800,
+      "maxW": 14800,
       "page": "procurement",
-      "text": "Procurement Specialist: more roles in setup, the sites it may read, purchase orders and renewals",
+      "text": "Procurement Specialist: more roles in setup, the sites it may read, purchase orders, renewals and data pipelines",
       "w": 240,
       "x": 0,
       "y": -300
@@ -1028,7 +1046,9 @@
     "AgentOrders.dc.html",
     "PhoneAgentOrders.dc.html",
     "TodayRenewal.dc.html",
-    "PhoneRenewal.dc.html"
+    "PhoneRenewal.dc.html",
+    "TodayDataPipeline.dc.html",
+    "PhoneDataPipeline.dc.html"
   ],
   "pages": [
     {

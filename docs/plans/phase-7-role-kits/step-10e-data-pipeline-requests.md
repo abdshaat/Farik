@@ -96,7 +96,7 @@ The stories use Firecrawl (`paid`), Shippo's rates (`free`, `needs_account`, `se
 
 ### Task 0: Mockups
 
-Files: `TodayDataPipeline.dc.html`, `PhoneDataPipeline.dc.html` (Today's escalated rows, one that costs money and one that sends your data out, each with the Product Manager's reason, the host in bold and the agent's fields in `untrusted` frames; the Approve dialog with the filed text and a note, and the Decline dialog with a note; as variants, a cost not known, "The Product Manager did not decide." and a free one the Product Manager asks about), `canvas.json`'s page "Procurement Specialist". Drawn by Opus (ADR 0032). The founder approves them before Task 6; the approval is written into this plan's header and Execution notes in the same commit.
+Files: `TodayDataPipeline.dc.html`, `PhoneDataPipeline.dc.html` (Today's escalated rows, one that costs money and one that sends your data out, each with the Product Manager's reason, the host in bold and the agent's fields in `untrusted` frames; the Approve dialog with the filed text and a note, and the Decline dialog with a note; as variants, a cost not known, "The Product Manager did not decide.", a free one the Product Manager asks about, and a source on a name in another alphabet with 10b2's warning), `canvas.json`'s page "Procurement Specialist". Drawn by Opus (ADR 0032). The founder approves them before Task 6; the approval is written into this plan's header and Execution notes in the same commit.
 
 - [ ] `docs(design): mock up data pipeline requests`
 
