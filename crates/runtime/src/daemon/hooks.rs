@@ -1503,10 +1503,24 @@ mod tests {
         // A finance task's session works in `.farik/local/finance`, with that folder as its
         // working directory (6.6): the hook judges every path against it, so the folder is all
         // it reaches, and no exception to the protected `.farik/local/**` is needed. The hook
-        // reads no role, so `dev-a` stands in for the Finance Specialist's session.
+        // reads no role, so `dev-a`, who holds `write_workspace`, stands in for the Finance
+        // Specialist's session, registered about a finance task whose contract it loads.
         use crate::daemon::SessionRegistration;
 
         let daemon = TestDaemon::new("hook-private-folder", |_| {});
+        daemon
+            .project
+            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+                wire["assignee_role"] = json!("finance_specialist");
+                wire["reviewer_role"] = json!("product_manager");
+                wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+                wire["exit_criteria"] = json!([{
+                    "id": "C1",
+                    "text": "The books exist.",
+                    "satisfies": ["R1"],
+                    "verification": { "method": "artifact", "path": "books.xlsx" }
+                }]);
+            });
         let root = daemon.project.repo.path.clone();
         let folder = root.join(".farik/local/finance");
         std::fs::create_dir_all(&folder).expect("the folder is made");
@@ -1516,7 +1530,7 @@ mod tests {
         daemon.state.register_session(SessionRegistration {
             session_id: "session-folder".to_string(),
             agent_id: "dev-a".to_string(),
-            task_id: None,
+            task_id: Some("FRK-2".parse().expect("a task id")),
             purpose: crate::session::SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -1560,6 +1574,21 @@ mod tests {
         denied_for(
             &hook("Glob", json!({ "pattern": "../worktrees/**" })),
             "path_outside_workspace",
+        );
+        // The copy of the folder taken for the task cannot be written over, so what the task
+        // changed is always judged against the state it started from.
+        std::fs::create_dir_all(folder.join(".history/FRK-2")).expect("the copy is made");
+        std::fs::write(folder.join(".history/FRK-2/books.xlsx"), "books").expect("written");
+        for tool in ["Write", "Edit"] {
+            let refused = hook(
+                tool,
+                json!({ "file_path": ".history/FRK-2/books.xlsx", "content": "changed" }),
+            );
+            denied_for(&refused, "path_outside_allowed");
+        }
+        assert_eq!(
+            std::fs::read_to_string(folder.join(".history/FRK-2/books.xlsx")).ok(),
+            Some("books".to_string())
         );
     }
 
