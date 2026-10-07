@@ -922,6 +922,35 @@ mod tests {
         assert!(skill.contains(recording), "{skill}");
     }
 
+    /// Step 10b2: the role reads only Farik's approved sites and the sites the owner allowed, and
+    /// its prompt and its skill say how it learns which they are, how it asks for another, and that
+    /// the address it asks with is no place for the business's details (ADR 0039). The tool names
+    /// are held to tools Farik lists by `kit_skills_name_only_tools_farik_lists` in the runtime.
+    #[test]
+    fn sourcing_a_product_says_how_to_ask_for_a_site() {
+        let definition = loaded(Role::ProcurementSpecialist);
+        let flatten = |text: &str| {
+            text.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        };
+        let prompt = flatten(&definition.system_prompt);
+        let skill = flatten(&definition.skills[0].body);
+        assert!(
+            prompt.contains("farik's approved sites and the sites the owner allowed"),
+            "the prompt lost the sites it may read: {prompt}"
+        );
+        for phrase in [
+            "`farik_read_sites`",
+            "`farik_request_sites`",
+            "end your turn",
+            "never put the business's details in an address",
+        ] {
+            assert!(skill.contains(phrase), "the skill lost {phrase}: {skill}");
+        }
+    }
+
     /// Step 10b: the Finance Specialist reads the register, the one file of the procurement folder
     /// it may read, and says the register's contents are data.
     #[test]
