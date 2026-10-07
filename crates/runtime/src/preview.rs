@@ -170,23 +170,42 @@ pub struct PolledPreviews {
     inner: Arc<dyn PreviewFactory>,
     holds: Duration,
     polled: Arc<(Mutex<Polled>, Condvar)>,
+    spawn: Spawn,
 }
 
 /// What `PolledPreviews` knows: its last answer and when it came, and whether an ask is under way.
 #[derive(Default)]
 struct Polled {
     last: Option<(Instant, bool)>,
-    asking: bool,
+    is_asking: bool,
 }
+
+/// What runs an ask of `PolledPreviews` apart from its caller: a thread of its own outside tests.
+pub(crate) type Spawn = Arc<dyn Fn(Box<dyn FnOnce() + Send>) -> std::io::Result<()> + Send + Sync>;
 
 impl PolledPreviews {
     /// Asks `inner` at once, whose answers hold for `holds`.
     #[must_use]
     pub fn new(inner: Arc<dyn PreviewFactory>, holds: Duration) -> Self {
+        Self::spawning(
+            inner,
+            holds,
+            Arc::new(|ask| {
+                std::thread::Builder::new()
+                    .name("farik-previews".to_string())
+                    .spawn(ask)
+                    .map(drop)
+            }),
+        )
+    }
+
+    /// `new`, its asks run by `spawn`.
+    pub(crate) fn spawning(inner: Arc<dyn PreviewFactory>, holds: Duration, spawn: Spawn) -> Self {
         let previews = Self {
             inner,
             holds,
             polled: Arc::default(),
+            spawn,
         };
         previews.last_answer();
         previews
@@ -196,30 +215,27 @@ impl PolledPreviews {
     /// out of date and none is under way.
     fn last_answer(&self) -> bool {
         let mut polled = crate::locked(&self.polled.0);
-        let due = polled.last.is_none_or(|(at, _)| at.elapsed() >= self.holds);
-        if due && !polled.asking {
-            polled.asking = true;
+        let is_due = polled.last.is_none_or(|(at, _)| at.elapsed() >= self.holds);
+        if is_due && !polled.is_asking {
+            polled.is_asking = true;
             let (inner, shared) = (Arc::clone(&self.inner), Arc::clone(&self.polled));
-            let asked = std::thread::Builder::new()
-                .name("farik-previews".to_string())
-                .spawn(move || {
-                    // An ask that panics answers no, so that it is asked again and `settle` ends.
-                    let available = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        inner.available()
-                    }))
-                    .unwrap_or(false);
-                    let (polled, answered) = &*shared;
-                    *crate::locked(polled) = Polled {
-                        last: Some((Instant::now(), available)),
-                        asking: false,
-                    };
-                    answered.notify_all();
-                });
+            let asked = (self.spawn)(Box::new(move || {
+                // An ask that panics answers no, so that it is asked again and `settle` ends.
+                let available =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inner.available()))
+                        .unwrap_or(false);
+                let (polled, answered) = &*shared;
+                *crate::locked(polled) = Polled {
+                    last: Some((Instant::now(), available)),
+                    is_asking: false,
+                };
+                answered.notify_all();
+            }));
             // Without a thread to ask on, no preview can run until the next ask.
             if asked.is_err() {
                 *polled = Polled {
                     last: Some((Instant::now(), false)),
-                    asking: false,
+                    is_asking: false,
                 };
                 self.polled.1.notify_all();
             }
@@ -605,13 +621,13 @@ fn run_within(
 #[cfg(test)]
 pub(crate) mod fixtures {
     use std::path::Path;
-    use std::sync::{Condvar, Mutex, PoisonError};
+    use std::sync::{Arc, Condvar, Mutex, PoisonError};
     use std::time::Duration;
 
     use farik_core::contract::TaskId;
     use farik_core::team::Preview;
 
-    use super::{CheckError, PreviewError, PreviewFactory, RunningPreview};
+    use super::{CheckError, PreviewError, PreviewFactory, RunningPreview, Spawn};
 
     /// A factory that starts `NamedPreview`s, or fails with `fails`, and keeps each `prepare` it
     /// was asked to run.
@@ -767,6 +783,50 @@ pub(crate) mod fixtures {
         }
     }
 
+    /// The asks a `PolledPreviews` started, each kept until the test runs it.
+    #[derive(Default)]
+    pub(crate) struct QueuedAsks {
+        asks: Mutex<Vec<Box<dyn FnOnce() + Send>>>,
+    }
+
+    impl QueuedAsks {
+        /// What keeps each ask here, or, `refused`, starts none.
+        pub(crate) fn spawn(self: &Arc<Self>, refused: bool) -> Spawn {
+            let queued = Arc::clone(self);
+            Arc::new(move |ask| {
+                if refused {
+                    return Err(std::io::Error::other("no thread to ask on"));
+                }
+                crate::locked(&queued.asks).push(ask);
+                Ok(())
+            })
+        }
+
+        /// How many asks wait to be run.
+        pub(crate) fn queued(&self) -> usize {
+            crate::locked(&self.asks).len()
+        }
+
+        /// Runs the oldest ask here.
+        pub(crate) fn run_next(&self) {
+            let ask = crate::locked(&self.asks).remove(0);
+            ask();
+        }
+    }
+
+    /// Waits for `previews` to settle, failing past the bound rather than hang.
+    pub(crate) fn settled(previews: &Arc<dyn PreviewFactory>) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let settling = Arc::clone(previews);
+        std::thread::spawn(move || {
+            settling.settle();
+            let _ = sender.send(());
+        });
+        receiver
+            .recv_timeout(BOUND)
+            .expect("the first answer came within the bound");
+    }
+
     /// What `ask` answers, which must come while `docker` still holds its ask: past the bound
     /// `docker` is released, so that a caller it holds ends, and the test fails.
     pub(crate) fn at_once<T: Send>(docker: &HeldPreviews, ask: impl FnOnce() -> T + Send) -> T {
@@ -906,7 +966,9 @@ mod tests {
 
     use farik_roles::builtin_connector;
 
-    use super::fixtures::{HeldPreviews, NamedPreview, UnaskedPreviews, at_once};
+    use super::fixtures::{
+        HeldPreviews, NamedPreview, QueuedAsks, UnaskedPreviews, at_once, settled,
+    };
     use super::{
         AVAILABLE_FOR, AXE_SOURCE, AXE_TAGS, PolledPreviews, PreviewFactory, connector_server,
     };
@@ -922,16 +984,15 @@ mod tests {
     #[test]
     fn says_no_preview_can_run_at_once_while_docker_is_first_asked() {
         let docker = Arc::new(HeldPreviews::held(true));
-        let previews = PolledPreviews::new(Arc::clone(&docker) as _, AVAILABLE_FOR);
+        let previews: Arc<dyn PreviewFactory> =
+            Arc::new(PolledPreviews::new(Arc::clone(&docker) as _, AVAILABLE_FOR));
         // The first ask is made with the factory, before anyone wants the answer.
         docker.wait_for_asks(1);
         assert!(!at_once(&docker, || previews.available()));
 
         docker.release();
-        previews.settle();
+        settled(&previews);
         assert!(previews.available());
-        // The answer holds: nobody's question asks again.
-        assert_eq!(docker.asks(), 1);
     }
 
     #[test]
@@ -939,8 +1000,11 @@ mod tests {
         let docker = Arc::new(HeldPreviews::held(true));
         docker.release();
         // An answer that holds for no time is out of date as soon as it comes.
-        let previews = PolledPreviews::new(Arc::clone(&docker) as _, Duration::ZERO);
-        previews.settle();
+        let previews: Arc<dyn PreviewFactory> = Arc::new(PolledPreviews::new(
+            Arc::clone(&docker) as _,
+            Duration::ZERO,
+        ));
+        settled(&previews);
         docker.hold();
 
         assert!(at_once(&docker, || previews.available()));
@@ -954,16 +1018,49 @@ mod tests {
     }
 
     #[test]
+    fn asks_again_only_once_the_answer_is_out_of_date() {
+        let docker = Arc::new(HeldPreviews::held(true));
+        docker.release();
+        let asks = Arc::new(QueuedAsks::default());
+
+        let holding =
+            PolledPreviews::spawning(Arc::clone(&docker) as _, AVAILABLE_FOR, asks.spawn(false));
+        assert_eq!(asks.queued(), 1, "the first ask is made with the factory");
+        asks.run_next();
+        assert!(holding.available());
+        assert_eq!(asks.queued(), 0, "an answer that holds starts no ask");
+
+        let stale = PolledPreviews::spawning(docker, Duration::ZERO, asks.spawn(false));
+        asks.run_next();
+        assert!(stale.available());
+        assert_eq!(asks.queued(), 1, "an answer out of date starts one");
+        assert!(stale.available());
+        assert_eq!(asks.queued(), 1, "and no other while it is under way");
+    }
+
+    #[test]
     fn says_no_preview_can_run_when_an_ask_fails() {
-        // An ask that panics is an answer too, or the first tick would wait for one forever.
-        let previews = PolledPreviews::new(Arc::new(UnaskedPreviews), AVAILABLE_FOR);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            previews.settle();
-            let _ = sender.send(previews.available());
-        });
-        let answered = receiver.recv_timeout(Duration::from_secs(30));
-        assert_eq!(answered, Ok(false));
+        // An ask that panics is an answer too, or the driver would wait for one forever.
+        let previews: Arc<dyn PreviewFactory> = Arc::new(PolledPreviews::new(
+            Arc::new(UnaskedPreviews),
+            AVAILABLE_FOR,
+        ));
+        settled(&previews);
+        assert!(!previews.available());
+    }
+
+    #[test]
+    fn says_no_preview_can_run_without_a_thread_to_ask_on() {
+        let docker = Arc::new(HeldPreviews::held(true));
+        docker.release();
+        let asks = Arc::new(QueuedAsks::default());
+        let previews: Arc<dyn PreviewFactory> = Arc::new(PolledPreviews::spawning(
+            docker,
+            AVAILABLE_FOR,
+            asks.spawn(true),
+        ));
+        settled(&previews);
+        assert!(!previews.available());
     }
 
     #[test]

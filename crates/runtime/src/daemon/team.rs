@@ -2454,7 +2454,7 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn proposes_the_team_while_docker_has_not_answered() {
-        use crate::preview::fixtures::{HeldPreviews, at_once};
+        use crate::preview::fixtures::{HeldPreviews, at_once, settled};
         use crate::preview::{AVAILABLE_FOR, PolledPreviews};
 
         // Setup is not held up behind `docker info`, which the driver asks off the request path.
@@ -2477,7 +2477,7 @@ pub(super) mod tests {
         );
 
         docker.release();
-        harness.previews.settle();
+        settled(&harness.previews);
         let proposed = query(
             &harness.daemon,
             "team.propose",
