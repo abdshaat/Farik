@@ -670,6 +670,7 @@ fn kits_of(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Failure> {
                     entry,
                     copy,
                     allowances,
+                    ..
                 } => {
                     let mut row = json!({
                         "name": entry.name.as_str(), "title": copy.title, "about": copy.about,

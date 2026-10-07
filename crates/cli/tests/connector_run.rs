@@ -162,6 +162,7 @@ impl Served {
                     origin: None,
                     tools: server.tools,
                     allowances: std::collections::BTreeMap::new(),
+                    plan_tools: std::collections::BTreeSet::new(),
                 })
                 .collect(),
             preview: None,

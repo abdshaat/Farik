@@ -172,6 +172,9 @@ pub struct SessionConnector {
     /// For each `external_effect` tool with one, how many calls the agent makes each period
     /// without asking (ADR 0037), by the bare tool name.
     pub allowances: std::collections::BTreeMap<String, u32>,
+    /// The `external_effect` tools the kit marks as approved by the owner's marketing plan (ADR
+    /// 0042), by the bare tool name: only a kit's entry of Farik's own connector has any.
+    pub plan_tools: std::collections::BTreeSet<String>,
 }
 
 /// The most calls an allowance may be: what the schema and the daemon hold it to.
@@ -186,6 +189,9 @@ pub struct ConnectorPass {
     pub approval: Option<u64>,
     /// The allowance the call ran inside, when that allowed it and no grant did.
     pub allowance: Option<u32>,
+    /// Whether the active marketing plan approved the call: a tool the kit marks, called while
+    /// a plan is active, never asked (ADR 0042).
+    pub plan_approved: bool,
 }
 
 /// The largest input, in bytes of its compact JSON, that the human is asked to allow: anything
@@ -229,6 +235,9 @@ pub enum ConnectorRefusal {
     /// The tool is tagged `external_effect` and its input is over `MAX_APPROVAL_INPUT`, too long
     /// to show the human, so it is refused without asking.
     InputTooLarge,
+    /// The tool is marked as approved by the marketing plan and no plan is active: it runs only
+    /// inside a plan the owner approved, and is never asked.
+    NoActivePlan,
     /// A `url` field names something other than the preview.
     UrlOutsidePreview {
         /// The field's value: the string, or the JSON of a value that is not one.
@@ -244,21 +253,25 @@ pub enum ConnectorRefusal {
 /// looks up by `ApprovalKey`; it is returned beside the tag, so the call's record can use it up.
 /// Failing that, a tool with an allowance runs while `used`, the agent's calls to it this period
 /// before this one, is under it (ADR 0037): the grant is for exactly this call, so it comes
-/// first. A `network` call ignores both. The tag governs whatever the agent's tiers.
-/// `tool` is the bare tool name, without `mcp__<server>__`.
+/// first. A `network` call ignores both. The tag governs whatever the agent's tiers. A tool the
+/// connector marks as approved by the marketing plan (`plan_tools`) runs only while a plan is
+/// active (`active_plan`), as the plan's own call, and neither a grant nor an allowance applies to
+/// it. `tool` is the bare tool name, without `mcp__<server>__`.
 ///
 /// # Errors
 ///
 /// `ConnectorNotInSession`, then `ToolNotTagged`, then `ToolDenied` for a `denied` tool, then
 /// `UrlOutsidePreview` with the first `url` found outside the origin, then, for an
 /// `external_effect` tool, `InputTooLarge` for an input over `MAX_APPROVAL_INPUT`, grant or not,
-/// and `ApprovalNeeded` without a grant or an allowance with a place left.
+/// then `NoActivePlan` for a marked tool while no plan is active, grant or not, and
+/// `ApprovalNeeded` without a grant or an allowance with a place left.
 pub fn evaluate_connector_call(
     tool: &str,
     input: &serde_json::Value,
     connector: Option<&SessionConnector>,
     granted: Option<u64>,
     used: u32,
+    active_plan: bool,
 ) -> Result<ConnectorPass, ConnectorRefusal> {
     let connector = connector.ok_or(ConnectorRefusal::ConnectorNotInSession)?;
     let tag = match connector.tools.get(tool) {
@@ -273,12 +286,27 @@ pub fn evaluate_connector_call(
         tag,
         approval,
         allowance,
+        plan_approved: false,
     };
     if tag == ConnectorTag::Network {
         return Ok(pass(None, None));
     }
     if canonical_json(input).len() > MAX_APPROVAL_INPUT {
         return Err(ConnectorRefusal::InputTooLarge);
+    }
+    // The owner's plan approves a marked call, so nothing else does: no grant, no allowance, and
+    // without a plan no asking, since the plan is what the owner approved (ADR 0042).
+    if connector.plan_tools.contains(tool) {
+        return if active_plan {
+            Ok(ConnectorPass {
+                tag,
+                approval: None,
+                allowance: None,
+                plan_approved: true,
+            })
+        } else {
+            Err(ConnectorRefusal::NoActivePlan)
+        };
     }
     if let Some(approval) = granted {
         return Ok(pass(Some(approval), None));
@@ -540,7 +568,7 @@ mod tests {
         connector: Option<&SessionConnector>,
         granted: Option<u64>,
     ) -> Result<(ConnectorTag, Option<u64>), Refused> {
-        evaluate_connector_call(tool, input, connector, granted, 0)
+        evaluate_connector_call(tool, input, connector, granted, 0, false)
             .map(|pass| (pass.tag, pass.approval))
     }
 
@@ -558,6 +586,7 @@ mod tests {
             .map(|(tool, tag)| (tool.to_string(), tag))
             .collect(),
             allowances: std::collections::BTreeMap::new(),
+            plan_tools: std::collections::BTreeSet::new(),
         }
     }
 
@@ -679,6 +708,7 @@ mod tests {
             .map(|(tool, tag)| (tool.to_string(), tag))
             .collect(),
             allowances: std::collections::BTreeMap::new(),
+            plan_tools: std::collections::BTreeSet::new(),
         }
     }
 
@@ -784,12 +814,14 @@ mod tests {
                 &json!({}),
                 Some(&with_allowance(20)),
                 None,
-                19
+                19,
+                false
             ),
             Ok(ConnectorPass {
                 tag: ConnectorTag::ExternalEffect,
                 approval: None,
-                allowance: Some(20)
+                allowance: Some(20),
+                plan_approved: false
             })
         );
     }
@@ -803,7 +835,8 @@ mod tests {
                     &json!({}),
                     Some(&with_allowance(20)),
                     None,
-                    used
+                    used,
+                    false
                 ),
                 Err(Refused::ApprovalNeeded),
                 "{used}"
@@ -814,7 +847,7 @@ mod tests {
     #[test]
     fn asks_at_any_count_for_a_tool_without_one() {
         assert_eq!(
-            evaluate_connector_call("create_issue", &json!({}), Some(&github()), None, 0),
+            evaluate_connector_call("create_issue", &json!({}), Some(&github()), None, 0, false),
             Err(Refused::ApprovalNeeded)
         );
     }
@@ -827,7 +860,8 @@ mod tests {
                 &json!({}),
                 Some(&with_allowance(0)),
                 None,
-                0
+                0,
+                false
             ),
             Err(Refused::ApprovalNeeded)
         );
@@ -841,12 +875,14 @@ mod tests {
                 &json!({}),
                 Some(&with_allowance(20)),
                 Some(7),
-                0
+                0,
+                false
             ),
             Ok(ConnectorPass {
                 tag: ConnectorTag::ExternalEffect,
                 approval: Some(7),
-                allowance: None
+                allowance: None,
+                plan_approved: false
             })
         );
     }
@@ -855,7 +891,14 @@ mod tests {
     fn refuses_a_large_input_inside_the_allowance() {
         let big = json!({ "b": "x".repeat(MAX_APPROVAL_INPUT) });
         assert_eq!(
-            evaluate_connector_call("create_issue", &big, Some(&with_allowance(20)), None, 0),
+            evaluate_connector_call(
+                "create_issue",
+                &big,
+                Some(&with_allowance(20)),
+                None,
+                0,
+                false
+            ),
             Err(Refused::InputTooLarge)
         );
     }
@@ -867,12 +910,120 @@ mod tests {
             ..github()
         };
         assert_eq!(
-            evaluate_connector_call("search_issues", &json!({}), Some(&connector), None, 0),
+            evaluate_connector_call(
+                "search_issues",
+                &json!({}),
+                Some(&connector),
+                None,
+                0,
+                false
+            ),
             Ok(ConnectorPass {
                 tag: ConnectorTag::Network,
                 approval: None,
-                allowance: None
+                allowance: None,
+                plan_approved: false
             })
+        );
+    }
+
+    /// GitHub's `create_issue` marked as approved by the marketing plan, and given an allowance
+    /// and a grant's chance beside it, so that each is shown not to matter.
+    fn with_plan_mark() -> SessionConnector {
+        SessionConnector {
+            plan_tools: ["create_issue".to_string()].into(),
+            allowances: [("create_issue".to_string(), 5)].into(),
+            ..github()
+        }
+    }
+
+    #[test]
+    fn a_plan_marked_call_runs_only_inside_a_plan() {
+        let connector = with_plan_mark();
+        let call = |input: &serde_json::Value, granted, used, active| {
+            evaluate_connector_call(
+                "create_issue",
+                input,
+                Some(&connector),
+                granted,
+                used,
+                active,
+            )
+        };
+        // Inside a plan it passes as the plan's: no grant, no allowance, whatever was on offer.
+        for (granted, used) in [(None, 0), (Some(7), 0), (None, 99)] {
+            assert_eq!(
+                call(&json!({}), granted, used, true),
+                Ok(ConnectorPass {
+                    tag: ConnectorTag::ExternalEffect,
+                    approval: None,
+                    allowance: None,
+                    plan_approved: true
+                }),
+                "{granted:?} {used}"
+            );
+        }
+        // Without a plan it is refused, never asked, even with a grant or an allowance left.
+        for (granted, used) in [(None, 0), (Some(7), 0), (None, 99)] {
+            assert_eq!(
+                call(&json!({}), granted, used, false),
+                Err(Refused::NoActivePlan),
+                "{granted:?} {used}"
+            );
+        }
+        // An input too long to show is still refused first, plan or none.
+        let big = json!({ "b": "x".repeat(MAX_APPROVAL_INPUT) });
+        for active in [true, false] {
+            assert_eq!(
+                call(&big, None, 0, active),
+                Err(Refused::InputTooLarge),
+                "{active}"
+            );
+        }
+        // An unmarked external_effect call is as it was, an active plan or not.
+        for active in [true, false] {
+            assert_eq!(
+                evaluate_connector_call(
+                    "create_issue",
+                    &json!({}),
+                    Some(&with_allowance(5)),
+                    None,
+                    0,
+                    active
+                ),
+                Ok(ConnectorPass {
+                    tag: ConnectorTag::ExternalEffect,
+                    approval: None,
+                    allowance: Some(5),
+                    plan_approved: false
+                }),
+                "{active}"
+            );
+            assert_eq!(
+                evaluate_connector_call(
+                    "create_issue",
+                    &json!({}),
+                    Some(&github()),
+                    None,
+                    0,
+                    active
+                ),
+                Err(Refused::ApprovalNeeded),
+                "{active}"
+            );
+        }
+        // A network tool of the same connector is not held to the plan.
+        assert_eq!(
+            evaluate_connector_call(
+                "search_issues",
+                &json!({}),
+                Some(&connector),
+                None,
+                0,
+                false
+            )
+            .map(|pass| pass.plan_approved),
+            Ok(false)
         );
     }
 

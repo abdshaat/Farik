@@ -44,6 +44,9 @@ pub enum KitConnector {
         copy: SetupCopy,
         /// The calls per sprint a user may pre-approve, by tool (step 05b).
         allowances: BTreeMap<String, KitAllowance>,
+        /// The tools the owner's approved marketing plan approves (ADR 0042): `external_effect`
+        /// tools of Farik's own connector only. Not part of the entry or its hash.
+        plan_approved: BTreeSet<String>,
     },
     /// A server Farik runs in Docker itself.
     Container(ConnectorDefinition),
@@ -276,6 +279,7 @@ fn shape(transport: &str) -> Shape {
                 "oauth",
                 "tools",
                 "allowances",
+                "plan_approved",
                 "title",
                 "about",
                 "why",
@@ -295,6 +299,7 @@ fn shape(transport: &str) -> Shape {
                 "oauth",
                 "tools",
                 "allowances",
+                "plan_approved",
                 "title",
                 "about",
                 "why",
@@ -574,7 +579,7 @@ fn load_server(
     let mut entry = serde_json::Map::new();
     entry.insert("source".to_string(), Value::from("custom"));
     for (field, item) in &object {
-        if !COPY.contains(&field.as_str()) && field != "allowances" {
+        if !COPY.contains(&field.as_str()) && field != "allowances" && field != "plan_approved" {
             entry.insert(field.clone(), item.clone());
         }
     }
@@ -636,6 +641,7 @@ fn load_server(
             },
         );
     }
+    let plan_approved = check_plan_marks(connector, transport, &tools, &allowances, &at, refused);
     for (tool, label) in &labels {
         refused.check_words(&at(&format!("labels/{tool}")), label);
     }
@@ -660,7 +666,52 @@ fn load_server(
         entry: wire,
         copy,
         allowances,
+        plan_approved,
     })
+}
+
+/// A connector's `plan_approved`: the tools the owner's marketing plan approves, each held to the
+/// rules of ADR 0042, answered whole. Only Farik's own connector may mark one, asked of the pair
+/// itself and not of `check_pinned`, which a fixture kit skips.
+fn check_plan_marks(
+    connector: &Value,
+    transport: &str,
+    tools: &BTreeMap<String, ConnectorTag>,
+    allowances: &BTreeMap<String, KitAllowance>,
+    at: &dyn Fn(&str) -> String,
+    refused: &mut Refusals,
+) -> BTreeSet<String> {
+    let plan_approved: BTreeSet<String> =
+        strings(&connector["plan_approved"]).into_iter().collect();
+    let command = connector["command"].as_str().unwrap_or_default();
+    let own = transport == "stdio" && is_farik_connector(command, &strings(&connector["args"]));
+    if !plan_approved.is_empty() && !own {
+        refused.add(
+            at("plan_approved"),
+            "plan_mark_not_farik",
+            "only Farik's own connector, `farik connector <name>`, may mark a tool as approved by \
+             the marketing plan, since only Farik's own server can be trusted to check the plan",
+        );
+    }
+    for tool in &plan_approved {
+        if tools.get(tool) != Some(&ConnectorTag::ExternalEffect) {
+            refused.add(
+                at(&format!("plan_approved/{tool}")),
+                "plan_mark_not_external",
+                &format!(
+                    "only a tool tagged external_effect is approved by the plan, and {tool} is not"
+                ),
+            );
+        }
+        if allowances.contains_key(tool) {
+            refused.add(
+                at(&format!("plan_approved/{tool}")),
+                "plan_mark_with_allowance",
+                &format!("{tool} is approved by the plan, so it has no allowance"),
+            );
+        }
+    }
+    plan_approved
 }
 
 /// The code a team-file refusal opens with, before its colon.
@@ -1609,6 +1660,7 @@ mod tests {
             entry,
             copy,
             allowances,
+            ..
         } = &kit.connectors[0]
         else {
             panic!("context7 is a server");
@@ -1963,6 +2015,7 @@ mod tests {
                 entry,
                 copy,
                 allowances,
+                ..
             } = connector
             {
                 let server = custom_server(&entry).expect("a custom server");
@@ -2881,6 +2934,7 @@ mod tests {
             entry,
             copy,
             allowances,
+            ..
         } = &kit.connectors[0]
         else {
             panic!("a server");
@@ -3167,6 +3221,85 @@ mod tests {
             &signing_in("farik", &["connector", "other"]),
             "/connectors/0/args",
             "package_not_pinned",
+        );
+    }
+
+    /// The base's `create_page` is `external_effect` and `search` is `network`: a stdio connector
+    /// that marks the named tools as approved by the marketing plan.
+    fn marking(command: &str, args: &[&str], marked: &[&str]) -> Value {
+        let mut value = stdio(command, args);
+        value["connectors"][0]["plan_approved"] = json!(marked);
+        value
+    }
+
+    #[test]
+    fn the_mark_is_farik_s_own_and_external_only() {
+        // Farik's own connector, one `external_effect` tool marked: it loads, by either parser, the
+        // mark is the kit's alone, and the team entry is the one an unmarked kit has.
+        let own = marking("farik", &["connector", "osv"], &["create_page"]);
+        let unmarked = stdio("farik", &["connector", "osv"]);
+        for kit in [
+            parse(&own).expect("a mark on Farik's own connector loads"),
+            super::parse_fixture_kit(Role::ProductManager, &own.to_string(), &[], &[])
+                .expect("and in a fixture kit"),
+        ] {
+            let KitConnector::Server {
+                entry,
+                plan_approved,
+                ..
+            } = &kit.connectors[0]
+            else {
+                panic!("a server");
+            };
+            assert_eq!(plan_approved.iter().collect::<Vec<_>>(), ["create_page"]);
+            assert!(
+                !serde_json::to_string(entry)
+                    .expect("an entry")
+                    .contains("plan_approved"),
+                "the mark is not in the team entry, so not in its hash"
+            );
+        }
+        let KitConnector::Server {
+            plan_approved: none,
+            ..
+        } = &parse(&unmarked).expect("unmarked loads").connectors[0]
+        else {
+            panic!("a server");
+        };
+        assert!(none.is_empty());
+
+        // Not Farik's own: an http connector, and a package, are refused whatever they mark.
+        let mut http = base();
+        http["connectors"][0]["plan_approved"] = json!(["create_page"]);
+        http["connectors"][0]
+            .as_object_mut()
+            .expect("an object")
+            .remove("allowances");
+        refused(&http, "/connectors/0/plan_approved", "plan_mark_not_farik");
+        refused(
+            &marking("npx", &["x@1.0.0"], &["create_page"]),
+            "/connectors/0/plan_approved",
+            "plan_mark_not_farik",
+        );
+
+        // Only an `external_effect` tool: a `network` one, a `denied` one and one the connector
+        // does not list are each refused, at the tool.
+        for tool in ["search", "delete_page", "nothing"] {
+            refused(
+                &marking("farik", &["connector", "osv"], &[tool]),
+                &format!("/connectors/0/plan_approved/{tool}"),
+                "plan_mark_not_external",
+            );
+        }
+
+        // Never a tool with an allowance: the plan approves it, so nothing counts calls.
+        let mut counted = marking("farik", &["connector", "osv"], &["create_page"]);
+        counted["connectors"][0]["allowances"] =
+            json!({ "create_page": { "calls": 5, "what": "pages" } });
+        refused(
+            &counted,
+            "/connectors/0/plan_approved/create_page",
+            "plan_mark_with_allowance",
         );
     }
 

@@ -219,6 +219,7 @@ fn session_connector(server: CustomServer) -> SessionConnector {
         origin: None,
         tools: server.tools,
         allowances: server.allowances,
+        plan_tools: std::collections::BTreeSet::new(),
     }
 }
 
@@ -297,6 +298,7 @@ async fn give_browser(
         origin: Some(running.origin()),
         tools: definition.tools.clone(),
         allowances: std::collections::BTreeMap::new(),
+        plan_tools: std::collections::BTreeSet::new(),
     };
     Ok(Ok(Some((running, connector))))
 }

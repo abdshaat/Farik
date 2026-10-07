@@ -204,6 +204,16 @@
           },
           "description": "A tool tagged external_effect to the calls per sprint a user may pre-approve (allowance_not_external otherwise). Step 05b reads it."
         },
+        "plan_approved": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "description": "Tools the owner's approved marketing plan approves: each tagged external_effect (plan_mark_not_external), none with an allowance (plan_mark_with_allowance), and only on Farik's own connector, farik connector <name> (plan_mark_not_farik), since only Farik's own server can be trusted to check the plan (ADR 0038, ADR 0042). Not part of the team entry or its hash."
+        },
         "image": {
           "type": "string",
           "minLength": 1,

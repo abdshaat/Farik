@@ -507,7 +507,8 @@ fn judge_connector(
             used = calls_made(deps, state, &registration.agent_id, server, tool)?;
         }
     }
-    match evaluate_connector_call(tool, &request.tool_input, connector, granted, used) {
+    // Until the plan's gate is read here, no plan is active: a marked tool is refused.
+    match evaluate_connector_call(tool, &request.tool_input, connector, granted, used, false) {
         Ok(pass) => Ok(Pass {
             approval: pass.approval,
             allowance: pass.allowance,
@@ -527,6 +528,10 @@ fn judge_connector(
                 "tool_denied: {tool} of {server} is tagged denied, and no session may call it"
             ),
             ConnectorRefusal::ApprovalNeeded => unreachable!("asked above"),
+            ConnectorRefusal::NoActivePlan => format!(
+                "no_active_marketing_plan: {tool} of {server} runs only inside a marketing plan \
+                 the owner approved"
+            ),
             ConnectorRefusal::InputTooLarge => format!(
                 "tool_input_too_large: {tool}'s input is over 64 KiB, too long to show you, so it \
                  is refused"
@@ -1714,6 +1719,7 @@ mod tests {
                 origin: Some("http://localhost:4400".to_string()),
                 tools: definition.tools,
                 allowances: std::collections::BTreeMap::new(),
+                plan_tools: std::collections::BTreeSet::new(),
             }],
             preview: None,
         });
@@ -1852,12 +1858,14 @@ mod tests {
                     allowances: calls
                         .map(|calls| [("create_issue".to_string(), calls)].into())
                         .unwrap_or_default(),
+                    plan_tools: std::collections::BTreeSet::new(),
                 },
                 SessionConnector {
                     server: "gitlab".to_string(),
                     origin: None,
                     tools: [("create_issue".to_string(), ConnectorTag::ExternalEffect)].into(),
                     allowances: std::collections::BTreeMap::new(),
+                    plan_tools: std::collections::BTreeSet::new(),
                 },
             ],
             preview: None,
@@ -2245,6 +2253,7 @@ mod tests {
                 origin: None,
                 tools: server.tools.clone(),
                 allowances: server.allowances.clone(),
+                plan_tools: std::collections::BTreeSet::new(),
             }],
             preview: None,
         });
