@@ -96,4 +96,4 @@ Every outward act, in both positions (step 10h's plan holds the same table and i
 
 Consequences:
 - Easier: no file, pull or stale page can turn `auto` on; the owner sees in one table what stops asking; credits cannot run away on `auto`; Today says when the team stopped at a limit.
-- Harder: the mode is per computer, so a project opened on a second computer starts at `ask` there; a seller cannot tell from a message the team sent on its own that an AI wrote it, by the founder's choice, which spec 8.6 records; the kit carries a second meaning for an allowance (`asks_always`), which the allowance editor says in words.
+- Harder: the mode is the project folder's own on this computer, in its log under `.farik/local/` (spec 8.4), so another clone of the repository, on this computer or another, starts at `ask`; a seller cannot tell from a message the team sent on its own that an AI wrote it, by the founder's choice, which spec 8.6 records; the kit carries a second meaning for an allowance (`asks_always`), which the allowance editor says in words.
