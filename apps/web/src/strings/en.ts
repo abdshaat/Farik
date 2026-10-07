@@ -1328,6 +1328,7 @@ export const en = {
 	kitConnected: "Connected",
 	kitSignedIn: "Signed in to {service}.",
 	kitAgain: "Farik updated this service. Connect it again to keep using it.",
+	kitAtLaunch: "{service} comes with Farik’s web launch.",
 	kitGone: "Farik no longer offers this service",
 	kitGoneNote:
 		"{name} does not use it. Removing it deletes what {name} had kept for it.",

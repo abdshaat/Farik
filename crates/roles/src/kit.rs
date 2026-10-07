@@ -232,6 +232,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "researching-the-market",
             "writing-the-marketing-plan",
             "running-social-channels",
+            "running-search-ads",
         ),
         Role::FinanceSpecialist => embedded!("finance_specialist":
             "categorising-expenses",
@@ -1050,7 +1051,8 @@ mod tests {
                 match role {
                     Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
                     Role::FinanceSpecialist => 3,
-                    Role::ProductManager | Role::Architect | Role::MarketingSpecialist => 4,
+                    Role::ProductManager | Role::Architect => 4,
+                    Role::MarketingSpecialist => 5,
                     _ => 0,
                 },
                 "{role}"
@@ -1249,9 +1251,10 @@ mod tests {
 
     /// The kit's skills are the nine of steps 08 and 08b, then the four of step 08c: the brand kit,
     /// the brand persona, the market and the marketing plan, each written for any business; then
-    /// the one of step 08d, running the social channels, which names the tool that posts.
+    /// the one of step 08d, running the social channels, which names the tool that posts; then
+    /// the one of step 08f, running search ads, which names Google Ads' own tools.
     #[test]
-    fn marketing_kit_carries_running_social_channels() {
+    fn marketing_kit_carries_running_search_ads() {
         let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
         let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
         assert_eq!(
@@ -1271,6 +1274,7 @@ mod tests {
                 "researching-the-market",
                 "writing-the-marketing-plan",
                 "running-social-channels",
+                "running-search-ads",
             ]
         );
         for skill in &kit.skills {
@@ -1280,7 +1284,7 @@ mod tests {
                 skill.name
             );
         }
-        // The five new skills: when each applies, numbered sections, under 6 KB, and the skill it
+        // The six new skills: when each applies, numbered sections, under 6 KB, and the skill it
         // sits beside named where the design says it does.
         for (name, description, beside) in [
             (
@@ -1307,6 +1311,11 @@ mod tests {
                 "running-social-channels",
                 "Use when the task asks for posts on the business's social channels",
                 "`farik_schedule_post`",
+            ),
+            (
+                "running-search-ads",
+                "Use when the active marketing plan has Google Ads campaigns",
+                "`create_search_campaign`",
             ),
         ] {
             let skill = kit
@@ -2567,8 +2576,17 @@ mod tests {
     fn the_marketing_kits_services_in_order() {
         let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
         let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
-        assert_eq!(names, ["higgsfield", "recraft", "buffer", "kit"]);
-        for connector in &kit.connectors {
+        assert_eq!(
+            names,
+            ["higgsfield", "recraft", "buffer", "kit", "google-ads"]
+        );
+        // The four services of the web are signed in to by route 1; Google Ads is Farik's own
+        // connector, held by `google_ads_runs_only_inside_the_plan`.
+        for connector in kit
+            .connectors
+            .iter()
+            .filter(|connector| connector.name() != "google-ads")
+        {
             let KitConnector::Server { entry, .. } = connector else {
                 panic!("{} is a server", connector.name());
             };
@@ -2579,6 +2597,126 @@ mod tests {
             assert!(oauth.is_some(), "{} signs in", server.name);
             assert!(server.credential_keys.is_empty(), "{}", server.name);
         }
+    }
+
+    /// Google Ads' three reads, which run on their own.
+    const GOOGLE_ADS_READS: [&str; 3] = ["keyword_ideas", "list_accounts", "report"];
+
+    /// Google Ads' seven writes: each runs only inside the marketing plan the owner approved.
+    const GOOGLE_ADS_WRITES: [&str; 7] = [
+        "add_ad_group",
+        "add_keywords",
+        "add_negative_keywords",
+        "add_responsive_search_ad",
+        "create_search_campaign",
+        "set_campaign_budget",
+        "set_campaign_status",
+    ];
+
+    /// The tools `name` of `role`'s kit marks as approved by the marketing plan.
+    fn plan_marked(role: Role, name: &str) -> Vec<String> {
+        let kit = load_kit(role).expect("a shipped kit");
+        for connector in kit.connectors {
+            if let KitConnector::Server {
+                entry,
+                plan_approved,
+                ..
+            } = connector
+                && entry.name.as_str() == name
+            {
+                return plan_approved.into_iter().collect();
+            }
+        }
+        panic!("the {role} kit has no {name}");
+    }
+
+    /// Google Ads is Farik's own connector (ADR 0042, step 08f): signed in to with Google's one
+    /// Ads scope, three reads, and seven writes that run only inside the plan the owner approved,
+    /// so each is `external_effect`, plan-marked and without an allowance. Nothing else in any kit
+    /// carries the mark.
+    #[test]
+    fn google_ads_runs_only_inside_the_plan() {
+        let (server, copy, allowances) = marketing_service("google-ads");
+        let CustomTransport::Stdio {
+            command,
+            args,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("google-ads is stdio");
+        };
+        assert_eq!(command, "farik");
+        assert_eq!(args, &["connector".to_string(), "google-ads".to_string()]);
+        let oauth = oauth.as_ref().expect("it signs in");
+        assert_eq!(
+            oauth.scopes,
+            ["https://www.googleapis.com/auth/adwords".to_string()]
+        );
+        assert!(oauth.client_id.is_none() && oauth.callback_port.is_none());
+        assert!(server.credential_keys.is_empty());
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Network),
+            sorted(&GOOGLE_ADS_READS)
+        );
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::ExternalEffect),
+            sorted(&GOOGLE_ADS_WRITES)
+        );
+        assert_eq!(tagged(&server, ConnectorTag::Denied), 0);
+        assert_eq!(server.tools.len(), 10);
+        assert!(allowances.is_empty(), "a plan covers a write, no allowance");
+        assert_eq!(
+            plan_marked(Role::MarketingSpecialist, "google-ads"),
+            sorted(&GOOGLE_ADS_WRITES)
+        );
+        // Only this entry, of every kit, carries the mark.
+        for role in SHIPPED {
+            for connector in load_kit(role).expect("a shipped kit").connectors {
+                if let KitConnector::Server { plan_approved, .. } = &connector
+                    && connector.name() != "google-ads"
+                {
+                    assert!(plan_approved.is_empty(), "{role}/{}", connector.name());
+                }
+            }
+        }
+        assert_eq!(copy.title, "Google Ads");
+        assert_eq!(
+            copy.about,
+            "Google Ads shows your ads to people searching on Google and charges you for the clicks."
+        );
+        assert_eq!(
+            copy.why,
+            "So the Marketing Specialist can find the words your customers search for and run the \
+             search ads in a marketing plan you approved, within its budget."
+        );
+        assert_eq!(
+            copy.setup,
+            "Sign in with the Google account that manages your ads and allow Farik to manage them. \
+             Farik makes and changes search ads only inside a marketing plan you approved, never \
+             deletes anything, and never touches billing or who can use your account. The ads cost \
+             money at Google, up to the budget in your plan."
+        );
+        assert!(copy.key_page.is_none());
+        let labels: Vec<(&str, &str)> = copy
+            .labels
+            .iter()
+            .map(|(tool, label)| (tool.as_str(), label.as_str()))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                ("add_ad_group", "add an ad group"),
+                ("add_keywords", "add search words"),
+                ("add_negative_keywords", "rule out search words"),
+                ("add_responsive_search_ad", "write an ad"),
+                ("create_search_campaign", "start a search campaign"),
+                ("keyword_ideas", "find search words"),
+                ("list_accounts", "list ad accounts"),
+                ("report", "read ad results"),
+                ("set_campaign_budget", "change a campaign's budget"),
+                ("set_campaign_status", "pause or run a campaign"),
+            ]
+        );
     }
 
     /// Step 10: Stripe's official server, signed in to by route 1 asking for its one scope, and

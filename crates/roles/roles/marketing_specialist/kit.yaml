@@ -1,10 +1,13 @@
-# The Marketing Specialist's kit: fourteen skills written for any business (ADR 0040) and the services it
+# The Marketing Specialist's kit: fifteen skills written for any business (ADR 0040) and the services it
 # signs in to (route 1, ADR 0035): two creative ones that spend the user's credits inside an allowance
 # (ADR 0037), then Buffer, whose writes are Farik's own (the agent's posts go out through
 # `farik_schedule_post`, in the plan the owner approved, and Farik calls `create_post` itself), and
-# Kit, whose email broadcasts are only drafts the human sends (ADR 0042). Tool lists are pinned
-# against each service's live listing by `live_kit_pins`; a tool a service lists that is not here is
-# never offered (`tool_not_tagged`) until a pin update tags it.
+# Kit, whose email broadcasts are only drafts the human sends (ADR 0042); and Google Ads, Farik's own
+# connector, whose seven writes run only inside the plan the owner approved (`plan_approved`, ADR 0042;
+# its ten tools are listed by `farik connector google-ads` itself, pinned offline by
+# `google_ads_server_lists_the_kits_tools`). Tool lists of the services are pinned against each
+# service's live listing by `live_kit_pins`; a tool a service lists that is not here is never offered
+# (`tool_not_tagged`) until a pin update tags it.
 role: marketing_specialist
 skills:
   - positioning-and-messaging
@@ -21,6 +24,7 @@ skills:
   - researching-the-market
   - writing-the-marketing-plan
   - running-social-channels
+  - running-search-ads
 connectors:
   - name: higgsfield
     transport: http
@@ -372,3 +376,35 @@ connectors:
       update_product: denied
       update_subscriber: denied
       update_tag_name: denied
+  - name: google-ads
+    transport: stdio
+    command: farik
+    args: [connector, google-ads]
+    oauth: { scopes: ["https://www.googleapis.com/auth/adwords"] }
+    title: Google Ads
+    about: "Google Ads shows your ads to people searching on Google and charges you for the clicks."
+    why: "So the Marketing Specialist can find the words your customers search for and run the search ads in a marketing plan you approved, within its budget."
+    setup: "Sign in with the Google account that manages your ads and allow Farik to manage them. Farik makes and changes search ads only inside a marketing plan you approved, never deletes anything, and never touches billing or who can use your account. The ads cost money at Google, up to the budget in your plan."
+    labels:
+      list_accounts: "list ad accounts"
+      report: "read ad results"
+      keyword_ideas: "find search words"
+      create_search_campaign: "start a search campaign"
+      add_ad_group: "add an ad group"
+      add_keywords: "add search words"
+      add_negative_keywords: "rule out search words"
+      add_responsive_search_ad: "write an ad"
+      set_campaign_budget: "change a campaign's budget"
+      set_campaign_status: "pause or run a campaign"
+    plan_approved: [create_search_campaign, add_ad_group, add_keywords, add_negative_keywords, add_responsive_search_ad, set_campaign_budget, set_campaign_status]
+    tools:
+      list_accounts: network
+      report: network
+      keyword_ideas: network
+      create_search_campaign: external_effect
+      add_ad_group: external_effect
+      add_keywords: external_effect
+      add_negative_keywords: external_effect
+      add_responsive_search_ad: external_effect
+      set_campaign_budget: external_effect
+      set_campaign_status: external_effect

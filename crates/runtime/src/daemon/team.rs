@@ -14,8 +14,9 @@ use farik_core::criteria::validate_criteria;
 use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::paths::{PathRefusal, check_protected_paths};
 use farik_core::team::{
-    Agent, AgentStatus, CustomServer, MODEL_FAMILIES, McpServerSource, McpServerWire, Team,
-    ValidationError, custom_server, describe_change, spec_sha256, validate_team,
+    Agent, AgentStatus, CustomServer, CustomTransport, MODEL_FAMILIES, McpServerSource,
+    McpServerWire, Team, ValidationError, custom_server, describe_change, spec_sha256,
+    validate_team,
 };
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{EventBody, new_event};
@@ -94,7 +95,7 @@ pub(super) fn query(
             let team = deps.files.read_team().map_err(|e| internal(&e))?;
             let mut answer = effective(deps, &team)?;
             answer["connectors"] = json!(connector_states(state, deps, &team));
-            answer["kits"] = json!(kits_of(deps, &team)?);
+            answer["kits"] = json!(kits_of(deps, &team, state.registered_apps())?);
             answer["team"] = serde_json::to_value(team).map_err(|e| internal(&e))?;
             answer["max_agents"] = json!(farik_core::team::MAX_AGENTS);
             answer["sandboxed"] = json!(deps.transitions.sandboxed());
@@ -665,10 +666,31 @@ pub fn plan_tools_of(kit: &Kit, server: &CustomServer) -> std::collections::BTre
         .unwrap_or_default()
 }
 
+/// Whether `entry` is a service that signs in through one of Farik's own connectors while the
+/// daemon's table has no app of Farik's for it (ADR 0044): until Farik Cloud signs customers in
+/// at the web launch, nothing here can connect it, and the page says so in place of Connect.
+fn at_launch(entry: &McpServerWire, apps: &[crate::registered_apps::RegisteredApp]) -> bool {
+    let Some(server) = kit_server(entry) else {
+        return false;
+    };
+    server.oauth().is_some()
+        && matches!(
+            &server.transport,
+            CustomTransport::Stdio { command, args, .. }
+                if farik_roles::is_farik_connector(command, args)
+                    && crate::registered_apps::app_for_farik_connector(apps, command, args)
+                        .is_none()
+        )
+}
+
 /// What `team.get` says of each role on the team whose kit has a service to connect by name: the
 /// copy the page shows and how the service is reached. A `container` connector is no service to
 /// connect, and a role with none is not listed.
-fn kits_of(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Failure> {
+fn kits_of(
+    deps: &ToolDeps,
+    team: &Team,
+    apps: &[crate::registered_apps::RegisteredApp],
+) -> Result<Vec<Value>, Failure> {
     let mut roles: Vec<Role> = Vec::new();
     for agent in team
         .agents
@@ -706,6 +728,9 @@ fn kits_of(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Failure> {
                     });
                     if let Some(page) = &copy.key_page {
                         row["key_page"] = json!(page);
+                    }
+                    if at_launch(entry, apps) {
+                        row["at_launch"] = json!(true);
                     }
                     if !allowances.is_empty() {
                         row["allowances"] = allowances
@@ -4029,8 +4054,127 @@ pub(super) mod tests {
         }
     }
 
-    /// A guard: each of the Marketing Specialist's four services connects by name, carrying the
-    /// kit's allowances (Buffer none, Kit its two broadcast tools), and is no other role's.
+    /// The kit's entry named `name`, as the daemon reads it.
+    fn kit_entry_of(kit: &farik_roles::Kit, name: &str) -> farik_core::team::McpServerWire {
+        kit.connectors
+            .iter()
+            .find_map(|connector| match connector {
+                farik_roles::KitConnector::Server { entry, .. } if entry.name.as_str() == name => {
+                    Some(entry.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("the kit has no {name}"))
+    }
+
+    /// An entry that signs in for one of Farik's own connectors, as a literal: nothing here is an
+    /// app of Farik's.
+    fn app_for(connector: &'static str) -> crate::registered_apps::RegisteredApp {
+        use crate::registered_apps::{AppFlow, RegisteredApp};
+        RegisteredApp {
+            id: "a-test-app",
+            name: "A test app",
+            host: None,
+            farik_connector: Some(connector),
+            flow: AppFlow::Loopback {
+                authorization_endpoint: "https://accounts.example/auth",
+            },
+            client_id: "a-test-client",
+            client_secret: None,
+            scopes: &["a-scope"],
+            issuer: "https://accounts.example",
+            token_endpoint: "https://accounts.example/token",
+            revocation_endpoint: None,
+            install_url: None,
+            settings_url: "https://accounts.example/settings",
+        }
+    }
+
+    /// Until Farik Cloud signs customers in (ADR 0044), a kit's service that signs in through one
+    /// of Farik's own connectors comes at the launch when the table has no app for that connector,
+    /// and no other service does.
+    #[test]
+    fn a_kit_row_without_an_app_comes_at_launch() {
+        use farik_core::contract::Role;
+        let marketing = farik_roles::load_kit(Role::MarketingSpecialist)
+            .expect("the Marketing Specialist's kit");
+        let ads = kit_entry_of(&marketing, "google-ads");
+        assert!(
+            super::at_launch(&ads, &[]),
+            "no app: it comes at the launch"
+        );
+        assert!(
+            !super::at_launch(&ads, &[app_for("google-ads")]),
+            "an app for it: Connect works"
+        );
+        assert!(
+            super::at_launch(&ads, &[app_for("osv")]),
+            "an app for another of Farik's connectors is no app for this one"
+        );
+        // A service signed in to by route 1 has nothing to wait for, and neither has a Farik
+        // connector that signs in to nothing.
+        for name in ["higgsfield", "recraft", "buffer", "kit"] {
+            assert!(
+                !super::at_launch(&kit_entry_of(&marketing, name), &[]),
+                "{name}"
+            );
+        }
+        let architect = farik_roles::load_kit(Role::Architect).expect("the Architect's kit");
+        assert!(!super::at_launch(&kit_entry_of(&architect, "osv"), &[]));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_says_which_kit_row_comes_at_launch() {
+        let (harness, _) = keeping_a_kit("kit-at-launch");
+        let mut team = team_file(&harness);
+        team["agents"].as_array_mut().expect("agents").push(
+            farik_core::team::fixtures::an_agent_wire("kai", "marketing_specialist"),
+        );
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&farik_core::team::validate_team(&team).expect("a team"))
+            .expect("the team is written");
+        let rows = |harness: &Harness| -> Vec<Value> {
+            let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+            got["kits"]
+                .as_array()
+                .and_then(|kits| {
+                    kits.iter()
+                        .find(|kit| kit["role"] == "marketing_specialist")
+                })
+                .and_then(|kit| kit["connectors"].as_array().cloned())
+                .expect("the Marketing Specialist's kit")
+        };
+        let row = |rows: &[Value], name: &str| -> Value {
+            rows.iter()
+                .find(|row| row["name"] == name)
+                .cloned()
+                .unwrap_or_else(|| panic!("no {name}"))
+        };
+        // No build carries an app of Farik's: Google Ads waits for the launch, the others do not.
+        let before = rows(&harness);
+        assert_eq!(row(&before, "google-ads")["at_launch"], json!(true));
+        assert_eq!(row(&before, "google-ads")["auth"], "oauth");
+        for name in ["higgsfield", "recraft", "buffer", "kit"] {
+            assert!(row(&before, name).get("at_launch").is_none(), "{name}");
+        }
+        // With an app for it, Connect works.
+        let table: &'static [crate::registered_apps::RegisteredApp] =
+            Box::leak(Box::new([app_for("google-ads")]));
+        assert!(harness.daemon.set_registered_apps(table));
+        assert!(
+            row(&rows(&harness), "google-ads")
+                .get("at_launch")
+                .is_none()
+        );
+    }
+
+    /// A guard: each of the Marketing Specialist's five services connects by name, carrying the
+    /// kit's allowances (Buffer and Google Ads none, Kit its two broadcast tools), and is no other
+    /// role's.
     #[test]
     fn connects_each_marketing_service_by_name() {
         use farik_core::contract::Role;
@@ -4072,6 +4216,8 @@ pub(super) mod tests {
                     ("update_broadcast".to_string(), 10),
                 ]),
             ),
+            // Its writes run inside the marketing plan, so none has an allowance.
+            ("google-ads", BTreeMap::new()),
         ] {
             let (_, server) = super::kit_entry(&marketing, &team, "kai", name, &BTreeMap::new())
                 .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
@@ -4081,7 +4227,7 @@ pub(super) mod tests {
         // None is the Developer's: not by its role, and not by its kit.
         let developer =
             farik_roles::load_kit(Role::SoftwareDeveloper).expect("the Developer's kit");
-        for name in ["higgsfield", "recraft", "buffer", "kit"] {
+        for name in ["higgsfield", "recraft", "buffer", "kit", "google-ads"] {
             let refused = super::kit_entry(&marketing, &team, "dev-a", name, &BTreeMap::new())
                 .expect_err("the Developer is not the Marketing Specialist");
             assert!(
