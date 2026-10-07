@@ -1192,7 +1192,8 @@ pub fn ad_group_campaign_query(ad_group: &str) -> Result<String, GoogleAdsError>
     ))
 }
 
-/// The query that reads what `campaigns` cost between two days.
+/// The query that reads what `campaigns` cost between two days, and what budget and end Google
+/// holds for each, which enabling one is checked against.
 ///
 /// # Errors
 ///
@@ -1215,10 +1216,51 @@ pub fn spend_query(
     }
     let names: Vec<String> = campaigns.iter().map(|name| format!("'{name}'")).collect();
     Ok(format!(
-        "SELECT campaign.resource_name, metrics.cost_micros FROM campaign WHERE \
-         campaign.resource_name IN ({}) AND segments.date BETWEEN '{from}' AND '{to}'",
+        "SELECT campaign.resource_name, campaign.start_date_time, campaign.end_date_time, \
+         campaign_budget.amount_micros, campaign_budget.total_amount_micros, metrics.cost_micros \
+         FROM campaign WHERE campaign.resource_name IN ({}) AND segments.date BETWEEN '{from}' \
+         AND '{to}'",
         names.join(", ")
     ))
+}
+
+/// What a spend read's row says Google holds for a campaign: its budget's amounts in micros, a
+/// total budget's and a daily one's, and the days it starts and ends. `None` is what the row did
+/// not give.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HeldRow {
+    /// `campaignBudget.totalAmountMicros`.
+    pub total_micros: Option<u64>,
+    /// `campaignBudget.amountMicros`.
+    pub daily_micros: Option<u64>,
+    /// The date part of `campaign.startDateTime`.
+    pub starts_on: Option<NaiveDate>,
+    /// The date part of `campaign.endDateTime`.
+    pub ends_on: Option<NaiveDate>,
+}
+
+/// What each campaign a spend query's rows name holds at Google.
+#[must_use]
+pub fn held_by_campaign(rows: &[Value]) -> std::collections::BTreeMap<String, HeldRow> {
+    let mut held = std::collections::BTreeMap::new();
+    for row in rows {
+        let Some(name) = row["campaign"]["resourceName"].as_str() else {
+            continue;
+        };
+        // The day is the first ten characters of "yyyy-MM-dd HH:mm:ss".
+        let day_of = |at: &Value| {
+            at.as_str()
+                .and_then(|at| at.get(..10))
+                .and_then(|day| day.parse().ok())
+        };
+        held.entry(name.to_string()).or_insert(HeldRow {
+            total_micros: micros_of(&row["campaignBudget"]["totalAmountMicros"]),
+            daily_micros: micros_of(&row["campaignBudget"]["amountMicros"]),
+            starts_on: day_of(&row["campaign"]["startDateTime"]),
+            ends_on: day_of(&row["campaign"]["endDateTime"]),
+        });
+    }
+    held
 }
 
 /// The cost in micros of each campaign a spend query's rows name.
@@ -1687,10 +1729,11 @@ mod tests {
 
     use super::{
         AdGroupInput, AdInput, BudgetInput, CUSTOMER_CURRENCY_QUERY, CampaignInput, GoogleAds,
-        GoogleAdsError, KeywordsInput, NewCampaign, Status, StatusInput, ad_group_campaign_query,
-        ad_group_operations, ad_operations, budget_operations, campaign_operations, keyword_ideas,
-        keyword_operations, list_accounts, negative_keyword_operations, report, resource_customer,
-        spend_by_campaign, spend_query, status_operations, tool_names,
+        GoogleAdsError, HeldRow, KeywordsInput, NewCampaign, Status, StatusInput,
+        ad_group_campaign_query, ad_group_operations, ad_operations, budget_operations,
+        campaign_operations, held_by_campaign, keyword_ideas, keyword_operations, list_accounts,
+        negative_keyword_operations, report, resource_customer, spend_by_campaign, spend_query,
+        status_operations, tool_names,
     };
     use crate::claude::Secret;
     use crate::google_ads_fixture::{Fixture, Mode};
@@ -2562,13 +2605,13 @@ mod tests {
         ];
         assert_eq!(
             spend_query(&campaigns, day("2026-10-31"), day("2026-11-04")),
-            Ok(
-                "SELECT campaign.resource_name, metrics.cost_micros FROM campaign WHERE \
+            Ok("SELECT campaign.resource_name, campaign.start_date_time, \
+                campaign.end_date_time, campaign_budget.amount_micros, \
+                campaign_budget.total_amount_micros, metrics.cost_micros FROM campaign WHERE \
                 campaign.resource_name IN ('customers/1234567890/campaigns/11', \
-                'customers/1234567890/campaigns/12') AND segments.date BETWEEN '2026-10-31' \
-                AND '2026-11-04'"
-                    .to_string()
-            )
+                'customers/1234567890/campaigns/12') AND segments.date BETWEEN '2026-10-31' AND \
+                '2026-11-04'"
+                .to_string())
         );
         for bad in [
             vec![],
@@ -2633,6 +2676,65 @@ mod tests {
                 ("customers/1234567890/campaigns/12".to_string(), 250),
                 ("customers/1234567890/campaigns/13".to_string(), 0),
             ])
+        );
+    }
+
+    #[test]
+    fn reads_what_google_holds_for_a_campaign() {
+        // Google writes a 64-bit number as text, drops what is zero, and gives the end as a day
+        // and a time of day in the account's time zone.
+        let rows = vec![
+            json!({
+                "campaign": {
+                    "resourceName": "customers/1234567890/campaigns/11",
+                    "startDateTime": "2026-11-04 00:00:00",
+                    "endDateTime": "2026-12-02 23:59:59"
+                },
+                "campaignBudget": { "totalAmountMicros": "500000000" },
+                "metrics": { "costMicros": "1500000" }
+            }),
+            json!({
+                "campaign": {
+                    "resourceName": "customers/1234567890/campaigns/12",
+                    "endDateTime": "2037-12-30 23:59:59"
+                },
+                "campaignBudget": { "amountMicros": 17_390_000 }
+            }),
+            json!({ "campaign": { "resourceName": "customers/1234567890/campaigns/13" } }),
+            json!({
+                "campaign": {
+                    "resourceName": "customers/1234567890/campaigns/14",
+                    "endDateTime": "not a date"
+                }
+            }),
+        ];
+        let held = held_by_campaign(&rows);
+        assert_eq!(
+            held.get("customers/1234567890/campaigns/11"),
+            Some(&HeldRow {
+                total_micros: Some(500_000_000),
+                daily_micros: None,
+                starts_on: Some(day("2026-11-04")),
+                ends_on: Some(day("2026-12-02")),
+            })
+        );
+        assert_eq!(
+            held.get("customers/1234567890/campaigns/12"),
+            Some(&HeldRow {
+                total_micros: None,
+                daily_micros: Some(17_390_000),
+                starts_on: None,
+                ends_on: Some(day("2037-12-30")),
+            })
+        );
+        assert_eq!(
+            held.get("customers/1234567890/campaigns/13"),
+            Some(&HeldRow::default())
+        );
+        assert_eq!(
+            held.get("customers/1234567890/campaigns/14"),
+            Some(&HeldRow::default()),
+            "a date that is not one is not given"
         );
     }
 

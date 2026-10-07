@@ -16,8 +16,8 @@ use chrono::{Duration as Days, NaiveDate};
 use farik_core::contract::Role;
 use farik_core::governor::permissions::ConnectorTag;
 use farik_core::marketing::{
-    AdsPlanView, AdsWrite, Amount, BudgetKind, CreatedCampaign, PlanProposal, PlanRecord,
-    ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write, first_day,
+    AdsPlanView, AdsWrite, Amount, BudgetKind, CreatedCampaign, HeldAtGoogle, PlanProposal,
+    PlanRecord, ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write, first_day,
 };
 use farik_core::team::{CustomServer, custom_server};
 use farik_protocol::event::{
@@ -34,9 +34,9 @@ use crate::google_ads::{
     AdGroupInput, AdInput, BudgetInput, CUSTOMER_CURRENCY_QUERY, CampaignInput, GoogleAds,
     GoogleAdsError, KeywordsInput, NewCampaign, READ_TOOLS, Status, StatusInput, WRITE_TOOLS,
     ad_group_campaign_query, ad_group_operations, ad_operations, budget_operations,
-    campaign_operations, customer_of, dashed, keyword_ideas, keyword_operations, list_accounts,
-    negative_keyword_operations, report, resource_customer, spend_by_campaign, spend_query,
-    status_operations,
+    campaign_operations, customer_of, dashed, held_by_campaign, keyword_ideas, keyword_operations,
+    list_accounts, negative_keyword_operations, report, resource_customer, spend_by_campaign,
+    spend_query, status_operations,
 };
 use crate::tools::ToolDeps;
 
@@ -289,6 +289,16 @@ fn read_plan(deps: &ToolDeps, today: NaiveDate) -> Result<ActivePlan, Refusal> {
     })
 }
 
+/// What one read of the lineage's campaigns in an ad account answers: what each plan campaign's
+/// key has spent, and what Google holds for each campaign.
+#[derive(Default)]
+struct Spend {
+    /// By the plan campaign's key, in hundredths.
+    by_key: BTreeMap<String, Amount>,
+    /// By the campaign's resource name.
+    held: BTreeMap<String, HeldAtGoogle>,
+}
+
 /// A write, with what it is checked against, read under the writes' lock.
 struct Writing<'a> {
     deps: &'a ToolDeps,
@@ -418,8 +428,9 @@ impl Writing<'_> {
 
     /// What each plan campaign's key has spent so far, in all the campaigns of the lineage in
     /// `account`: one `Search` of their cost from the day before the first was made to tomorrow,
-    /// rounded up from micros to hundredths.
-    async fn spend(&self, account: &str) -> Result<BTreeMap<String, Amount>, Refusal> {
+    /// rounded up from micros to hundredths; and what budget and end Google holds for each
+    /// campaign, which the same rows say.
+    async fn spend(&self, account: &str) -> Result<Spend, Refusal> {
         let customer = customer_of(account).map_err(said)?;
         let ours: Vec<&(CreatedCampaign, NaiveDate)> = self
             .created
@@ -430,7 +441,7 @@ impl Writing<'_> {
             })
             .collect();
         let Some(first) = ours.iter().map(|(_, day)| *day).min() else {
-            return Ok(BTreeMap::new());
+            return Ok(Spend::default());
         };
         let names: Vec<String> = ours.iter().map(|(made, _)| made.campaign.clone()).collect();
         let unread = |why: GoogleAdsError| {
@@ -448,14 +459,33 @@ impl Writing<'_> {
             .map_err(unread)?;
         let micros = spend_by_campaign(&rows);
         let mut spent: BTreeMap<String, u64> = BTreeMap::new();
+        let mut held = BTreeMap::new();
+        let rows_held = held_by_campaign(&rows);
         for (made, _) in ours {
             *spent.entry(made.key.clone()).or_insert(0) +=
                 micros.get(&made.campaign).copied().unwrap_or(0);
+            // A total budget's amount is its total, a daily one's its daily amount.
+            let row = rows_held.get(&made.campaign).copied().unwrap_or_default();
+            let amount = match made.kind {
+                BudgetKind::Total => row.total_micros,
+                BudgetKind::Daily => row.daily_micros,
+            };
+            held.insert(
+                made.campaign.clone(),
+                HeldAtGoogle {
+                    amount: amount.map(|micros| Amount(micros.div_ceil(10_000))),
+                    starts_on: row.starts_on,
+                    ends_on: row.ends_on,
+                },
+            );
         }
-        Ok(spent
-            .into_iter()
-            .map(|(key, cost)| (key, Amount(cost.div_ceil(10_000))))
-            .collect())
+        Ok(Spend {
+            by_key: spent
+                .into_iter()
+                .map(|(key, cost)| (key, Amount(cost.div_ceil(10_000))))
+                .collect(),
+            held,
+        })
     }
 
     /// Refuses unless the ad account bills in the plan's currency. The plan's figures are in it,
@@ -629,7 +659,7 @@ impl Writing<'_> {
                 campaign: input.campaign.clone(),
                 amount,
             },
-            &spent,
+            &spent.by_key,
         )?;
         let made = self.made(&input.campaign)?;
         self.mutate(&account, budget_operations(&made.budget, made.kind, amount))
@@ -648,12 +678,14 @@ impl Writing<'_> {
             Status::Enabled => {
                 self.bills_in_the_plans_currency(&account).await?;
                 let spent = self.spend(&account).await?;
+                let held = spent.held.get(&input.campaign).copied().unwrap_or_default();
                 self.covers(
                     &AdsWrite::Enable {
                         account: account.clone(),
                         campaign: input.campaign.clone(),
+                        held,
                     },
-                    &spent,
+                    &spent.by_key,
                 )?;
             }
             Status::Paused => self.covers(
@@ -853,6 +885,11 @@ mod tests {
         /// ahead), and `search-long` of 400.00 to 2027-01-20 (a daily one), out of 1000.00 for
         /// Google Ads.
         fn plan(&self, plan: &str, replaces: Option<&str>) {
+            self.plan_with(plan, replaces, |_| {});
+        }
+
+        /// As `plan`, with `change` made to the proposal's wire.
+        fn plan_with(&self, plan: &str, replaces: Option<&str>, change: impl FnOnce(&mut Value)) {
             let mut body =
                 farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
             body["plan"] = json!(plan);
@@ -874,6 +911,7 @@ mod tests {
                 campaign("search-launch", "500.00", "2026-10-22"),
                 campaign("search-long", "400.00", "2027-01-20"),
             ]);
+            change(&mut body);
             self.harness.project.record_by(
                 Some("kai"),
                 crate::tools::fixtures::at(),
@@ -1167,7 +1205,19 @@ mod tests {
                 "budget_kind": "total", "amount": "500.00"
             }),
         );
-        let spend = |micros: &str| json!([{ "campaign": { "resourceName": campaign }, "metrics": { "costMicros": micros } }]);
+        // What Google answers for the campaign: what it holds, as the create made it, and what it
+        // cost.
+        let spend = |micros: &str| {
+            json!([{
+                "campaign": {
+                    "resourceName": campaign,
+                    "startDateTime": "2026-09-24 00:00:00",
+                    "endDateTime": "2026-10-22 23:59:59"
+                },
+                "campaignBudget": { "totalAmountMicros": "500000000" },
+                "metrics": { "costMicros": micros }
+            }])
+        };
         ads.google.script(|script| {
             script.rows = serde_json::from_value(spend("99999999")).expect("rows");
         });
@@ -1219,7 +1269,9 @@ mod tests {
         assert_eq!(
             query,
             json!(format!(
-                "SELECT campaign.resource_name, metrics.cost_micros FROM campaign WHERE \
+                "SELECT campaign.resource_name, campaign.start_date_time, \
+                 campaign.end_date_time, campaign_budget.amount_micros, \
+                 campaign_budget.total_amount_micros, metrics.cost_micros FROM campaign WHERE \
                  campaign.resource_name IN ('{campaign}') AND segments.date BETWEEN \
                  '2026-09-21' AND '2026-09-23'"
             ))
@@ -1766,6 +1818,121 @@ mod tests {
         assert_eq!(ads.mutates().len(), 2);
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one plan after another, so what Google holds between them stays in view"
+    )]
+    async fn enabling_holds_what_google_keeps_to_the_plan() {
+        let ads = Ads::new("ads-held").await;
+        ads.plan("MP-1", None);
+        let campaign = campaign_of(
+            &ads.call("create_search_campaign", create("search-launch"))
+                .await
+                .expect("made"),
+        );
+        let enable = |campaign: &str| {
+            ads.call(
+                "set_campaign_status",
+                json!({ "campaign": campaign, "status": "enabled" }),
+            )
+        };
+        // What Google answers for a campaign, which keeps what its first plan made: a budget
+        // column, "totalAmountMicros" or "amountMicros", and the days it runs.
+        let holds =
+            |campaign: &str, (column, micros): (&str, &str), (starts, ends): (&str, &str)| {
+                let rows = json!([{
+                    "campaign": {
+                        "resourceName": campaign,
+                        "startDateTime": format!("{starts} 00:00:00"),
+                        "endDateTime": format!("{ends} 23:59:59")
+                    },
+                    "campaignBudget": { column: micros },
+                    "metrics": { "costMicros": "0" }
+                }]);
+                ads.google.script(|script| {
+                    script.rows = serde_json::from_value(rows).expect("rows");
+                });
+            };
+        let days = ("2026-09-24", "2026-10-22");
+        holds(&campaign, ("totalAmountMicros", "500000000"), days);
+
+        // A plan that replaces MP-1 and lowers the campaign's budget: Google still holds 500.00.
+        ads.plan_with("MP-2", Some("MP-1"), |body| {
+            body["campaigns"][0]["budget"] = json!("300.00");
+        });
+        let refused = enable(&campaign)
+            .await
+            .expect_err("more than the plan allows");
+        assert!(refused.starts_with("not_in_marketing_plan: "), "{refused}");
+        assert!(
+            refused.contains("total budget at Google is 500.00, more than the 300.00"),
+            "{refused}"
+        );
+        assert_eq!(ads.mutates().len(), 1, "only the create reached Google");
+        // Lowered to the plan's, it runs.
+        ads.call(
+            "set_campaign_budget",
+            json!({ "campaign": campaign, "amount": "300" }),
+        )
+        .await
+        .expect("lowered");
+        // A budget set by hand in Google's own screens need not be a whole hundredth: a micro over
+        // is a hundredth over.
+        holds(&campaign, ("totalAmountMicros", "300000001"), days);
+        let refused = enable(&campaign).await.expect_err("a micro over");
+        assert!(refused.contains("budget at Google is 300.01"), "{refused}");
+        holds(&campaign, ("totalAmountMicros", "300000000"), days);
+        enable(&campaign).await.expect("within the plan now");
+        assert_eq!(ads.mutates().len(), 3);
+
+        // A plan that replaces it and shortens the campaign: Google still ends it on the 22nd,
+        // and Farik cannot change that.
+        ads.plan_with("MP-3", Some("MP-2"), |body| {
+            body["campaigns"][0]["budget"] = json!("300.00");
+            body["campaigns"][0]["ends_on"] = json!("2026-10-10");
+        });
+        let refused = enable(&campaign).await.expect_err("ends too late");
+        assert!(
+            refused.contains("ends on 2026-10-22 at Google, after the 2026-10-10"),
+            "{refused}"
+        );
+        // An answer that does not say what Google holds is not one to enable on.
+        ads.google.script(|script| {
+            script.rows = vec![json!({ "campaign": { "resourceName": campaign } })];
+        });
+        let refused = enable(&campaign).await.expect_err("unreadable");
+        assert!(refused.contains("could not read"), "{refused}");
+        assert_eq!(ads.mutates().len(), 3, "nothing more reached Google");
+
+        // A daily budget is read from its own column and counted over the days Google runs the
+        // campaign: 400.00 over the 119 days from 2026-09-24 is 3.36, which a freshly made
+        // campaign must be allowed to run on, though today (the 22nd) has 121 days left in the
+        // plan's dates.
+        let long = campaign_of(
+            &ads.call("create_search_campaign", create("search-long"))
+                .await
+                .expect("made, with a daily budget"),
+        );
+        let run = ("2026-09-24", "2027-01-20");
+        holds(&long, ("amountMicros", "3360000"), run);
+        enable(&long)
+            .await
+            .expect("a daily budget of what was left over its run");
+        // A plan that lowers it to 300.00 leaves Google at 3.36 a day: 399.84 over the run.
+        ads.plan_with("MP-4", Some("MP-3"), |body| {
+            body["campaigns"][1]["budget"] = json!("300.00");
+        });
+        let refused = enable(&long)
+            .await
+            .expect_err("more than the plan has left");
+        assert!(
+            refused.contains("daily budget at Google is 3.36, which over the 119 days it runs is more than the 300.00"),
+            "{refused}"
+        );
+    }
+
     /// A campaign enabled while `during` happens to the plan, which the write reads and checks
     /// before it has read the ad account's currency and what the ads have spent, each a search
     /// that waits; the refusal it is answered with, after the campaign made under MP-1.
@@ -1777,8 +1944,18 @@ mod tests {
                 .await
                 .expect("made"),
         );
-        ads.google
-            .script(|script| script.search_delay = Some(Duration::from_millis(300)));
+        ads.google.script(|script| {
+            script.search_delay = Some(Duration::from_millis(300));
+            script.rows = vec![json!({
+                "campaign": {
+                    "resourceName": campaign,
+                    "startDateTime": "2026-09-24 00:00:00",
+                    "endDateTime": "2026-10-22 23:59:59"
+                },
+                "campaignBudget": { "totalAmountMicros": "500000000" },
+                "metrics": { "costMicros": "0" }
+            })];
+        });
         let (enabled, ()) = tokio::join!(
             ads.call(
                 "set_campaign_status",

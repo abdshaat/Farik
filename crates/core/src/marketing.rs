@@ -823,6 +823,21 @@ pub fn campaign_budget(
     )
 }
 
+/// What Google holds for a campaign when it is enabled, read from Google for the call: its
+/// budget's amount as its kind keeps it (a total budget's total, a daily one's daily amount) and
+/// the days it runs, first and last. A replacing plan that lowers a key's budget or shortens its dates leaves
+/// these as the creating plan made them, so enabling is checked against them. `None` is a figure
+/// Google's answer did not give.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HeldAtGoogle {
+    /// The budget's amount.
+    pub amount: Option<Amount>,
+    /// The first day, a date in the ad account's time zone.
+    pub starts_on: Option<NaiveDate>,
+    /// The last day, a date in the ad account's time zone.
+    pub ends_on: Option<NaiveDate>,
+}
+
 /// One change to Google Ads the agent asks for, by what it names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdsWrite {
@@ -855,6 +870,8 @@ pub enum AdsWrite {
         account: String,
         /// The campaign's resource name.
         campaign: String,
+        /// What Google holds for it, read for the call.
+        held: HeldAtGoogle,
     },
     /// Pausing `campaign`.
     Pause {
@@ -930,7 +947,7 @@ pub fn check_ads_write(view: &AdsPlanView<'_>, write: &AdsWrite) -> Result<(), S
         AdsWrite::Budget {
             campaign, amount, ..
         } => check_new_budget(view, campaign, account, *amount),
-        AdsWrite::Enable { campaign, .. } => check_enable(view, campaign, account),
+        AdsWrite::Enable { campaign, held, .. } => check_enable(view, campaign, account, *held),
         AdsWrite::Pause { campaign, .. } => {
             let made = view
                 .created
@@ -1067,8 +1084,16 @@ fn check_new_budget(
     }
 }
 
-/// Running `campaign`.
-fn check_enable(view: &AdsPlanView<'_>, campaign: &str, account: &str) -> Result<(), String> {
+/// Running `campaign`: today within its dates, its spend below its budget and the plan's below
+/// the plan's, and what Google holds for it no more than the active plan gives its key: a plan
+/// that replaces another and lowers a key's budget, or shortens its dates, leaves the campaign's
+/// budget and end as the first plan made them, and Farik can lower the budget but not the end.
+fn check_enable(
+    view: &AdsPlanView<'_>,
+    campaign: &str,
+    account: &str,
+    held: HeldAtGoogle,
+) -> Result<(), String> {
     let (made, planned) = made_for_plan(view, campaign, account)?;
     let key = &made.key;
     if view.today < planned.starts_on {
@@ -1088,7 +1113,52 @@ fn check_enable(view: &AdsPlanView<'_>, campaign: &str, account: &str) -> Result
             view.plan.google_ads
         ));
     }
-    Ok(())
+    let Some(ends_on) = held.ends_on else {
+        return Err(format!(
+            "Farik could not read when {key} ends at Google, so it cannot check it against the plan"
+        ));
+    };
+    if ends_on > planned.ends_on {
+        return Err(format!(
+            "{key} ends on {ends_on} at Google, after the {} the plan gives it, and Farik cannot \
+             change a campaign's end",
+            planned.ends_on
+        ));
+    }
+    let Some(amount) = held.amount else {
+        return Err(format!(
+            "Farik could not read the budget of {key} at Google, so it cannot check it against \
+             the plan"
+        ));
+    };
+    match made.kind {
+        BudgetKind::Total if amount > planned.budget => Err(format!(
+            "{key}'s total budget at Google is {amount}, more than the {} the plan gives it; lower \
+             it first",
+            planned.budget
+        )),
+        BudgetKind::Total => Ok(()),
+        BudgetKind::Daily => {
+            // Google runs it from its first day, or today, to its last, both included, and bills
+            // up to the daily amount each day.
+            let Some(starts_on) = held.starts_on else {
+                return Err(format!(
+                    "Farik could not read when {key} starts at Google, so it cannot check it \
+                     against the plan"
+                ));
+            };
+            let days =
+                u64::try_from((ends_on - starts_on.max(view.today)).num_days() + 1).unwrap_or(0);
+            let left = Amount(planned.budget.0.saturating_sub(spent.0));
+            if amount.0.saturating_mul(days) > left.0 {
+                return Err(format!(
+                    "{key}'s daily budget at Google is {amount}, which over the {days} days it \
+                     runs is more than the {left} the plan has left for it; lower it first"
+                ));
+            }
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1096,10 +1166,10 @@ mod tests {
     use chrono::{DateTime, Days, FixedOffset, NaiveDate, Utc};
 
     use super::{
-        AdsPlanView, AdsWrite, Amount, BudgetKind, CreatedCampaign, EndReason, PlanCampaign,
-        PlanProposal, PlanRecord, PostChannel, PostSlot, ProposalRefusal, SlotCheck, SlotRefusal,
-        ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write, check_proposal, check_slot,
-        network_name, parse_amount, plans_to_end, text_fits, text_limit,
+        AdsPlanView, AdsWrite, Amount, BudgetKind, CreatedCampaign, EndReason, HeldAtGoogle,
+        PlanCampaign, PlanProposal, PlanRecord, PostChannel, PostSlot, ProposalRefusal, SlotCheck,
+        SlotRefusal, ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write, check_proposal,
+        check_slot, network_name, parse_amount, plans_to_end, text_fits, text_limit,
     };
 
     fn day(text: &str) -> NaiveDate {
@@ -2155,10 +2225,33 @@ mod tests {
         }
     }
 
+    /// Enabling campaign 11 (`search-a`, a total budget of 500.00 to 2026-12-02), which Google
+    /// holds as the plan has it.
     fn enable(number: u64) -> AdsWrite {
+        enabling(number, Some(50_000), Some("2026-12-02"))
+    }
+
+    /// Enabling a campaign that Google holds a budget of `held_amount` and an end of `held_ends`
+    /// for, running from 2026-11-03, the plan's first day.
+    fn enabling(number: u64, held_amount: Option<u64>, held_ends: Option<&str>) -> AdsWrite {
+        enabling_from(number, held_amount, Some("2026-11-03"), held_ends)
+    }
+
+    /// As `enabling`, with the day Google starts the campaign.
+    fn enabling_from(
+        number: u64,
+        held_amount: Option<u64>,
+        held_starts: Option<&str>,
+        held_ends: Option<&str>,
+    ) -> AdsWrite {
         AdsWrite::Enable {
             account: ACCOUNT.to_string(),
             campaign: campaign(number),
+            held: HeldAtGoogle {
+                amount: held_amount.map(amount),
+                starts_on: held_starts.map(day),
+                ends_on: held_ends.map(day),
+            },
         }
     }
 
@@ -2199,6 +2292,7 @@ mod tests {
             AdsWrite::Enable {
                 account: elsewhere.clone(),
                 campaign: campaign(11),
+                held: HeldAtGoogle::default(),
             },
             AdsWrite::Pause {
                 account: elsewhere.clone(),
@@ -2329,5 +2423,91 @@ mod tests {
         ads.passes(&pause(13));
         ads.refuses(&pause(14), "not made for");
         ads.refuses(&pause(99), "not made for");
+    }
+
+    #[test]
+    fn enabling_holds_what_google_keeps_to_the_plan() {
+        // Today is 2026-11-10. `search-a` (campaign 11) has a total budget, 500.00 in the plan,
+        // to 2026-12-02; `search-b` (campaign 12) a daily one, 400.00 in the plan, to 2026-12-02.
+        let mut ads = Ads::new();
+        // As the plan has them, or less.
+        ads.passes(&enabling(11, Some(50_000), Some("2026-12-02")));
+        ads.passes(&enabling(11, Some(1), Some("2026-11-10")));
+        // A total budget past the plan campaign's, by a hundredth.
+        ads.refuses(
+            &enabling(11, Some(50_001), Some("2026-12-02")),
+            "total budget at Google is 500.01, more than the 500.00",
+        );
+        // An end after the plan campaign's, by a day.
+        ads.refuses(
+            &enabling(11, Some(50_000), Some("2026-12-03")),
+            "ends on 2026-12-03 at Google, after the 2026-12-02",
+        );
+        // A figure Google did not give cannot be checked.
+        ads.refuses(
+            &enabling(11, None, Some("2026-12-02")),
+            "could not read the budget",
+        );
+        ads.refuses(
+            &enabling(11, Some(50_000), None),
+            "could not read when search-a ends",
+        );
+
+        // A daily budget, over the days Google still runs the campaign: today is the 10th, so
+        // 400.00 over the 23 days from today to 2026-12-02, both included, is 17.39 a day (17.39
+        // over 23 days is 399.97), and what was spent comes off.
+        ads.passes(&enabling(12, Some(1_739), Some("2026-12-02")));
+        ads.refuses(
+            &enabling(12, Some(1_740), Some("2026-12-02")),
+            "daily budget at Google is 17.40, which over the 23 days it runs is more than the \
+             400.00",
+        );
+        ads.spent.insert("search-b".to_string(), amount(9_200));
+        ads.passes(&enabling(12, Some(1_339), Some("2026-12-02")));
+        ads.refuses(
+            &enabling(12, Some(1_340), Some("2026-12-02")),
+            "more than the 308.00",
+        );
+        // Before Google starts it, its days are all of its run: from the 12th, 21 days, so 19.04
+        // a day of 400.00 and not 19.05.
+        ads.spent.clear();
+        ads.passes(&enabling_from(
+            12,
+            Some(1_904),
+            Some("2026-11-12"),
+            Some("2026-12-02"),
+        ));
+        ads.refuses(
+            &enabling_from(12, Some(1_905), Some("2026-11-12"), Some("2026-12-02")),
+            "over the 21 days it runs",
+        );
+        // A start Google did not give cannot be counted from.
+        ads.refuses(
+            &enabling_from(12, Some(1_739), None, Some("2026-12-02")),
+            "could not read when search-b starts",
+        );
+        // Over already, at Google, runs no day: nothing to spend.
+        ads.passes(&enabling_from(
+            12,
+            Some(99_999),
+            Some("2026-11-03"),
+            Some("2026-11-09"),
+        ));
+
+        // A replacing plan that lowers a key's budget leaves Google's total as it was.
+        ads.spent.clear();
+        ads.plan.campaigns[0].budget = amount(30_000);
+        ads.refuses(
+            &enabling(11, Some(50_000), Some("2026-12-02")),
+            "more than the 300.00",
+        );
+        ads.passes(&enabling(11, Some(30_000), Some("2026-12-02")));
+        // And one that shortens its dates leaves Google's end as it was.
+        ads.plan.campaigns[0].ends_on = day("2026-11-20");
+        ads.refuses(
+            &enabling(11, Some(30_000), Some("2026-12-02")),
+            "after the 2026-11-20",
+        );
+        ads.passes(&enabling(11, Some(30_000), Some("2026-11-20")));
     }
 }
