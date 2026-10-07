@@ -6,6 +6,7 @@ Amended 2026-10-05 by ADR 0041: a team the user runs on auto sends the agent's m
 Amended 2026-10-07 by the founder's answers to phase 7 step 10b's readiness review: the Procurement Specialist fetches only the sites the owner approved ("Restrict its web access"), in a new step 10b2; and it is not offered `farik_read_costs` ("No"). The same day the founder answered step 10b2's three questions: an approval lasts "Until you remove it", the owner may add sites, and the role starts with Farik's approved sites, trusted shops Farik ships ("Choose trusted shops across different products categories"). See "Amendment of 2026-10-07" at the end.
 Amended 2026-10-07 by the founder's answers to phase 7 step 10c's readiness review, in conversation: a purchase order's seller page must be on an approved site ("Yes, approved sites only"); an order left waiting closes by itself ("Expire after 30 days"); and "Mark received" offers to ask the agent to update the register ("Ask the agent, ticked"). Later the same day: "Slight change. The procurement agent only researches and follows up and store the status of an order. He may not execute any orders by himself", clarified as "Suggest, then track" and "The agent, from follow-ups": the founder marks an order placed and received, and the agent records the order's status from its follow-ups. See "Amendment of 2026-10-07: suggest, then track" at the end.
 Amended 2026-10-07 by the founder's answer to phase 7 step 10d's readiness review, in conversation: Exa's search, whose results carry text from pages on any site, stays in the kit, and spec 8.6, 6.10 and Exa's setup copy say so ("Keep it, say so"); the agent still opens and sends nothing outside the approved sites. Exa's page reader, `web_fetch_exa`, is `denied`: Exa fetches on its own servers and follows a redirect to another site, which the approved-sites check cannot see.
+Amended 2026-10-07 by the founder's answers to phase 7 step 10e's readiness review, in conversation: a data pipeline that sends the project's data out always goes to the owner, as one that costs money does ("Yes, always to me"); and under ADR 0041's `auto` the Product Manager's approval is enough for one that costs money or whose cost is unknown ("Auto may approve"), never for one that sends the project's data out. See "Amendment of 2026-10-07: data pipelines" at the end.
 
 ## Context
 
@@ -93,3 +94,15 @@ Decision:
 Consequences:
 - Easier: the founder sees every order from suggestion to arrival in one place, with what the agent learned, without the agent ever holding the money or the order.
 - Harder: the founder records two steps per order, placed and received; a follow-up costs a task each time, and the agent's statuses are only as good as what the seller's pages say, which is why the founder can correct them.
+
+## Amendment of 2026-10-07: data pipelines
+
+Step 10e's readiness review asked the founder two questions. Under ADR 0041's `auto`, should a pipeline that costs money, or whose cost is unknown, still wait for the owner, as a site and a marketing plan do? "Auto may approve." Should a pipeline that sends the project's data out always come to the owner, as one that costs money does? "Yes, always to me", in keeping with O3 ("all the data are and spreadsheets are to stay local").
+
+Decision:
+- **The governor holds a pipeline that sends the project's data out for the owner**, as it holds one that costs money or whose cost is unknown: the Product Manager's approval of it is refused (`pipeline_needs_owner`), and the Product Manager declines it or escalates it to the owner. Whether one that needs an account goes to the owner stays the Product Manager's judgement.
+- **Under `auto`**, the Product Manager's approval is enough for a pipeline that costs money or whose cost is unknown, recorded `by: auto`; it still only files a request, and connecting or paying for the source stays the owner's. One that sends the project's data out waits for the owner in both positions, and so does one the Product Manager escalates or does not decide. This replaces "approves escalated data pipelines" in the amendment by ADR 0041 above.
+
+Consequences:
+- Easier: the project's data leaves for a new service only with the owner's yes, whatever the position; on `auto`, a paid source the Product Manager judges worth it reaches the team's work without waiting.
+- Harder: on `auto`, a request for a paid source can be filed with no word from the owner, so the owner first meets it as the team's request, or as the connection or payment it needs; it is listed under "Done on its own".
