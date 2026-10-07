@@ -22,6 +22,8 @@ pub mod generated;
 mod kit;
 /// Which role reviews a task (D7).
 mod reviewer;
+/// Farik's own list of approved sites for the Procurement Specialist.
+pub mod sites;
 /// Checking a skill a user adds.
 mod skill_check;
 

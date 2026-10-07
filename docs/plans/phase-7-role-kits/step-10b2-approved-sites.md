@@ -144,7 +144,7 @@ Files: `approved_sites.yaml` (the table above), `approved-sites.schema.json`, `c
 - `refuses_a_malformed_site_list`: hand-written lists, each refused naming its entry: a host `https://a.com`, `A.com`, `a.com:443`, `a.com/x`, `10.0.0.1`, `bücher.example`, `www.a.com`, `a.com` twice, an unknown category, an empty shop, a shop with a line break, and an entry with a fourth key; a list of two good entries parses to them in order. RED: no such function.
 - `farik_s_approved_sites_are_well_formed`: the shipped file parses (`farik_sites()` does not panic), every host `site_of("https://<host>/")` gives back unchanged, no host twice, every one of the ten categories has at least one shop, and every `shop` is non-empty; the count is not asserted, since the launch review changes it. RED: no such file.
 
-- [ ] `feat(roles): ship Farik's approved sites`
+- [x] `feat(roles): ship Farik's approved sites`
 
 ### Task 3: The events, the waiting and the store
 
@@ -243,3 +243,4 @@ Then, in the web app, by the founder (step 10b's run, moved here): add a Procure
   - The latest revision of the spec at HEAD is 0.70, so Task 9's is 0.71.
   - Task 0's approval is in this plan's header (the founder, 2026-10-07, "Approved, We will improve the Ui/ UX later"); `canvas.json` has no version field, so the commit that wrote it is the version.
 - **Task 1.** The plan's file map says `permissions.rs` gains `check_site_urls` beside `check_urls`, and its Produces block lists the function with `site_of` under `farik_core::governor::sites`. It lives in `governor/sites.rs`, with `site_of` and `SiteRefusal`; `permissions.rs` is unchanged, since `evaluate_connector_call`'s signature does not change and the hook calls the check on its own. A `urls` that is not an array is refused naming the field's JSON (its quotes included), an address naming the string itself. `SiteFault` has a hand-written `Display` (the words `farik_request_sites` gives after `site_invalid: <url>`).
+- **Task 2.** The shipped YAML is the table above, 46 entries in its order, with the first version's comment on top. `parse_farik_sites` names each refusal as `<json pointer>: <code>: <words>`, as the kit's loader does: `schema` at the entry's field (a fourth key at `/sites/<n>`), `host_not_bare` and `host_twice` at `/sites/<n>/host`. The shop's one-line rule is the schema's `pattern` `^[^\r\n]+$` beside `minLength` 1 and `maxLength` 60.

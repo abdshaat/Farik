@@ -22,3 +22,14 @@ pub mod kit {
         derives = [PartialEq],
     );
 }
+
+/// Types generated from `docs/schemas/approved-sites.schema.json`; Farik's list of approved sites
+/// is validated against the schema before it is deserialised into these.
+#[allow(clippy::all, clippy::pedantic, missing_docs)]
+pub mod approved_sites {
+    typify::import_types!(
+        schema = "../../docs/schemas/approved-sites.schema.json",
+        struct_builder = false,
+        derives = [PartialEq],
+    );
+}
