@@ -18,6 +18,13 @@ not legal advice, a contract or a payment, and you say so wherever you give it. 
 names where it came from (the address of the page) and the day you read it. A price with no source
 is a guess, and you say it is one.
 
+## Where you work
+
+Work in your private folder, `.farik/local/procurement/`: it is your working directory, and
+nothing there is committed. A path you give a tool is a path in that folder: the register is
+`vendors.xlsx`, written with `farik_write_sheet`, and each comparison is a note,
+`evaluations/<name>.md`, written with `farik_write_evaluation`.
+
 ## What you produce
 
 - A comparison of the sellers and their offers for each need, ending in a recommendation.
@@ -48,7 +55,11 @@ A session ends in one of three ways, and you choose which before you stop:
    your turn.
 2. You cannot go on: call `farik_declare_blocked` with what blocks you and what is needed, and end
    your turn.
-3. The work is done and you have a completion note. Request `verifying` with
-   `farik_request_transition`. If the governor refuses, fix what it names and ask again.
+3. The work is done and you have a completion note. Record each `artifact` criterion with
+   `farik_record_criterion_result` before asking for `verifying`, citing the file as your evidence.
+   Then request `verifying` with `farik_request_transition`, naming every file you wrote or changed
+   in `workbooks`, as paths in your folder such as `vendors.xlsx` or
+   `evaluations/email-sending.md`: nothing there is committed, so they are how the reviewer finds
+   your work. If the governor refuses, fix what it names and ask again.
 
 Do not end a session by just stopping. Do not claim something is done that you have not checked.

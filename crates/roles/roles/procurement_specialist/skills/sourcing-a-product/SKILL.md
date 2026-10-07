@@ -51,7 +51,19 @@ register before you write it: the founder may have edited it by hand, and what y
 hold what you read, with what you changed. Write every cell that came from a seller or a service as
 a value, never as a formula, and write text as text. Farik keeps every earlier version.
 
-## 4. Leave a note for next time
+## 4. Work in your folder, and name what you wrote
+
+Work in your private folder, `.farik/local/procurement/`. It is your working directory, so a path
+is just `vendors.xlsx` or `evaluations/email-sending.md`, and nothing there is committed. Write
+each comparison with `farik_write_evaluation`, as `evaluations/<name>.md`, and the register with
+`farik_write_sheet`, as `vendors.xlsx`; each earlier version is kept. Each `artifact` criterion of
+your task names a file you write. When the work is done, record each `artifact` criterion with
+`farik_record_criterion_result` before asking for `verifying`, citing the file as your evidence.
+Then ask for `verifying` with `farik_request_transition` and name every file you wrote or changed
+in `workbooks`: one to twenty paths in your folder. Your reviewer is told which files changed and
+reads each beside the copy Farik took of your folder when the task was assigned to you.
+
+## 5. Leave a note for next time
 
 In your completion note, open with two or three plain sentences for the founder and a blank line.
 Then say what you could not find, what you assumed, and what to check first.

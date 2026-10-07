@@ -1682,6 +1682,18 @@ mod tests {
             let allowed = hook("Read", json!({ "file_path": file }));
             assert!(allowed.allow, "{file}: {allowed:?}");
         }
+        // So is the copy taken when the task was assigned, which a reviewer reads a note beside.
+        std::fs::create_dir_all(folder.join(".history/FRK-2/evaluations")).expect("the copy");
+        std::fs::write(
+            folder.join(".history/FRK-2/evaluations/email-sending.md"),
+            "the note at assignment",
+        )
+        .expect("written");
+        let allowed = hook(
+            "Read",
+            json!({ "file_path": ".history/FRK-2/evaluations/email-sending.md" }),
+        );
+        assert!(allowed.allow, "{allowed:?}");
         // The finance folder is not, by a path that climbs, an absolute one, or one from the root.
         for file in [
             "../finance/books.xlsx".to_string(),

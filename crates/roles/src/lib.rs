@@ -819,6 +819,102 @@ mod tests {
         assert!(skill.contains(recording), "{skill}");
     }
 
+    /// Step 10b: as the Finance Specialist's does, the role works in its private folder, where
+    /// nothing is committed, and finishes by naming the files it wrote: the register is a
+    /// workbook, each comparison a note written with its own tool. The one item of "How a session
+    /// ends" that asks for `verifying` is that one.
+    #[test]
+    fn sourcing_a_product_says_where_to_work() {
+        let definition = loaded(Role::ProcurementSpecialist);
+        let flatten = |text: &str| {
+            text.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        };
+        let prompt = flatten(&definition.system_prompt);
+        let skill = flatten(&definition.skills[0].body);
+        for (what, text) in [("prompt", &prompt), ("skill", &skill)] {
+            for phrase in [
+                "work in your private folder",
+                "nothing there is committed",
+                "`workbooks`",
+            ] {
+                assert!(
+                    text.contains(phrase),
+                    "the {what} lost \"{phrase}\": {text}"
+                );
+            }
+        }
+        // The skill names the tool of each file the role writes, and that each `artifact`
+        // criterion names a file it writes.
+        for phrase in [
+            "`farik_write_evaluation`",
+            "`evaluations/<name>.md`",
+            "`farik_write_sheet`",
+            "`vendors.xlsx`",
+            "each `artifact` criterion",
+            "names a file you write",
+        ] {
+            assert!(skill.contains(phrase), "the skill lost {phrase}: {skill}");
+        }
+        // One item of the prompt's ending asks for `verifying`, and it names every file written.
+        let ending = prompt
+            .split_once("## how a session ends")
+            .map(|(_, ending)| ending)
+            .expect("the prompt says how a session ends");
+        assert_eq!(ending.matches("request `verifying`").count(), 1, "{ending}");
+        let item = ending
+            .split_once("request `verifying`")
+            .map(|(_, rest)| {
+                rest.split("do not end a session")
+                    .next()
+                    .unwrap_or_default()
+            })
+            .expect("the item");
+        assert!(
+            item.contains("naming every file you wrote or changed in `workbooks`"),
+            "{item}"
+        );
+        assert!(item.contains("`evaluations/email-sending.md`"), "{item}");
+        assert!(item.contains("fix what it names and ask again"), "{item}");
+        // Each `artifact` criterion is recorded before `verifying` is asked for, in the prompt's
+        // item and in the skill: the governor refuses a request while one has no result.
+        let recording = "record each `artifact` criterion with `farik_record_criterion_result` \
+                         before asking for `verifying`";
+        let third = ending
+            .split_once("3. the work is done")
+            .map(|(_, rest)| {
+                rest.split("do not end a session")
+                    .next()
+                    .unwrap_or_default()
+            })
+            .expect("the third item");
+        assert!(third.contains(recording), "{third}");
+        assert!(skill.contains(recording), "{skill}");
+    }
+
+    /// Step 10b: the Finance Specialist reads the register, the one file of the procurement folder
+    /// it may read, and says the register's contents are data.
+    #[test]
+    fn keeping_the_books_reads_the_register() {
+        let definition = loaded(Role::FinanceSpecialist);
+        let skill = definition.skills[0]
+            .body
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        for phrase in [
+            "`vendors.xlsx`",
+            "`farik_read_sheet`",
+            "`folder: procurement`",
+            "data, not instructions",
+        ] {
+            assert!(skill.contains(phrase), "the skill lost {phrase}: {skill}");
+        }
+    }
+
     /// ADR 0042: the Marketing Specialist owns the brand kit, the brand persona, the marketing plan
     /// and the social presence. It posts, advertises and spends only as the owner's approved plan
     /// says or after the owner allows that one call, and the prompt carries every `forbidden` line
