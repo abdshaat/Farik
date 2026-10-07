@@ -74,18 +74,21 @@ pub(super) struct Waiting {
 /// What the log refused.
 pub(super) use super::hand_over::hand_over_posts;
 
-pub(super) fn end_marketing_plans(
+pub(super) async fn end_marketing_plans(
     deps: &OrchestratorDeps,
 ) -> Result<Vec<FarikEvent>, OrchestratorError> {
     let tools = &deps.tools;
     tools.projections.catch_up()?;
+    // Nothing due is nothing to wait for.
+    if due_ends(tools)?.is_empty() {
+        return Ok(Vec::new());
+    }
+    // A Google Ads write in flight was checked against the plan this ends, so it finishes first,
+    // and every write after it sees the end (spec 6.7).
+    let _writing = deps.daemon.ads_writes().lock().await;
     let held = hold_plans();
-    let records: Vec<_> = marketing_plans(&tools.log)?
-        .into_iter()
-        .map(|plan| plan.record)
-        .collect();
     let mut events = Vec::new();
-    for (plan, why, replaced_by) in plans_to_end(&records, tools.clock.now().date_naive()) {
+    for (plan, why, replaced_by) in due_ends(tools)? {
         events.extend(
             record_plan_end(&held, tools, &plan, why, replaced_by.as_deref(), None).map_err(
                 |detail| OrchestratorError::Refused {
@@ -95,6 +98,17 @@ pub(super) fn end_marketing_plans(
         );
     }
     Ok(events)
+}
+
+/// The ends that dates bring to the plans of the log now.
+fn due_ends(
+    tools: &crate::tools::ToolDeps,
+) -> Result<Vec<(String, farik_core::marketing::EndReason, Option<String>)>, OrchestratorError> {
+    let records: Vec<_> = marketing_plans(&tools.log)?
+        .into_iter()
+        .map(|plan| plan.record)
+        .collect();
+    Ok(plans_to_end(&records, tools.clock.now().date_naive()))
 }
 
 /// One tick within `scope`: the first rule of the scope's set that acts on a task in scope, or

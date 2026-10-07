@@ -73,6 +73,9 @@ pub struct Script {
     pub fail_mutate: Option<u16>,
     /// A `googleAds:mutate` waits this long before it answers, so that two calls overlap.
     pub mutate_delay: Option<std::time::Duration>,
+    /// A `googleAds:search` waits this long before it answers, so that something else can happen
+    /// while a call reads.
+    pub search_delay: Option<std::time::Duration>,
 }
 
 impl Default for Script {
@@ -100,6 +103,7 @@ impl Default for Script {
             ideas: Vec::new(),
             fail_mutate: None,
             mutate_delay: None,
+            search_delay: None,
         }
     }
 }
@@ -202,8 +206,15 @@ impl Fixture {
                         body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
                     };
                     record.lock().expect("the record").push(one.clone());
-                    let delay = rules.lock().expect("the script").mutate_delay;
-                    if let Some(delay) = delay.filter(|_| one.method_name() == "mutate") {
+                    let delay = {
+                        let script = rules.lock().expect("the script");
+                        match one.method_name().as_str() {
+                            "mutate" => script.mutate_delay,
+                            "search" => script.search_delay,
+                            _ => None,
+                        }
+                    };
+                    if let Some(delay) = delay {
                         tokio::time::sleep(delay).await;
                     }
                     let script = rules.lock().expect("the script");

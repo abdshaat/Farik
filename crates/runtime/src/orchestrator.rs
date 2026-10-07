@@ -466,7 +466,7 @@ impl Orchestrator {
         // The ends that dates bring to marketing plans come first, before the pause is read: they
         // start no session, so a paused team has them too (ADR 0042).
         if scope.task_id.is_none() {
-            rules::end_marketing_plans(&self.deps)?;
+            rules::end_marketing_plans(&self.deps).await?;
             // Posts go to Buffer between sessions, with no model, so under Farik's own pause
             // for a refused key too, and the owner's pause alone holds them (ADR 0042).
             rules::hand_over_posts(&self.deps).await?;

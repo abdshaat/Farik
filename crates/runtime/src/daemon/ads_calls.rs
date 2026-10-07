@@ -382,8 +382,18 @@ impl Writing<'_> {
         .map_err(|why| format!("not_in_marketing_plan: {why}"))
     }
 
-    /// One `googleAds:mutate`, its refusal in the route's words.
+    /// One `googleAds:mutate`, its refusal in the route's words, sent only while the plan the
+    /// write was checked against is still the active one: it is read again just before, since
+    /// the owner may have ended or replaced it during the reads that came first.
     async fn mutate(&self, account: &str, operations: Vec<Value>) -> Result<Vec<String>, Refusal> {
+        let still = read_plan(self.deps, self.deps.clock.now().date_naive())?;
+        if still.id != self.plan.id {
+            return Err(format!(
+                "no_active_marketing_plan: the active plan is {} now, no longer {}, which this \
+                 change was checked against, so it was not sent",
+                still.id, self.plan.id
+            ));
+        }
         self.ads
             .mutate(self.token, account, operations)
             .await
@@ -1754,6 +1764,65 @@ mod tests {
         .await
         .expect("paused");
         assert_eq!(ads.mutates().len(), 2);
+    }
+
+    /// A campaign enabled while `during` happens to the plan, which the write reads and checks
+    /// before it has read the ad account's currency and what the ads have spent, each a search
+    /// that waits; the refusal it is answered with, after the campaign made under MP-1.
+    async fn enabled_while(name: &str, during: impl FnOnce(&Ads)) -> (Ads, String) {
+        let ads = Ads::new(name).await;
+        ads.plan("MP-1", None);
+        let campaign = campaign_of(
+            &ads.call("create_search_campaign", create("search-launch"))
+                .await
+                .expect("made"),
+        );
+        ads.google
+            .script(|script| script.search_delay = Some(Duration::from_millis(300)));
+        let (enabled, ()) = tokio::join!(
+            ads.call(
+                "set_campaign_status",
+                json!({ "campaign": campaign, "status": "enabled" })
+            ),
+            async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                during(&ads);
+            }
+        );
+        let refused = enabled.expect_err("the plan changed, so nothing was sent");
+        (ads, refused)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_plan_ended_during_a_write_changes_nothing() {
+        // The plan ends by a path that does not wait for the write, as one in another process
+        // would not, while the write is still reading.
+        let (ads, refused) = enabled_while("ads-plan-ends", |ads| {
+            let held = crate::marketing::hold_plans();
+            crate::marketing::record_plan_end(
+                &held,
+                &ads.harness.project.deps,
+                "MP-1",
+                farik_core::marketing::EndReason::ByOwner,
+                None,
+                None,
+            )
+            .expect("ended");
+        })
+        .await;
+        assert_eq!(code(&refused), "no_active_marketing_plan", "{refused}");
+        assert_eq!(ads.mutates().len(), 1, "only the create reached Google");
+
+        // A newer plan that replaces it is no more the plan the write was checked against.
+        let (ads, refused) =
+            enabled_while("ads-plan-replaced", |ads| ads.plan("MP-2", Some("MP-1"))).await;
+        assert_eq!(code(&refused), "no_active_marketing_plan", "{refused}");
+        assert!(
+            refused.contains("MP-1") && refused.contains("MP-2"),
+            "{refused}"
+        );
+        assert_eq!(ads.mutates().len(), 1, "only the create reached Google");
     }
 
     /// A plan in yen with one campaign of 500.50 to 2026-10-22.

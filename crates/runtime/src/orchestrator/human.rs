@@ -157,8 +157,20 @@ pub(super) async fn handle(
             plan,
             approve,
             note,
-        } => decide_plan(tools, &plan, approve, note),
-        Command::MarketingPlanEnd { plan, note } => end_plan(tools, &plan, note),
+        } => {
+            // An approval ends the plans it replaces, and a Google Ads write in flight was
+            // checked against one of them: it finishes first (spec 6.7).
+            let _writing = if approve {
+                Some(orchestrator.deps.daemon.ads_writes().lock().await)
+            } else {
+                None
+            };
+            decide_plan(tools, &plan, approve, note)
+        }
+        Command::MarketingPlanEnd { plan, note } => {
+            let _writing = orchestrator.deps.daemon.ads_writes().lock().await;
+            end_plan(tools, &plan, note)
+        }
         Command::SocialPostStop { post } => stop_post(&orchestrator.deps, post).await,
         Command::SocialPostDecide {
             post,
@@ -3909,6 +3921,94 @@ mod tests {
         .expect("a plan already ended is not an error");
         assert!(again.is_empty(), "{again:?}");
         drop(held);
+        assert_eq!(harness.events(&[EventKind::MarketingPlanEnded]).len(), 1);
+    }
+
+    /// Runs `work` while a Google Ads write holds the daemon's lock, as one in flight does, and
+    /// says that it waited and recorded no `kind` meanwhile; then lets the write finish.
+    async fn while_a_google_ads_write_is_in_flight<T>(
+        harness: &Harness,
+        kind: EventKind,
+        mut work: std::pin::Pin<Box<dyn std::future::Future<Output = T> + '_>>,
+    ) -> T {
+        let before = harness.events(&[kind]).len();
+        let writing = harness.daemon.ads_writes().lock().await;
+        let early = tokio::time::timeout(Duration::from_millis(250), &mut work).await;
+        assert!(early.is_err(), "it waited for the write in flight");
+        assert_eq!(
+            harness.events(&[kind]).len(),
+            before,
+            "nothing was recorded while the write ran"
+        );
+        drop(writing);
+        work.await
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn replacing_or_ending_a_plan_waits_for_a_google_ads_write() {
+        let harness = Harness::new(
+            "human-plan-waits-for-ads",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        harness.in_progress("FRK-2", "kai", "pm");
+        let orchestrator = an_orchestrator(&harness);
+        // MP-1 is approved and starts next week.
+        harness
+            .project
+            .plan_proposed("FRK-1", "MP-1", "2026-09-29", "2026-10-20");
+        handled(&orchestrator, decide("MP-1", true, None)).await;
+
+        // The owner's approval of a plan that starts tomorrow ends MP-1 at once, so it waits.
+        harness
+            .project
+            .plan_proposed("FRK-2", "MP-2", "2026-09-23", "2026-10-20");
+        let report = while_a_google_ads_write_is_in_flight(
+            &harness,
+            EventKind::MarketingPlanApproved,
+            Box::pin(handled(&orchestrator, decide("MP-2", true, None))),
+        )
+        .await;
+        assert_eq!(report.events.len(), 2, "the approval and MP-1's end");
+
+        // The owner's end of a plan waits.
+        let end = Command::MarketingPlanEnd {
+            plan: "MP-2".to_string(),
+            note: None,
+        };
+        let report = while_a_google_ads_write_is_in_flight(
+            &harness,
+            EventKind::MarketingPlanEnded,
+            Box::pin(handled(&orchestrator, end)),
+        )
+        .await;
+        assert_eq!(report.events.len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_dates_end_of_a_plan_waits_for_a_google_ads_write() {
+        let harness = Harness::new(
+            "tick-plan-waits-for-ads",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        let orchestrator = an_orchestrator(&harness);
+        // The fixture's today is 2026-09-22: a plan that ended on the 10th has run out.
+        harness
+            .project
+            .plan_proposed("FRK-1", "MP-1", "2026-09-01", "2026-09-10");
+        harness.project.plan_approved("FRK-1", "MP-1", "");
+
+        while_a_google_ads_write_is_in_flight(
+            &harness,
+            EventKind::MarketingPlanEnded,
+            Box::pin(async {
+                orchestrator.tick().await.expect("the tick runs");
+            }),
+        )
+        .await;
+
         assert_eq!(harness.events(&[EventKind::MarketingPlanEnded]).len(), 1);
     }
 }
