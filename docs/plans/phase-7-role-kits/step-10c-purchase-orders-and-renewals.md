@@ -1,11 +1,11 @@
 # Phase 7, step 10c: Purchase orders and renewals
 
-Status: ready once its mockups are approved
+Status: ready
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 5.7, 6.10, 8.5, 8.6; F3, F1
 Depends on: step 10b2 of this phase (`site_of` in `farik_core::governor::sites`, `approved_sites` in `farik_store::sites`, `farik_sites()`, migration 0014, `farik_request_sites` and `farik_read_sites` after `farik_write_evaluation` in `TOOLS` with the read-tier slice at `[..32]` and `daemon/mcp.rs`'s count at 39, Today's `SiteRequestRow` and `visibly`); step 10b (the role, `Role::ProcurementSpecialist`, its folder and the register's columns); steps 08c and 08d (the owner-only folds `marketing_plans` and `social_posts`, `NUMBERING` and `write_new` in `tools/marketing.rs` numbering `MP-<n>`, and the post outside the plan, a waiting row that holds no task, in 5.7); step 09b (`write_workbook`, `SheetInput`, the sheet reader); step 02 (decisions only on `POST /command` and the browser's RPC, `decide_tool_call`'s one lock, `waiting.list`); phase 6 (merged in #19). File:line citations are at b4b345b; the names are what count.
 Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-07 (one round, ADR 0032): not ready, 4 Blocking and the Should items, all folded below with the founder's answers; no second round
-Mockups approved by: pending
+Mockups approved by: the founder, 2026-10-07, as drawn ("Approve as drawn"): `TodayPurchaseOrder`, `PhonePurchaseOrder`, `AgentOrders`, `PhoneAgentOrders`, `TodayRenewal`, `PhoneRenewal` (`.dc.html`), with the decisions shown on them (follow-ups only as tasks the owner asks for; "It won't come" for a placed order; a placed order shows Overdue rather than closing)
 Decided by the founder, 2026-10-07, in conversation (this plan's readiness review): whether a purchase order's seller page must be on an approved site, "Yes, approved sites only"; what ends an approved order never placed, or one whose task was cancelled, "Expire after 30 days"; who updates the register after "Mark received", "Ask the agent, ticked". Later the same day: "Slight change. The procurement agent only researches and follows up and store the status of an order. He may not execute any orders by himself"; asked to clarify, "Suggest, then track" (it prepares a suggested order for the founder to approve; the founder places and pays it; the agent then follows up and keeps the order's status) and "The agent, from follow-ups" (the agent records the statuses it learns from follow-ups, the founder can correct any status, and only the founder marks an order placed or received). ADR 0039 is amended the same day.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
@@ -118,7 +118,7 @@ A test that needs an approved site takes one from `farik_sites()` or adds one wi
 
 Files: `TodayPurchaseOrder.dc.html`, `PhonePurchaseOrder.dc.html` (Today's row of a drafted order, with its lines, total and period, the seller's page with its host, why, the comparison and the download, and the day it closes; the Approve dialog with a note and the Reject dialog; the `xn--` warning, an order with no page and a monthly one as variants), `AgentOrders.dc.html`, `PhoneAgentOrders.dc.html` (the Procurement Specialist's page, "Orders": one approved order to place with its closing day, placed orders with an agent's status, an owner's correction and one overdue, "Recent orders" with one closed by itself; the `MarkPlaced` dialog with its ticked follow-up request, `MarkReceived` with what was paid, the currency, the dates and its ticked register request, `CorrectStatus`, `CloseOrder` and "Ask for a follow-up"), `TodayRenewal.dc.html`, `PhoneRenewal.dc.html` ("Renewals coming up" with two renewals and the line about dates Farik can't read; the `AskTeam` dialog with its editable request; the line alone when no renewal is open), `canvas.json`. The founder approves them before Task 8; the approval is written into this plan's header and Execution notes in the same commit.
 
-- [ ] `docs(design): mock up purchase orders and renewals`
+- [x] `docs(design): mock up purchase orders and renewals`
 
 ### Task 1: The totals and the due renewals (`farik-core`, pure)
 
