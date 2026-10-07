@@ -2667,7 +2667,7 @@ pub(super) mod tests {
             &json!({ "task_id": "FRK-3", "contract": contract }),
             "contractCheckResult",
         );
-        assert_eq!(checked, json!({ "failures": [], "total": 24 }));
+        assert_eq!(checked, json!({ "failures": [], "total": 25 }));
 
         // The activity and what moved answer in their shapes.
         query(
