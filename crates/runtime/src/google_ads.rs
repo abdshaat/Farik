@@ -1147,6 +1147,144 @@ pub fn status_operations(campaign: &str, status: Status) -> Vec<Value> {
     } })]
 }
 
+/// What `list_accounts` asks of an account's currency, which the route checks a create against.
+pub const CUSTOMER_CURRENCY_QUERY: &str = "SELECT customer.currency_code FROM customer";
+
+/// The customer, ten digits, of a campaign's or an ad group's resource name, `kind` being
+/// `campaigns` or `adGroups`; `None` for anything that is not exactly one.
+#[must_use]
+pub fn resource_customer(name: &str, kind: &str) -> Option<String> {
+    let mut parts = name.split('/');
+    let customer = parts
+        .next()
+        .filter(|first| *first == "customers")
+        .and(parts.next())?;
+    let shaped = is_customer(customer)
+        && parts.next() == Some(kind)
+        && parts.next().is_some_and(|id| {
+            (1..=20).contains(&id.len()) && id.bytes().all(|byte| byte.is_ascii_digit())
+        })
+        && parts.next().is_none();
+    shaped.then(|| customer.to_string())
+}
+
+/// The query that reads which campaign an ad group belongs to.
+///
+/// # Errors
+///
+/// `Input` for a name that is not an ad group's resource name.
+pub fn ad_group_campaign_query(ad_group: &str) -> Result<String, GoogleAdsError> {
+    resource_customer(ad_group, "adGroups").ok_or_else(|| {
+        GoogleAdsError::Input(
+            "ad_group is a resource name such as customers/1234567890/adGroups/123".to_string(),
+        )
+    })?;
+    Ok(format!(
+        "SELECT ad_group.campaign FROM ad_group WHERE ad_group.resource_name = '{ad_group}'"
+    ))
+}
+
+/// The query that reads what `campaigns` cost between two days.
+///
+/// # Errors
+///
+/// `Input` for no campaign, or a name that is not a campaign's resource name.
+pub fn spend_query(
+    campaigns: &[String],
+    from: NaiveDate,
+    to: NaiveDate,
+) -> Result<String, GoogleAdsError> {
+    if campaigns.is_empty()
+        || campaigns
+            .iter()
+            .any(|name| resource_customer(name, "campaigns").is_none())
+    {
+        return Err(GoogleAdsError::Input(
+            "a spend read names one or more campaigns, each a resource name such as \
+             customers/1234567890/campaigns/123"
+                .to_string(),
+        ));
+    }
+    let names: Vec<String> = campaigns.iter().map(|name| format!("'{name}'")).collect();
+    Ok(format!(
+        "SELECT campaign.resource_name, metrics.cost_micros FROM campaign WHERE \
+         campaign.resource_name IN ({}) AND segments.date BETWEEN '{from}' AND '{to}'",
+        names.join(", ")
+    ))
+}
+
+/// The cost in micros of each campaign a spend query's rows name.
+#[must_use]
+pub fn spend_by_campaign(rows: &[Value]) -> std::collections::BTreeMap<String, u64> {
+    let mut cost = std::collections::BTreeMap::new();
+    for row in rows {
+        if let Some(name) = row["campaign"]["resourceName"].as_str() {
+            *cost.entry(name.to_string()).or_insert(0) +=
+                micros_of(&row["metrics"]["costMicros"]).unwrap_or(0);
+        }
+    }
+    cost
+}
+
+/// The input of `set_campaign_budget`, checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BudgetInput {
+    /// The campaign's resource name.
+    pub campaign: String,
+    /// The new amount, in the plan's currency.
+    pub amount: Amount,
+}
+
+impl BudgetInput {
+    /// The checked input of `set_campaign_budget`.
+    ///
+    /// # Errors
+    ///
+    /// `Input`, saying what is wrong.
+    pub fn parse(input: &Value) -> Result<Self, GoogleAdsError> {
+        Ok(Self {
+            campaign: resource(input, "campaign", "campaigns")?,
+            amount: money(input, "amount")?.ok_or_else(|| {
+                GoogleAdsError::Input(
+                    "amount is an amount above nothing, as text such as 250.00".to_string(),
+                )
+            })?,
+        })
+    }
+}
+
+/// The input of `set_campaign_status`, checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusInput {
+    /// The campaign's resource name.
+    pub campaign: String,
+    /// What to set.
+    pub status: Status,
+}
+
+impl StatusInput {
+    /// The checked input of `set_campaign_status`.
+    ///
+    /// # Errors
+    ///
+    /// `Input`, saying what is wrong.
+    pub fn parse(input: &Value) -> Result<Self, GoogleAdsError> {
+        let status = match input["status"].as_str() {
+            Some("paused") => Status::Paused,
+            Some("enabled") => Status::Enabled,
+            _ => {
+                return Err(GoogleAdsError::Input(
+                    "status is paused or enabled".to_string(),
+                ));
+            }
+        };
+        Ok(Self {
+            campaign: resource(input, "campaign", "campaigns")?,
+            status,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -1156,10 +1294,11 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        AdGroupInput, AdInput, CampaignInput, GoogleAds, GoogleAdsError, KeywordsInput,
-        NewCampaign, Status, ad_group_operations, ad_operations, budget_operations,
-        campaign_operations, keyword_ideas, keyword_operations, list_accounts,
-        negative_keyword_operations, report, status_operations, tool_names,
+        AdGroupInput, AdInput, BudgetInput, CUSTOMER_CURRENCY_QUERY, CampaignInput, GoogleAds,
+        GoogleAdsError, KeywordsInput, NewCampaign, Status, StatusInput, ad_group_campaign_query,
+        ad_group_operations, ad_operations, budget_operations, campaign_operations, keyword_ideas,
+        keyword_operations, list_accounts, negative_keyword_operations, report, resource_customer,
+        spend_by_campaign, spend_query, status_operations, tool_names,
     };
     use crate::claude::Secret;
     use crate::google_ads_fixture::{Fixture, Mode};
@@ -2021,5 +2160,132 @@ mod tests {
         );
         assert!(proxy.requests().is_empty(), "the proxy was used");
         assert_eq!(target.requests().len(), 1);
+    }
+
+    #[test]
+    fn builds_the_route_s_reads_from_fixed_text() {
+        let campaigns = vec![
+            "customers/1234567890/campaigns/11".to_string(),
+            "customers/1234567890/campaigns/12".to_string(),
+        ];
+        assert_eq!(
+            spend_query(&campaigns, day("2026-10-31"), day("2026-11-04")),
+            Ok(
+                "SELECT campaign.resource_name, metrics.cost_micros FROM campaign WHERE \
+                campaign.resource_name IN ('customers/1234567890/campaigns/11', \
+                'customers/1234567890/campaigns/12') AND segments.date BETWEEN '2026-10-31' \
+                AND '2026-11-04'"
+                    .to_string()
+            )
+        );
+        for bad in [
+            vec![],
+            vec!["customers/1234567890/campaigns/11' OR '1'='1".to_string()],
+            vec!["customers/123/campaigns/1".to_string()],
+            vec!["customers/1234567890/adGroups/1".to_string()],
+            vec!["x".to_string()],
+        ] {
+            assert!(
+                matches!(
+                    spend_query(&bad, day("2026-10-31"), day("2026-11-04")),
+                    Err(GoogleAdsError::Input(_))
+                ),
+                "{bad:?}"
+            );
+        }
+        assert_eq!(
+            ad_group_campaign_query("customers/1234567890/adGroups/7"),
+            Ok(
+                "SELECT ad_group.campaign FROM ad_group WHERE ad_group.resource_name = \
+                'customers/1234567890/adGroups/7'"
+                    .to_string()
+            )
+        );
+        for bad in [
+            "customers/1234567890/adGroups/7' OR 1=1",
+            "customers/1234567890/campaigns/7",
+            "",
+        ] {
+            assert!(
+                matches!(ad_group_campaign_query(bad), Err(GoogleAdsError::Input(_))),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            CUSTOMER_CURRENCY_QUERY,
+            "SELECT customer.currency_code FROM customer"
+        );
+        assert_eq!(
+            resource_customer("customers/1234567890/campaigns/11", "campaigns"),
+            Some("1234567890".to_string())
+        );
+        assert_eq!(
+            resource_customer("customers/1234567890/campaigns/11", "adGroups"),
+            None
+        );
+        assert_eq!(
+            resource_customer("customers/1234567890/campaigns/", "campaigns"),
+            None
+        );
+
+        // The cost of a campaign, in micros, as Google writes a 64-bit number.
+        let rows = vec![
+            json!({ "campaign": { "resourceName": "customers/1234567890/campaigns/11" }, "metrics": { "costMicros": "1500000" } }),
+            json!({ "campaign": { "resourceName": "customers/1234567890/campaigns/12" }, "metrics": { "costMicros": 250 } }),
+            json!({ "campaign": { "resourceName": "customers/1234567890/campaigns/13" }, "metrics": {} }),
+        ];
+        assert_eq!(
+            spend_by_campaign(&rows),
+            std::collections::BTreeMap::from([
+                ("customers/1234567890/campaigns/11".to_string(), 1_500_000),
+                ("customers/1234567890/campaigns/12".to_string(), 250),
+                ("customers/1234567890/campaigns/13".to_string(), 0),
+            ])
+        );
+    }
+
+    #[test]
+    fn reads_the_input_of_a_budget_and_a_status_change() {
+        let campaign = "customers/1234567890/campaigns/5";
+        assert_eq!(
+            BudgetInput::parse(&json!({ "campaign": campaign, "amount": "250.5" })),
+            Ok(BudgetInput {
+                campaign: campaign.to_string(),
+                amount: Amount(25_050)
+            })
+        );
+        for bad in [
+            json!({ "campaign": campaign }),
+            json!({ "campaign": campaign, "amount": "0" }),
+            json!({ "campaign": campaign, "amount": "1.234" }),
+            json!({ "campaign": campaign, "amount": 5 }),
+            json!({ "campaign": "customers/1234567890/adGroups/5", "amount": "5" }),
+            json!({ "amount": "5" }),
+        ] {
+            assert!(
+                matches!(BudgetInput::parse(&bad), Err(GoogleAdsError::Input(_))),
+                "{bad}"
+            );
+        }
+        for (word, status) in [("paused", Status::Paused), ("enabled", Status::Enabled)] {
+            assert_eq!(
+                StatusInput::parse(&json!({ "campaign": campaign, "status": word })),
+                Ok(StatusInput {
+                    campaign: campaign.to_string(),
+                    status
+                })
+            );
+        }
+        for bad in [
+            json!({ "campaign": campaign, "status": "removed" }),
+            json!({ "campaign": campaign, "status": "ENABLED" }),
+            json!({ "campaign": campaign }),
+            json!({ "campaign": "x", "status": "paused" }),
+        ] {
+            assert!(
+                matches!(StatusInput::parse(&bad), Err(GoogleAdsError::Input(_))),
+                "{bad}"
+            );
+        }
     }
 }

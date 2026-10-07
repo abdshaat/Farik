@@ -712,7 +712,8 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::SocialPostSent(_)
         | EventBody::SocialPostStopped(_)
         | EventBody::SocialPostMissed(_)
-        | EventBody::SocialPostFailed(_) => Ok(()),
+        | EventBody::SocialPostFailed(_)
+        | EventBody::MarketingCampaignCreated(_) => Ok(()),
     }
 }
 

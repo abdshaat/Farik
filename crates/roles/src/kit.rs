@@ -163,7 +163,7 @@ type EmbeddedSkills = Vec<(&'static str, &'static [(&'static str, &'static str)]
 pub const FARIK_COMMAND: &str = "farik";
 
 /// The names of Farik's own connectors, each started as `farik connector <name>`.
-pub const FARIK_CONNECTORS: &[&str] = &["osv"];
+pub const FARIK_CONNECTORS: &[&str] = &["osv", "google-ads"];
 
 /// Whether `command` and `args` are, exactly, `farik connector <name>` for one of Farik's own
 /// connectors. Nothing else, a user's own `farik` command included, is Farik's.
@@ -3187,6 +3187,20 @@ mod tests {
             );
         }
         parse(&stdio("/usr/local/bin/farik-mcp", &["--flag"])).expect("Farik's own binary");
+    }
+
+    #[test]
+    fn google_ads_is_one_of_farik_s_own_connectors() {
+        use super::{FARIK_CONNECTORS, is_farik_connector};
+
+        assert_eq!(FARIK_CONNECTORS, ["osv", "google-ads"]);
+        let pair = |name: &str| ["connector".to_string(), name.to_string()];
+        assert!(is_farik_connector("farik", &pair("google-ads")));
+        for other in ["google-ad", "Google-Ads", "google_ads", "google-ads2"] {
+            assert!(!is_farik_connector("farik", &pair(other)), "{other}");
+        }
+        parse(&stdio("farik", &["connector", "google-ads"]))
+            .expect("the kit may start Farik's Google Ads connector");
     }
 
     #[test]

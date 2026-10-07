@@ -23,6 +23,7 @@ pub use crate::generated::event::{
     DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody, DriftDetectedBody,
     DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
     EscalationResolvedBody, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer,
+    MarketingCampaignCreatedBody, MarketingCampaignCreatedBodyBudgetKind,
     MarketingPlanApprovedBody, MarketingPlanBudget, MarketingPlanCampaign,
     MarketingPlanCampaignChannel, MarketingPlanEndedBody, MarketingPlanEndedBodyWhy,
     MarketingPlanPost, MarketingPlanPostChannel, MarketingPlanProposedBody,
@@ -182,6 +183,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::SocialPostStopped => "socialPostStoppedBody",
         EventKind::SocialPostMissed => "socialPostMissedBody",
         EventKind::SocialPostFailed => "socialPostFailedBody",
+        EventKind::MarketingCampaignCreated => "marketingCampaignCreatedBody",
     }
 }
 
@@ -321,13 +323,14 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::SocialPostSent(_)
         | EventBody::SocialPostStopped(_)
         | EventBody::SocialPostMissed(_)
-        | EventBody::SocialPostFailed(_) => None,
+        | EventBody::SocialPostFailed(_)
+        | EventBody::MarketingCampaignCreated(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 71] = [
+pub const EVERY_KIND: [EventKind; 72] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -399,6 +402,7 @@ pub const EVERY_KIND: [EventKind; 71] = [
     EventKind::SocialPostStopped,
     EventKind::SocialPostMissed,
     EventKind::SocialPostFailed,
+    EventKind::MarketingCampaignCreated,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -652,6 +656,9 @@ pub enum EventBody {
     /// Buffer did not take a post.
     #[serde(rename = "social_post.failed")]
     SocialPostFailed(SocialPostFailedBody),
+    /// Farik made a Google Ads campaign, paused, for a plan campaign of the active plan.
+    #[serde(rename = "marketing_campaign.created")]
+    MarketingCampaignCreated(MarketingCampaignCreatedBody),
 }
 
 impl EventBody {
@@ -730,6 +737,7 @@ impl EventBody {
             Self::SocialPostStopped(_) => EventKind::SocialPostStopped,
             Self::SocialPostMissed(_) => EventKind::SocialPostMissed,
             Self::SocialPostFailed(_) => EventKind::SocialPostFailed,
+            Self::MarketingCampaignCreated(_) => EventKind::MarketingCampaignCreated,
         }
     }
 }
@@ -1644,7 +1652,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 71);
+        assert_eq!(EVERY_KIND.len(), 72);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

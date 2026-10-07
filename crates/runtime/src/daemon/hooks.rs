@@ -831,7 +831,7 @@ fn tag_wire(tag: ConnectorTag) -> ConnectorTagWire {
 }
 
 /// Appends one event and projects it: the seq it was written at.
-fn append(deps: &ToolDeps, ids: EventIds, body: EventBody) -> Result<u64, String> {
+pub(super) fn append(deps: &ToolDeps, ids: EventIds, body: EventBody) -> Result<u64, String> {
     let event = new_event(body, deps.clock.now(), ids)
         .map_err(|error| format!("the event cannot be stamped: {error:?}"))?;
     let appended = deps.log.append(&event).map_err(|error| error.to_string())?;

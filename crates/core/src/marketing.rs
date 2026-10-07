@@ -783,7 +783,8 @@ pub struct CreatedCampaign {
 
 /// The first day a plan campaign made on `today` can start: its own first day, or tomorrow when
 /// that is not ahead, so that no time zone makes it the past. Every day is a UTC date.
-fn first_day(campaign: &PlanCampaign, today: NaiveDate) -> NaiveDate {
+#[must_use]
+pub fn first_day(campaign: &PlanCampaign, today: NaiveDate) -> NaiveDate {
     campaign.starts_on.max(today + Duration::days(1))
 }
 

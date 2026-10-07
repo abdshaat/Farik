@@ -127,7 +127,8 @@
         "social_post.sent",
         "social_post.stopped",
         "social_post.missed",
-        "social_post.failed"
+        "social_post.failed",
+        "marketing_campaign.created"
       ]
     },
     "eventBodyWire": {
@@ -198,7 +199,8 @@
         { "$ref": "#/$defs/socialPostSentBody" },
         { "$ref": "#/$defs/socialPostStoppedBody" },
         { "$ref": "#/$defs/socialPostMissedBody" },
-        { "$ref": "#/$defs/socialPostFailedBody" }
+        { "$ref": "#/$defs/socialPostFailedBody" },
+        { "$ref": "#/$defs/marketingCampaignCreatedBody" }
       ]
     },
     "contractSummary": {
@@ -1192,6 +1194,22 @@
       "properties": {
         "post": { "$ref": "#/$defs/socialPostNumber" },
         "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "marketingCampaignCreatedBody": {
+      "title": "Marketing Campaign Created Body",
+      "description": "Farik made a Google Ads campaign for a plan campaign of the active marketing plan, paused, on a session's call of create_search_campaign (docs/SPEC.md 6.7; ADR 0042): plan is the active plan, key the plan campaign's, account the ad account as NNN-NNN-NNNN, campaign and budget the resource names Google gave, budget_kind whether the budget is a total one for the campaign's run or a daily one, and amount its figure in the plan's currency. The envelope names the agent, the session and the task that asked, and the event is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "key", "account", "campaign", "budget", "budget_kind", "amount"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "key": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 },
+        "account": { "type": "string", "pattern": "^[0-9]{3}-[0-9]{3}-[0-9]{4}$" },
+        "campaign": { "type": "string", "pattern": "^customers/[0-9]{10}/campaigns/[0-9]{1,20}$" },
+        "budget": { "type": "string", "pattern": "^customers/[0-9]{10}/campaignBudgets/[0-9]{1,20}$" },
+        "budget_kind": { "type": "string", "enum": ["total", "daily"] },
+        "amount": { "$ref": "#/$defs/marketingPlanAmount" }
       }
     },
     "connectorTag": {
