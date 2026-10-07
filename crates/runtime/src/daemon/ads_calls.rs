@@ -950,6 +950,15 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn a_write_outside_the_plan_is_refused_and_records_nothing() {
         let ads = Ads::new("ads-outside-plan").await;
+        // With no plan active not even a pause runs.
+        let refused = ads
+            .call(
+                "set_campaign_status",
+                json!({ "campaign": "customers/1234567890/campaigns/77", "status": "paused" }),
+            )
+            .await
+            .expect_err("no plan");
+        assert_eq!(code(&refused), "no_active_marketing_plan", "{refused}");
         ads.plan("MP-1", None);
 
         // A plan campaign the plan lacks.
@@ -975,6 +984,18 @@ mod tests {
             assert!(
                 refused.starts_with("not_in_marketing_plan: "),
                 "{campaign}: {refused}"
+            );
+            // Nor is it Farik's to pause.
+            let refused = ads
+                .call(
+                    "set_campaign_status",
+                    json!({ "campaign": campaign, "status": "paused" }),
+                )
+                .await
+                .expect_err("refused");
+            assert!(
+                refused.starts_with("not_in_marketing_plan: "),
+                "pause {campaign}: {refused}"
             );
         }
         assert!(ads.mutates().is_empty(), "Google saw no change");
@@ -1550,6 +1571,56 @@ mod tests {
             .expect_err("it has one");
         assert!(refused.starts_with("not_in_marketing_plan: "), "{refused}");
         assert_eq!(ads.made().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_campaign_two_plans_back_counts_under_the_newest() {
+        let ads = Ads::new("ads-lineage-deep").await;
+        ads.plan("MP-1", None);
+        let campaign = campaign_of(
+            &ads.call("create_search_campaign", create("search-launch"))
+                .await
+                .expect("made under MP-1"),
+        );
+        // MP-3 replaces MP-2, which replaced MP-1: the campaign is two plans back.
+        ads.plan("MP-2", Some("MP-1"));
+        ads.plan("MP-3", Some("MP-2"));
+
+        // Its key has a campaign already, whichever plan made it.
+        let refused = ads
+            .call("create_search_campaign", create("search-launch"))
+            .await
+            .expect_err("it has one");
+        assert!(refused.contains("has a campaign already"), "{refused}");
+        // It may be paused.
+        ads.call(
+            "set_campaign_status",
+            json!({ "campaign": campaign, "status": "paused" }),
+        )
+        .await
+        .expect("MP-3 pauses MP-1's campaign");
+        // And what it spent is read: the spend query names it.
+        ads.call(
+            "set_campaign_budget",
+            json!({ "campaign": campaign, "amount": "400" }),
+        )
+        .await
+        .expect("MP-3 changes MP-1's campaign");
+        let query = ads
+            .google
+            .requests_of("search")
+            .last()
+            .map(|seen| seen.body["query"].clone())
+            .expect("a read");
+        assert!(
+            query
+                .as_str()
+                .is_some_and(|query| query.contains(&format!("IN ('{campaign}')"))),
+            "{query}"
+        );
+        assert_eq!(ads.made().len(), 1);
+        assert_eq!(ads.mutates().len(), 3, "the create, the pause, the budget");
     }
 
     /// The route's status and body for a call with `ticket` as its bearer, or none.
