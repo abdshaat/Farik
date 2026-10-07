@@ -1,5 +1,11 @@
-# The Finance Specialist's kit (ADR 0019; phase 7 step 10): the six skills of its work. Its services
-# are added in the same step's later tasks, each read-only.
+# The Finance Specialist's kit (ADR 0019; phase 7 step 10): the six skills of its work and the
+# services it reads. It only reads: every tool that changes anything at a service is `denied`, and
+# no tool is `external_effect`, so no service has an allowance.
+#
+# Stripe is the service's official server, signed in to by route 1 (it registers Farik itself). The
+# scope is pinned, since `oauth: {}` would ask for every scope Stripe advertises, a wider one added
+# later included. The user chooses the account, live or a sandbox, and the permissions on Stripe's
+# own page. Its tools are from docs.stripe.com/mcp, read 2026-10-07.
 role: finance_specialist
 skills:
   - categorising-expenses
@@ -8,4 +14,31 @@ skills:
   - unit-economics-and-pricing
   - recommending-a-budget
   - using-finance-sources
-connectors: []
+connectors:
+  - name: stripe
+    transport: http
+    url: https://mcp.stripe.com
+    oauth: { scopes: [mcp] }
+    title: Stripe
+    about: "Stripe takes your product's payments: charges, subscriptions, invoices, fees, refunds and payouts."
+    why: "So the Finance Specialist can put your revenue, fees and payouts in the books from Stripe's own numbers. It only reads."
+    setup: "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see the name and email on each payment; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under ‘OAuth sessions’ in your Stripe user settings."
+    labels:
+      stripe_api_search: "find what Stripe can answer"
+      stripe_api_details: "read how to ask Stripe"
+      stripe_api_read: "read payments and payouts"
+      get_stripe_account_info: "read the account"
+      stripe_analytics: "ask about revenue"
+      get_balance_summary: "read the balance"
+      search_stripe_documentation: "search Stripe's help"
+    tools:
+      stripe_api_search: network
+      stripe_api_details: network
+      stripe_api_read: network
+      get_stripe_account_info: network
+      stripe_analytics: network
+      get_balance_summary: network
+      search_stripe_documentation: network
+      stripe_api_write: denied
+      stripe_implementation_planner: denied
+      send_stripe_feedback: denied

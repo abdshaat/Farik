@@ -70,7 +70,7 @@ Consumes: `load_kit`, `KitConnector`, `check_skill`, `SHIPPED_ROLES` (`farik-rol
 - `denied` (3): `stripe_api_write`, `stripe_implementation_planner`, `send_stripe_feedback`.
 - `stripe_only_reads`: `http` at `https://mcp.stripe.com`, `oauth.scopes` exactly `["mcp"]`; the 7 `network` exactly, each with its label; the 3 `denied`, among them `stripe_api_write`; 10 in all; no allowances; the setup copy exactly. RED.
 
-- [ ] `feat(roles): give the Finance Specialist Stripe`
+- [x] `feat(roles): give the Finance Specialist Stripe`
 
 ### Task 3: Digits and Kick
 
@@ -132,3 +132,5 @@ Corrections against the code, read at HEAD `1760373` on 2026-10-07 before Task 1
 - **A guard's proof.** `the_finance_kit_never_changes_a_service` and `connects_each_finance_service_by_name` pass when written; each is proved by the mutation its task names, recorded in its task's note.
 
 Task 1: RED, `finance_kit_carries_its_skills` failed on its one assertion with left `[]` (the kit had no skills) and right the six names with their descriptions. The six `SKILL.md` files and the role's arm of `embedded_skills` make it pass; `its_kit_is_empty_until_step_10` is replaced by it. The descriptions are the plan's, each ending in a full stop as every shipped skill's does (the plan's quotes leave it off). Test support beyond the plan: `the_finance_skills_say_what_protects_the_user`, which pins the phrases the founder's accepted risk and the close rest on (the customers' details rule of `using-finance-sources`, the close's one-per-cent and `closed` rules, and that a budget is recommended and never set); a guard, proved by two mutations, each reverted: the customers' details section deleted from `using-finance-sources` (failed with `using-finance-sources lacks "Never write a customer's name, email or card in a"`) and the close made to read `closed` whatever (`closing-the-month lacks "`Status` cell reads `closed` only when every"`). `kit_skills_name_only_tools_farik_lists` passes over the six and was not mutated, since proving it would put a name `tool_descriptors` does not list into a shipped file. `loads_every_shipped_kit` is unchanged here, as the notes above say.
+
+Task 2: RED, two tests, each for the right reason: `stripe_only_reads` panicked "the finance_specialist kit has no stripe", and `loads_every_shipped_kit` failed with left 0, right 1 at "finance_specialist" (the Finance Specialist joined the arm of 1). `stripe_only_reads` asserts the address, the one scope `mcp`, the seven `network` tools with their seven labels and no other label, the three `denied`, ten in all, no allowance and the four copy texts exactly. The setup's ‘OAuth sessions’ is in curly quotes, as the loader needs. The kit's header comment now says what the kit holds and why Stripe's scope is pinned.

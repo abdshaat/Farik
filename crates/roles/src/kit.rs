@@ -997,7 +997,7 @@ mod tests {
             assert_eq!(
                 kit.connectors.len(),
                 match role {
-                    Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
+                    Role::UiUxDesigner | Role::SoftwareDeveloper | Role::FinanceSpecialist => 1,
                     Role::ProductManager | Role::Architect | Role::MarketingSpecialist => 4,
                     _ => 0,
                 },
@@ -2507,6 +2507,60 @@ mod tests {
             assert!(oauth.is_some(), "{} signs in", server.name);
             assert!(server.credential_keys.is_empty(), "{}", server.name);
         }
+    }
+
+    /// Step 10: Stripe's official server, signed in to by route 1 asking for its one scope, and
+    /// read: seven tools run, each with a label, and the three that write, send or build an
+    /// integration are `denied`.
+    #[test]
+    fn stripe_only_reads() {
+        let (server, copy) = service(Role::FinanceSpecialist, "stripe");
+        let (url, scopes) = signed_in(&server);
+        assert_eq!(url, "https://mcp.stripe.com");
+        assert_eq!(scopes, Some(["mcp".to_string()].as_slice()));
+        assert!(server.credential_keys.is_empty());
+        let labelled = [
+            ("stripe_api_search", "find what Stripe can answer"),
+            ("stripe_api_details", "read how to ask Stripe"),
+            ("stripe_api_read", "read payments and payouts"),
+            ("get_stripe_account_info", "read the account"),
+            ("stripe_analytics", "ask about revenue"),
+            ("get_balance_summary", "read the balance"),
+            ("search_stripe_documentation", "search Stripe's help"),
+        ];
+        let names: Vec<&str> = labelled.iter().map(|(tool, _)| *tool).collect();
+        assert_eq!(names_tagged(&server, ConnectorTag::Network), sorted(&names));
+        for (tool, label) in labelled {
+            assert_eq!(
+                copy.labels.get(tool).map(String::as_str),
+                Some(label),
+                "{tool}"
+            );
+        }
+        assert_eq!(copy.labels.len(), 7, "a denied tool has no label");
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Denied),
+            sorted(&[
+                "send_stripe_feedback",
+                "stripe_api_write",
+                "stripe_implementation_planner",
+            ])
+        );
+        assert_eq!(server.tools.len(), 10);
+        assert!(allowances_of(Role::FinanceSpecialist, "stripe").is_empty());
+        assert_eq!(copy.title, "Stripe");
+        assert_eq!(
+            copy.about,
+            "Stripe takes your product's payments: charges, subscriptions, invoices, fees, refunds and payouts."
+        );
+        assert_eq!(
+            copy.why,
+            "So the Finance Specialist can put your revenue, fees and payouts in the books from Stripe's own numbers. It only reads."
+        );
+        assert_eq!(
+            copy.setup,
+            "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see the name and email on each payment; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under \u{2018}OAuth sessions\u{2019} in your Stripe user settings."
+        );
     }
 
     /// A guard: it passes with no marketing connector at all.
