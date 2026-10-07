@@ -115,7 +115,7 @@ Files: `daemon/team.rs` tests; `live_kit_pins.rs`'s header comment, which names 
 
 - `connects_every_shipped_kit_connector_by_name` (`daemon/team.rs:3950`, extended, a guard): for the Product Manager and for the Architect, `kit_entry` of `github` is `Ok` and `matches_kit` true against its own role's kit; `matches_kit` of the Product Manager's `github` against the Architect's kit is false, and the reverse; `kit_entry` of `github` on the Developer is `connector_not_in_kit`.
 
-- [ ] `test(runtime): connect GitHub to the Product Manager and the Architect by name` (a guard, so no RED; it may be folded into Task 2's commit, said in the Execution notes)
+- [x] `test(runtime): connect GitHub to the Product Manager and the Architect by name` (a guard, so no RED; it may be folded into Task 2's commit, said in the Execution notes)
 
 ### Task 5: Spec and plan
 
@@ -157,3 +157,5 @@ Corrections against the code, read at HEAD `f2cc535` on 2026-10-07 before Task 1
 - **The setups' lengths are as measured**: 508 and 468 characters (maximum 600); with the Copilot sentence 558 and 518. `KitConnect`'s key field reads `kitKeyLabel`, "Your {service} key", with the kit's `title`, so "Your GitHub key"; its refusal words are `kitRefused` in `apps/web/src/strings/en.ts:1365`, as the plan quotes.
 - **`docs/design/role-kits.md`**: the Product Manager's row is line 41, the Architect's 43, the GitHub row of the Signing-in table 57; its Steps table has a row for 07 (line 96) and none for 07b, so 07c's row follows 07's. **`docs/plans/project-plan.md`**: row 07c is at line 520 and already reads "ready since its readiness review of 2026-10-06"; the "Open (the founder; ADR 0044)" line is 486. **ADR 0044**: the Status is one line (line 4), and the amendment line goes under it.
 - **Step 10h** (line 26) names this step's setup sentence and section 4's "each call waits for the human" as the lines it rewords, as Decisions says.
+
+Task 4: a guard, so no RED, and its own commit, not folded into Task 2's. It also asserts the two GitHub entries are not each other's (`matches_kit` of the Product Manager's against the Architect's kit is false, and the reverse) and refuses GitHub on the Developer beside OSV. Mutations, each reverted: the Architect's `github` renamed (`kit_entry` refused it `connector_not_in_kit`); `matches_kit` without its comparison of the entry (`!matches_kit(&architect, &pm_github)` failed). `live_kit_pins.rs`'s header comment now names GitHub in both kits and `FARIK_KIT_GITHUB_GITHUB_KEY`.
