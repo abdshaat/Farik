@@ -1,0 +1,189 @@
+# Phase 7, step 10b2: Approved sites
+
+Status: draft. Its readiness review (ADR 0032, one round) runs once step 10b has landed and the founder has answered O1 to O3 below.
+Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
+Spec: `docs/SPEC.md` 5.6, 5.7, 6.10, 8.2, 8.5, 8.6; F9
+Depends on: step 10b of this phase (the role, `Role::ProcurementSpecialist`, its folder and tools; `TOOLS` with 30 read-tier entries and `daemon/mcp.rs`'s count at 37, which this step's numbers assume); step 08c (a task waiting for the owner: `open_plans`, migration 0013, `human_message`'s owner decisions, `farik_request_transition`'s refusal while a plan waits); step 02 (decisions only on `POST /command` and the browser's RPC, `decide_tool_call`'s one lock, `waiting.list` rows); phase 6 step 12 (the preview's `url` check, `check_urls` in `crates/core/src/governor/permissions.rs`); phase 6 (merged in #19)
+Readiness confirmed by: not yet
+Decided by the founder, 2026-10-07, in conversation (step 10b's readiness review): asked whether to accept and record that the agent reads untrusted sellers' pages while `network` lets it fetch any address, "or restrict its web access (it may only browse addresses you approve)?", the founder answered "Restrict its web access". ADR 0039 is amended the same day.
+
+Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from step 10b, whose readiness review raised it; it lands before step 10c and before the kit (10d), and the role is not used live until it has.
+
+## Goal
+
+The Procurement Specialist reads only the websites the owner has allowed. When it needs a seller's or a maker's site, it asks for it with the reason, the owner allows it or not on Today, and an allowed site stays allowed for the team until the owner removes it from the agent's page, which lists every allowed site. A page the agent reads can no longer have it send the business's quotes, prices or notes to an address the page chose, because the agent cannot fetch any address on a site the owner has not allowed. It still searches the web freely. Out of scope: any other role's web access (the Finance Specialist's risk was accepted and recorded on 2026-10-07, spec 8.6); the kit's connectors themselves (10d, held by this step's rule); approving pages one by one.
+
+## Decisions
+
+- **Who is held: a role, fixed at session start.** In a new `farik_core::governor::sites`: `pub enum WebAccess { Open, ApprovedSites }` and `pub fn web_access(role: Role) -> WebAccess`, `ApprovedSites` for `Role::ProcurementSpecialist` and `Open` for every other role. `SessionRegistration` (`crates/runtime/src/daemon.rs`) gains `pub web: WebAccess`, set from the agent's role when a session is registered, whatever its purpose (a one-to-one chat and a conversation included), so the hook reads no team for it. The role keeps `network` (spec 6.10); this narrows what it reaches. Rejected: a tier of its own, which would change the tier table, the agent page and every tier test for one role; keying on the purpose, since a chat reads the web too.
+- **What a site is.** A host, matched exactly in the ASCII form the `url` crate gives (`url = "=2.5.8"`, already the workspace's, added to `farik-core`: it parses and does no I/O, so `cargo xtask core-io` passes): lower case, an internationalised name in its punycode `xn--` form. `pub fn site_of(address: &str) -> Result<String, SiteFault>` accepts an address that parses as a URL with scheme `https`, no user name or password, no port other than 443 (`url` drops a default port, so `:443` is none), and a host that is `url::Host::Domain` (an IPv4 or IPv6 address is never a site) with at least one dot and at most 253 characters once one trailing dot is removed (`https://shop.example./` is `shop.example`). Path, query and fragment are not judged: a site is approved whole, since a seller's prices and terms are on many pages. `pub fn host_approved(host: &str, approved: &BTreeSet<String>) -> bool` is true for the host itself and for its `www.` twin (`example.com` and `www.example.com` are one site, both ways), a rule of Farik's own, since a `www.` name belongs to whoever holds the name under it; no other host matches: `shop.example.com` is not `example.com`'s, because one name often holds many owners' sites (`*.myshopify.com`, `*.github.io`, `*.blogspot.com`), and a subdomain is asked for as its own site. Rejected: `http` (Claude Code's `WebFetch` upgrades it to `https`, so it would be judged as one address and read as another; the agent writes `https`); approving subdomains with their parent; approving each page (the owner would be asked on every link).
+- **Where approvals are kept: this computer's log.** The approved set is the fold, in sequence order, of `site.approved` and `site.removed` in the project's event log (`.farik/local/farik.db`, never committed): `pub fn approved_sites(log: &EventLog) -> Result<BTreeSet<String>, StoreError>` in a new `farik_store::sites`, read through the kind index. A project has one team, so the set is the team's, shared by every Procurement Specialist on it. Rejected: `team.yaml`, which is committed and travels with the repository, so a pull could add a site the owner never allowed (8.6: a committed team file is untrusted); a file under `.farik/local/`, a second record to keep in step with the log. ADR 0034's confirmation of a skill in this computer's log is the precedent.
+- **How the agent asks: `farik_request_sites { sites: [{ url, why }] }`**, `read` tier, offered to an `implement` session about its own task of an agent whose `web` is `ApprovedSites`, the one session that can wait for the owner. 1 to 10 entries; `url` is the first page it wants, which `site_of` must accept (`site_invalid: <url> <why>`); `why` is 1 to 300 characters on one line (`site_why_invalid`). For each entry: a site already approved is answered `allowed`, and one already waiting for this task `waiting`, nothing recorded; otherwise `site.requested { host, url, why }` is recorded with the task, agent and session on its envelope and answered `asked` with its request number, the event's seq. At most 20 requests wait in the project at once (10f's cap on drafts is the precedent): an entry past it is answered `full`, and a call that records nothing because of it is refused `too_many_site_requests`. When anything was recorded the answer ends `next: "end your turn: the owner's decision starts the next session"`. Rejected: one site per call (a search finds several sellers at once); having the hook ask on a refused `WebFetch`, as a connector call asks (ADR 0031), which would stop the session at the first link it tried and ask about pages it only glanced at.
+- **`farik_read_sites {}`**, `read` tier, offered with `farik_request_sites` and in the role's chat: `{ approved: [host], waiting: [host], declined: [{ host, note }] }`, `waiting` and `declined` those of the session's task (none without one), so a new session knows where it may read without a refused call.
+- **The task waits, as for a marketing plan (08c).** Migration `crates/store/src/migrations/0014_site_requests.sql` (the next free number at HEAD) adds `open_sites INTEGER NOT NULL DEFAULT 0 CHECK (open_sites >= 0)` to `task_projections`; `site.requested` raises it on its task, and a `site.approved` or `site.declined` carrying `request` lowers it on its own task, where each is recorded. The task waits on the human while `open_questions`, `open_approvals`, `open_plans` or `open_sites` is above zero (`projections.rs`), so no session starts for it and the board marks it "Waiting on you". While a request of its task waits, `farik_request_transition` refuses `verifying` with `site_request_waiting: <host> waits for the owner; end your turn`, recording nothing. The next session about the task is told, as the human's message (`human_message`, `orchestrator/messages.rs`), each decision on its requests since its last session started: "The owner allowed you to read <host>." with " The owner adds: <note>" when there is a note, or "The owner did not allow <host>: <note>" ("The owner did not allow <host>." without one); a note is the owner's own words, not wrapped (ADR 0011), and a decision whose envelope names an agent or a session is not the owner's and is not told. Rejected: holding no task, as a post outside the plan does (6.5), since the work needs the site.
+- **What the hook does.** For a session whose `web` is `ApprovedSites`, `judge_call` (`daemon/hooks.rs`) checks a `WebFetch` after its tier: its `url` must be a string `site_of` accepts whose host `host_approved` finds in `approved_sites`, read from the log at the call; otherwise `site_not_approved: <host> is not a site the owner allowed; ask with farik_request_sites, then end your turn`, or, for an address `site_of` refuses, `site_not_approved: <url> is not an https address on a named site`. The session goes on. For a connector's call, `judge_connector` adds, after the preview's check and whatever the tool's tag, `pub fn check_site_urls(input: &serde_json::Value, approved: &BTreeSet<String>) -> Result<(), SiteRefusal>`, the preview's `check_urls` generalised: every field named `url` must be a string, and every field named `urls` an array of strings, at any depth, each passing the same test (`site_not_approved`). A removal takes effect at the next call; what the agent already read stays in its session. `WebFetch` (Claude Code 2.1.285) returns a redirect to another host to the model instead of following it, so the address it moves to is the agent's next `WebFetch`, judged again. Rejected: judging after the fetch (`PostToolUse` cannot unsend a request).
+- **`WebSearch` stays open.** It is judged by the `network` tier alone, as for every role. Its query goes to the one search service Claude Code uses, through the model provider, which already receives every word of the session; neither a page nor the agent chooses where it goes, so it cannot carry data to a seller or to an address a page names. Its results are titles and addresses, untrusted, and reading one is a `WebFetch` the list holds. The query does leave the computer, as every prompt does; 8.6 says so. Rejected: refusing it (the agent could not find the sellers to ask about); asking the owner per query (a query reaches no seller).
+- **Connectors.** A user's own server given to the role, and its kit's connectors (10d), are held by their `url` and `urls` fields; an address in a field of another name is not judged, which 8.6 records. Step 10d checks, when it pins Exa, that `web_fetch_exa` takes its address in a `url` or `urls` field, and tags it `denied` otherwise.
+- **Under `auto`, a request still waits for the owner** (ADR 0041, amended 2026-10-07). The list is a limit the owner sets, like a spending limit, not an outward act; under `auto` the limits are the only guard against a steered agent (ADR 0041's Consequences), and approving requests on their own would make the list as wide as any page asks.
+- **Only the owner decides.** Three commands, on `POST /command` behind the daemon's token and in the browser's RPC behind the session cookie, as `tool_approve` (8.6); no Farik tool decides, adds or removes a site, and the role has no `execute`, so the no-sandbox residual of `daemon.json`'s token (8.6) does not reach it. `site_decide { request, allow, note? }` (`note` at most 600 characters) records `site.approved { host, request }`, then the same for each other request still waiting for that host, each on its own task, or `site.declined { request, host, note? }`; a seq that is no `site.requested` is `unknown_site_request`, and a second decision `site_request_decided`, the check and the write under one lock as `decide_tool_call`'s. `site_add { site }` (O2) takes a host or an address (`https://` put before a bare host, then `site_of`; `site_invalid`), records `site.approved { host }`, settles each request waiting for it as above, and is `site_already_allowed` for an approved host. `site_remove { host }` records `site.removed { host }`, `site_not_allowed` for a host not approved.
+- **Events**, four kinds, `<entity>.<past_tense_verb>`: `site.requested { host, url, why }` (task, agent, session on the envelope); `site.approved { host, request? }` and `site.declined { request, host, note? }` (on the request's task, or on none for an added site; no agent, no session); `site.removed { host }` (no task). In `event.schema.json` and every exhaustive match: `EventBody`, `kind`, `body_def_name`, `EVERY_KIND` (`crates/protocol/src/event.rs`), the names (`protocol/src/lib.rs`), the fixtures.
+- **Queries and lists.** `sites.list {}` answers `{ approved: [{ host, at, request? }], waiting: [{ request, host, url, why, task_id, agent_id, at }] }`, each by host. `waiting.list` gains a row of kind `site_request` per waiting request, carrying `request`, `host`, `url` and `why`, line "<agent name> asks to read <host>", after the posts outside the plan; the agent's activity line is "Waiting on you: may <agent name> read <host>?" (`crates/store/src/activity.rs`).
+- **Today and the agent's page** (Task 0's mockups). Today lists each waiting request: the host in bold as stored, in its ASCII form, and, when a label starts with `xn--`, "This name is written in another alphabet. Check it is the site you expect."; the page address as text, never a link; why, the agent's words, in an `untrusted` frame; "Allow" and "Don't allow", each with an optional note; and "<agent name> reads only sites you allow. Allowing <host> lets it read any page there until you remove it." The Procurement Specialist's page (`AgentEdit.tsx`) gains "Sites it may read": each approved host, the day it was allowed and "Remove", which asks first ("<agent name> will no longer read <host>."), and "Add a site" (O2). `en.ts` keys: `sitesTitle`, `sitesAdd`, `sitesRemove`, `sitesRemoveConfirm`, `siteRequestLine`, `siteRequestAllow`, `siteRequestDecline`, `siteRequestNote`, `siteRequestScript`.
+- **The command line.** `farik site list`, `farik site approve <n> [--note <text>]`, `farik site decline <n> [--note <text>]`, `farik site add <site>`, `farik site remove <host>` (`crates/cli/src/site.rs`); when a process driving the project ends, each waiting request reads "<task> waits: <agent name> asks to read <host>: farik site approve <n>, or farik site decline <n>" (`crates/cli/src/waiting.rs`), with `--json` a `request` field.
+- **The prompt.** `sourcing-a-product` and the role's `system.md` say: you read only the sites the owner allowed, which `farik_read_sites` lists; search freely with `WebSearch`; find the sellers first, then ask for their sites at once with `farik_request_sites`, each with why, and end your turn; never put the business's details in an address.
+- **Tool counts.** The two tools follow `farik_write_evaluation` in `TOOLS`: the read-tier slice goes from `[..30]` to `[..32]`, `daemon/mcp.rs`'s count from 37 to 39; both are left out of `gives_a_session_the_farik_tools_of_its_tiers` (`rules.rs:4919`).
+
+## Open questions for the founder
+
+- **O1. How long an approval lasts.** Until the owner removes it, or for the task that asked only? Recommendation: until removed; a per-task approval asks again about the same seller for every need.
+- **O2. May the owner add a site no request named** ("Add a site", `site_add`)? Recommendation: yes; the owner allows the sellers they already buy from before the agent asks. If no, `site_add`, `farik site add` and the field are dropped.
+- **O3. Does the role start with any site allowed?** Recommendation: none. Marketplace prices come through the kit's SerpApi and eBay connectors (10d, 10g), whose hosts are fixed, and a starter list would be sites the owner did not choose.
+
+## File map
+
+```
+docs/design/mockups/{TodaySiteRequest,PhoneSiteRequest,AgentSites,PhoneAgentSites}.dc.html, canvas.json   creates, modifies (Task 0)
+crates/core/Cargo.toml, crates/core/src/governor.rs, crates/core/src/governor/sites.rs   modifies, creates (Task 1)
+crates/core/src/governor/permissions.rs                       modifies: check_site_urls beside check_urls (Task 1)
+docs/schemas/{event,command,rpc}.schema.json, crates/protocol/src/{event.rs,command.rs,lib.rs,event/fixtures.rs}   modifies (Task 2)
+crates/store/src/migrations/0014_site_requests.sql, crates/store/src/{migrations.rs,projections.rs,sites.rs,waiting.rs,activity.rs,lib.rs}   creates, modifies (Task 2)
+crates/runtime/src/tools/sites.rs, crates/runtime/src/tools.rs, crates/runtime/src/daemon/mcp.rs   creates, modifies (Task 3)
+crates/runtime/src/orchestrator/session.rs, crates/runtime/src/tools/work.rs   modifies: offered_tools; the transition's refusal (Task 3)
+crates/runtime/src/daemon.rs, crates/runtime/src/daemon/hooks.rs   modifies: SessionRegistration.web; judge_call, judge_connector (Task 4)
+crates/runtime/src/orchestrator/{human.rs,messages.rs}, crates/runtime/src/daemon/gates.rs   modifies: the commands, human_message, sites.list (Task 5)
+crates/cli/src/{site.rs,main.rs,waiting.rs}, crates/cli/tests/human.rs   creates, modifies, tests (Task 5)
+crates/roles/roles/procurement_specialist/{system.md,skills/sourcing-a-product/SKILL.md}, crates/roles/src/lib.rs   modifies (Task 6)
+apps/web/src/pages/{Today.tsx,AgentEdit.tsx}, apps/web/src/pages/dialogs/SiteRequest.tsx, apps/web/src/strings/en.ts   modifies, creates (Task 7)
+apps/web/src/pages/{Today.test.tsx,sites.test.tsx}, apps/web/src/pages/dialogs/SiteRequest.test.tsx   tests (Task 7)
+docs/SPEC.md, docs/design/procurement-specialist.md, docs/plans/project-plan.md   modifies (Task 8)
+```
+
+## Interfaces
+
+Consumes: `Role`, `check_urls`, `evaluate_connector_call` (`farik-core`); `EventLog`, `EventQuery`, `Projections`, `waiting`, `Waiting` (`farik-store`); `SessionRegistration`, `judge_call`, `judge_connector`, `decide_tool_call`, `human_message`, `offered_tools`, `request_transition` (`farik-runtime`); from step 10b, `Role::ProcurementSpecialist` and `TOOLS` after `farik_write_evaluation`.
+
+Produces:
+
+```rust
+pub enum WebAccess { Open, ApprovedSites }                        // farik_core::governor::sites
+pub fn web_access(role: Role) -> WebAccess;
+pub enum SiteFault { NotUrl, NotHttps, HasUserInfo, HasPort, NotADomain, TooLong }
+pub fn site_of(address: &str) -> Result<String, SiteFault>;
+pub fn host_approved(host: &str, approved: &BTreeSet<String>) -> bool;
+pub struct SiteRefusal { pub address: String }
+pub fn check_site_urls(input: &serde_json::Value, approved: &BTreeSet<String>) -> Result<(), SiteRefusal>;
+pub fn approved_sites(log: &EventLog) -> Result<BTreeSet<String>, StoreError>;   // farik_store::sites
+pub struct RequestSitesInput { pub sites: Vec<SiteAsk> }           // farik_runtime::tools::sites
+pub struct SiteAsk { pub url: String, pub why: String }
+// SessionRegistration gains `pub web: WebAccess`; Command gains SiteDecide { request: u64, allow: bool, note: Option<String> },
+// SiteAdd { site: String }, SiteRemove { host: String }; WaitingKind gains SiteRequest
+```
+
+## Tasks
+
+### Task 0: Mockups
+
+Files: `TodaySiteRequest.dc.html`, `PhoneSiteRequest.dc.html` (Today's gate: two requests of one task, one an `xn--` name, a note, "Allow" and "Don't allow"), `AgentSites.dc.html`, `PhoneAgentSites.dc.html` (the Procurement Specialist's page: "Sites it may read", three sites, Remove and its question, "Add a site"), `canvas.json`. The founder approves them, and answers O1 to O3, before Task 7; the approval, with its date and canvas version, and the answers are written into this plan's Execution notes in the same commit.
+
+- [ ] `docs(design): mock up asking for a site and the approved sites`
+
+### Task 1: What a site is
+
+Files: `crates/core/Cargo.toml` (`url`), `governor.rs` (`pub mod sites`), `governor/sites.rs`, `permissions.rs`.
+
+- `a_site_is_an_https_named_host`: `https://Shop.Example.com/p?q=1#f`, `https://shop.example.com:443/` and `https://shop.example.com./` each give `shop.example.com`. RED: no such function.
+- `refuses_what_is_not_a_site`: `http://a.com`, `https://a.com:8443/`, `https://u:p@a.com/`, `https://127.0.0.1/`, `https://[::1]/`, `https://localhost/`, `ftp://a.com/`, `a.com` and the empty string are each refused with its `SiteFault`. RED: no such function.
+- `an_international_name_is_its_ascii_form`: `https://bücher.example/` gives `xn--bcher-kva.example`, and that host approved, `host_approved` finds the Unicode address's host. RED: no such function.
+- `www_is_the_same_site_and_nothing_else_is`: with `example.com` approved, `www.example.com` matches, and `shop.example.com`, `example.com.evil.net` and `wwwexample.com` do not; with `www.shop.example` approved, `shop.example` matches. RED: no such function.
+- `holds_every_url_field_to_the_sites`: with `a.com` approved, `{ url: "https://a.com/x" }` and `{ q: { urls: ["https://www.a.com/"] } }` pass; `{ url: "https://b.com/" }`, `{ deep: [{ url: "https://b.com/" }] }`, `{ urls: ["https://a.com/", "https://b.com/"] }`, `{ url: 7 }` and `{ urls: "https://a.com/" }` are refused, each naming the address or the field's JSON. RED: no such function.
+- `only_procurement_is_held`: `web_access` is `ApprovedSites` for the Procurement Specialist and `Open` for the eight other roles. RED: no such function.
+
+- [ ] `feat(core): say what an approved site is`
+
+### Task 2: The events, the waiting and the store
+
+Files: the event, command and RPC schemas and their exhaustive matches; the migration and `MIGRATIONS`; `projections.rs`; `sites.rs`; `waiting.rs`; `activity.rs`.
+
+- `round_trips_every_site_event` (`protocol`): each of the four kinds validates against the schema and reads back equal; `EVERY_KIND` counts them. RED: no such kinds.
+- `the_approved_sites_are_the_log_s`: approve `a.com`, approve `b.com`, remove `a.com` gives `{b.com}`; approving `a.com` again gives `{a.com, b.com}`; a log with none gives the empty set. RED: no such function.
+- `a_site_request_makes_its_task_wait`: `site.requested` raises the task's `open_sites` and marks it waiting on the human; a `site.approved` with its `request` lowers it, as a `site.declined` does; an added site with no `request` lowers nothing. RED: no column.
+- `waiting_lists_each_site_request`: one undecided request gives a `site_request` row with `request`, `host`, `url` and `why` and the line "Kai asks to read shop.example", after the posts outside the plan; a decided one gives none; the agent's activity line is "Waiting on you: may Kai read shop.example?". RED: no such kind.
+
+- [ ] `feat(store): record sites asked for, approved and removed`
+
+### Task 3: The agent's two tools
+
+Files: `tools/sites.rs`, `tools.rs` (two descriptors after `farik_write_evaluation`, the slice `[..32]`, their arms in `call_tool`), `daemon/mcp.rs` (39), `offered_tools`, `tools/work.rs`.
+
+- `asks_for_each_new_site`: three entries, one approved, two new, record two `site.requested` with the task, agent and session, answer `allowed`, `asked`, `asked` with their numbers, and end with `next`. RED: no such tool.
+- `does_not_ask_twice`: an entry for a host already waiting for this task is answered `waiting` and nothing is recorded. RED: no such tool.
+- `refuses_a_bad_site_or_why`: `http://a.com`, an IP address, an empty `why`, a why of 301 characters and one with a line break are refused with their codes, and nothing is recorded; eleven entries are refused. RED: no such tool.
+- `caps_the_requests_waiting`: with 19 waiting, three new entries record one and answer `full` twice; with 20 waiting the call is `too_many_site_requests`. RED: no such tool.
+- `reads_where_it_may_read`: `farik_read_sites` gives the approved hosts, this task's waiting hosts, and its declined ones with their notes. RED: no such tool.
+- `offers_the_site_tools_to_a_held_role`: a procurement `implement` session is offered both, its chat `farik_read_sites` alone, a Finance Specialist's and a Marketing Specialist's sessions neither. RED: no such tools.
+- `cannot_hand_in_while_a_site_waits`: with a request waiting, `farik_request_transition` to `verifying` is `site_request_waiting: shop.example waits for the owner; end your turn` and records nothing; once it is decided, the move goes through. RED: no such refusal.
+
+- [ ] `feat(runtime): let the Procurement Specialist ask for a site`
+
+### Task 4: The hook holds the role to its sites
+
+Files: `daemon.rs` (`SessionRegistration.web`, set where a registration is made), `daemon/hooks.rs`.
+
+- `procurement_fetches_only_approved_sites`: with `shop.example` approved, a procurement session's `WebFetch` of `https://www.shop.example/prices` is allowed and of `https://other.example/` denied `site_not_approved`, the session not stopped; after `site.removed`, the next `WebFetch` of `shop.example` is denied. RED: every `WebFetch` passes on `network`.
+- `procurement_s_chat_is_held_too`: the role's chat session's `WebFetch` of an unapproved site is denied. RED: as above.
+- `other_roles_fetch_as_before` (a guard): a Marketing Specialist's `WebFetch` of any `https` address is allowed.
+- `procurement_searches_freely` (a guard): a procurement session's `WebSearch` is allowed, approved sites or not.
+- `a_connector_s_addresses_are_held_too`: a user's server given to a Procurement Specialist, its tool tagged `network`, is denied `site_not_approved` for `{ url: "https://other.example/" }` and allowed for an approved one; the same call of a Developer's is allowed. RED: connectors are judged by tag alone.
+
+- [ ] `feat(runtime): hold the Procurement Specialist's web reading to approved sites`
+
+### Task 5: The owner decides
+
+Files: `human.rs` (`site_decide`, `site_add`, `site_remove`), `messages.rs` (`human_message`), `daemon/gates.rs` (`sites.list`, the `site_request` rows), `crates/cli/src/{site.rs,main.rs,waiting.rs}`, `crates/cli/tests/human.rs`.
+
+- `allowing_a_request_approves_its_site`: `site_decide { allow: true }` records `site.approved { host, request }` on the request's task, with no agent or session, and the host is in `approved_sites`. RED: no such command.
+- `allowing_settles_every_request_for_the_site`: two tasks' requests for `shop.example`; allowing one records a second `site.approved` for the other, and neither task waits. RED: no such command.
+- `a_request_is_decided_once`: a second decision is `site_request_decided`, a seq that is no request `unknown_site_request`, and two decisions at once let exactly one through. RED: no such command.
+- `adding_and_removing_a_site`: `site_add { site: "shop.example" }` records `site.approved { host: "shop.example" }`; again, `site_already_allowed`; `site_remove` records `site.removed`; again, `site_not_allowed`; `site_add { site: "http://a.com" }` is `site_invalid`. RED: no such commands.
+- `the_next_session_is_told`: after one site allowed with a note and one declined without, the task's next session's human message holds "The owner allowed you to read shop.example. The owner adds: <note>" and "The owner did not allow other.example."; a `site.declined` whose envelope names an agent is not told. RED: no such lines.
+- `lists_the_sites`: `sites.list` answers the approved hosts and the waiting requests with their fields. RED: no such query.
+- `farik_site_lists_and_decides` (`cli/tests/human.rs`): `farik site approve <n> --note ok` and `farik site decline <n>` record their decisions; `farik site list` prints the approved hosts and the waiting requests; a process ending prints the waiting line with both commands. RED: no such commands.
+
+- [ ] `feat(runtime): let the owner allow, refuse, add and remove sites`
+
+### Task 6: The prompt says how to ask
+
+Files: the role's `system.md` and `sourcing-a-product/SKILL.md`; `crates/roles/src/lib.rs`.
+
+- `sourcing_a_product_says_how_to_ask_for_a_site`: the skill contains "`farik_read_sites`", "`farik_request_sites`", "end your turn" and "never put the business's details in an address", and the prompt "sites the owner allowed"; `kit_skills_name_only_tools_farik_lists` passes. RED: neither says it.
+
+- [ ] `feat(roles): tell the Procurement Specialist how to ask for a site`
+
+### Task 7: Today and the agent's page
+
+Files: `Today.tsx` (the `site_request` kind), `dialogs/SiteRequest.tsx`, `AgentEdit.tsx` ("Sites it may read"), `en.ts`, their tests; as the approved mockups.
+
+- `today_lists_a_site_request` (`Today.test.tsx`): a `site_request` row shows the host in bold, the address as text with no link, why in an `untrusted` frame, and, for an `xn--` host, `siteRequestScript`. RED: the kind is filtered out.
+- `allowing_and_refusing_a_site` (`SiteRequest.test.tsx`): "Allow" sends `site_decide { request, allow: true }`, "Don't allow" with a note sends `allow: false` and the note. RED: no dialog.
+- `the_agent_page_lists_its_sites` (`sites.test.tsx`): a Procurement Specialist's page lists `sites.list`'s hosts; "Remove" asks, then sends `site_remove`; "Add a site" sends `site_add`; a Developer's page has no such section. RED: no section.
+
+- [ ] `feat(web): ask the owner about sites and list the approved ones`
+
+### Task 8: Spec and plan
+
+`docs/SPEC.md`: 5.6 (a role held to approved sites; `WebFetch` and a connector's `url` fields judged against them; `WebSearch` unchanged); 5.7 (a site request waits as a marketing plan does; `open_sites`; the decisions told); 6.10 (the role reads only approved sites; its two tools); 8.2 (`SessionRegistration.web`); 8.5 (the four events); 8.6 (what the list stops; the residuals: data can still reach an approved site in an address; a connector's address in a field not named `url` or `urls`; a `WebSearch` query leaves the computer for the search service; what a session read before a removal stays in it; an approved name may later point elsewhere); F9 (the agent page's list); the revision line. `docs/design/procurement-specialist.md`: line 38's tiers, with the approved sites, and the tools table's two rows. `docs/plans/project-plan.md`: row 10b2, what was executed.
+
+- [ ] `docs(spec): record the approved sites`
+
+## Verification
+
+```
+cargo xtask check
+# expected: xtask check: ok (with pnpm check)
+```
+
+Then, in the web app, by the founder (step 10b's run, moved here): add a Procurement Specialist to a team of six and file "Compare three email-sending services for about 3,000 emails a month"; see it search, then ask on Today for the services' sites; allow two and decline one with a note; see the evaluation and the register written in `.farik/local/procurement/`, the Product Manager's review, and the acceptance with nothing to integrate, with `git status` showing nothing new; then remove one site on the agent's page and see the log (`farik log`) record the next `WebFetch` of it as `tool.denied` with `site_not_approved`.
+
+## Execution notes
+
+None yet.
