@@ -759,8 +759,8 @@
       "x": 6530,
       "y": 0,
       "w": 1280,
-      "h": 4198,
-      "title": "Today: Ivo sets up an order, Approve or Reject (step 10c)",
+      "h": 5587,
+      "title": "Today: Ivo sets up an order, Approve and send, Approve or Reject (steps 10c, 10f)",
       "page": "procurement",
       "is_interactive": true
     },
@@ -768,8 +768,8 @@
       "x": 8010,
       "y": 0,
       "w": 390,
-      "h": 2673,
-      "title": "Phone: Ivo sets up an order (step 10c)",
+      "h": 4406,
+      "title": "Phone: Ivo sets up an order, Approve and send (steps 10c, 10f)",
       "page": "procurement",
       "is_interactive": true
     },
@@ -824,6 +824,78 @@
       "w": 390,
       "h": 4133,
       "title": "Phone: Ivo asks for a data source (step 10e)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "ProcurementMailbox.dc.html": {
+      "x": 14970,
+      "y": 0,
+      "w": 1440,
+      "h": 4494,
+      "title": "Connect a procurement mailbox: providers, Microsoft not supported yet, the alias note; Ivo’s mailbox section (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneProcurementMailbox.dc.html": {
+      "x": 16610,
+      "y": 0,
+      "w": 390,
+      "h": 4220,
+      "title": "Phone: connect a procurement mailbox (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "TodaySellerMessages.dc.html": {
+      "x": 17200,
+      "y": 0,
+      "w": 1280,
+      "h": 3659,
+      "title": "Today: Ivo’s messages to sellers, Send, Edit or Discard, and the sellers’ replies (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneSellerMessages.dc.html": {
+      "x": 18680,
+      "y": 0,
+      "w": 390,
+      "h": 3965,
+      "title": "Phone: messages to sellers and their replies (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "SellerMessage.dc.html": {
+      "x": 19270,
+      "y": 0,
+      "w": 1280,
+      "h": 2336,
+      "title": "Edit a message to a seller, then send it; a refused send and the daily cap (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneSellerMessage.dc.html": {
+      "x": 20750,
+      "y": 0,
+      "w": 390,
+      "h": 4303,
+      "title": "Phone: edit a message to a seller (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "SellerReply.dc.html": {
+      "x": 21340,
+      "y": 0,
+      "w": 1280,
+      "h": 2770,
+      "title": "Read a seller’s reply as text, its attachments, Ask for a comparison (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneSellerReply.dc.html": {
+      "x": 22820,
+      "y": 0,
+      "w": 390,
+      "h": 2192,
+      "title": "Phone: read a seller’s reply (step 10f)",
       "page": "procurement",
       "is_interactive": true
     }
@@ -948,9 +1020,9 @@
     },
     "t_procurement": {
       "kind": "title1",
-      "maxW": 14800,
+      "maxW": 23300,
       "page": "procurement",
-      "text": "Procurement Specialist: more roles in setup, the sites it may read, purchase orders, renewals and data pipelines",
+      "text": "Procurement Specialist: more roles in setup, the sites it may read, purchase orders, renewals, data pipelines and contacting sellers",
       "w": 240,
       "x": 0,
       "y": -300
@@ -1048,7 +1120,15 @@
     "TodayRenewal.dc.html",
     "PhoneRenewal.dc.html",
     "TodayDataPipeline.dc.html",
-    "PhoneDataPipeline.dc.html"
+    "PhoneDataPipeline.dc.html",
+    "ProcurementMailbox.dc.html",
+    "PhoneProcurementMailbox.dc.html",
+    "TodaySellerMessages.dc.html",
+    "PhoneSellerMessages.dc.html",
+    "SellerMessage.dc.html",
+    "PhoneSellerMessage.dc.html",
+    "SellerReply.dc.html",
+    "PhoneSellerReply.dc.html"
   ],
   "pages": [
     {
