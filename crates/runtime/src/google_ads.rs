@@ -1,0 +1,2025 @@
+//! Farik's own Google Ads connector (`docs/SPEC.md` 6.7, ADR 0038, ADR 0042): the client for
+//! Google's API, and what each of the connector's ten tools sends. It speaks to one fixed address,
+//! follows no redirect and uses no proxy, sends the agent's grant as a bearer and nothing else (no
+//! developer token, no `login-customer-id`), checks every input before anything leaves, and builds
+//! its queries from fixed text and checked values alone. What Google answers is data the agent
+//! reads under the untrusted-content notice.
+
+use std::fmt;
+use std::time::Duration;
+
+use chrono::NaiveDate;
+use farik_core::marketing::{Amount, BudgetKind, parse_amount};
+use serde_json::{Value, json};
+
+use crate::claude::Secret;
+
+/// Google Ads' address, version 25 (released 2026-07-22; a Farik release moves it). Never an
+/// argument or an input: the tests pass a fixture's address to [`GoogleAds::new`].
+pub const GOOGLE_ADS_API: &str = "https://googleads.googleapis.com/v25";
+
+/// The connector's three reads, in the order its kit lists them.
+pub const READ_TOOLS: [&str; 3] = ["list_accounts", "report", "keyword_ideas"];
+
+/// The connector's seven writes, in the order its kit lists them.
+pub const WRITE_TOOLS: [&str; 7] = [
+    "create_search_campaign",
+    "add_ad_group",
+    "add_keywords",
+    "add_negative_keywords",
+    "add_responsive_search_ad",
+    "set_campaign_budget",
+    "set_campaign_status",
+];
+
+/// The ten tools the shim lists: the reads, then the writes.
+#[must_use]
+pub fn tool_names() -> Vec<&'static str> {
+    READ_TOOLS.iter().chain(&WRITE_TOOLS).copied().collect()
+}
+
+/// Why a call to Google, or a tool's input, was refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GoogleAdsError {
+    /// An input is not valid; nothing was sent.
+    Input(String),
+    /// Google refused the request, in Farik's words with Google's own cut and quoted.
+    Google(String),
+    /// Google would not allow it: its `PERMISSION_DENIED`.
+    NotAllowed(String),
+    /// The call could not be made, or Google answered with a fault, in a sentence.
+    Failed(String),
+}
+
+impl fmt::Display for GoogleAdsError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (Self::Input(words)
+        | Self::Google(words)
+        | Self::NotAllowed(words)
+        | Self::Failed(words)) = self;
+        formatter.write_str(words)
+    }
+}
+
+impl std::error::Error for GoogleAdsError {}
+
+/// How long one call to Google may take.
+const TIMEOUT: Duration = Duration::from_secs(25);
+/// The most of an answer Farik reads.
+const MAX_BODY: usize = 4 * 1024 * 1024;
+/// The most characters of Google's own words Farik passes on.
+const MAX_WORDS: usize = 300;
+/// The most accounts `list_accounts` reads.
+const MAX_ACCOUNTS: usize = 20;
+/// The most rows a `report` answers with.
+const MAX_ROWS: usize = 500;
+/// The most ideas `keyword_ideas` answers with.
+const MAX_IDEAS: usize = 100;
+/// What `list_accounts` asks of each account.
+const CUSTOMER_QUERY: &str = "SELECT customer.descriptive_name, customer.currency_code, \
+     customer.time_zone, customer.manager FROM customer";
+
+/// The client, speaking to one address.
+#[derive(Clone)]
+pub struct GoogleAds {
+    api: String,
+    client: reqwest::Client,
+    timeout: Duration,
+}
+
+/// Why Farik could not speak to Google at all.
+fn failed(words: &str) -> GoogleAdsError {
+    GoogleAdsError::Failed(words.to_string())
+}
+
+/// `text` cut at the most characters of Google's own words Farik passes on.
+fn cut(text: &str) -> String {
+    text.chars().take(MAX_WORDS).collect()
+}
+
+impl GoogleAds {
+    /// A client for `api`: `https`, or `http` on this computer, for the tests.
+    ///
+    /// # Errors
+    ///
+    /// The address is not one of those, or the web client could not be made.
+    pub fn new(api: &str) -> Result<Self, GoogleAdsError> {
+        Self::with_timeout(api, TIMEOUT)
+    }
+
+    fn with_timeout(api: &str, timeout: Duration) -> Result<Self, GoogleAdsError> {
+        let url = reqwest::Url::parse(api).map_err(|_| failed("Google Ads' address is not one"))?;
+        let on_this_computer = match url.host() {
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            Some(url::Host::Domain(name)) => name == "localhost",
+            None => false,
+        };
+        let allowed = match url.scheme() {
+            "https" => url.host().is_some(),
+            "http" => on_this_computer,
+            _ => false,
+        };
+        if !allowed {
+            return Err(failed(
+                "Google Ads' address is https, or http on this computer",
+            ));
+        }
+        let client = reqwest::Client::builder()
+            // Nothing Google answers sends Farik anywhere else, and nothing goes through a proxy.
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .timeout(timeout)
+            .build()
+            .map_err(|_| failed("the web client could not be made"))?;
+        Ok(Self {
+            api: url.as_str().trim_end_matches('/').to_string(),
+            client,
+            timeout,
+        })
+    }
+
+    /// One call: GET, or POST of `body`, to `path` under the fixed address, answered as JSON.
+    async fn call(
+        &self,
+        token: &Secret,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<Value, GoogleAdsError> {
+        let url = format!("{}/{path}", self.api);
+        let request = match body {
+            Some(body) => self
+                .client
+                .post(url)
+                .header("content-type", "application/json")
+                .body(body.to_string()),
+            None => self.client.get(url),
+        };
+        let silent = format!(
+            "Google did not answer within {} seconds",
+            self.timeout.as_secs()
+        );
+        let mut response = request
+            .bearer_auth(token.expose())
+            .send()
+            .await
+            .map_err(|error| {
+                if error.is_timeout() {
+                    GoogleAdsError::Failed(silent.clone())
+                } else {
+                    failed("Google could not be reached")
+                }
+            })?;
+        let status = response.status();
+        if status.is_redirection() {
+            return Err(failed(
+                "Google answered with a redirect, which Farik does not follow",
+            ));
+        }
+        let mut bytes: Vec<u8> = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            if error.is_timeout() {
+                GoogleAdsError::Failed(silent.clone())
+            } else {
+                failed("Google's answer was cut off")
+            }
+        })? {
+            if chunk.len() > MAX_BODY - bytes.len() {
+                return Err(failed("Google's answer is too large"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let answer: Option<Value> = serde_json::from_slice(&bytes).ok();
+        if !status.is_success() {
+            return Err(refusal(status.as_u16(), answer.as_ref()));
+        }
+        answer.ok_or_else(|| failed("Google's answer is not JSON"))
+    }
+
+    /// The customer ids the sign-in reaches directly.
+    ///
+    /// # Errors
+    ///
+    /// As [`GoogleAds::search`].
+    pub async fn accessible(&self, token: &Secret) -> Result<Vec<String>, GoogleAdsError> {
+        let answer = self
+            .call(token, "customers:listAccessibleCustomers", None)
+            .await?;
+        Ok(answer["resourceNames"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|name| name.as_str()?.strip_prefix("customers/"))
+            .filter(|id| is_customer(id))
+            .map(str::to_string)
+            .collect())
+    }
+
+    /// The rows of one `googleAds:search` of `query` in `account`.
+    ///
+    /// # Errors
+    ///
+    /// `Input` for an account that is not one, `NotAllowed` for Google's `PERMISSION_DENIED`,
+    /// `Google` for any other refusal, `Failed` when Google could not be reached or answered
+    /// badly.
+    pub async fn search(
+        &self,
+        token: &Secret,
+        account: &str,
+        query: &str,
+    ) -> Result<Vec<Value>, GoogleAdsError> {
+        let customer = customer(account)?;
+        let answer = self
+            .call(
+                token,
+                &format!("customers/{customer}/googleAds:search"),
+                Some(&json!({ "query": query })),
+            )
+            .await?;
+        Ok(answer["results"].as_array().cloned().unwrap_or_default())
+    }
+
+    /// One `googleAds:mutate` of `operations` in `account`: all of them or none, and the resource
+    /// name each made or changed, in order.
+    ///
+    /// # Errors
+    ///
+    /// As [`GoogleAds::search`].
+    pub async fn mutate(
+        &self,
+        token: &Secret,
+        account: &str,
+        operations: Vec<Value>,
+    ) -> Result<Vec<String>, GoogleAdsError> {
+        let customer = customer(account)?;
+        if operations.is_empty() {
+            return Err(GoogleAdsError::Input(
+                "there is nothing to change".to_string(),
+            ));
+        }
+        let asked = operations.len();
+        let answer = self
+            .call(
+                token,
+                &format!("customers/{customer}/googleAds:mutate"),
+                Some(&json!({ "mutateOperations": operations })),
+            )
+            .await?;
+        let made: Vec<String> = answer["mutateOperationResponses"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|response| {
+                response
+                    .as_object()?
+                    .values()
+                    .find_map(|result| result["resourceName"].as_str())
+                    .map(str::to_string)
+            })
+            .collect();
+        if made.len() == asked {
+            Ok(made)
+        } else {
+            Err(failed("Google's answer does not say what it changed"))
+        }
+    }
+
+    /// The ideas of one `generateKeywordIdeas` `request` in `account`.
+    ///
+    /// # Errors
+    ///
+    /// As [`GoogleAds::search`], but Google's `PERMISSION_DENIED` is the words of an app Google
+    /// has not yet allowed to give keyword ideas.
+    pub async fn keyword_ideas(
+        &self,
+        token: &Secret,
+        account: &str,
+        request: &Value,
+    ) -> Result<Vec<Value>, GoogleAdsError> {
+        let customer = customer(account)?;
+        let answer = self
+            .call(
+                token,
+                &format!("customers/{customer}:generateKeywordIdeas"),
+                Some(request),
+            )
+            .await
+            .map_err(|error| match error {
+                GoogleAdsError::NotAllowed(_) => GoogleAdsError::NotAllowed(
+                    "Google has not yet allowed Farik's app to give keyword ideas.".to_string(),
+                ),
+                other => other,
+            })?;
+        Ok(answer["results"].as_array().cloned().unwrap_or_default())
+    }
+}
+
+/// What Google's refusal, `status` and its error body, comes to in Farik's words, Google's own
+/// message cut and quoted.
+fn refusal(status: u16, body: Option<&Value>) -> GoogleAdsError {
+    let google = body.map_or("", |body| {
+        body["error"]["status"].as_str().unwrap_or_default()
+    });
+    let message = cut(body.map_or("", |body| {
+        body["error"]["message"].as_str().unwrap_or_default()
+    }));
+    if status == 401 || google == "UNAUTHENTICATED" {
+        failed("Google did not accept Farik's sign-in; sign in again")
+    } else if status == 403 || google == "PERMISSION_DENIED" {
+        GoogleAdsError::NotAllowed(format!("Google would not allow this: “{message}”"))
+    } else if status == 429 || google == "RESOURCE_EXHAUSTED" {
+        GoogleAdsError::Google(format!(
+            "Google says Farik has asked too often: “{message}”"
+        ))
+    } else if status >= 500 {
+        GoogleAdsError::Failed(format!(
+            "Google had a fault (status {status}); try again later"
+        ))
+    } else {
+        GoogleAdsError::Google(format!("Google refused it: “{message}”"))
+    }
+}
+
+/// Whether `text` is a customer id: ten digits.
+fn is_customer(text: &str) -> bool {
+    text.len() == 10 && text.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// The ten digits of an ad account, given as `NNN-NNN-NNNN`.
+///
+/// # Errors
+///
+/// `Input` for anything else.
+pub fn customer_of(account: &str) -> Result<String, GoogleAdsError> {
+    let bytes = account.as_bytes();
+    let shaped = bytes.len() == 12
+        && bytes.iter().enumerate().all(|(at, byte)| {
+            if at == 3 || at == 7 {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        });
+    if shaped {
+        Ok(account.replace('-', ""))
+    } else {
+        Err(GoogleAdsError::Input(
+            "the account is the ad account's number written 123-456-7890".to_string(),
+        ))
+    }
+}
+
+/// The customer of `account`, written as `NNN-NNN-NNNN` or as ten digits.
+fn customer(account: &str) -> Result<String, GoogleAdsError> {
+    if is_customer(account) {
+        Ok(account.to_string())
+    } else {
+        customer_of(account)
+    }
+}
+
+/// A customer's ten digits written `NNN-NNN-NNNN`.
+#[must_use]
+pub fn dashed(customer: &str) -> String {
+    format!("{}-{}-{}", &customer[..3], &customer[3..6], &customer[6..])
+}
+
+/// `text`'s field of `input`, 1 to `most` characters with no control character.
+fn text(input: &Value, field: &str, most: usize) -> Result<String, GoogleAdsError> {
+    let words = input[field]
+        .as_str()
+        .ok_or_else(|| GoogleAdsError::Input(format!("{field} is needed, as text")))?;
+    checked_text(field, words, most)
+}
+
+fn checked_text(field: &str, words: &str, most: usize) -> Result<String, GoogleAdsError> {
+    let length = words.chars().count();
+    if length == 0 || length > most || words.trim().is_empty() {
+        return Err(GoogleAdsError::Input(format!(
+            "{field} is 1 to {most} characters"
+        )));
+    }
+    if words.chars().any(char::is_control) {
+        return Err(GoogleAdsError::Input(format!(
+            "{field} holds no control character"
+        )));
+    }
+    Ok(words.to_string())
+}
+
+/// The list `field` holds, `least` to `most` long.
+fn list<'a>(
+    input: &'a Value,
+    field: &str,
+    least: usize,
+    most: usize,
+) -> Result<&'a Vec<Value>, GoogleAdsError> {
+    input[field]
+        .as_array()
+        .filter(|items| (least..=most).contains(&items.len()))
+        .ok_or_else(|| GoogleAdsError::Input(format!("{field} is a list of {least} to {most}")))
+}
+
+/// Each member of the list `field` as a text of 1 to `each` characters.
+fn texts(
+    input: &Value,
+    field: &str,
+    (least, most): (usize, usize),
+    each: usize,
+) -> Result<Vec<String>, GoogleAdsError> {
+    list(input, field, least, most)?
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .ok_or_else(|| GoogleAdsError::Input(format!("{field} holds text only")))
+                .and_then(|words| checked_text(field, words, each))
+        })
+        .collect()
+}
+
+/// Numeric ids of Google's constants: `least` to `most` of them, each a whole number from 1.
+fn ids(input: &Value, field: &str, least: usize, most: usize) -> Result<Vec<u64>, GoogleAdsError> {
+    list(input, field, least, most)?
+        .iter()
+        .map(|item| {
+            item.as_u64()
+                .filter(|id| (1..1_000_000_000_000).contains(id))
+                .ok_or_else(|| {
+                    GoogleAdsError::Input(format!("{field} holds numeric constant ids, from 1"))
+                })
+        })
+        .collect()
+}
+
+/// An amount in the plan's currency, as a decimal text above nothing; none when `field` is absent.
+fn money(input: &Value, field: &str) -> Result<Option<Amount>, GoogleAdsError> {
+    match input.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(words)) => parse_amount(words)
+            .filter(|amount| amount.0 > 0)
+            .map(Some)
+            .ok_or_else(|| {
+                GoogleAdsError::Input(format!(
+                    "{field} is an amount above nothing, as text such as 1.50"
+                ))
+            }),
+        Some(_) => Err(GoogleAdsError::Input(format!(
+            "{field} is an amount above nothing, as text such as 1.50"
+        ))),
+    }
+}
+
+/// A day written `YYYY-MM-DD`.
+fn day(input: &Value, field: &str) -> Result<NaiveDate, GoogleAdsError> {
+    let said = format!("{field} is a day written 2026-10-31");
+    let words = input[field]
+        .as_str()
+        .filter(|words| {
+            words.len() == 10
+                && words.bytes().enumerate().all(|(at, byte)| {
+                    if at == 4 || at == 7 {
+                        byte == b'-'
+                    } else {
+                        byte.is_ascii_digit()
+                    }
+                })
+        })
+        .ok_or_else(|| GoogleAdsError::Input(said.clone()))?;
+    words.parse().map_err(|_| GoogleAdsError::Input(said))
+}
+
+/// A plan campaign's key: lower-case words joined by hyphens, at most 40 characters.
+fn is_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 40
+        && key.split('-').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        })
+}
+
+/// The resource name `field` holds: `customers/<ten digits>/<kind>/<id>`, `kind` `campaigns` or
+/// `adGroups`.
+fn resource(input: &Value, field: &str, kind: &str) -> Result<String, GoogleAdsError> {
+    let said = || {
+        GoogleAdsError::Input(format!(
+            "{field} is a resource name such as customers/1234567890/{kind}/123"
+        ))
+    };
+    let name = input[field].as_str().ok_or_else(said)?;
+    let mut parts = name.split('/');
+    let shaped = parts.next() == Some("customers")
+        && parts.next().is_some_and(is_customer)
+        && parts.next() == Some(kind)
+        && parts.next().is_some_and(|id| {
+            (1..=20).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit())
+        })
+        && parts.next().is_none();
+    if shaped {
+        Ok(name.to_string())
+    } else {
+        Err(said())
+    }
+}
+
+/// Google's micros of `amount`, hundredths times 10,000, as the text of a 64-bit number.
+fn micros(amount: Amount) -> String {
+    (amount.0 * 10_000).to_string()
+}
+
+/// Micros, read from the text or number Google writes a 64-bit number as.
+fn micros_of(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|words| words.parse().ok()))
+}
+
+/// Micros as a decimal of the currency: at least two decimals, never more than six.
+fn decimal(micros: u64) -> String {
+    let mut fraction = format!("{:06}", micros % 1_000_000);
+    while fraction.len() > 2 && fraction.ends_with('0') {
+        fraction.pop();
+    }
+    format!("{}.{fraction}", micros / 1_000_000)
+}
+
+/// Google's `camelCase` name as the wire's `snake_case`.
+fn snake(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 4);
+    for letter in name.chars() {
+        if letter.is_ascii_uppercase() {
+            out.push('_');
+            out.push(letter.to_ascii_lowercase());
+        } else {
+            out.push(letter);
+        }
+    }
+    out
+}
+
+/// `value` with every key of every object `snake_case`.
+fn snake_keys(value: &Value) -> Value {
+    match value {
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|(key, field)| (snake(key), snake_keys(field)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(snake_keys).collect()),
+        other => other.clone(),
+    }
+}
+
+/// One row of a report as the tool answers it: Google's names as `snake_case`, and the metrics
+/// as numbers, the cost as a decimal of the account's currency.
+fn report_row(row: &Value) -> Value {
+    let Some(fields) = row.as_object() else {
+        return snake_keys(row);
+    };
+    Value::Object(
+        fields
+            .iter()
+            .map(|(key, field)| {
+                let shaped = if key == "metrics" {
+                    json!({
+                        "clicks": micros_of(&field["clicks"]),
+                        "impressions": micros_of(&field["impressions"]),
+                        "cost": micros_of(&field["costMicros"]).map(decimal),
+                        "conversions": field["conversions"],
+                    })
+                } else {
+                    snake_keys(field)
+                };
+                (snake(key), shaped)
+            })
+            .collect(),
+    )
+}
+
+/// A `report`'s query and the account it is for, from the tool's input.
+///
+/// # Errors
+///
+/// `Input` for anything but an account, one of the five kinds and two days, the second not before
+/// the first and at most 366 days after it.
+pub fn report_query(input: &Value) -> Result<(String, String), GoogleAdsError> {
+    let account = input["account"].as_str().unwrap_or_default();
+    customer_of(account)?;
+    let (from, to) = (day(input, "from")?, day(input, "to")?);
+    if to < from || (to - from).num_days() > 366 {
+        return Err(GoogleAdsError::Input(
+            "to is not before from, and at most 366 days after it".to_string(),
+        ));
+    }
+    let metrics = "metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions";
+    let when = format!("segments.date BETWEEN '{from}' AND '{to}'");
+    let order = "ORDER BY metrics.cost_micros DESC LIMIT 501";
+    let query = match input["kind"].as_str() {
+        Some("campaigns") => format!(
+            "SELECT campaign.resource_name, campaign.name, campaign.status, {metrics} \
+             FROM campaign WHERE {when} AND campaign.status != 'REMOVED' {order}"
+        ),
+        Some("ad_groups") => format!(
+            "SELECT ad_group.resource_name, ad_group.name, ad_group.status, campaign.name, \
+             {metrics} FROM ad_group WHERE {when} AND ad_group.status != 'REMOVED' {order}"
+        ),
+        Some("keywords") => format!(
+            "SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, \
+             ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.name, \
+             campaign.name, {metrics} FROM keyword_view WHERE {when} \
+             AND ad_group_criterion.status != 'REMOVED' {order}"
+        ),
+        Some("search_terms") => format!(
+            "SELECT search_term_view.search_term, search_term_view.status, ad_group.name, \
+             campaign.name, {metrics} FROM search_term_view WHERE {when} {order}"
+        ),
+        Some("ads") => format!(
+            "SELECT ad_group_ad.ad.id, ad_group_ad.ad.responsive_search_ad.headlines, \
+             ad_group_ad.status, ad_group.name, campaign.name, {metrics} \
+             FROM ad_group_ad WHERE {when} AND ad_group_ad.status != 'REMOVED' {order}"
+        ),
+        _ => {
+            return Err(GoogleAdsError::Input(
+                "kind is campaigns, ad_groups, keywords, search_terms or ads".to_string(),
+            ));
+        }
+    };
+    Ok((account.to_string(), query))
+}
+
+/// The `report` tool: its answer, the rows cut at 500 with `more` when there were more.
+///
+/// # Errors
+///
+/// As [`report_query`] and [`GoogleAds::search`].
+pub async fn report(
+    ads: &GoogleAds,
+    token: &Secret,
+    input: &Value,
+) -> Result<Value, GoogleAdsError> {
+    let (account, query) = report_query(input)?;
+    let rows = ads.search(token, &account, &query).await?;
+    Ok(json!({
+        "kind": input["kind"], "from": input["from"], "to": input["to"],
+        "rows": rows.iter().take(MAX_ROWS).map(report_row).collect::<Vec<_>>(),
+        "more": rows.len() > MAX_ROWS,
+    }))
+}
+
+/// The `list_accounts` tool: each account the sign-in reaches, at most 20. One that cannot be
+/// read says why in its place.
+///
+/// # Errors
+///
+/// As [`GoogleAds::accessible`].
+pub async fn list_accounts(ads: &GoogleAds, token: &Secret) -> Result<Value, GoogleAdsError> {
+    let reached = ads.accessible(token).await?;
+    let mut accounts = Vec::new();
+    for id in reached.iter().take(MAX_ACCOUNTS) {
+        let account = dashed(id);
+        accounts.push(match ads.search(token, id, CUSTOMER_QUERY).await {
+            Ok(rows) => {
+                let found = &rows
+                    .first()
+                    .map_or(Value::Null, |row| row["customer"].clone());
+                json!({
+                    "account": account, "name": found["descriptiveName"],
+                    "currency": found["currencyCode"], "time_zone": found["timeZone"],
+                    "manager": found["manager"],
+                })
+            }
+            Err(error) => json!({ "account": account, "error": error.to_string() }),
+        });
+    }
+    Ok(json!({ "accounts": accounts, "more": reached.len() > MAX_ACCOUNTS }))
+}
+
+/// One idea as the tool answers it.
+fn idea(result: &Value) -> Value {
+    let metrics = &result["keywordIdeaMetrics"];
+    let competition = metrics["competition"]
+        .as_str()
+        .filter(|level| ["LOW", "MEDIUM", "HIGH"].contains(level))
+        .map(str::to_lowercase);
+    json!({
+        "text": result["text"],
+        "avg_monthly_searches": micros_of(&metrics["avgMonthlySearches"]),
+        "competition": competition,
+        "low_bid": micros_of(&metrics["lowTopOfPageBidMicros"]).map(decimal),
+        "high_bid": micros_of(&metrics["highTopOfPageBidMicros"]).map(decimal),
+    })
+}
+
+/// The `keyword_ideas` tool: at most 100 ideas.
+///
+/// # Errors
+///
+/// `Input` for an input that is not valid, else as [`GoogleAds::keyword_ideas`].
+pub async fn keyword_ideas(
+    ads: &GoogleAds,
+    token: &Secret,
+    input: &Value,
+) -> Result<Value, GoogleAdsError> {
+    let account = input["account"].as_str().unwrap_or_default();
+    customer_of(account)?;
+    let words = texts(input, "words", (1, 10), 80)?;
+    let language = input["language"]
+        .as_u64()
+        .filter(|id| (1..1_000_000_000_000).contains(id))
+        .ok_or_else(|| {
+            GoogleAdsError::Input("language is a numeric constant id, from 1".to_string())
+        })?;
+    let locations: Vec<String> = ids(input, "locations", 1, 10)?
+        .iter()
+        .map(|id| format!("geoTargetConstants/{id}"))
+        .collect();
+    let request = json!({
+        "language": format!("languageConstants/{language}"),
+        "geoTargetConstants": locations,
+        "keywordPlanNetwork": "GOOGLE_SEARCH",
+        "keywordSeed": { "keywords": words },
+        "pageSize": MAX_IDEAS,
+    });
+    let ideas = ads.keyword_ideas(token, account, &request).await?;
+    Ok(json!({ "ideas": ideas.iter().take(MAX_IDEAS).map(idea).collect::<Vec<_>>() }))
+}
+
+/// How a campaign bids.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bidding {
+    /// As many clicks as the budget buys, within `max_cpc` when one is given.
+    MaximizeClicks,
+    /// As many conversions as the budget buys.
+    MaximizeConversions,
+}
+
+/// The input of `create_search_campaign`, checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CampaignInput {
+    /// The ad account, `NNN-NNN-NNNN`.
+    pub account: String,
+    /// The plan campaign's key.
+    pub plan_campaign: String,
+    /// The campaign's name after the plan id and key.
+    pub name: String,
+    /// How it bids.
+    pub bidding: Bidding,
+    /// The most a click may cost, in the plan's currency.
+    pub max_cpc: Option<Amount>,
+    /// Numeric ids of Google's location constants.
+    pub locations: Vec<u64>,
+    /// Numeric ids of Google's language constants.
+    pub languages: Vec<u64>,
+}
+
+impl CampaignInput {
+    /// The checked input of `create_search_campaign`.
+    ///
+    /// # Errors
+    ///
+    /// `Input`, saying what is wrong.
+    pub fn parse(input: &Value) -> Result<Self, GoogleAdsError> {
+        let account = input["account"].as_str().unwrap_or_default();
+        customer_of(account)?;
+        let plan_campaign = text(input, "plan_campaign", 40)?;
+        if !is_key(&plan_campaign) {
+            return Err(GoogleAdsError::Input(
+                "plan_campaign is the plan campaign's key, lower-case words joined by hyphens"
+                    .to_string(),
+            ));
+        }
+        let max_cpc = money(input, "max_cpc")?;
+        let bidding = match input["bidding"].as_str() {
+            Some("maximize_clicks") => Bidding::MaximizeClicks,
+            Some("maximize_conversions") if max_cpc.is_none() => Bidding::MaximizeConversions,
+            Some("maximize_conversions") => {
+                return Err(GoogleAdsError::Input(
+                    "max_cpc goes with maximize_clicks only".to_string(),
+                ));
+            }
+            _ => {
+                return Err(GoogleAdsError::Input(
+                    "bidding is maximize_clicks or maximize_conversions; a campaign with Manual \
+                     CPC has no campaign-level bid for max_cpc to be"
+                        .to_string(),
+                ));
+            }
+        };
+        Ok(Self {
+            account: account.to_string(),
+            plan_campaign,
+            name: text(input, "name", 80)?,
+            bidding,
+            max_cpc,
+            locations: ids(input, "locations", 1, 20)?,
+            languages: ids(input, "languages", 1, 10)?,
+        })
+    }
+}
+
+/// A campaign to make, with what the plan and today decide.
+pub struct NewCampaign<'a> {
+    /// What the agent asked for.
+    pub input: &'a CampaignInput,
+    /// The plan's id, `MP-<n>`.
+    pub plan: &'a str,
+    /// The first day, a UTC date no earlier than tomorrow.
+    pub start: NaiveDate,
+    /// The last day.
+    pub ends_on: NaiveDate,
+    /// The budget Google keeps: its kind and amount, in hundredths.
+    pub budget: (BudgetKind, Amount),
+}
+
+/// The campaign's name at Google: the plan, the plan campaign's key and the agent's name.
+#[must_use]
+pub fn campaign_name(plan: &str, input: &CampaignInput) -> String {
+    format!("{plan} {}: {}", input.plan_campaign, input.name)
+}
+
+/// The one `googleAds:mutate` that makes a campaign: its budget, the campaign paused, and a
+/// criterion for each location and language. Temporary ids tie them together.
+#[must_use]
+pub fn campaign_operations(new: &NewCampaign<'_>) -> Vec<Value> {
+    let customer = customer_of(&new.input.account).unwrap_or_default();
+    let budget = format!("customers/{customer}/campaignBudgets/-1");
+    let campaign = format!("customers/{customer}/campaigns/-2");
+    let (kind, amount) = new.budget;
+    let mut made = json!({
+        "resourceName": budget, "explicitlyShared": false, "deliveryMethod": "STANDARD"
+    });
+    match kind {
+        BudgetKind::Total => {
+            made["period"] = json!("CUSTOM_PERIOD");
+            made["totalAmountMicros"] = json!(micros(amount));
+        }
+        BudgetKind::Daily => made["amountMicros"] = json!(micros(amount)),
+    }
+    let mut running = json!({
+        "resourceName": campaign,
+        "name": campaign_name(new.plan, new.input),
+        "advertisingChannelType": "SEARCH",
+        "status": "PAUSED",
+        "campaignBudget": budget,
+        "networkSettings": {
+            "targetGoogleSearch": true, "targetSearchNetwork": false, "targetContentNetwork": false
+        },
+        "startDateTime": format!("{} 00:00:00", new.start),
+        "endDateTime": format!("{} 23:59:59", new.ends_on),
+        "containsEuPoliticalAdvertising": "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+    });
+    match new.input.bidding {
+        Bidding::MaximizeClicks => {
+            running["targetSpend"] = new.input.max_cpc.map_or_else(
+                || json!({}),
+                |ceiling| json!({ "cpcBidCeilingMicros": micros(ceiling) }),
+            );
+        }
+        Bidding::MaximizeConversions => running["maximizeConversions"] = json!({}),
+    }
+    let mut operations = vec![
+        json!({ "campaignBudgetOperation": { "create": made } }),
+        json!({ "campaignOperation": { "create": running } }),
+    ];
+    for id in &new.input.locations {
+        operations.push(json!({ "campaignCriterionOperation": { "create": {
+            "campaign": campaign,
+            "location": { "geoTargetConstant": format!("geoTargetConstants/{id}") }
+        } } }));
+    }
+    for id in &new.input.languages {
+        operations.push(json!({ "campaignCriterionOperation": { "create": {
+            "campaign": campaign,
+            "language": { "languageConstant": format!("languageConstants/{id}") }
+        } } }));
+    }
+    operations
+}
+
+/// One search word and how it matches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Keyword {
+    /// The word or phrase.
+    pub text: String,
+    /// `EXACT`, `PHRASE` or `BROAD`.
+    pub match_type: &'static str,
+}
+
+/// The input of `add_ad_group`, checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdGroupInput {
+    /// The campaign's resource name.
+    pub campaign: String,
+    /// The ad group's name.
+    pub name: String,
+    /// What a click may cost, in the plan's currency.
+    pub cpc_bid: Option<Amount>,
+}
+
+impl AdGroupInput {
+    /// The checked input of `add_ad_group`.
+    ///
+    /// # Errors
+    ///
+    /// `Input`, saying what is wrong.
+    pub fn parse(input: &Value) -> Result<Self, GoogleAdsError> {
+        Ok(Self {
+            campaign: resource(input, "campaign", "campaigns")?,
+            name: text(input, "name", 80)?,
+            cpc_bid: money(input, "cpc_bid")?,
+        })
+    }
+}
+
+/// The input of `add_keywords` or `add_negative_keywords`, checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeywordsInput {
+    /// The ad group's or the campaign's resource name.
+    pub parent: String,
+    /// One to fifty words.
+    pub keywords: Vec<Keyword>,
+}
+
+impl KeywordsInput {
+    /// The checked input of `add_keywords` (`parent_field` `ad_group`) or
+    /// `add_negative_keywords` (`campaign`).
+    ///
+    /// # Errors
+    ///
+    /// `Input`, saying what is wrong.
+    pub fn parse(input: &Value, parent_field: &str) -> Result<Self, GoogleAdsError> {
+        let kind = if parent_field == "ad_group" {
+            "adGroups"
+        } else {
+            "campaigns"
+        };
+        let parent = resource(input, parent_field, kind)?;
+        let keywords = list(input, "keywords", 1, 50)?
+            .iter()
+            .map(|word| {
+                let match_type = match word["match"].as_str() {
+                    Some("exact") => "EXACT",
+                    Some("phrase") => "PHRASE",
+                    Some("broad") => "BROAD",
+                    _ => {
+                        return Err(GoogleAdsError::Input(
+                            "match is exact, phrase or broad".to_string(),
+                        ));
+                    }
+                };
+                Ok(Keyword {
+                    text: text(word, "text", 80)?,
+                    match_type,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self { parent, keywords })
+    }
+}
+
+/// The input of `add_responsive_search_ad`, checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdInput {
+    /// The ad group's resource name.
+    pub ad_group: String,
+    /// Three to fifteen headlines.
+    pub headlines: Vec<String>,
+    /// Two to four descriptions.
+    pub descriptions: Vec<String>,
+    /// Where the ad leads, `https`.
+    pub final_url: String,
+    /// The first path part shown.
+    pub path1: Option<String>,
+    /// The second path part shown.
+    pub path2: Option<String>,
+}
+
+/// A `final_url`: `https`, a host, no user information and no space.
+fn final_url(input: &Value) -> Result<String, GoogleAdsError> {
+    let said = || {
+        GoogleAdsError::Input(
+            "final_url is an https address with a host and no user name or password".to_string(),
+        )
+    };
+    let address = input["final_url"].as_str().ok_or_else(said)?;
+    let rest = address.strip_prefix("https://").ok_or_else(said)?;
+    let parsed = reqwest::Url::parse(address).map_err(|_| said())?;
+    let plain = !address
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || c == '\\');
+    if address.len() > 2000
+        || !plain
+        || rest.starts_with('/')
+        || parsed.host_str().is_none_or(str::is_empty)
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(said());
+    }
+    Ok(address.to_string())
+}
+
+/// An optional path part of an ad's address, at most 15 characters.
+fn path(input: &Value, field: &str) -> Result<Option<String>, GoogleAdsError> {
+    match input.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => text(input, field, 15).map(Some),
+    }
+}
+
+impl AdInput {
+    /// The checked input of `add_responsive_search_ad`.
+    ///
+    /// # Errors
+    ///
+    /// `Input`, saying what is wrong.
+    pub fn parse(input: &Value) -> Result<Self, GoogleAdsError> {
+        Ok(Self {
+            ad_group: resource(input, "ad_group", "adGroups")?,
+            headlines: texts(input, "headlines", (3, 15), 30)?,
+            descriptions: texts(input, "descriptions", (2, 4), 90)?,
+            final_url: final_url(input)?,
+            path1: path(input, "path1")?,
+            path2: path(input, "path2")?,
+        })
+    }
+}
+
+/// What `set_campaign_status` sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// Paused.
+    Paused,
+    /// Running.
+    Enabled,
+}
+
+/// The operations of `add_ad_group`: the ad group, running.
+#[must_use]
+pub fn ad_group_operations(input: &AdGroupInput) -> Vec<Value> {
+    let mut group = json!({
+        "campaign": input.campaign, "name": input.name,
+        "status": "ENABLED", "type": "SEARCH_STANDARD",
+    });
+    if let Some(bid) = input.cpc_bid {
+        group["cpcBidMicros"] = json!(micros(bid));
+    }
+    vec![json!({ "adGroupOperation": { "create": group } })]
+}
+
+/// The operations of `add_keywords`: one criterion in the ad group for each word, running.
+#[must_use]
+pub fn keyword_operations(input: &KeywordsInput) -> Vec<Value> {
+    input
+        .keywords
+        .iter()
+        .map(|word| {
+            json!({ "adGroupCriterionOperation": { "create": {
+                "adGroup": input.parent, "status": "ENABLED",
+                "keyword": { "text": word.text, "matchType": word.match_type }
+            } } })
+        })
+        .collect()
+}
+
+/// The operations of `add_negative_keywords`: one negative criterion in the campaign for each
+/// word.
+#[must_use]
+pub fn negative_keyword_operations(input: &KeywordsInput) -> Vec<Value> {
+    input
+        .keywords
+        .iter()
+        .map(|word| {
+            json!({ "campaignCriterionOperation": { "create": {
+                "campaign": input.parent, "negative": true,
+                "keyword": { "text": word.text, "matchType": word.match_type }
+            } } })
+        })
+        .collect()
+}
+
+/// The operations of `add_responsive_search_ad`: the ad, running.
+#[must_use]
+pub fn ad_operations(input: &AdInput) -> Vec<Value> {
+    let assets = |words: &[String]| -> Vec<Value> {
+        words.iter().map(|text| json!({ "text": text })).collect()
+    };
+    let mut search = json!({
+        "headlines": assets(&input.headlines), "descriptions": assets(&input.descriptions)
+    });
+    for (field, part) in [("path1", &input.path1), ("path2", &input.path2)] {
+        if let Some(part) = part {
+            search[field] = json!(part);
+        }
+    }
+    vec![json!({ "adGroupAdOperation": { "create": {
+        "adGroup": input.ad_group, "status": "ENABLED",
+        "ad": { "finalUrls": [input.final_url], "responsiveSearchAd": search }
+    } } })]
+}
+
+/// The operation that sets a campaign budget's amount, by the budget's kind.
+#[must_use]
+pub fn budget_operations(budget: &str, kind: BudgetKind, amount: Amount) -> Vec<Value> {
+    let field = match kind {
+        BudgetKind::Total => "totalAmountMicros",
+        BudgetKind::Daily => "amountMicros",
+    };
+    vec![json!({ "campaignBudgetOperation": {
+        "update": { "resourceName": budget, field: micros(amount) },
+        "updateMask": field
+    } })]
+}
+
+/// The operation that sets a campaign's status.
+#[must_use]
+pub fn status_operations(campaign: &str, status: Status) -> Vec<Value> {
+    let word = match status {
+        Status::Paused => "PAUSED",
+        Status::Enabled => "ENABLED",
+    };
+    vec![json!({ "campaignOperation": {
+        "update": { "resourceName": campaign, "status": word },
+        "updateMask": "status"
+    } })]
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use chrono::NaiveDate;
+    use farik_core::marketing::{Amount, BudgetKind};
+    use serde_json::{Value, json};
+
+    use super::{
+        AdGroupInput, AdInput, CampaignInput, GoogleAds, GoogleAdsError, KeywordsInput,
+        NewCampaign, Status, ad_group_operations, ad_operations, budget_operations,
+        campaign_operations, keyword_ideas, keyword_operations, list_accounts,
+        negative_keyword_operations, report, status_operations, tool_names,
+    };
+    use crate::claude::Secret;
+    use crate::google_ads_fixture::{Fixture, Mode};
+
+    fn token() -> Secret {
+        Secret::new("an-access-token".to_string())
+    }
+
+    fn day(text: &str) -> NaiveDate {
+        text.parse().expect("a date")
+    }
+
+    const ACCOUNT: &str = "123-456-7890";
+
+    async fn ads() -> (Fixture, GoogleAds) {
+        let fixture = Fixture::start().await;
+        let ads = GoogleAds::new(&fixture.address).expect("a client");
+        (fixture, ads)
+    }
+
+    #[test]
+    fn names_ten_tools() {
+        assert_eq!(
+            tool_names(),
+            [
+                "list_accounts",
+                "report",
+                "keyword_ideas",
+                "create_search_campaign",
+                "add_ad_group",
+                "add_keywords",
+                "add_negative_keywords",
+                "add_responsive_search_ad",
+                "set_campaign_budget",
+                "set_campaign_status"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn sends_the_bearer_and_no_developer_token() {
+        let (fixture, ads) = ads().await;
+        let token = token();
+        ads.accessible(&token).await.expect("customers");
+        ads.search(&token, ACCOUNT, "SELECT campaign.name FROM campaign")
+            .await
+            .expect("rows");
+        ads.mutate(
+            &token,
+            ACCOUNT,
+            status_operations("customers/1234567890/campaigns/5", Status::Paused),
+        )
+        .await
+        .expect("a mutate");
+        ads.keyword_ideas(
+            &token,
+            ACCOUNT,
+            &json!({ "keywordSeed": { "keywords": ["boots"] } }),
+        )
+        .await
+        .expect("ideas");
+        let sent = fixture.requests();
+        assert_eq!(
+            sent.iter()
+                .map(|seen| format!("{} {}", seen.method, seen.path))
+                .collect::<Vec<_>>(),
+            [
+                "GET /v25/customers:listAccessibleCustomers",
+                "POST /v25/customers/1234567890/googleAds:search",
+                "POST /v25/customers/1234567890/googleAds:mutate",
+                "POST /v25/customers/1234567890:generateKeywordIdeas",
+            ]
+        );
+        for seen in &sent {
+            assert_eq!(
+                seen.headers.get("authorization").map(String::as_str),
+                Some("Bearer an-access-token"),
+                "{}",
+                seen.path
+            );
+            for header in ["developer-token", "login-customer-id"] {
+                assert!(!seen.headers.contains_key(header), "{header}");
+            }
+        }
+    }
+
+    /// The fixed text of each report, as it is sent.
+    fn report_text(kind: &str, from: &str, to: &str) -> String {
+        let metrics = "metrics.clicks, metrics.impressions, metrics.cost_micros, \
+                       metrics.conversions";
+        let when = format!("segments.date BETWEEN '{from}' AND '{to}'");
+        match kind {
+            "campaigns" => format!(
+                "SELECT campaign.resource_name, campaign.name, campaign.status, {metrics} \
+                 FROM campaign WHERE {when} AND campaign.status != 'REMOVED' \
+                 ORDER BY metrics.cost_micros DESC LIMIT 501"
+            ),
+            "ad_groups" => format!(
+                "SELECT ad_group.resource_name, ad_group.name, ad_group.status, campaign.name, \
+                 {metrics} FROM ad_group WHERE {when} AND ad_group.status != 'REMOVED' \
+                 ORDER BY metrics.cost_micros DESC LIMIT 501"
+            ),
+            "keywords" => format!(
+                "SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, \
+                 ad_group_criterion.keyword.match_type, ad_group_criterion.status, \
+                 ad_group.name, campaign.name, {metrics} FROM keyword_view WHERE {when} \
+                 AND ad_group_criterion.status != 'REMOVED' \
+                 ORDER BY metrics.cost_micros DESC LIMIT 501"
+            ),
+            "search_terms" => format!(
+                "SELECT search_term_view.search_term, search_term_view.status, ad_group.name, \
+                 campaign.name, {metrics} FROM search_term_view WHERE {when} \
+                 ORDER BY metrics.cost_micros DESC LIMIT 501"
+            ),
+            "ads" => format!(
+                "SELECT ad_group_ad.ad.id, ad_group_ad.ad.responsive_search_ad.headlines, \
+                 ad_group_ad.status, ad_group.name, campaign.name, {metrics} \
+                 FROM ad_group_ad WHERE {when} AND ad_group_ad.status != 'REMOVED' \
+                 ORDER BY metrics.cost_micros DESC LIMIT 501"
+            ),
+            other => panic!("no such report {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn builds_each_report_from_fixed_text() {
+        let (fixture, ads) = ads().await;
+        for kind in ["campaigns", "ad_groups", "keywords", "search_terms", "ads"] {
+            report(
+                &ads,
+                &token(),
+                &json!({ "account": ACCOUNT, "kind": kind, "from": "2026-10-01", "to": "2026-10-31" }),
+            )
+            .await
+            .expect("a report");
+            let sent = fixture.requests_of("search");
+            assert_eq!(
+                sent.last().expect("a search").body,
+                json!({ "query": report_text(kind, "2026-10-01", "2026-10-31") }),
+                "{kind}"
+            );
+            assert_eq!(
+                sent.last()
+                    .and_then(crate::google_ads_fixture::Seen::customer),
+                Some("1234567890".to_string())
+            );
+        }
+        assert_eq!(fixture.requests_of("search").len(), 5);
+
+        // Two years apart are not allowed, one day short of 367 are.
+        for (from, to) in [("2025-01-01", "2026-01-02")] {
+            report(
+                &ads,
+                &token(),
+                &json!({ "account": ACCOUNT, "kind": "ads", "from": from, "to": to }),
+            )
+            .await
+            .expect("366 days apart");
+        }
+    }
+
+    #[tokio::test]
+    async fn refuses_a_report_that_is_not_one_before_sending() {
+        let (fixture, ads) = ads().await;
+        let ask = |changes: Value| {
+            let mut input = json!({ "account": ACCOUNT, "kind": "ads", "from": "2026-10-01", "to": "2026-10-31" });
+            for (key, value) in changes.as_object().expect("an object") {
+                input[key] = value.clone();
+            }
+            input
+        };
+        for changes in [
+            json!({ "from": "2026-01-01' OR 1=1" }),
+            json!({ "to": "2026-10-31' OR '1'='1" }),
+            json!({ "from": "2026-02-30" }),
+            json!({ "from": "2026-1-5" }),
+            json!({ "from": "2026-10-31", "to": "2026-10-01" }),
+            json!({ "from": "2025-01-01", "to": "2026-01-03" }),
+            json!({ "kind": "ads; DROP" }),
+            json!({ "kind": "free_query" }),
+            json!({ "account": "123456789" }),
+            json!({ "account": "123-456-789" }),
+            json!({ "account": "123-456-7890 OR 1" }),
+            json!({ "account": "customers/1234567890" }),
+            json!({ "from": 20_261_001 }),
+            json!({ "kind": null }),
+        ] {
+            let error = report(&ads, &token(), &ask(changes.clone()))
+                .await
+                .expect_err("refused");
+            assert!(
+                matches!(error, GoogleAdsError::Input(_)),
+                "{changes}: {error:?}"
+            );
+        }
+        assert!(fixture.requests().is_empty(), "nothing was sent");
+    }
+
+    #[tokio::test]
+    async fn shapes_a_report_s_rows_and_cuts_them_at_500() {
+        let (fixture, ads) = ads().await;
+        fixture.script(|script| {
+            script.rows = vec![json!({
+                "campaign": { "resourceName": "customers/1234567890/campaigns/5", "name": "Boots", "status": "PAUSED" },
+                "metrics": { "clicks": "12", "impressions": "340", "costMicros": "1500000", "conversions": 2.5 }
+            })];
+        });
+        let input = json!({ "account": ACCOUNT, "kind": "campaigns", "from": "2026-10-01", "to": "2026-10-31" });
+        let answer = report(&ads, &token(), &input).await.expect("a report");
+        assert_eq!(
+            answer,
+            json!({
+                "kind": "campaigns", "from": "2026-10-01", "to": "2026-10-31", "more": false,
+                "rows": [{
+                    "campaign": { "resource_name": "customers/1234567890/campaigns/5", "name": "Boots", "status": "PAUSED" },
+                    "metrics": { "clicks": 12, "impressions": 340, "cost": "1.50", "conversions": 2.5 }
+                }]
+            })
+        );
+        fixture.script(|script| {
+            script.rows = (0..501)
+                .map(|n| json!({ "campaign": { "name": format!("c{n}") }, "metrics": { "costMicros": "1234567" } }))
+                .collect();
+        });
+        let answer = report(&ads, &token(), &input).await.expect("a report");
+        assert_eq!(answer["rows"].as_array().map(Vec::len), Some(500));
+        assert_eq!(answer["more"], json!(true));
+        assert_eq!(answer["rows"][0]["metrics"]["cost"], json!("1.234567"));
+    }
+
+    #[tokio::test]
+    async fn lists_the_accounts_the_sign_in_reaches() {
+        let (fixture, ads) = ads().await;
+        let answer = list_accounts(&ads, &token()).await.expect("accounts");
+        assert_eq!(
+            answer,
+            json!({
+                "accounts": [
+                    { "account": "123-456-7890", "name": "Shop", "currency": "USD", "time_zone": "America/New_York", "manager": false },
+                    { "account": "234-567-8901", "name": "Agency", "currency": "EUR", "time_zone": "Europe/Paris", "manager": true }
+                ],
+                "more": false
+            })
+        );
+        let query = "SELECT customer.descriptive_name, customer.currency_code, customer.time_zone, customer.manager FROM customer";
+        assert_eq!(
+            fixture
+                .requests_of("search")
+                .iter()
+                .map(|seen| seen.body["query"].clone())
+                .collect::<Vec<_>>(),
+            [json!(query), json!(query)]
+        );
+        // One that cannot be read says so, and the others still answer; past 20 there is more.
+        fixture.script(|script| {
+            script.fail_search_containing = Some(("customer".to_string(), 500));
+        });
+        let answer = list_accounts(&ads, &token()).await.expect("accounts");
+        assert_eq!(answer["accounts"][0]["account"], json!("123-456-7890"));
+        assert!(answer["accounts"][0]["error"].is_string(), "{answer}");
+        let (fixture, ads) = self::ads().await;
+        fixture.script(|script| {
+            script.customers = (0..21)
+                .map(|n| {
+                    (
+                        format!("{:010}", 1_000_000_000 + n),
+                        json!({ "descriptiveName": "x" }),
+                    )
+                })
+                .collect();
+        });
+        let answer = list_accounts(&ads, &token()).await.expect("accounts");
+        assert_eq!(answer["accounts"].as_array().map(Vec::len), Some(20));
+        assert_eq!(answer["more"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn asks_for_keyword_ideas_and_shapes_them() {
+        let (fixture, ads) = ads().await;
+        fixture.script(|script| {
+            script.ideas = vec![
+                json!({
+                    "text": "red boots",
+                    "keywordIdeaMetrics": {
+                        "avgMonthlySearches": "1900", "competition": "LOW",
+                        "lowTopOfPageBidMicros": "500000", "highTopOfPageBidMicros": "2250000"
+                    }
+                }),
+                json!({ "text": "boots" }),
+            ];
+        });
+        let input = json!({
+            "account": ACCOUNT, "words": ["boots", "red boots"], "language": 1000, "locations": [2840, 2826]
+        });
+        let answer = keyword_ideas(&ads, &token(), &input).await.expect("ideas");
+        assert_eq!(
+            answer,
+            json!({ "ideas": [
+                { "text": "red boots", "avg_monthly_searches": 1900, "competition": "low", "low_bid": "0.50", "high_bid": "2.25" },
+                { "text": "boots", "avg_monthly_searches": null, "competition": null, "low_bid": null, "high_bid": null }
+            ] })
+        );
+        assert_eq!(
+            fixture.requests_of("generateKeywordIdeas")[0].body,
+            json!({
+                "language": "languageConstants/1000",
+                "geoTargetConstants": ["geoTargetConstants/2840", "geoTargetConstants/2826"],
+                "keywordPlanNetwork": "GOOGLE_SEARCH",
+                "keywordSeed": { "keywords": ["boots", "red boots"] },
+                "pageSize": 100
+            })
+        );
+        // At most 100 ideas.
+        fixture.script(|script| {
+            script.ideas = (0..150)
+                .map(|n| json!({ "text": format!("idea {n}") }))
+                .collect();
+        });
+        let answer = keyword_ideas(&ads, &token(), &input).await.expect("ideas");
+        assert_eq!(answer["ideas"].as_array().map(Vec::len), Some(100));
+        // Inputs are checked before anything is sent.
+        let before = fixture.requests().len();
+        for change in [
+            json!({ "words": [] }),
+            json!({ "words": (0..11).map(|n| format!("w{n}")).collect::<Vec<_>>() }),
+            json!({ "words": [""] }),
+            json!({ "words": ["x".repeat(81)] }),
+            json!({ "language": "en" }),
+            json!({ "language": -1 }),
+            json!({ "locations": [] }),
+            json!({ "locations": (1..12).collect::<Vec<u64>>() }),
+            json!({ "locations": ["2840"] }),
+            json!({ "account": "1234567890" }),
+        ] {
+            let mut bad = input.clone();
+            for (key, value) in change.as_object().expect("an object") {
+                bad[key] = value.clone();
+            }
+            let error = keyword_ideas(&ads, &token(), &bad)
+                .await
+                .expect_err("refused");
+            assert!(
+                matches!(error, GoogleAdsError::Input(_)),
+                "{change}: {error:?}"
+            );
+        }
+        assert_eq!(fixture.requests().len(), before);
+    }
+
+    /// The input of a campaign that bids for clicks, within a ceiling of 1.50.
+    fn campaign_input() -> Value {
+        json!({
+            "account": ACCOUNT, "plan_campaign": "search-launch", "name": "Launch search",
+            "bidding": "maximize_clicks", "max_cpc": "1.50", "locations": [2840], "languages": [1000]
+        })
+    }
+
+    fn new_campaign(input: &CampaignInput, budget: (BudgetKind, Amount)) -> NewCampaign<'_> {
+        NewCampaign {
+            input,
+            plan: "MP-3",
+            start: day("2026-11-03"),
+            ends_on: day("2026-12-02"),
+            budget,
+        }
+    }
+
+    #[tokio::test]
+    async fn creates_a_paused_search_campaign_in_one_request() {
+        let (fixture, ads) = ads().await;
+        let input = CampaignInput::parse(&campaign_input()).expect("a campaign");
+        let total = campaign_operations(&new_campaign(&input, (BudgetKind::Total, Amount(30_000))));
+        let made = ads.mutate(&token(), ACCOUNT, total).await.expect("made");
+        assert_eq!(made.len(), 4);
+        assert!(
+            made[1].starts_with("customers/1234567890/campaigns/"),
+            "{made:?}"
+        );
+        assert!(!made[1].contains("/-"), "a real id: {made:?}");
+
+        let sent = fixture.requests_of("mutate");
+        assert_eq!(sent.len(), 1, "one request");
+        let budget = "customers/1234567890/campaignBudgets/-1";
+        let campaign = "customers/1234567890/campaigns/-2";
+        assert_eq!(
+            sent[0].body,
+            json!({ "mutateOperations": [
+                { "campaignBudgetOperation": { "create": {
+                    "resourceName": budget, "explicitlyShared": false, "deliveryMethod": "STANDARD",
+                    "period": "CUSTOM_PERIOD", "totalAmountMicros": "300000000"
+                } } },
+                { "campaignOperation": { "create": {
+                    "resourceName": campaign, "name": "MP-3 search-launch: Launch search",
+                    "advertisingChannelType": "SEARCH", "status": "PAUSED", "campaignBudget": budget,
+                    "networkSettings": { "targetGoogleSearch": true, "targetSearchNetwork": false, "targetContentNetwork": false },
+                    "startDateTime": "2026-11-03 00:00:00", "endDateTime": "2026-12-02 23:59:59",
+                    "containsEuPoliticalAdvertising": "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+                    "targetSpend": { "cpcBidCeilingMicros": "1500000" }
+                } } },
+                { "campaignCriterionOperation": { "create": {
+                    "campaign": campaign, "location": { "geoTargetConstant": "geoTargetConstants/2840" }
+                } } },
+                { "campaignCriterionOperation": { "create": {
+                    "campaign": campaign, "language": { "languageConstant": "languageConstants/1000" }
+                } } }
+            ] })
+        );
+
+        // A daily budget is `amountMicros`, with no period and no total.
+        let daily = campaign_operations(&new_campaign(&input, (BudgetKind::Daily, Amount(2_500))));
+        assert_eq!(
+            daily[0],
+            json!({ "campaignBudgetOperation": { "create": {
+                "resourceName": budget, "explicitlyShared": false, "deliveryMethod": "STANDARD",
+                "amountMicros": "25000000"
+            } } })
+        );
+        // Conversions have no ceiling and no click strategy; clicks without a ceiling have none.
+        let mut conversions = campaign_input();
+        conversions["bidding"] = json!("maximize_conversions");
+        conversions
+            .as_object_mut()
+            .expect("an object")
+            .remove("max_cpc");
+        let conversions = CampaignInput::parse(&conversions).expect("conversions");
+        let ops = campaign_operations(&new_campaign(
+            &conversions,
+            (BudgetKind::Total, Amount(100)),
+        ));
+        let created = &ops[1]["campaignOperation"]["create"];
+        assert_eq!(created["maximizeConversions"], json!({}));
+        assert!(created.get("targetSpend").is_none());
+        let mut clicks = campaign_input();
+        clicks.as_object_mut().expect("an object").remove("max_cpc");
+        let clicks = CampaignInput::parse(&clicks).expect("clicks");
+        let ops = campaign_operations(&new_campaign(&clicks, (BudgetKind::Total, Amount(100))));
+        assert_eq!(
+            ops[1]["campaignOperation"]["create"]["targetSpend"],
+            json!({})
+        );
+        assert_eq!(
+            ops[1]["campaignOperation"]["create"]["status"],
+            json!("PAUSED")
+        );
+    }
+
+    #[test]
+    fn refuses_a_campaign_that_is_not_one() {
+        for change in [
+            json!({ "bidding": "manual_cpc" }),
+            json!({ "bidding": "target_cpa" }),
+            json!({ "bidding": "maximize_conversions" }),
+            json!({ "max_cpc": "0" }),
+            json!({ "max_cpc": "1.234" }),
+            json!({ "max_cpc": "-1" }),
+            json!({ "max_cpc": 1.5 }),
+            json!({ "name": "" }),
+            json!({ "name": "x".repeat(81) }),
+            json!({ "plan_campaign": "Search Launch" }),
+            json!({ "plan_campaign": "-x" }),
+            json!({ "locations": [] }),
+            json!({ "locations": (1..22).collect::<Vec<u64>>() }),
+            json!({ "locations": ["2840"] }),
+            json!({ "languages": [] }),
+            json!({ "languages": (1..12).collect::<Vec<u64>>() }),
+            json!({ "languages": [-1] }),
+            json!({ "account": "1234567890" }),
+        ] {
+            let mut bad = campaign_input();
+            for (key, value) in change.as_object().expect("an object") {
+                bad[key] = value.clone();
+            }
+            let error = CampaignInput::parse(&bad).expect_err("refused");
+            assert!(
+                matches!(error, GoogleAdsError::Input(_)),
+                "{change}: {error:?}"
+            );
+        }
+        // The edges that load: 20 locations, 10 languages, an 80-character name.
+        let mut edges = campaign_input();
+        edges["locations"] = json!((1..=20).collect::<Vec<u64>>());
+        edges["languages"] = json!((1..=10).collect::<Vec<u64>>());
+        edges["name"] = json!("x".repeat(80));
+        CampaignInput::parse(&edges).expect("the edges load");
+        let mut conversions = campaign_input();
+        conversions["bidding"] = json!("maximize_conversions");
+        conversions
+            .as_object_mut()
+            .expect("an object")
+            .remove("max_cpc");
+        CampaignInput::parse(&conversions).expect("conversions load without a ceiling");
+    }
+
+    #[tokio::test]
+    async fn creates_what_goes_under_a_campaign_enabled() {
+        let (fixture, ads) = ads().await;
+        let campaign = "customers/1234567890/campaigns/5";
+        let ad_group = "customers/1234567890/adGroups/7";
+
+        let group = AdGroupInput::parse(
+            &json!({ "campaign": campaign, "name": "Boots", "cpc_bid": "0.75" }),
+        )
+        .expect("an ad group");
+        assert_eq!(
+            ad_group_operations(&group),
+            [json!({ "adGroupOperation": { "create": {
+                "campaign": campaign, "name": "Boots", "status": "ENABLED",
+                "type": "SEARCH_STANDARD", "cpcBidMicros": "750000"
+            } } })]
+        );
+        let bare = AdGroupInput::parse(&json!({ "campaign": campaign, "name": "Boots" }))
+            .expect("an ad group without a bid");
+        assert!(
+            ad_group_operations(&bare)[0]["adGroupOperation"]["create"]
+                .get("cpcBidMicros")
+                .is_none()
+        );
+
+        let words = KeywordsInput::parse(
+            &json!({ "ad_group": ad_group, "keywords": [
+                { "text": "red boots", "match": "phrase" }, { "text": "boots", "match": "exact" },
+                { "text": "shoes", "match": "broad" }
+            ] }),
+            "ad_group",
+        )
+        .expect("keywords");
+        assert_eq!(
+            keyword_operations(&words),
+            [
+                json!({ "adGroupCriterionOperation": { "create": {
+                    "adGroup": ad_group, "status": "ENABLED", "keyword": { "text": "red boots", "matchType": "PHRASE" } } } }),
+                json!({ "adGroupCriterionOperation": { "create": {
+                    "adGroup": ad_group, "status": "ENABLED", "keyword": { "text": "boots", "matchType": "EXACT" } } } }),
+                json!({ "adGroupCriterionOperation": { "create": {
+                    "adGroup": ad_group, "status": "ENABLED", "keyword": { "text": "shoes", "matchType": "BROAD" } } } }),
+            ]
+        );
+
+        let negatives = KeywordsInput::parse(
+            &json!({ "campaign": campaign, "keywords": [{ "text": "free", "match": "broad" }] }),
+            "campaign",
+        )
+        .expect("negative keywords");
+        assert_eq!(
+            negative_keyword_operations(&negatives),
+            [json!({ "campaignCriterionOperation": { "create": {
+                "campaign": campaign, "negative": true, "keyword": { "text": "free", "matchType": "BROAD" } } } })]
+        );
+
+        let ad = AdInput::parse(&json!({
+            "ad_group": ad_group,
+            "headlines": ["Boots", "Red boots", "Free shipping"],
+            "descriptions": ["Boots made to last.", "Order today."],
+            "final_url": "https://shop.example/boots", "path1": "boots", "path2": "sale"
+        }))
+        .expect("an ad");
+        assert_eq!(
+            ad_operations(&ad),
+            [json!({ "adGroupAdOperation": { "create": {
+                "adGroup": ad_group, "status": "ENABLED",
+                "ad": {
+                    "finalUrls": ["https://shop.example/boots"],
+                    "responsiveSearchAd": {
+                        "headlines": [{ "text": "Boots" }, { "text": "Red boots" }, { "text": "Free shipping" }],
+                        "descriptions": [{ "text": "Boots made to last." }, { "text": "Order today." }],
+                        "path1": "boots", "path2": "sale"
+                    }
+                }
+            } } })]
+        );
+
+        // Each goes to Google as one request, and only what the operations say is sent.
+        for ops in [ad_group_operations(&group), keyword_operations(&words)] {
+            ads.mutate(&token(), ACCOUNT, ops).await.expect("made");
+        }
+        assert_eq!(fixture.requests_of("mutate").len(), 2);
+    }
+
+    #[test]
+    fn refuses_what_goes_under_a_campaign_when_it_is_not_valid() {
+        let campaign = "customers/1234567890/campaigns/5";
+        let ad_group = "customers/1234567890/adGroups/7";
+        let words = |text: &str, how: &str| json!({ "text": text, "match": how });
+        let many = |n: usize| {
+            (0..n)
+                .map(|k| words(&format!("w{k}"), "exact"))
+                .collect::<Vec<_>>()
+        };
+        for bad in [
+            json!({ "ad_group": ad_group, "keywords": [] }),
+            json!({ "ad_group": ad_group, "keywords": many(51) }),
+            json!({ "ad_group": ad_group, "keywords": [words("", "exact")] }),
+            json!({ "ad_group": ad_group, "keywords": [words(&"x".repeat(81), "exact")] }),
+            json!({ "ad_group": ad_group, "keywords": [words("boots", "exact_match")] }),
+            json!({ "ad_group": ad_group, "keywords": [words("boots", "EXACT")] }),
+            json!({ "ad_group": campaign, "keywords": many(1) }),
+            json!({ "ad_group": "customers/123/adGroups/7", "keywords": many(1) }),
+            json!({ "ad_group": "customers/1234567890/adGroups/7/x", "keywords": many(1) }),
+            json!({ "ad_group": "customers/1234567890/adGroups/", "keywords": many(1) }),
+            json!({ "ad_group": "customers/1234567890/adGroups/123456789012345678901", "keywords": many(1) }),
+            json!({ "keywords": many(1) }),
+        ] {
+            let error = KeywordsInput::parse(&bad, "ad_group").expect_err("refused");
+            assert!(
+                matches!(error, GoogleAdsError::Input(_)),
+                "{bad}: {error:?}"
+            );
+        }
+        KeywordsInput::parse(
+            &json!({ "ad_group": ad_group, "keywords": many(50) }),
+            "ad_group",
+        )
+        .expect("fifty load");
+        KeywordsInput::parse(
+            &json!({ "ad_group": ad_group, "keywords": [words(&"x".repeat(80), "phrase")] }),
+            "ad_group",
+        )
+        .expect("eighty characters load");
+        assert!(
+            KeywordsInput::parse(
+                &json!({ "campaign": ad_group, "keywords": many(1) }),
+                "campaign"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn refuses_an_ad_or_an_ad_group_that_is_not_valid() {
+        let campaign = "customers/1234567890/campaigns/5";
+        let ad_group = "customers/1234567890/adGroups/7";
+        let headlines = |n: usize| (0..n).map(|k| format!("Headline {k}")).collect::<Vec<_>>();
+        let descriptions = |n: usize| {
+            (0..n)
+                .map(|k| format!("Description {k}"))
+                .collect::<Vec<_>>()
+        };
+        let ad = |changes: Value| {
+            let mut input = json!({
+                "ad_group": ad_group, "headlines": headlines(3), "descriptions": descriptions(2),
+                "final_url": "https://shop.example/boots"
+            });
+            for (key, value) in changes.as_object().expect("an object") {
+                input[key] = value.clone();
+            }
+            input
+        };
+        AdInput::parse(&ad(json!({}))).expect("a plain ad");
+        AdInput::parse(&ad(json!({
+            "headlines": headlines(15), "descriptions": descriptions(4),
+            "path1": "x".repeat(15), "path2": "y".repeat(15)
+        })))
+        .expect("the edges load");
+        for changes in [
+            json!({ "headlines": headlines(2) }),
+            json!({ "headlines": headlines(16) }),
+            json!({ "headlines": ["x".repeat(31), "b", "c"] }),
+            json!({ "headlines": ["", "b", "c"] }),
+            json!({ "descriptions": descriptions(1) }),
+            json!({ "descriptions": descriptions(5) }),
+            json!({ "descriptions": ["x".repeat(91), "b"] }),
+            json!({ "final_url": "http://shop.example/boots" }),
+            json!({ "final_url": "https://user:secret@shop.example/boots" }),
+            json!({ "final_url": "https://user@shop.example" }),
+            json!({ "final_url": "https:///boots" }),
+            json!({ "final_url": "https://" }),
+            json!({ "final_url": "javascript:alert(1)" }),
+            json!({ "final_url": "https://shop.example/a b" }),
+            json!({ "path1": "x".repeat(16) }),
+            json!({ "path2": "x".repeat(16) }),
+            json!({ "ad_group": campaign }),
+        ] {
+            let error = AdInput::parse(&ad(changes.clone())).expect_err("refused");
+            assert!(
+                matches!(error, GoogleAdsError::Input(_)),
+                "{changes}: {error:?}"
+            );
+        }
+        for bad in [
+            json!({ "campaign": ad_group, "name": "x" }),
+            json!({ "campaign": campaign, "name": "" }),
+            json!({ "campaign": campaign, "name": "x".repeat(81) }),
+            json!({ "campaign": campaign, "name": "x", "cpc_bid": "0" }),
+            json!({ "campaign": campaign, "name": "x", "cpc_bid": "1.234" }),
+            json!({ "name": "x" }),
+        ] {
+            let error = AdGroupInput::parse(&bad).expect_err("refused");
+            assert!(
+                matches!(error, GoogleAdsError::Input(_)),
+                "{bad}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn changes_a_budget_and_a_status_by_update_mask() {
+        let budget = "customers/1234567890/campaignBudgets/9";
+        assert_eq!(
+            budget_operations(budget, BudgetKind::Total, Amount(25_050)),
+            [json!({ "campaignBudgetOperation": {
+                "update": { "resourceName": budget, "totalAmountMicros": "250500000" },
+                "updateMask": "totalAmountMicros"
+            } })]
+        );
+        assert_eq!(
+            budget_operations(budget, BudgetKind::Daily, Amount(1_339)),
+            [json!({ "campaignBudgetOperation": {
+                "update": { "resourceName": budget, "amountMicros": "13390000" },
+                "updateMask": "amountMicros"
+            } })]
+        );
+        let campaign = "customers/1234567890/campaigns/5";
+        for (status, word) in [(Status::Paused, "PAUSED"), (Status::Enabled, "ENABLED")] {
+            assert_eq!(
+                status_operations(campaign, status),
+                [json!({ "campaignOperation": {
+                    "update": { "resourceName": campaign, "status": word },
+                    "updateMask": "status"
+                } })]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn says_google_s_refusal_in_farik_s_words() {
+        let (fixture, ads) = ads().await;
+        let input = json!({ "account": ACCOUNT, "words": ["boots"], "language": 1000, "locations": [2840] });
+
+        // A refusal's message is cut at 300 characters, and quoted.
+        fixture.script(|script| script.mode = Mode::LongError(1000));
+        let GoogleAdsError::Google(words) = ads
+            .search(&token(), ACCOUNT, "SELECT campaign.name FROM campaign")
+            .await
+            .expect_err("refused")
+        else {
+            panic!("Google refused it");
+        };
+        assert_eq!(words.matches('x').count(), 300, "{words}");
+        assert!(words.contains('“') && words.contains('”'), "{words}");
+
+        // PERMISSION_DENIED on keyword ideas is the sentence for an app Google has not allowed yet.
+        fixture.script(|script| script.mode = Mode::PermissionDenied);
+        assert_eq!(
+            keyword_ideas(&ads, &token(), &input).await,
+            Err(GoogleAdsError::NotAllowed(
+                "Google has not yet allowed Farik's app to give keyword ideas.".to_string()
+            ))
+        );
+        let GoogleAdsError::NotAllowed(words) = ads
+            .search(&token(), ACCOUNT, "SELECT campaign.name FROM campaign")
+            .await
+            .expect_err("denied")
+        else {
+            panic!("Google would not allow it");
+        };
+        assert!(!words.contains("keyword ideas"), "{words}");
+
+        // A sign-in Google does not accept says to sign in again.
+        fixture.script(|script| script.mode = Mode::Unauthenticated);
+        let GoogleAdsError::Failed(words) = ads.accessible(&token()).await.expect_err("401") else {
+            panic!("a failure");
+        };
+        assert!(words.contains("sign in again"), "{words}");
+
+        // No redirect is followed, and a body one byte over 4 MiB is refused.
+        fixture.script(|script| script.mode = Mode::Redirect);
+        let before = fixture.requests().len();
+        let GoogleAdsError::Failed(words) = ads.accessible(&token()).await.expect_err("302") else {
+            panic!("a failure");
+        };
+        assert!(words.contains("redirect"), "{words}");
+        assert_eq!(fixture.requests().len(), before + 1);
+        fixture.script(|script| script.mode = Mode::Oversized);
+        let GoogleAdsError::Failed(words) = ads.accessible(&token()).await.expect_err("big") else {
+            panic!("a failure");
+        };
+        assert!(words.contains("too large"), "{words}");
+    }
+
+    #[tokio::test]
+    async fn takes_only_https_or_a_loopback_address() {
+        for api in [
+            "http://googleads.googleapis.com/v25",
+            "ftp://127.0.0.1/v25",
+            "http://10.0.0.1/v25",
+            "not an address",
+            "https://",
+        ] {
+            assert!(GoogleAds::new(api).is_err(), "{api}");
+        }
+        for api in [
+            "https://googleads.googleapis.com/v25",
+            "http://127.0.0.1:8080/v25",
+            "http://localhost/v25",
+            "http://[::1]:8080/v25",
+        ] {
+            assert!(GoogleAds::new(api).is_ok(), "{api}");
+        }
+    }
+
+    #[tokio::test]
+    async fn gives_up_on_a_silent_server() {
+        use std::time::Instant;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a port");
+        let address = format!("http://{}/v25", listener.local_addr().expect("an address"));
+        tokio::spawn(async move {
+            // Accepts and never answers.
+            let mut held = Vec::new();
+            while let Ok(connection) = listener.accept().await {
+                held.push(connection);
+            }
+        });
+        let ads = GoogleAds::with_timeout(&address, Duration::from_secs(1)).expect("a client");
+        let started = Instant::now();
+        let GoogleAdsError::Failed(words) = ads.accessible(&token()).await.expect_err("no answer")
+        else {
+            panic!("a failure");
+        };
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(words.contains("did not answer"), "{words}");
+    }
+
+    /// The environment's proxy is never used: a child copy of this test, with `HTTP_PROXY` set to a
+    /// fixture that records, asks a second fixture directly.
+    #[tokio::test]
+    async fn uses_no_proxy_from_the_environment() {
+        if let Ok(target) = std::env::var("FARIK_ADS_PROXY_CHILD") {
+            GoogleAds::new(&target)
+                .expect("a client")
+                .accessible(&token())
+                .await
+                .expect("answered");
+            return;
+        }
+        let proxy = Fixture::start().await;
+        let target = Fixture::start().await;
+        let through = proxy.address.trim_end_matches("/v25").to_string();
+        let child = tokio::process::Command::new(std::env::current_exe().expect("this test"))
+            .args([
+                "--exact",
+                "google_ads::tests::uses_no_proxy_from_the_environment",
+            ])
+            .env("FARIK_ADS_PROXY_CHILD", &target.address)
+            .env("HTTP_PROXY", &through)
+            .env("http_proxy", &through)
+            .env("ALL_PROXY", &through)
+            .env_remove("NO_PROXY")
+            .env_remove("no_proxy")
+            .output()
+            .await
+            .expect("the child runs");
+        assert!(
+            child.status.success(),
+            "{}",
+            String::from_utf8_lossy(&child.stdout)
+        );
+        assert!(proxy.requests().is_empty(), "the proxy was used");
+        assert_eq!(target.requests().len(), 1);
+    }
+}

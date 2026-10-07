@@ -32,6 +32,14 @@ pub mod daemon;
 pub mod exec;
 /// The forge pull requests live on, driven through the `gh` program.
 pub mod forge;
+/// Farik's own Google Ads connector: the client for Google's API and what each tool sends (ADR
+/// 0038, ADR 0042).
+#[cfg(unix)]
+pub mod google_ads;
+/// A stand-in for the Google Ads API, for the tests of the connector.
+#[cfg(all(test, unix))]
+#[path = "../tests/support/google_ads_fixture.rs"]
+mod google_ads_fixture;
 /// The owner's decisions on marketing plans, the ends that dates bring, and how a plan is worded
 /// on the wire.
 pub mod marketing;
