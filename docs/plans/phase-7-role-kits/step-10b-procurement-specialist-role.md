@@ -97,7 +97,7 @@ Files: the five schemas; the role's folder; `lib.rs`, `kit.rs`, `skill_check.rs`
 - `sourcing_a_product_passes_the_skill_checks`: the shipped skill passes `check_skill`, and names no `farik_*` tool that `tool_descriptors` lacks. RED: no skill.
 - `gives_the_scrum_master_half_the_tokens_and_every_other_role_the_team_default` (`crates/core/src/budget.rs`) and `keeps_farik_s_headings_the_only_top_level_ones_for_every_shipped_role` (`crates/runtime/src/prompt.rs`): each lists the role. RED: no such role.
 
-- [ ] `feat(roles): add the Procurement Specialist`
+- [x] `feat(roles): add the Procurement Specialist`
 
 ### Task 2: Its private folder
 

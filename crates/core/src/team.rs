@@ -92,6 +92,7 @@ pub fn plain_role(role: Role) -> &'static str {
         Role::MarketingSpecialist => "Marketing Specialist",
         Role::UiUxDesigner => "UI/UX Designer",
         Role::FinanceSpecialist => "Finance Specialist",
+        Role::ProcurementSpecialist => "Procurement Specialist",
         Role::Human => "human",
     }
 }
@@ -1266,6 +1267,7 @@ impl From<RoleWire> for Role {
             RoleWire::MarketingSpecialist => Self::MarketingSpecialist,
             RoleWire::UiUxDesigner => Self::UiUxDesigner,
             RoleWire::FinanceSpecialist => Self::FinanceSpecialist,
+            RoleWire::ProcurementSpecialist => Self::ProcurementSpecialist,
         }
     }
 }
@@ -2232,6 +2234,7 @@ mod tests {
                 RoleWire::MarketingSpecialist,
                 RoleWire::UiUxDesigner,
                 RoleWire::FinanceSpecialist,
+                RoleWire::ProcurementSpecialist,
             ]
             .map(Role::from),
             [
@@ -2242,6 +2245,7 @@ mod tests {
                 Role::MarketingSpecialist,
                 Role::UiUxDesigner,
                 Role::FinanceSpecialist,
+                Role::ProcurementSpecialist,
             ]
         );
     }
@@ -2252,8 +2256,21 @@ mod tests {
     }
 
     #[test]
+    fn plain_role_names_procurement() {
+        assert_eq!(
+            plain_role(Role::ProcurementSpecialist),
+            "Procurement Specialist"
+        );
+    }
+
+    #[test]
     fn finance_does_not_change_code() {
         assert!(!changes_code(Role::FinanceSpecialist));
+    }
+
+    #[test]
+    fn procurement_does_not_change_code() {
+        assert!(!changes_code(Role::ProcurementSpecialist));
     }
 
     #[test]

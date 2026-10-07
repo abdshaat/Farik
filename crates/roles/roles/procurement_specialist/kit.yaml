@@ -1,0 +1,6 @@
+# The Procurement Specialist's kit (ADR 0039): empty until phase 7 step 10d gives it its skills and
+# its services, and 10g its two servers of Farik's own. Its one skill, `sourcing-a-product`, is the
+# role's own, in every prompt (ADR 0011).
+role: procurement_specialist
+skills: []
+connectors: []

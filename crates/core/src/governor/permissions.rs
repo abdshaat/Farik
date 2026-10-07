@@ -49,7 +49,9 @@ pub fn default_tiers(role: Role) -> &'static [PermissionTier] {
             T::Network,
             T::GitLocal,
         ],
-        Role::ProductManager | Role::FinanceSpecialist => &[T::Read, T::Network],
+        Role::ProductManager | Role::FinanceSpecialist | Role::ProcurementSpecialist => {
+            &[T::Read, T::Network]
+        }
         Role::MarketingSpecialist => &[T::Read, T::Network, T::WriteWorkspace, T::GitLocal],
         Role::ScrumMaster | Role::Human => &[T::Read],
     }
@@ -1151,6 +1153,14 @@ mod tests {
     }
 
     #[test]
+    fn procurement_reads_and_researches_only() {
+        assert_eq!(
+            default_tiers(Role::ProcurementSpecialist),
+            [T::Read, T::Network].as_slice()
+        );
+    }
+
+    #[test]
     fn grants_git_remote_and_external_effect_to_nobody_by_default() {
         for role in [
             Role::ProductManager,
@@ -1160,6 +1170,7 @@ mod tests {
             Role::MarketingSpecialist,
             Role::UiUxDesigner,
             Role::FinanceSpecialist,
+            Role::ProcurementSpecialist,
             Role::Human,
         ] {
             let tiers = default_tiers(role);

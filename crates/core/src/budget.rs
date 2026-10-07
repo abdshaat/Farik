@@ -260,6 +260,7 @@ mod tests {
             Role::SoftwareDeveloper,
             Role::MarketingSpecialist,
             Role::FinanceSpecialist,
+            Role::ProcurementSpecialist,
             Role::Human,
         ] {
             assert_eq!(

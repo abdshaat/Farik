@@ -129,6 +129,10 @@ impl std::error::Error for RoleError {}
 ///
 /// `NotFound` for `Human`, which no agent is: every agent role ships. `Invalid` when a shipped
 /// file breaks its schema, which a test over every shipped role rules out.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm for each shipped role, each naming the files it embeds"
+)]
 pub fn load_role(role: Role) -> Result<RoleDefinition, RoleError> {
     match role {
         Role::ProductManager => parse_role(
@@ -220,6 +224,15 @@ pub fn load_role(role: Role) -> Result<RoleDefinition, RoleError> {
             &[(
                 "keeping-the-books",
                 include_str!("../roles/finance_specialist/skills/keeping-the-books/SKILL.md"),
+            )],
+        ),
+        Role::ProcurementSpecialist => parse_role(
+            role,
+            include_str!("../roles/procurement_specialist/role.yaml"),
+            include_str!("../roles/procurement_specialist/system.md"),
+            &[(
+                "sourcing-a-product",
+                include_str!("../roles/procurement_specialist/skills/sourcing-a-product/SKILL.md"),
             )],
         ),
         Role::Human => Err(RoleError::NotFound {
@@ -468,6 +481,7 @@ mod tests {
             Role::MarketingSpecialist,
             Role::UiUxDesigner,
             Role::FinanceSpecialist,
+            Role::ProcurementSpecialist,
         ] {
             let definition = loaded(role);
             let texts = std::iter::once(&definition.system_prompt)
@@ -609,6 +623,41 @@ mod tests {
                 "publish anywhere",
                 "write application code",
                 "write anything outside your finance folder",
+            ]
+        );
+        assert!(definition.system_prompt.contains("untrusted"));
+    }
+
+    /// ADR 0039: the optional ninth role, which finds sellers and prices and never buys. Its seven
+    /// `forbidden` lines are the design's, in its order, and its one prompt skill is the loop.
+    #[test]
+    fn loads_the_procurement_specialist() {
+        let definition = loaded(Role::ProcurementSpecialist);
+        assert_eq!(definition.id, Role::ProcurementSpecialist);
+        assert_eq!(
+            definition.persona,
+            "Finds the best seller at the right price"
+        );
+        assert_eq!(definition.model, "claude-sonnet-5-5");
+        assert_eq!(definition.effort, Effort::Medium);
+        assert_eq!(
+            definition.default_tiers,
+            default_tiers(Role::ProcurementSpecialist)
+        );
+        assert_eq!(definition.skills.len(), 1);
+        assert_eq!(definition.skills[0].name, "sourcing-a-product");
+        assert!(!definition.skills[0].description.trim().is_empty());
+        assert!(!definition.skills[0].body.trim().is_empty());
+        assert_eq!(
+            definition.forbidden,
+            [
+                "pay, buy, bid, check out, sign up, or start a trial that takes a card",
+                "accept terms or sign anything",
+                "send any message the founder has not sent",
+                "promise a seller to buy",
+                "write application code",
+                "write anything outside your procurement folder",
+                "change Farik's budgets or the books",
             ]
         );
         assert!(definition.system_prompt.contains("untrusted"));
@@ -986,6 +1035,7 @@ mod tests {
             Role::Architect,
             Role::MarketingSpecialist,
             Role::FinanceSpecialist,
+            Role::ProcurementSpecialist,
         ] {
             let definition = loaded(role);
             assert!(
@@ -1024,6 +1074,7 @@ mod tests {
                 "architect",
                 "finance_specialist",
                 "marketing_specialist",
+                "procurement_specialist",
                 "product_manager",
                 "scrum_master",
                 "software_developer",
