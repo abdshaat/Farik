@@ -9,12 +9,14 @@ use farik_core::governor::permissions::{
     AgentGrants, ApprovalKey, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext,
     ToolCallRequest, ToolDescriptor, evaluate_connector_call, evaluate_tool_call, input_sha256,
 };
+use farik_core::marketing::active_plan;
 use farik_core::team::{AgentStatus, Team};
 use farik_protocol::event::{
     ConnectorTagWire, EventBody, EventIds, EventKind, ToolApprovalRequestedBody, ToolCalledBody,
     ToolDeniedBody, ToolReturnedBody, new_event,
 };
 use farik_store::EventQuery;
+use farik_store::marketing::marketing_plans;
 use farik_store::waiting::open_grants;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
@@ -180,10 +182,12 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
 
 /// What let a call through, beyond that it was allowed: the human's grant it uses up, or the
 /// allowance it ran inside (ADR 0037).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Pass {
     approval: Option<u64>,
     allowance: Option<u32>,
+    /// The active marketing plan that approved the call (ADR 0042).
+    marketing_plan: Option<String>,
 }
 
 /// Why a call is denied, and the stop the denial asks of the session when it asks one: an agent
@@ -493,25 +497,34 @@ fn judge_connector(
         .find(|connector| connector.server == server);
     let mut granted = None;
     let mut used = 0;
+    let mut plan = None;
     if connector.and_then(|connector| connector.tools.get(tool))
         == Some(&ConnectorTag::ExternalEffect)
     {
         plan_gate(deps, team, registration, PermissionTier::ExternalEffect)?;
-        granted = grant_for(deps, registration, server, tool, &request.tool_input)?;
-        // Zero asks every time, and a grant is used before an allowance: neither needs the count.
-        if granted.is_none()
-            && connector
-                .and_then(|connector| connector.allowances.get(tool))
-                .is_some_and(|calls| *calls > 0)
-        {
-            used = calls_made(deps, state, &registration.agent_id, server, tool)?;
+        if connector.is_some_and(|connector| connector.plan_tools.contains(tool)) {
+            // The owner's plan approves it or nothing does: no grant is looked up and no allowance
+            // counted, and the log is read for the active plan only for such a tool.
+            plan = active_marketing_plan(deps)?;
+        } else {
+            granted = grant_for(deps, registration, server, tool, &request.tool_input)?;
+            // Zero asks every time, and a grant is used before an allowance: neither needs the
+            // count.
+            if granted.is_none()
+                && connector
+                    .and_then(|connector| connector.allowances.get(tool))
+                    .is_some_and(|calls| *calls > 0)
+            {
+                used = calls_made(deps, state, &registration.agent_id, server, tool)?;
+            }
         }
     }
-    // Until the plan's gate is read here, no plan is active: a marked tool is refused.
-    match evaluate_connector_call(tool, &request.tool_input, connector, granted, used, false) {
+    let active = plan.is_some();
+    match evaluate_connector_call(tool, &request.tool_input, connector, granted, used, active) {
         Ok(pass) => Ok(Pass {
             approval: pass.approval,
             allowance: pass.allowance,
+            marketing_plan: plan.filter(|_| pass.plan_approved),
         }),
         Err(ConnectorRefusal::ApprovalNeeded) => {
             Err(ask(deps, registration, server, tool, &request.tool_input))
@@ -544,6 +557,14 @@ fn judge_connector(
             ),
         })),
     }
+}
+
+/// The id of the marketing plan that is active today by the daemon's clock, from the log.
+fn active_marketing_plan(deps: &ToolDeps) -> Result<Option<String>, Denial> {
+    let plans = marketing_plans(&deps.log)
+        .map_err(|error| Denial::from(format!("marketing_plan_unreadable: {error}")))?;
+    let records: Vec<_> = plans.iter().map(|plan| plan.record.clone()).collect();
+    Ok(active_plan(&records, deps.clock.now().date_naive()).map(|plan| plan.id.clone()))
 }
 
 /// The calls `agent` has made of `tool` of `server` this period, from the daemon's counts.
@@ -777,6 +798,7 @@ fn record_decision(
                 allowance: pass
                     .allowance
                     .and_then(|calls| std::num::NonZeroU64::new(u64::from(calls))),
+                marketing_plan: pass.marketing_plan.and_then(|plan| plan.try_into().ok()),
             }),
             HookDecision {
                 allow: true,
@@ -1823,6 +1845,18 @@ mod tests {
         task: &str,
         calls: Option<u32>,
     ) {
+        registering(daemon, session, agent, task, calls, &[]);
+    }
+
+    /// `allowing_session`, with `plan_tools` of `github` marked as approved by the marketing plan.
+    fn registering(
+        daemon: &TestDaemon,
+        session: &str,
+        agent: &str,
+        task: &str,
+        calls: Option<u32>,
+        plan_tools: &[&str],
+    ) {
         use farik_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
 
         use crate::daemon::SessionRegistration;
@@ -1858,7 +1892,7 @@ mod tests {
                     allowances: calls
                         .map(|calls| [("create_issue".to_string(), calls)].into())
                         .unwrap_or_default(),
-                    plan_tools: std::collections::BTreeSet::new(),
+                    plan_tools: plan_tools.iter().map(|tool| (*tool).to_string()).collect(),
                 },
                 SessionConnector {
                     server: "gitlab".to_string(),
@@ -2352,6 +2386,77 @@ mod tests {
         denied_for(&batch, "approval_needed");
         assert_eq!(daemon.events(EventKind::ToolApprovalRequested).len(), 2);
         assert_eq!(daemon.events(EventKind::ToolCalled).len(), 20);
+    }
+
+    /// `dev-a`'s `close_issue` through `session-github`.
+    fn close(daemon: &TestDaemon) -> HookDecision {
+        decide_pre_tool_use(
+            &daemon.call(
+                "session-github",
+                "mcp__github__close_issue",
+                &json!({ "n": 1 }),
+            ),
+            &daemon.state,
+        )
+    }
+
+    /// The marketing plan the last `tool.called` names.
+    fn ran_for_plan(daemon: &TestDaemon) -> Option<String> {
+        let called = daemon.events(EventKind::ToolCalled);
+        let EventBody::ToolCalled(body) = &called.last().expect("recorded").body else {
+            panic!("a tool.called body");
+        };
+        body.marketing_plan
+            .as_ref()
+            .map(|plan| plan.as_str().to_string())
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_plan_marked_call_runs_while_a_plan_is_active() {
+        let daemon = TestDaemon::new("hook-plan-marked", |_| {});
+        registering(
+            &daemon,
+            "session-github",
+            "dev-a",
+            "FRK-1",
+            Some(5),
+            &["close_issue"],
+        );
+
+        // No plan, and a plan only proposed: refused with the plan's reason, never asked.
+        denied_for(&close(&daemon), "no_active_marketing_plan");
+        daemon
+            .project
+            .plan_proposed("FRK-1", "MP-1", "2026-09-20", "2026-10-10");
+        denied_for(&close(&daemon), "no_active_marketing_plan");
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+        assert!(daemon.events(EventKind::ToolCalled).is_empty());
+        assert_eq!(daemon.state.stop_reason("session-github"), None);
+
+        // Approved and in its dates: it runs, naming the plan, with no grant and no allowance,
+        // and nothing is asked.
+        daemon.project.plan_approved("FRK-1", "MP-1", "");
+        let allowed = close(&daemon);
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(ran_for_plan(&daemon), Some("MP-1".to_string()));
+        assert_eq!(ran_inside(&daemon), None);
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+
+        // The plan approves only what the kit marked: its neighbour inside its allowance runs as
+        // before and names no plan, and one with none still asks.
+        assert!(issue(&daemon, 1).allow);
+        assert_eq!(ran_for_plan(&daemon), None);
+        assert_eq!(ran_inside(&daemon), Some(5));
+
+        // Ended by the owner, it approves nothing.
+        daemon.project.record(
+            "",
+            "marketing_plan.ended",
+            &json!({ "plan": "MP-1", "why": "by_owner" }),
+        );
+        denied_for(&close(&daemon), "no_active_marketing_plan");
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
     }
 
     #[test]

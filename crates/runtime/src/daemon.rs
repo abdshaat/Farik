@@ -66,7 +66,7 @@ pub use hooks::{
 pub use setup::{SetupError, SetupHost};
 pub(crate) use signed_in::{Fresh, refreshed_entry};
 pub use team::SETUP_PENDING;
-pub use team::{custom_entry, kit_entry, labelled, matches_kit};
+pub use team::{custom_entry, kit_entry, labelled, matches_kit, plan_tools_of};
 pub(crate) use team::{secret_at, with_server};
 
 /// What a daemon with no project answers what needs one.

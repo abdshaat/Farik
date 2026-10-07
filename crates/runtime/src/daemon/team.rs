@@ -644,6 +644,27 @@ pub fn matches_kit(kit: &Kit, server: &CustomServer) -> bool {
         })
 }
 
+/// The tools the owner's marketing plan approves for `server` (ADR 0042): the kit's `plan_approved`
+/// of the entry of its name, and only when `server` is exactly what the kit says (`matches_kit`),
+/// so a custom entry naming the same command, or a kit entry that was widened, gets none.
+#[must_use]
+pub fn plan_tools_of(kit: &Kit, server: &CustomServer) -> std::collections::BTreeSet<String> {
+    if !matches_kit(kit, server) {
+        return std::collections::BTreeSet::new();
+    }
+    kit.connectors
+        .iter()
+        .find_map(|connector| match connector {
+            KitConnector::Server {
+                entry,
+                plan_approved,
+                ..
+            } if entry.name.as_str() == server.name => Some(plan_approved.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
 /// What `team.get` says of each role on the team whose kit has a service to connect by name: the
 /// copy the page shows and how the service is reached. A `container` connector is no service to
 /// connect, and a role with none is not listed.

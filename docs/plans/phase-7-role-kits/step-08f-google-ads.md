@@ -119,7 +119,7 @@ One commit: every construction of `SessionConnector` (`session.rs:216`, `session
 - `a_plan_marked_call_runs_while_a_plan_is_active` (`hooks.rs`, `#[ignore]`d for `--integration` as its neighbours): a fixture kit's marked tool, with an approved plan active, is allowed, `tool.called` carries `marketing_plan: "MP-1"`, and nothing is asked; with none active it is denied `no_active_marketing_plan` and no `tool_approval.requested` exists. RED.
 - `a_custom_entry_gets_no_plan_mark` (`session.rs`): a custom entry naming the same pair has empty `plan_tools`. RED.
 
-- [ ] `feat(runtime): run a plan-marked call inside the active marketing plan`
+- [x] `feat(runtime): run a plan-marked call inside the active marketing plan`
 
 ### Task 3: The plan's checks
 
