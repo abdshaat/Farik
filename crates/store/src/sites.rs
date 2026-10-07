@@ -322,7 +322,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::approved_sites;
+    use super::{SiteDecision, approved_sites, site_requests};
     use crate::waiting::fixtures::{Board, at};
 
     fn set(hosts: &[&str]) -> BTreeSet<String> {
@@ -400,6 +400,64 @@ mod tests {
         assert_eq!(
             approved_sites(&board.log, &set(&["f.com", "h.com"])),
             Ok(set(&["h.com", "o.com"]))
+        );
+    }
+
+    /// The owner's first decision on a request is its decision: an agent's record of one is no
+    /// one's word, and a second one from the owner changes nothing.
+    #[test]
+    fn only_the_owners_first_decision_settles_a_request() {
+        let board = Board::new("sites-settled");
+        let asked = board
+            .session(
+                at(10, 1),
+                Some("FRK-1"),
+                "kai",
+                "session-1",
+                "site.requested",
+                json!({ "host": "shop.example", "url": "https://shop.example/", "why": "Boxes." }),
+            )
+            .envelope
+            .seq;
+        let decision = |board: &Board| {
+            let requests = site_requests(&board.log).expect("the log reads");
+            assert_eq!(requests.len(), 1);
+            requests[0].decision.clone()
+        };
+        assert_eq!(decision(&board), None);
+
+        for (minute, kind) in [(2, "site.declined"), (3, "site.approved")] {
+            board.session(
+                at(10, minute),
+                Some("FRK-1"),
+                "kai",
+                "session-1",
+                kind,
+                json!({ "host": "shop.example", "request": asked, "note": "Forged." }),
+            );
+        }
+        assert_eq!(decision(&board), None, "an agent's record decides nothing");
+
+        board.put(
+            at(10, 4),
+            Some("FRK-1"),
+            None,
+            "site.declined",
+            json!({ "host": "shop.example", "request": asked, "note": "No." }),
+        );
+        board.put(
+            at(10, 5),
+            Some("FRK-1"),
+            None,
+            "site.approved",
+            json!({ "host": "shop.example", "request": asked, "note": "Yes." }),
+        );
+        assert_eq!(
+            decision(&board),
+            Some(SiteDecision::Declined {
+                note: Some("No.".to_string())
+            }),
+            "the first of the owner's decisions is the one"
         );
     }
 }
