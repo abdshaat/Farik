@@ -457,8 +457,11 @@ async fn start_listening(
         );
     }
     let tools = tool_deps(project, io)?;
-    // Before the daemon listens: a tab that reconnects asks `team.get` the moment it does.
+    // Before the daemon listens: a tab that reconnects asks `team.get` the moment it does, and a
+    // task in `verifying` or `team.propose` asks whether the Designer can have its browser.
     tools.transitions.set_sandbox(settings.sandbox);
+    let (sandboxes, previews) = factories(settings.sandbox, sandbox_image(io));
+    tools.transitions.set_previews(Arc::clone(&previews));
     let daemon = connected_daemon(&tools, io);
     let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
     let web = options
@@ -489,8 +492,6 @@ async fn start_listening(
             return Err(error);
         }
     };
-    let (sandboxes, previews) = factories(settings.sandbox, sandbox_image(io));
-    tools.transitions.set_previews(Arc::clone(&previews));
     let orchestrator = Arc::new(Orchestrator::new(OrchestratorDeps {
         tools,
         daemon: Arc::clone(&daemon),

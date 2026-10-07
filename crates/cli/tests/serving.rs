@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
+use farik_core::governor::gates::DesignerBrowser;
 use farik_protocol::clock::FixedClock;
 use farik_protocol::event::{EventBody, EventKind};
 use farik_runtime::recorded::fixtures::{refine_asks_frk_1, triage_frk_1_large};
@@ -478,23 +479,25 @@ fn tells_the_page_whether_it_runs_in_the_sandbox_by_the_setting() {
     assert_eq!(sandboxed_while_serving(&sandboxed), json!(true));
 }
 
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn knows_the_sandbox_setting_from_the_moment_it_listens() {
-    // A tab that reconnects asks `team.get` the moment the daemon listens, and the engine is made
-    // right after that: a setting told only later would let that tab read `false` in between.
+/// What the governor's door says, asked by `ask` in a project whose sandbox setting is `docker`,
+/// the moment the engine is made: once the daemon listens, which is as soon as a page that
+/// reconnects can ask it anything.
+fn told_at_listen<T: Send + 'static>(
+    test: &str,
+    ask: impl Fn(&farik_runtime::tools::ToolContext) -> T + Send + Sync + 'static,
+) -> T {
     use farik::Engine;
     use farik_core::budget::DEFAULT_SESSION_LIMITS;
     use farik_runtime::SessionPurpose;
     use farik_runtime::daemon::SessionRegistration;
 
-    let repository = a_team("serve-sandbox-at-listen");
+    let repository = a_team(test);
     std::fs::write(
         repository.path.join(".farik/local/settings.json"),
         r#"{"sandbox":"docker"}"#,
     )
     .expect("the settings are written");
-    let seen: Arc<Mutex<Option<bool>>> = Arc::default();
+    let seen: Arc<Mutex<Option<T>>> = Arc::default();
     let kept = Arc::clone(&seen);
     let port = free_port();
     let root = repository.path.clone();
@@ -523,11 +526,9 @@ fn knows_the_sandbox_setting_from_the_moment_it_listens() {
                     connectors: Vec::new(),
                     preview: None,
                 });
-                let sandboxed = daemon
-                    .tool_context("probe")
-                    .map(|context| context.deps.transitions.sandboxed());
+                let told = daemon.tool_context("probe").map(|context| ask(&context));
                 daemon.end_session("probe");
-                *kept.lock().expect("the answer") = sandboxed;
+                *kept.lock().expect("the answer") = told;
                 engine(daemon)
             }));
         })
@@ -539,7 +540,34 @@ fn knows_the_sandbox_setting_from_the_moment_it_listens() {
     assert_eq!(stopped.code, 0, "{}", stopped.err);
     let ran = joined(serving, "the serve");
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
-    assert_eq!(*seen.lock().expect("the answer"), Some(true));
+    seen.lock()
+        .expect("the answer")
+        .take()
+        .expect("the probe was told")
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn knows_the_sandbox_setting_from_the_moment_it_listens() {
+    // A tab that reconnects asks `team.get` the moment the daemon listens, and the engine is made
+    // right after that: a setting told only later would let that tab read `false` in between.
+    let sandboxed = told_at_listen("serve-sandbox-at-listen", |context| {
+        context.deps.transitions.sandboxed()
+    });
+    assert!(sandboxed);
+}
+
+#[test]
+#[ignore = "needs the git program and Docker: cargo xtask check --integration"]
+fn knows_what_runs_previews_from_the_moment_it_listens() {
+    // `task.get` of a task in `verifying` and `team.propose` ask whether the Designer can have a
+    // browser, and read `NoSandbox` until the driver has said what runs previews: with Docker
+    // answering and no preview in the starter team, the answer is `NoPreview`.
+    let browser = told_at_listen("serve-previews-at-listen", |context| {
+        let team = context.deps.files.read_team().expect("the team is read");
+        context.deps.transitions.designer_browser(&team)
+    });
+    assert_eq!(browser, DesignerBrowser::NoPreview);
 }
 
 /// `farik serve <extra>` on a thread whose opener records what it is asked to open, and answers
