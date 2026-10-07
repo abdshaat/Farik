@@ -664,6 +664,96 @@
       "title": "Phone: Ivo’s sites (step 10b2)",
       "page": "procurement",
       "is_interactive": true
+    },
+    "TodayBudgetReached.dc.html": {
+      "x": 5620,
+      "y": 0,
+      "w": 1280,
+      "h": 4082,
+      "title": "Today: a plan’s ads reached their budget, Farik could not pause them, the spend unread, ads still running (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneBudgetReached.dc.html": {
+      "x": 7100,
+      "y": 0,
+      "w": 390,
+      "h": 3406,
+      "title": "Phone: a plan’s ads reached their budget (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "RaiseBudget.dc.html": {
+      "x": 7690,
+      "y": 0,
+      "w": 1280,
+      "h": 3277,
+      "title": "Raise the budget: the new budgets, refused amounts, sent (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneRaiseBudget.dc.html": {
+      "x": 9170,
+      "y": 0,
+      "w": 390,
+      "h": 2907,
+      "title": "Phone: raise the budget (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "MarketingPlanSpend.dc.html": {
+      "x": 9760,
+      "y": 0,
+      "w": 1280,
+      "h": 5750,
+      "title": "The plan’s spend and the ads Farik paused: running, unread, End, ended (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneMarketingPlanSpend.dc.html": {
+      "x": 11240,
+      "y": 0,
+      "w": 390,
+      "h": 2708,
+      "title": "Phone: the plan’s spend and pauses (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "MarketingPlanApproval.dc.html": {
+      "x": 11830,
+      "y": 0,
+      "w": 1280,
+      "h": 3394,
+      "title": "The plan to approve: what each campaign advertises, and its price (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneMarketingPlanApproval.dc.html": {
+      "x": 13310,
+      "y": 0,
+      "w": 390,
+      "h": 2143,
+      "title": "Phone: what each campaign advertises, and its price (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "RemoveGoogleAds.dc.html": {
+      "x": 6960,
+      "y": 0,
+      "w": 1440,
+      "h": 1742,
+      "title": "Remove Google Ads: Farik pauses the plan’s ads first, and Today when Google refused (step 08g)",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "PhoneRemoveGoogleAds.dc.html": {
+      "x": 8480,
+      "y": 0,
+      "w": 360,
+      "h": 1624,
+      "title": "Phone: Remove Google Ads, pausing the ads first (step 08g)",
+      "page": "connectors",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -868,7 +958,17 @@
     "TodaySiteRequest.dc.html",
     "PhoneSiteRequest.dc.html",
     "AgentSites.dc.html",
-    "PhoneAgentSites.dc.html"
+    "PhoneAgentSites.dc.html",
+    "TodayBudgetReached.dc.html",
+    "PhoneBudgetReached.dc.html",
+    "RaiseBudget.dc.html",
+    "PhoneRaiseBudget.dc.html",
+    "MarketingPlanSpend.dc.html",
+    "PhoneMarketingPlanSpend.dc.html",
+    "MarketingPlanApproval.dc.html",
+    "PhoneMarketingPlanApproval.dc.html",
+    "RemoveGoogleAds.dc.html",
+    "PhoneRemoveGoogleAds.dc.html"
   ],
   "pages": [
     {
