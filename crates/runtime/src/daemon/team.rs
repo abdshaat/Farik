@@ -1268,7 +1268,7 @@ async fn connector_allowances(
 /// file and records `connector.disconnected`, then the agent's entry deleted and, when it held a
 /// sign-in, the service asked to forget it.
 async fn connector_disconnect(
-    state: &DaemonState,
+    state: &Arc<DaemonState>,
     deps: &ToolDeps,
     params: &Value,
 ) -> Result<Value, Failure> {
@@ -1276,6 +1276,12 @@ async fn connector_disconnect(
         params["agent"].as_str().unwrap_or_default(),
         params["server"].as_str().unwrap_or_default(),
     );
+    if server == super::ads_calls::GOOGLE_ADS {
+        // Without this connection Farik could no longer stop the ads at their budget, so it pauses
+        // them first. A refusal is no reason to keep the connection: it is removed all the same,
+        // and Today says the ads keep running (the owner's answer of 2026-10-07).
+        let _ = super::ads_calls::pause_before_removing(state, deps, agent).await;
+    }
     handled(
         state,
         Command::ConnectorDisconnect {
@@ -1949,6 +1955,7 @@ pub(super) mod tests {
         ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
     };
     use crate::credential::{CredentialStore, MemoryStore};
+    use crate::daemon::ads_calls::fixtures::Ads;
     use crate::daemon::gates::tests::{call, driven, query, rpc};
     use crate::daemon::web::{BrowserSessions, ConnectCodes, WebState};
     use crate::orchestrator::fixtures::Harness;
@@ -2684,6 +2691,197 @@ pub(super) mod tests {
             }
         );
         (ended == Ok(crate::orchestrator::Waited::Woken), answered)
+    }
+
+    /// Kai with Google Ads and two plans: MP-1, which the owner ended, left campaign 21 running;
+    /// MP-2, the active plan, carries campaign 11. Both run at Google.
+    async fn google_ads_with_two_campaigns_running(name: &str) -> Ads {
+        let ads = Ads::new(name).await;
+        let orchestrator = Arc::new(ads.harness.orchestrator(ads.harness.recorded(Vec::new())));
+        assert!(
+            ads.harness
+                .daemon
+                .set_command_handler(crate::orchestrator::command_handler(orchestrator))
+        );
+        ads.plan("MP-1", None);
+        ads.made_campaign(
+            ("MP-1", "search-old"),
+            ("1234567890", 21),
+            ("total", "500.00"),
+        );
+        // A campaign of MP-1 that Farik paused when the plan ended is not paused again.
+        ads.made_campaign(
+            ("MP-1", "search-done"),
+            ("1234567890", 22),
+            ("total", "500.00"),
+        );
+        ads.harness.project.record(
+            "",
+            "marketing_plan.ended",
+            &json!({ "plan": "MP-1", "why": "by_owner" }),
+        );
+        ads.harness.project.record(
+            "",
+            "marketing_campaign.paused",
+            &json!({
+                "plan": "MP-1", "key": "search-done",
+                "campaign": "customers/1234567890/campaigns/22", "why": "plan_ended"
+            }),
+        );
+        ads.plan("MP-2", None);
+        ads.made_campaign(
+            ("MP-2", "search-launch"),
+            ("1234567890", 11),
+            ("total", "500.00"),
+        );
+        ads
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn removing_google_ads_pauses_first() {
+        let ads = google_ads_with_two_campaigns_running("team-remove-ads").await;
+        let (carried, ended) = (
+            "customers/1234567890/campaigns/11",
+            "customers/1234567890/campaigns/21",
+        );
+
+        super::call(
+            &ads.harness.daemon,
+            "connector.disconnect",
+            &json!({ "agent": "kai", "server": "google-ads" }),
+        )
+        .await
+        .expect("removed");
+
+        // Both were paused at Google, the ended plan's recorded for its end and the active
+        // plan's for the connection, each recorded before the entry left the team file.
+        let paused: Vec<String> = ads
+            .google
+            .requests_of("mutate")
+            .iter()
+            .flat_map(|seen| {
+                seen.body["mutateOperations"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .map(|operation| {
+                assert_eq!(operation["campaignOperation"]["update"]["status"], "PAUSED");
+                operation["campaignOperation"]["update"]["resourceName"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(paused.len(), 2, "{paused:?}");
+        assert!(paused.contains(&carried.to_string()) && paused.contains(&ended.to_string()));
+        let events: Vec<_> = ads
+            .harness
+            .project
+            .events(&[
+                EventKind::MarketingCampaignPaused,
+                EventKind::ConnectorDisconnected,
+            ])
+            .into_iter()
+            // Campaign 22 was recorded paused before, when its plan ended.
+            .filter(|event| {
+                !matches!(&event.body, farik_protocol::event::EventBody::MarketingCampaignPaused(body)
+                    if body.campaign.as_str().ends_with("/22"))
+            })
+            .collect();
+        let kinds: Vec<String> = events
+            .iter()
+            .map(|event| event.body.kind().to_string())
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "marketing_campaign.paused",
+                "marketing_campaign.paused",
+                "connector.disconnected"
+            ],
+            "the pauses come before the removal"
+        );
+        let why = |campaign: &str| {
+            events.iter().find_map(|event| match &event.body {
+                farik_protocol::event::EventBody::MarketingCampaignPaused(body)
+                    if body.campaign.as_str() == campaign =>
+                {
+                    Some(body.why.to_string())
+                }
+                _ => None,
+            })
+        };
+        assert_eq!(why(ended).as_deref(), Some("plan_ended"));
+        assert_eq!(why(carried).as_deref(), Some("connection_removed"));
+        // The entry and its keys are gone.
+        let team = ads
+            .harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team");
+        assert!(
+            team.agents
+                .iter()
+                .filter(|agent| agent.id.as_str() == "kai")
+                .all(|agent| agent
+                    .mcp_servers
+                    .iter()
+                    .flatten()
+                    .all(|each| each.name.as_str() != "google-ads"))
+        );
+        assert!(ads.store.load(&ads.at).expect("reads").is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn removing_google_ads_goes_on_when_google_refuses() {
+        let ads = google_ads_with_two_campaigns_running("team-remove-refused").await;
+        ads.google.script(|script| {
+            for number in [11, 21] {
+                script.refuse_pause.insert(
+                    format!("customers/1234567890/campaigns/{number}"),
+                    "Mutations are disabled".to_string(),
+                );
+            }
+        });
+
+        super::call(
+            &ads.harness.daemon,
+            "connector.disconnect",
+            &json!({ "agent": "kai", "server": "google-ads" }),
+        )
+        .await
+        .expect("removed all the same");
+
+        // Removed, its keys deleted, and the plans say their ads still run, in Google's words.
+        assert!(ads.store.load(&ads.at).expect("reads").is_none());
+        assert_eq!(
+            ads.harness
+                .project
+                .events(&[EventKind::ConnectorDisconnected])
+                .len(),
+            1
+        );
+        assert_eq!(
+            ads.harness
+                .project
+                .events(&[EventKind::MarketingCampaignPaused])
+                .len(),
+            1,
+            "only the one recorded before"
+        );
+        let reads = ads.harness.daemon.spend_reads();
+        for plan in ["MP-1", "MP-2"] {
+            assert_eq!(
+                reads.get(plan).and_then(|read| read.unstopped.as_deref()),
+                Some("Google answered “Mutations are disabled”"),
+                "{plan}"
+            );
+        }
     }
 
     /// Switching "Plan work in sprints" off frees the Backlog's work at once, not at the next

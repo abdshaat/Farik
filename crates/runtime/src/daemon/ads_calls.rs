@@ -16,19 +16,21 @@ use chrono::{Duration as Days, NaiveDate};
 use farik_core::contract::Role;
 use farik_core::governor::permissions::ConnectorTag;
 use farik_core::marketing::{
-    AdsPlanView, AdsWrite, Amount, BudgetKind, CreatedCampaign, HeldAtGoogle, PlanProposal,
-    PlanRecord, ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write, first_day,
+    AdsPlanView, AdsWrite, Amount, BudgetKind, CreatedCampaign, HeldAtGoogle, Lineage,
+    PlanProposal, PlanRecord, ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write,
+    first_day, to_pause_for_end,
 };
 use farik_core::team::{CustomServer, Team, custom_server};
 use farik_protocol::event::{
     EventBody, EventIds, MarketingCampaignCreatedBody, MarketingCampaignCreatedBodyBudgetKind,
+    MarketingCampaignPausedBody,
 };
-use farik_store::marketing::{created_campaigns_on, marketing_plans};
+use farik_store::marketing::{PausedWhy, campaigns_paused, created_campaigns_on, marketing_plans};
 use farik_store::waiting::name_of;
 use serde_json::{Value, json};
 
 use super::hooks::append;
-use super::{DaemonState, Fresh, Ticketed, matches_kit, refreshed_entry};
+use super::{DaemonState, Fresh, SpendRead, Ticketed, matches_kit, refreshed_entry};
 use crate::claude::Secret;
 use crate::connectors::SecretAt;
 use crate::google_ads::{
@@ -493,6 +495,101 @@ pub(crate) async fn pause_campaigns(
             (campaign.clone(), answer)
         })
         .collect()
+}
+
+/// Before the owner removes `agent_id`'s Google Ads connection (step 08g): under the writes' lock
+/// and with this agent's grant, pauses every campaign Farik made that is not recorded paused for
+/// its plan's end, as every pause is made (`pause_campaigns`), and records each as paused: for
+/// `plan_ended` when no active plan carries it, else `connection_removed`, since without the
+/// connection Farik could no longer stop it at its budget. A campaign Google would not pause, or
+/// that no grant could be had for, is kept as the plan's `unstopped`, in the owner's words, for
+/// Today to say that it keeps running; the caller removes the connection all the same. It pauses
+/// even when another Marketing Specialist still has Google Ads.
+///
+/// # Errors
+///
+/// The first reason a campaign was not paused, or that the log could not be read or written.
+pub(crate) async fn pause_before_removing(
+    state: &Arc<DaemonState>,
+    deps: &ToolDeps,
+    agent_id: &str,
+) -> Result<(), String> {
+    let _writing = state.ads_writes().lock().await;
+    let now = deps.clock.now();
+    let plans = marketing_plans(&deps.log).map_err(|error| error.to_string())?;
+    let made: Vec<CreatedCampaign> = created_campaigns_on(&deps.log)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|(made, _)| made)
+        .collect();
+    let ended: Vec<String> = campaigns_paused(&deps.log)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|pause| pause.why == PausedWhy::PlanEnded)
+        .map(|pause| pause.campaign)
+        .collect();
+    let running: Vec<&CreatedCampaign> = made
+        .iter()
+        .filter(|each| !ended.contains(&each.campaign))
+        .collect();
+    if running.is_empty() {
+        return Ok(());
+    }
+    let records: Vec<PlanRecord> = plans.iter().map(|plan| plan.record.clone()).collect();
+    let active = active_plan(&records, now.date_naive())
+        .and_then(|record| plans.iter().find(|plan| plan.record.id == record.id));
+    let lineage = active.map(|plan| lineage_of(&plans, &plan.record.id));
+    let carried = active
+        .zip(lineage.as_deref())
+        .map(|(plan, lineage)| Lineage {
+            id: plan.record.id.as_str(),
+            plan: &plan.proposal,
+            lineage,
+        });
+    let for_end: Vec<String> = to_pause_for_end(carried.as_ref(), &made, &ended)
+        .into_iter()
+        .map(|each| each.campaign)
+        .collect();
+    let names: Vec<String> = running.iter().map(|each| each.campaign.clone()).collect();
+    let results = pause_campaigns(state, &[agent_id.to_string()], &names).await;
+    let mut first = None;
+    for ((name, result), each) in results.into_iter().zip(running) {
+        match result {
+            Ok(()) => {
+                let why = if for_end.contains(&name) {
+                    PausedWhy::PlanEnded
+                } else {
+                    PausedWhy::ConnectionRemoved
+                };
+                let body: MarketingCampaignPausedBody = serde_json::from_value(json!({
+                    "plan": each.plan, "key": each.key, "campaign": name, "why": why.as_str(),
+                }))
+                .map_err(|error| error.to_string())?;
+                crate::marketing::append(deps, None, EventBody::MarketingCampaignPaused(body))?;
+            }
+            Err(why) => {
+                first.get_or_insert_with(|| why.clone());
+                // Shown under the active plan when it carries the campaign through its lineage,
+                // else under the plan the campaign was made for.
+                let shown = match (active, &lineage) {
+                    (Some(plan), Some(lineage)) if lineage.contains(&each.plan) => {
+                        plan.record.id.clone()
+                    }
+                    _ => each.plan.clone(),
+                };
+                let mut reads = state.spend_reads();
+                let read = reads.entry(shown).or_insert_with(|| SpendRead {
+                    attempted_at: now,
+                    spend: None,
+                    failed: None,
+                    unstopped: None,
+                });
+                read.attempted_at = now;
+                read.unstopped = Some(why);
+            }
+        }
+    }
+    first.map_or(Ok(()), Err)
 }
 
 /// The agent's access token, its sign-in refreshed first when it will not last the call.

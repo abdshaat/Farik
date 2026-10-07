@@ -423,6 +423,109 @@ fn farik_disconnect_deletes_the_keys_and_the_entry() {
     assert_eq!(ran.code, 1, "{}", ran.out);
 }
 
+/// `dev-a` given a `google-ads` entry and its keys, and a campaign Farik made, in `repository`.
+fn google_ads_with_a_campaign(
+    repository: &TempRepo,
+    script: &std::path::Path,
+) -> Arc<MemoryConnectorSecrets> {
+    let mut wire = serde_json::to_value(files_of(repository).read_team().expect("the team reads"))
+        .expect("the team is JSON");
+    wire["agents"][1]["mcp_servers"] = json!([{
+        "name": "google-ads", "source": "custom", "transport": "stdio", "command": "sh",
+        "args": [script.display().to_string()], "tools": { "search": "network" }
+    }]);
+    files_of(repository)
+        .write_team(&farik_core::team::validate_team(&wire).expect("a team"))
+        .expect("the team is written");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    store
+        .save(
+            &kept_at(repository, "dev-a", "google-ads"),
+            &ConnectorEntry {
+                spec_sha256: "0".repeat(64),
+                keys: std::collections::BTreeMap::new(),
+                oauth: None,
+            },
+        )
+        .expect("kept");
+    project::record(
+        repository,
+        "",
+        "marketing_campaign.created",
+        &json!({
+            "plan": "MP-1", "key": "search-launch", "account": "123-456-7890",
+            "campaign": "customers/1234567890/campaigns/11",
+            "budget": "customers/1234567890/campaignBudgets/12",
+            "budget_kind": "total", "amount": "500.00"
+        }),
+    );
+    store
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_disconnect_sends_google_ads_to_the_browser() {
+    let repository = a_team("disconnect-google-ads");
+    let script = fixture("disconnect-google-ads");
+    let store = google_ads_with_a_campaign(&repository, &script);
+    let disconnect = |store: &Arc<MemoryConnectorSecrets>| {
+        let held = Arc::clone(store);
+        let config = config_of(&repository);
+        run_with(
+            &repository.path,
+            &["disconnect", "dev-a", "google-ads"],
+            move |io| {
+                io.connector_secrets = held;
+                io.env
+                    .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+            },
+        )
+    };
+
+    // A campaign Farik made is not recorded paused, and with no process driving the project there
+    // is no daemon to pause it with: the browser, where Farik pauses first, is the way.
+    let ran = disconnect(&store);
+    assert_eq!(ran.code, 1, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.err.contains("disconnect_in_the_browser: remove Google Ads on dev-a's page in the browser, where Farik pauses its running ads first"),
+        "{}",
+        ran.err
+    );
+    assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "google-ads")).is_some());
+    assert!(events(&repository, &[EventKind::ConnectorDisconnected]).is_empty());
+
+    // Paused at its budget is no pause for its end: a raise may have started it again.
+    project::record(
+        &repository,
+        "",
+        "marketing_campaign.paused",
+        &json!({
+            "plan": "MP-1", "key": "search-launch",
+            "campaign": "customers/1234567890/campaigns/11", "why": "budget_reached"
+        }),
+    );
+    let ran = disconnect(&store);
+    assert_eq!(ran.code, 1, "{}\n{}", ran.out, ran.err);
+
+    // Recorded paused for its plan's end, nothing runs, and the command disconnects as it does.
+    project::record(
+        &repository,
+        "",
+        "marketing_campaign.paused",
+        &json!({
+            "plan": "MP-1", "key": "search-launch",
+            "campaign": "customers/1234567890/campaigns/11", "why": "plan_ended"
+        }),
+    );
+    let ran = disconnect(&store);
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "google-ads")).is_none());
+    assert_eq!(
+        events(&repository, &[EventKind::ConnectorDisconnected]).len(),
+        1
+    );
+}
+
 /// An opener that follows the address as a browser would, on `runtime`.
 fn following(runtime: &tokio::runtime::Runtime) -> farik::Opener {
     let handle = runtime.handle().clone();

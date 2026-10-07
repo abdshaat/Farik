@@ -17,6 +17,7 @@ use farik_runtime::credential::CredentialError;
 use farik_runtime::daemon::{custom_entry, kit_entry, labelled};
 use farik_runtime::registered_apps::{RegisteredApp, app_for_farik_connector};
 use farik_runtime::sign_in::{SignInError, revoke, start_app_sign_in, start_sign_in};
+use farik_store::marketing::{PausedWhy, campaigns_paused, created_campaigns};
 use serde_json::{Map, Value, json};
 
 use crate::project::Project;
@@ -588,6 +589,14 @@ pub(crate) fn disconnect(
     name: &str,
     io: &mut CliIo<'_>,
 ) -> Result<Report, String> {
+    if name == GOOGLE_ADS && google_ads_still_runs(project)? {
+        // Farik pauses its running ads before this connection goes (spec 6.7), which only the
+        // daemon of a process driving the project can do, in the browser.
+        return Err(format!(
+            "disconnect_in_the_browser: remove Google Ads on {agent}'s page in the browser, where \
+             Farik pauses its running ads first"
+        ));
+    }
     let said = crate::human::said(command(
         project,
         Command::ConnectorDisconnect {
@@ -612,6 +621,23 @@ pub(crate) fn disconnect(
         runtime()?.block_on(revoke(&grant));
     }
     Ok(said)
+}
+
+/// The name of Farik's Google Ads connector.
+const GOOGLE_ADS: &str = "google-ads";
+
+/// Whether a campaign Farik made is not recorded paused for its plan's end: Farik's own pause
+/// before the connection is removed is what the browser's Remove makes, and a campaign recorded
+/// paused for another reason may have been started again since.
+fn google_ads_still_runs(project: &Project) -> Result<bool, String> {
+    let made = created_campaigns(&project.log).map_err(|error| error.to_string())?;
+    let ended: Vec<String> = campaigns_paused(&project.log)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|pause| pause.why == PausedWhy::PlanEnded)
+        .map(|pause| pause.campaign)
+        .collect();
+    Ok(made.iter().any(|each| !ended.contains(&each.campaign)))
 }
 
 /// The user's state folder, where the project's id on this machine is kept and each stdio
