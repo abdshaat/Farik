@@ -474,6 +474,9 @@ impl Orchestrator {
             // Posts go to Buffer between sessions, with no model, so under Farik's own pause
             // for a refused key too, and the owner's pause alone holds them (ADR 0042).
             rules::hand_over_posts(&self.deps).await?;
+            // The orders nobody decided in time, and the renewals coming up, close and flag with
+            // no model too (ADR 0039).
+            rules::close_orders_and_flag_renewals(&self.deps)?;
         }
         if crate::pause::paused(log)? {
             // A paused team still answers its chats (ADR 0026), unless the provider refused the

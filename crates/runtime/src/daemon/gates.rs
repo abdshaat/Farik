@@ -207,6 +207,10 @@ fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
 }
 
 /// The gates' queries, whose params the schema already passed.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm for each query the page asks"
+)]
 pub(super) fn query(
     state: &DaemonState,
     deps: &ToolDeps,
@@ -273,6 +277,7 @@ pub(super) fn query(
         }
         "sites.list" => crate::tools::sites::site_list(&deps.log).map_err(|e| internal(&e)),
         "purchase_orders.list" => purchase_orders_list(deps),
+        "renewals.list" => renewals_list(deps),
         "purchase_order.evaluation" => order_evaluation(deps, params),
         "social_posts.list" => Ok(json!({
             "posts": going_out(&social_posts(&deps.log).map_err(|e| internal(&e))?, deps.clock.now())
@@ -655,6 +660,28 @@ pub(super) async fn call(
         return Ok(filed);
     }
     save(state, &deps, params).await
+}
+
+/// `renewals.list`: the renewals Farik flagged that the owner has not dismissed, oldest first, and
+/// how many rows the last daily check could not read.
+fn renewals_list(deps: &ToolDeps) -> Result<Value, Failure> {
+    let time = |at: DateTime<Utc>| at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
+    let open: Vec<Value> = farik_store::renewals::renewals(&deps.log)
+        .map_err(|e| internal(&e))?
+        .into_iter()
+        .filter(|one| !one.dismissed)
+        .map(|one| {
+            json!({
+                "renewal": one.renewal, "vendor": one.vendor,
+                "renews_on": one.renews_on.to_string(), "decide_by": one.decide_by.to_string(),
+                "flagged_at": time(one.flagged_at),
+            })
+        })
+        .collect();
+    let unreadable = farik_store::renewals::last_check(&deps.log)
+        .map_err(|e| internal(&e))?
+        .map_or(0, |check| check.unreadable);
+    Ok(json!({ "open": open, "unreadable": unreadable }))
 }
 
 /// `purchase_orders.list`: every order the log holds, oldest first, as the Orders section words it.
@@ -4268,6 +4295,67 @@ pub(super) mod tests {
             .clone();
         assert_eq!(dev_a["line"], "Answering your chat", "{dev_a}");
         assert_eq!(dev_a["purpose"], "chat", "{dev_a}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn renewals_list_answers_open_and_unreadable() {
+        let harness = Harness::with_procurement("gates-renewals-list");
+        let ask = || {
+            query(
+                &harness.daemon,
+                "renewals.list",
+                &json!({}),
+                "renewalsListResult",
+            )
+        };
+        assert_eq!(
+            ask(),
+            json!({ "open": [], "unreadable": 0 }),
+            "before any run"
+        );
+
+        // A register with one renewal due and two rows Farik cannot read, read by the daily run.
+        let folder = harness.procurement_folder();
+        let cells = |cells: &[&str]| -> Vec<crate::tools::sheets::CellInput> {
+            cells
+                .iter()
+                .map(|cell| crate::tools::sheets::CellInput::text(cell))
+                .collect()
+        };
+        crate::tools::sheets::write_new_workbook(
+            &folder,
+            &folder.join("vendors.xlsx"),
+            &[crate::tools::sheets::SheetInput::new(
+                "Vendors",
+                vec![
+                    cells(&["vendor", "renews_on", "notice_days", "status"]),
+                    cells(&["Vercel", "2026-10-02", "7", "active"]),
+                    cells(&["Notion", "next month", "", "active"]),
+                    cells(&["Slack", "2026-10-10", "-3", "trial"]),
+                ],
+            )],
+        )
+        .expect("a register");
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        crate::procurement::check_renewals(deps, &team, at()).expect("the daily run");
+
+        let listed = ask();
+        assert_eq!(listed["unreadable"], 2);
+        let open = listed["open"].as_array().expect("a list");
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0]["vendor"], "Vercel");
+        assert_eq!(open[0]["renews_on"], "2026-10-02");
+        assert_eq!(open[0]["decide_by"], "2026-09-25");
+        assert_eq!(open[0]["flagged_at"], "2026-09-22T12:00:00Z");
+        let number = open[0]["renewal"].as_u64().expect("a number");
+
+        // Dismissed, it is not open; what Farik could not read is still said.
+        harness
+            .project
+            .record("", "renewal.dismissed", &json!({ "renewal": number }));
+        assert_eq!(ask(), json!({ "open": [], "unreadable": 2 }));
     }
 
     /// `proc`'s order 1 on FRK-1 from `seller`, drafted in its session as the tool records it, with

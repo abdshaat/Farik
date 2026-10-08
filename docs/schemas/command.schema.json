@@ -51,7 +51,8 @@
         "purchase_order_place",
         "purchase_order_receive",
         "purchase_order_close",
-        "purchase_order_update"
+        "purchase_order_update",
+        "renewal_dismiss"
       ]
     },
     "commandBodyWire": {
@@ -87,6 +88,7 @@
         { "$ref": "#/$defs/purchaseOrderDecideBody" },
         { "$ref": "#/$defs/purchaseOrderStepBody" },
         { "$ref": "#/$defs/purchaseOrderUpdateBody" },
+        { "$ref": "#/$defs/renewalDismissBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -387,6 +389,16 @@
         "status": { "type": "string", "maxLength": 32 },
         "note": { "type": "string", "maxLength": 600 },
         "expected_on": { "type": "string", "format": "date" }
+      }
+    },
+    "renewalDismissBody": {
+      "title": "Renewal Dismiss Body",
+      "description": "The owner dismisses a renewal coming up, or sends a request to review it and so dismisses it (docs/SPEC.md 6.10; ADR 0039): renewal is the sequence number of its renewal.flagged. renewal.dismissed is appended with no task, no agent and no session. Refused unknown_renewal when renewal names no renewal.flagged and renewal_dismissed when it was dismissed before.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["renewal"],
+      "properties": {
+        "renewal": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
       }
     },
     "skillLevel": {

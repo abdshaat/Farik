@@ -230,6 +230,7 @@ pub(super) async fn handle(
             note,
             expected_on,
         } => order_update(tools, order, &status, note, expected_on),
+        Command::RenewalDismiss { renewal } => renewal_dismiss(tools, renewal),
         Command::ToolApprove { approval, note } => decide_tool_call(tools, approval, note, true),
         Command::ToolRefuse { approval, note } => decide_tool_call(tools, approval, note, false),
         Command::RunStop => {
@@ -1123,6 +1124,40 @@ fn order_update(
             "Corrected the status of {} to {}.",
             seller_of(record),
             fields.status
+        ),
+        events: vec![seq],
+    })
+}
+
+/// Dismisses the renewal `renewal` coming up, once: `renewal.dismissed` with no task, no agent and
+/// no session. Refused `unknown_renewal` for a number that is no `renewal.flagged`, and
+/// `renewal_dismissed` for one dismissed before.
+fn renewal_dismiss(tools: &ToolDeps, renewal: u64) -> Result<CommandReport, CommandError> {
+    let _dismissing = crate::locked(&crate::procurement::RENEWALS);
+    let all = farik_store::renewals::renewals(&tools.log).map_err(failed)?;
+    let Some(one) = all.iter().find(|one| one.renewal == renewal) else {
+        return Err(order_refusal(
+            "unknown_renewal",
+            format!("event {renewal} is no renewal Farik flagged"),
+        ));
+    };
+    if one.dismissed {
+        return Err(order_refusal(
+            "renewal_dismissed",
+            format!(
+                "the renewal of {} was dismissed already",
+                crate::tools::sites::shown(&one.vendor)
+            ),
+        ));
+    }
+    let body = farik_protocol::event::RenewalDismissedBody {
+        renewal: NonZeroU64::new(renewal).ok_or_else(|| failed("a renewal's number is not 0"))?,
+    };
+    let seq = append(tools, None, EventBody::RenewalDismissed(body))?;
+    Ok(CommandReport {
+        said: format!(
+            "Dismissed the renewal of {}.",
+            crate::tools::sites::shown(&one.vendor)
         ),
         events: vec![seq],
     })
@@ -5658,5 +5693,100 @@ mod tests {
                 "{what} recorded one event"
             );
         }
+    }
+    /// A renewal Farik flagged: the vendor Vercel renewing on 2026-11-30, decide by 2026-10-31.
+    fn renewal_flagged(harness: &Harness, vendor: &str) -> u64 {
+        harness
+            .project
+            .record(
+                "",
+                "renewal.flagged",
+                &json!({ "vendor": vendor, "renews_on": "2026-11-30", "decide_by": "2026-10-31" }),
+            )
+            .envelope
+            .seq
+    }
+
+    fn renewals_open(harness: &Harness) -> Vec<u64> {
+        farik_store::renewals::renewals(&harness.project.deps.log)
+            .expect("the log reads")
+            .iter()
+            .filter(|one| !one.dismissed)
+            .map(|one| one.renewal)
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn dismissing_closes_a_renewal() {
+        let harness = Harness::with_procurement("human-renewal-dismiss");
+        let orchestrator = an_orchestrator(&harness);
+        let first = renewal_flagged(&harness, "Vercel");
+        let second = renewal_flagged(&harness, "Notion");
+        assert_eq!(renewals_open(&harness), [first, second]);
+
+        let report = handled(&orchestrator, Command::RenewalDismiss { renewal: first }).await;
+
+        let dismissed = last(&harness, EventKind::RenewalDismissed).expect("recorded");
+        assert_eq!(report.events, vec![dismissed.envelope.seq]);
+        assert_eq!(
+            (
+                &dismissed.envelope.ids.task_id,
+                &dismissed.envelope.ids.agent_id,
+                &dismissed.envelope.ids.session_id
+            ),
+            (&None, &None, &None),
+            "the owner's, about no task"
+        );
+        let EventBody::RenewalDismissed(body) = &dismissed.body else {
+            panic!("a dismissal");
+        };
+        assert_eq!(body.renewal.get(), first);
+        assert_eq!(renewals_open(&harness), [second]);
+
+        let reason = refused(&orchestrator, Command::RenewalDismiss { renewal: first }).await;
+        assert!(reason.starts_with("renewal_dismissed: "), "{reason}");
+        // A number that is no renewal: nothing at all, and an event of another kind.
+        for number in [99_999, dismissed.envelope.seq] {
+            let reason = refused(&orchestrator, Command::RenewalDismiss { renewal: number }).await;
+            assert!(
+                reason.starts_with("unknown_renewal: "),
+                "{number}: {reason}"
+            );
+        }
+        assert_eq!(harness.events(&[EventKind::RenewalDismissed]).len(), 1);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn two_dismissals_racing_on_one_renewal_let_one_through() {
+        let harness = Harness::with_procurement("human-renewal-race");
+        let renewal = renewal_flagged(&harness, "Vercel");
+        let deps = crate::daemon::fixtures::slowed_deps(
+            &harness.project,
+            std::time::Duration::from_millis(50),
+        );
+        let barrier = std::sync::Barrier::new(2);
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let dismissals: Vec<_> = (0..2)
+                .map(|_| {
+                    let (deps, barrier) = (&deps, &barrier);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        super::renewal_dismiss(deps, renewal)
+                    })
+                })
+                .collect();
+            dismissals
+                .into_iter()
+                .map(|one| one.join().expect("the dismissal ends"))
+                .collect()
+        });
+        assert_eq!(
+            results.iter().filter(|one| one.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        assert_eq!(harness.events(&[EventKind::RenewalDismissed]).len(), 1);
     }
 }

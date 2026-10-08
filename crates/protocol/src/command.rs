@@ -19,11 +19,11 @@ use crate::generated::command::{
     HumanSendBackBody, HumanSendBackBodySubject, MarketingPlanDecideBody,
     MarketingPlanDecideBodyDecision, MarketingPlanEndBody, MessagePostBody,
     PurchaseOrderDecideBody, PurchaseOrderDecideBodyDecision, PurchaseOrderStepBody,
-    PurchaseOrderUpdateBody, QuestionAnswerBody, RequestTriageBody, RequestTriageBodySize,
-    SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody, SkillConfirmBody, SkillLevel,
-    SkillRemoveBody, SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision,
-    SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
-    ToolDecisionBody,
+    PurchaseOrderUpdateBody, QuestionAnswerBody, RenewalDismissBody, RequestTriageBody,
+    RequestTriageBodySize, SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody,
+    SkillConfirmBody, SkillLevel, SkillRemoveBody, SkillSaveBody, SocialPostDecideBody,
+    SocialPostDecideBodyDecision, SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody,
+    TaskTransitionBody, ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -363,6 +363,11 @@ pub enum Command {
         /// The day the seller expects the order.
         expected_on: Option<chrono::NaiveDate>,
     },
+    /// Dismiss a renewal coming up (ADR 0039).
+    RenewalDismiss {
+        /// The renewal's number, the seq of its `renewal.flagged`.
+        renewal: u64,
+    },
     /// Allow a post written outside the plan, or not allow it (ADR 0042).
     SocialPostDecide {
         /// The post's number.
@@ -603,6 +608,12 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
                 status: body.status.to_string(),
                 note: body.note.map(|note| note.as_str().to_string()),
                 expected_on: body.expected_on,
+            })
+        }
+        CommandName::RenewalDismiss => {
+            let body: RenewalDismissBody = read_body(body, name)?;
+            Ok(Command::RenewalDismiss {
+                renewal: body.renewal.get(),
             })
         }
         CommandName::SocialPostDecide => {
@@ -927,6 +938,9 @@ pub fn command_to_value(command: &Command) -> Value {
                 renews_on.map(|day| json!(day.to_string())),
             ),
         ),
+        Command::RenewalDismiss { renewal } => {
+            (CommandName::RenewalDismiss, json!({ "renewal": renewal }))
+        }
         Command::PurchaseOrderClose { order, note } => (
             CommandName::PurchaseOrderClose,
             with_optional(
@@ -2012,6 +2026,25 @@ mod tests {
             "purchase_order_update",
             &json!({ "order": 1, "status": "placed" }),
         );
+    }
+
+    #[test]
+    fn reads_and_writes_the_renewal_dismiss_command() {
+        let command = Command::RenewalDismiss { renewal: 7 };
+        assert_eq!(read("renewal_dismiss", &json!({ "renewal": 7 })), command);
+        assert_eq!(
+            command_to_value(&command),
+            json!({ "command": "renewal_dismiss", "body": { "renewal": 7 } })
+        );
+        for body in [
+            json!({}),
+            json!({ "renewal": 0 }),
+            json!({ "renewal": "7" }),
+            json!({ "renewal": 7, "note": "x" }),
+        ] {
+            let errors = refusal(&json!({ "command": "renewal_dismiss", "body": body }));
+            assert!(!errors.is_empty(), "{body}");
+        }
     }
 
     #[test]

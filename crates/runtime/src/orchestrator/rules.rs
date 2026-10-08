@@ -100,6 +100,28 @@ pub(super) async fn end_marketing_plans(
     Ok(events)
 }
 
+/// What the clock closes and flags for the Procurement Specialist, with no model (ADR 0039): the
+/// orders nobody decided or placed in 30 days, and the renewals the register says are coming up,
+/// the check once a UTC day. It starts no session and does not use up the tick, so it runs while
+/// the team is paused too.
+///
+/// # Errors
+///
+/// What the log or the team file refused.
+pub(super) fn close_orders_and_flag_renewals(
+    deps: &OrchestratorDeps,
+) -> Result<(), OrchestratorError> {
+    let tools = &deps.tools;
+    tools.projections.catch_up()?;
+    let now = tools.clock.now();
+    let failed = |error: crate::tools::ToolError| OrchestratorError::Refused {
+        reason: format!("procurement_tick_failed: {error}"),
+    };
+    crate::procurement::expire_orders(tools, now).map_err(failed)?;
+    let team = tools.files.read_team()?;
+    crate::procurement::check_renewals(tools, &team, now).map_err(failed)
+}
+
 /// The ends that dates bring to the plans of the log now.
 fn due_ends(
     tools: &crate::tools::ToolDeps,

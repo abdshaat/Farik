@@ -67,7 +67,8 @@
         "social_posts.list",
         "sites.list",
         "purchase_orders.list",
-        "purchase_order.evaluation"
+        "purchase_order.evaluation",
+        "renewals.list"
       ]
     },
     "subscribeRequest": {
@@ -300,6 +301,9 @@
             },
             {
               "$ref": "#/$defs/purchaseOrderEvaluationQuery"
+            },
+            {
+              "$ref": "#/$defs/renewalsListQuery"
             },
             {
               "$ref": "#/$defs/metricsQuery"
@@ -2270,6 +2274,16 @@
         "params": { "type": "object", "additionalProperties": false, "properties": {} }
       }
     },
+    "renewalsListQuery": {
+      "title": "Renewals List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "renewals.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
     "purchaseOrderEvaluationQuery": {
       "title": "Purchase Order Evaluation Query",
       "type": "object",
@@ -3602,6 +3616,30 @@
             }
           }
         }
+      }
+    },
+    "renewalsListResult": {
+      "description": "The renewals coming up (docs/SPEC.md 6.10; ADR 0039): open is every renewal Farik flagged that the owner has not dismissed, oldest first, each with renewal, its number, vendor (the register's own text, untrusted), renews_on, decide_by, the last day to change or cancel it, and flagged_at; unreadable is how many rows of the register the last daily check could not read, 0 before any check.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["open", "unreadable"],
+      "properties": {
+        "open": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["renewal", "vendor", "renews_on", "decide_by", "flagged_at"],
+            "properties": {
+              "renewal": { "type": "integer", "minimum": 1 },
+              "vendor": { "type": "string" },
+              "renews_on": { "type": "string", "format": "date" },
+              "decide_by": { "type": "string", "format": "date" },
+              "flagged_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "unreadable": { "type": "integer", "minimum": 0 }
       }
     },
     "purchaseOrderEvaluationResult": {

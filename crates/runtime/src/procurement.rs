@@ -1,19 +1,36 @@
 //! The Procurement Specialist's purchase orders and renewals (`docs/SPEC.md` 6.10, ADR 0039): the
 //! locks under which an order is numbered, decided, placed, received, closed and expired, the rules
-//! of an order's follow-up status, and how an order is worded on the wire.
+//! of an order's follow-up status, how an order is worded on the wire, and the two rules the clock
+//! runs with no model: the orders that close by themselves and the renewals coming up.
 
+use std::io::Cursor;
+use std::path::Path;
 use std::sync::Mutex;
 
+use calamine::{Data, Range, Reader as _, Xlsx, open_workbook_from_rs};
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
-use farik_protocol::event::PurchaseOrderStatus;
-use farik_store::purchase_orders::{PurchaseOrderRecord, expires_at, overdue};
+use farik_core::contract::{Role, TaskId};
+use farik_core::renewals::{RegisterRow, due_renewals};
+use farik_core::team::{Team, private_folder};
+use farik_protocol::event::{
+    EventBody, EventIds, PurchaseOrderExpiredBody, PurchaseOrderStatus, RenewalCheckedBody,
+    RenewalFlaggedBody, new_event,
+};
+use farik_store::purchase_orders::{PurchaseOrderRecord, expires_at, overdue, purchase_orders};
+use farik_store::renewals::{last_check, renewals};
 use serde_json::{Value, json};
+
+use crate::tools::{ToolDeps, ToolError};
 
 /// Held from the first read of the orders to the record that changes them: by the agent's draft,
 /// by each of the owner's commands, by a status and by the expiry, so that two of them never take
 /// one number, decide one order twice or expire an order being placed. One lock for every project
 /// in the process.
 pub(crate) static ORDERS: Mutex<()> = Mutex::new(());
+
+/// Held from the first read of the renewals to the record that changes them: by the daily check
+/// and by the owner's dismissal.
+pub(crate) static RENEWALS: Mutex<()> = Mutex::new(());
 
 /// The most characters a follow-up status's note has.
 const MOST_STATUS_NOTE: usize = 300;
@@ -191,4 +208,656 @@ pub fn order_row(record: &PurchaseOrderRecord, today: NaiveDate, detail: bool) -
         row["why"] = json!(body.why.to_string());
     }
     row
+}
+
+/// An event of Farik's own, recorded at `now`: about `task` when it is about one, and with no
+/// agent and no session.
+fn record_event(
+    tools: &ToolDeps,
+    task: Option<&TaskId>,
+    body: EventBody,
+    now: DateTime<Utc>,
+) -> Result<(), ToolError> {
+    let ids = EventIds {
+        task_id: task.cloned(),
+        ..tools.ids.clone()
+    };
+    let failed = |error: &dyn std::fmt::Display| ToolError::Failed {
+        detail: error.to_string(),
+    };
+    let event = new_event(body, now, ids).map_err(|error| ToolError::Failed {
+        detail: format!("the event cannot be stamped: {error:?}"),
+    })?;
+    let appended = tools.log.append(&event).map_err(|error| failed(&error))?;
+    tools
+        .projections
+        .apply(&appended)
+        .map_err(|error| failed(&error))
+}
+
+/// Closes the orders nobody decided or placed in time: records `purchase_order.expired` for each
+/// order drafted 30 days ago or more and not decided, and each approved 30 days ago or more and
+/// not placed, whatever its task's state. A placed order never closes by itself. It runs under the
+/// orders' lock, so that an expiry and the owner's step on the same order are not both taken.
+///
+/// # Errors
+///
+/// `Failed` when the log cannot be read or written.
+pub(crate) fn expire_orders(tools: &ToolDeps, now: DateTime<Utc>) -> Result<(), ToolError> {
+    let _held = crate::locked(&ORDERS);
+    let records = purchase_orders(&tools.log).map_err(|error| ToolError::Failed {
+        detail: error.to_string(),
+    })?;
+    for record in records
+        .iter()
+        .filter(|record| expires_at(record).is_some_and(|at| at <= now))
+    {
+        let body: PurchaseOrderExpiredBody =
+            serde_json::from_value(json!({ "order": record.order })).map_err(|error| {
+                ToolError::Failed {
+                    detail: error.to_string(),
+                }
+            })?;
+        record_event(
+            tools,
+            Some(&record.task_id),
+            EventBody::PurchaseOrderExpired(body),
+            now,
+        )?;
+    }
+    Ok(())
+}
+
+/// A cell as the text a person sees: a date cell as its ISO day, a whole number as its digits.
+fn cell_text(cell: &Data) -> String {
+    match cell {
+        Data::String(text) | Data::DateTimeIso(text) | Data::DurationIso(text) => text.clone(),
+        Data::Int(number) => number.to_string(),
+        Data::Float(number) => number.to_string(),
+        Data::Bool(flag) => flag.to_string(),
+        Data::DateTime(moment) if !moment.is_duration() => {
+            let (year, month, day, ..) = moment.to_ymd_hms_milli();
+            format!("{year:04}-{month:02}-{day:02}")
+        }
+        Data::DateTime(moment) => moment.as_f64().to_string(),
+        Data::Empty | Data::Error(_) => String::new(),
+    }
+}
+
+/// How many rows of the sheet below its first row hold something; `range` starts at the first row
+/// that holds something, so when that is not the sheet's first row, every row of it is below it.
+fn rows_below_the_first(range: &Range<Data>) -> u32 {
+    let first_row_is_empty = range.start().is_some_and(|at| at.0 != 0);
+    let held = range
+        .rows()
+        .skip(usize::from(!first_row_is_empty))
+        .filter(|row| row.iter().any(|cell| !cell_text(cell).is_empty()))
+        .count();
+    u32::try_from(held).unwrap_or(u32::MAX)
+}
+
+/// The `Vendors` sheet of the register at `path`: each row's `vendor`, `renews_on`, `notice_days`
+/// and `status` as text, the columns found by their heading in the sheet's first row (case and
+/// surrounding spaces ignored), so that a column the user moved still reads; and how many rows it
+/// could not read for want of a column to read them by. A file that is no workbook, a workbook with
+/// no `Vendors` sheet and a sheet with no rows count one; a sheet whose first row lacks any of
+/// the four headings counts each of its rows below the first that holds something, and at least
+/// one.
+///
+/// # Errors
+///
+/// What `read_workbook_file` refuses: a file that is not there or past 10 MiB.
+pub(crate) fn read_register(path: &Path) -> Result<(Vec<RegisterRow>, u32), ToolError> {
+    let bytes = crate::tools::sheets::read_workbook_file(path, "vendors.xlsx")?;
+    let Ok(mut book) = open_workbook_from_rs::<Xlsx<_>, _>(Cursor::new(bytes)) else {
+        return Ok((Vec::new(), 1));
+    };
+    let Ok(range) = book.worksheet_range("Vendors") else {
+        return Ok((Vec::new(), 1));
+    };
+    let headings: Vec<String> = range
+        .rows()
+        .next()
+        .filter(|_| range.start().is_some_and(|at| at.0 == 0))
+        .map(|first| {
+            first
+                .iter()
+                .map(|cell| cell_text(cell).trim().to_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
+    let column = |name: &str| headings.iter().position(|heading| heading == name);
+    let (Some(vendor), Some(renews_on), Some(notice_days), Some(status)) = (
+        column("vendor"),
+        column("renews_on"),
+        column("notice_days"),
+        column("status"),
+    ) else {
+        return Ok((Vec::new(), rows_below_the_first(&range).max(1)));
+    };
+    let rows = range
+        .rows()
+        .skip(1)
+        .filter(|row| row.iter().any(|cell| !cell_text(cell).is_empty()))
+        .map(|row| {
+            let at = |column: usize| row.get(column).map(cell_text).unwrap_or_default();
+            RegisterRow {
+                vendor: at(vendor),
+                renews_on: at(renews_on),
+                notice_days: at(notice_days),
+                status: at(status),
+            }
+        })
+        .collect();
+    Ok((rows, 0))
+}
+
+/// The register's daily check, once per UTC day and with no model: reads the `Vendors` sheet of
+/// `vendors.xlsx` in the Procurement Specialist's folder, records `renewal.flagged` for each
+/// renewal whose decision date is two weeks off or nearer that was not flagged before, and
+/// `renewal.checked` with how many it flagged and how many rows it could not read, which is how
+/// the next tick knows the day's check ran. It runs only when the team has an active Procurement
+/// Specialist and the register is a file in its folder; a register it cannot open counts as one
+/// row it cannot read.
+///
+/// # Errors
+///
+/// `Failed` when the log cannot be read or written.
+pub(crate) fn check_renewals(
+    tools: &ToolDeps,
+    team: &Team,
+    now: DateTime<Utc>,
+) -> Result<(), ToolError> {
+    let held = team
+        .active_agents()
+        .any(|agent| Role::from(agent.role) == Role::ProcurementSpecialist);
+    let Some(folder) = private_folder(Role::ProcurementSpecialist).filter(|_| held) else {
+        return Ok(());
+    };
+    let Ok(path) = crate::tools::sheets::private_path(tools.files.root(), folder, "vendors.xlsx")
+    else {
+        return Ok(());
+    };
+    if !path.is_file() {
+        return Ok(());
+    }
+    let failed = |error: &dyn std::fmt::Display| ToolError::Failed {
+        detail: error.to_string(),
+    };
+    let _held = crate::locked(&RENEWALS);
+    let today = now.date_naive();
+    if last_check(&tools.log)
+        .map_err(|error| failed(&error))?
+        .is_some_and(|check| check.at.date_naive() == today)
+    {
+        return Ok(());
+    }
+    let (rows, unreadable) = read_register(&path).unwrap_or_else(|_| (Vec::new(), 1));
+    let flagged: Vec<(String, NaiveDate)> = renewals(&tools.log)
+        .map_err(|error| failed(&error))?
+        .into_iter()
+        .map(|one| (one.vendor, one.renews_on))
+        .collect();
+    let (due, unread) = due_renewals(&rows, today, &flagged);
+    for renewal in &due {
+        let body: RenewalFlaggedBody = serde_json::from_value(json!({
+            "vendor": renewal.vendor,
+            "renews_on": renewal.renews_on.to_string(),
+            "decide_by": renewal.decide_by.to_string(),
+        }))
+        .map_err(|error| failed(&error))?;
+        record_event(tools, None, EventBody::RenewalFlagged(body), now)?;
+    }
+    let body: RenewalCheckedBody = serde_json::from_value(json!({
+        "due": due.len(),
+        "unreadable": unreadable.saturating_add(unread),
+    }))
+    .map_err(|error| failed(&error))?;
+    record_event(tools, None, EventBody::RenewalChecked(body), now)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use chrono::{DateTime, Duration, Utc};
+    use farik_protocol::clock::MovableClock;
+    use farik_protocol::event::{EventBody, EventKind};
+    use farik_store::purchase_orders::{OrderState, overdue, purchase_orders};
+    use serde_json::json;
+
+    use crate::orchestrator::fixtures::Harness;
+    use crate::tools::sheets::{CellInput, SheetInput, write_new_workbook};
+
+    fn utc(text: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(text)
+            .expect("a time")
+            .with_timezone(&Utc)
+    }
+
+    /// An order `number` that `proc` drafted on FRK-1 at `when`.
+    fn drafted(harness: &Harness, number: u64, when: DateTime<Utc>) {
+        harness.project.record_by(
+            Some("proc"),
+            when,
+            "FRK-1",
+            "purchase_order.drafted",
+            &json!({
+                "order": number, "seller": format!("Seller {number}"), "seller_contact": "",
+                "lines": [{ "item": "Box", "quantity": 1, "unit": "", "unit_price": "1.00", "line_total": "1.00" }],
+                "currency": "USD", "period": "once", "total": "1.00", "delivery": "", "terms": "",
+                "url": "", "evaluation": "evaluations/boxes.md", "why": "A seller of boxes for the team."
+            }),
+        );
+    }
+
+    fn states(harness: &Harness) -> Vec<(u64, OrderState)> {
+        purchase_orders(&harness.project.deps.log)
+            .expect("the log reads")
+            .iter()
+            .map(|record| (record.order, record.state))
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_order_closes_by_itself_after_thirty_days() {
+        let harness = Harness::with_procurement("procurement-expiry");
+        let start = utc("2026-09-01T09:00:00Z");
+        // 1 is drafted and left; 2 is approved on day 5 and never placed; 3 is placed on day 5.
+        drafted(&harness, 1, start);
+        drafted(&harness, 2, start + Duration::days(1));
+        drafted(&harness, 3, start + Duration::days(1));
+        for (kind, body) in [
+            ("purchase_order.approved", json!({ "order": 2, "note": "" })),
+            ("purchase_order.approved", json!({ "order": 3, "note": "" })),
+            (
+                "purchase_order.placed",
+                json!({ "order": 3, "placed_on": "2026-09-06" }),
+            ),
+        ] {
+            harness
+                .project
+                .record_at(start + Duration::days(5), "FRK-1", kind, &body);
+        }
+        let clock = Arc::new(MovableClock::new(start));
+        let orchestrator =
+            harness.orchestrator_on(harness.recorded(Vec::new()), Arc::clone(&clock));
+        let expired = |harness: &Harness| harness.events(&[EventKind::PurchaseOrderExpired]);
+
+        // Not a minute before the drafted order's thirtieth day.
+        clock.set(start + Duration::days(30) - Duration::minutes(1));
+        orchestrator.tick().await.expect("a tick");
+        assert!(expired(&harness).is_empty());
+
+        clock.set(start + Duration::days(30));
+        orchestrator.tick().await.expect("a tick");
+        let events = expired(&harness);
+        assert_eq!(events.len(), 1);
+        let ids = &events[0].envelope.ids;
+        assert_eq!(
+            ids.task_id.as_ref().map(|task| task.as_str()),
+            Some("FRK-1")
+        );
+        assert_eq!(
+            (&ids.agent_id, &ids.session_id),
+            (&None, &None),
+            "Farik's own"
+        );
+        let EventBody::PurchaseOrderExpired(body) = &events[0].body else {
+            panic!("an expiry");
+        };
+        assert_eq!(body.order.get(), 1);
+        assert_eq!(events[0].envelope.recorded_at, start + Duration::days(30));
+        assert_eq!(
+            states(&harness),
+            [
+                (1, OrderState::Expired),
+                (2, OrderState::Approved),
+                (3, OrderState::Placed)
+            ]
+        );
+
+        // An approved order, thirty days after its approval; two ticks record one expiry.
+        clock.set(start + Duration::days(35) - Duration::minutes(1));
+        orchestrator.tick().await.expect("a tick");
+        assert_eq!(expired(&harness).len(), 1);
+        clock.set(start + Duration::days(35));
+        orchestrator.tick().await.expect("a tick");
+        orchestrator.tick().await.expect("a tick");
+        assert_eq!(
+            expired(&harness).len(),
+            2,
+            "one expiry for each, however many ticks"
+        );
+        assert_eq!(
+            states(&harness),
+            [
+                (1, OrderState::Expired),
+                (2, OrderState::Expired),
+                (3, OrderState::Placed)
+            ]
+        );
+
+        // A placed order never closes by itself, and is overdue past its expected day.
+        clock.set(start + Duration::days(400));
+        orchestrator.tick().await.expect("a tick");
+        assert_eq!(states(&harness)[2], (3, OrderState::Placed));
+        let placed = purchase_orders(&harness.project.deps.log)
+            .expect("reads")
+            .remove(2);
+        assert!(!overdue(
+            &placed,
+            chrono::NaiveDate::from_ymd_opt(2026, 10, 6).expect("a date")
+        ));
+        assert!(overdue(
+            &placed,
+            chrono::NaiveDate::from_ymd_opt(2026, 10, 7).expect("a date")
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_paused_team_closes_its_orders_too() {
+        let harness = Harness::with_procurement("procurement-expiry-paused");
+        let start = utc("2026-09-01T09:00:00Z");
+        drafted(&harness, 1, start);
+        harness
+            .project
+            .record("", "team.paused", &json!({ "by": "human" }));
+        let clock = Arc::new(MovableClock::new(start + Duration::days(31)));
+        let orchestrator = harness.orchestrator_on(harness.recorded(Vec::new()), clock);
+
+        orchestrator.tick().await.expect("a tick");
+
+        assert_eq!(states(&harness), [(1, OrderState::Expired)]);
+    }
+
+    /// The Procurement Specialist's register with `rows` under its headings, replacing any.
+    fn write_register(harness: &Harness, rows: Vec<Vec<CellInput>>) {
+        let folder = harness.procurement_folder();
+        let path = folder.join("vendors.xlsx");
+        let _ = std::fs::remove_file(&path);
+        write_new_workbook(&folder, &path, &[SheetInput::new("Vendors", rows)])
+            .expect("a register is written");
+    }
+
+    fn text_row(cells: &[&str]) -> Vec<CellInput> {
+        cells.iter().map(|cell| CellInput::text(cell)).collect()
+    }
+
+    fn vendor_row(vendor: &str, renews_on: &str, notice: &str, status: &str) -> Vec<CellInput> {
+        text_row(&[vendor, renews_on, notice, status])
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_tick_runs_once_a_day_without_a_session() {
+        let harness = Harness::with_procurement("procurement-renewals");
+        let heading = || text_row(&["vendor", "renews_on", "notice_days", "status"]);
+        write_register(
+            &harness,
+            vec![
+                heading(),
+                vendor_row("Vercel", "2026-10-20", "7", "active"),
+                vendor_row("Notion", "next month", "", "active"),
+                vendor_row("Old", "2026-10-10", "0", "cancelled"),
+                vendor_row("Later", "2027-01-01", "30", "active"),
+            ],
+        );
+        let clock = Arc::new(MovableClock::new(utc("2026-10-05T08:00:00Z")));
+        let orchestrator =
+            harness.orchestrator_on(harness.recorded(Vec::new()), Arc::clone(&clock));
+
+        orchestrator.tick().await.expect("a tick");
+        clock.set(utc("2026-10-05T20:00:00Z"));
+        orchestrator.tick().await.expect("a second tick");
+
+        let flagged = harness.events(&[EventKind::RenewalFlagged]);
+        assert_eq!(
+            flagged.len(),
+            1,
+            "one flag for a due row, however many ticks"
+        );
+        let EventBody::RenewalFlagged(body) = &flagged[0].body else {
+            panic!("a flag");
+        };
+        assert_eq!(body.vendor.to_string(), "Vercel");
+        assert_eq!(body.renews_on.to_string(), "2026-10-20");
+        assert_eq!(body.decide_by.to_string(), "2026-10-13");
+        let ids = &flagged[0].envelope.ids;
+        assert_eq!(
+            (&ids.task_id, &ids.agent_id, &ids.session_id),
+            (&None, &None, &None)
+        );
+        let checked = harness.events(&[EventKind::RenewalChecked]);
+        assert_eq!(checked.len(), 1, "one check a UTC day");
+        let EventBody::RenewalChecked(body) = &checked[0].body else {
+            panic!("a check");
+        };
+        assert_eq!((body.due, body.unreadable), (1, 1));
+        assert!(
+            harness.events(&[EventKind::SessionStarted]).is_empty(),
+            "no model runs for it"
+        );
+
+        // The next day it checks again and flags nothing twice; a row that became due is flagged.
+        write_register(
+            &harness,
+            vec![
+                heading(),
+                vendor_row("Vercel", "2026-10-20", "7", "active"),
+                vendor_row("Later", "2026-10-30", "30", "trial"),
+            ],
+        );
+        clock.set(utc("2026-10-06T00:00:00Z"));
+        orchestrator.tick().await.expect("a tick");
+        assert_eq!(harness.events(&[EventKind::RenewalChecked]).len(), 2);
+        let flagged = harness.events(&[EventKind::RenewalFlagged]);
+        assert_eq!(flagged.len(), 2);
+        let EventBody::RenewalFlagged(body) = &flagged[1].body else {
+            panic!("a flag");
+        };
+        assert_eq!(body.vendor.to_string(), "Later");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_tick_reads_a_register_only_where_there_is_one() {
+        let clock = || Arc::new(MovableClock::new(utc("2026-10-05T08:00:00Z")));
+        let register = || {
+            vec![
+                text_row(&["vendor", "renews_on", "notice_days", "status"]),
+                vendor_row("Vercel", "2026-10-20", "7", "active"),
+            ]
+        };
+        // No Procurement Specialist on the team: the register, if any, is nobody's to watch.
+        let without = Harness::new("procurement-renewals-no-role", |_| {});
+        write_register(&without, register());
+        let orchestrator = without.orchestrator_on(without.recorded(Vec::new()), clock());
+        orchestrator.tick().await.expect("a tick");
+        assert!(
+            without
+                .events(&[EventKind::RenewalChecked, EventKind::RenewalFlagged])
+                .is_empty()
+        );
+        // The role, and no register.
+        let none = Harness::with_procurement("procurement-renewals-no-register");
+        let orchestrator = none.orchestrator_on(none.recorded(Vec::new()), clock());
+        orchestrator.tick().await.expect("a tick");
+        assert!(
+            none.events(&[EventKind::RenewalChecked, EventKind::RenewalFlagged])
+                .is_empty()
+        );
+        // A retired Procurement Specialist is no one to watch for.
+        let retired = Harness::with_procurement("procurement-renewals-retired");
+        write_register(&retired, register());
+        let orchestrator = retired.orchestrator_on(retired.recorded(Vec::new()), clock());
+        for id in ["proc", "proc-2"] {
+            orchestrator
+                .handle(farik_protocol::command::Command::AgentUpdate {
+                    agent_id: id.to_string(),
+                    status: farik_core::team::AgentStatus::Retired,
+                })
+                .await
+                .expect("the agent is retired");
+        }
+        orchestrator.tick().await.expect("a tick");
+        assert!(retired.events(&[EventKind::RenewalChecked]).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_columns_by_their_header() {
+        use super::read_register;
+        let harness = Harness::with_procurement("procurement-register");
+        let path = harness.procurement_folder().join("vendors.xlsx");
+        let rows_of = |harness: &Harness, rows: Vec<Vec<CellInput>>| {
+            write_register(harness, rows);
+            read_register(&path).expect("the register reads")
+        };
+        let row = |vendor: &str, renews_on: &str, notice: &str, status: &str| {
+            farik_core::renewals::RegisterRow {
+                vendor: vendor.to_string(),
+                renews_on: renews_on.to_string(),
+                notice_days: notice.to_string(),
+                status: status.to_string(),
+            }
+        };
+
+        // The columns in any order and among others, a date cell read as its day, a whole number
+        // as its digits, a heading's case and spaces ignored.
+        let (rows, unreadable) = rows_of(
+            &harness,
+            vec![
+                text_row(&["Renews_on ", "notes", " VENDOR", "status", "notice_days"]),
+                vec![
+                    CellInput::date("2026-11-30"),
+                    CellInput::text("x"),
+                    CellInput::text("Vercel"),
+                    CellInput::text("active"),
+                    CellInput::number(30.0),
+                ],
+                vec![
+                    CellInput::text("2026-12-15"),
+                    CellInput::empty(),
+                    CellInput::text("Notion"),
+                    CellInput::text("trial"),
+                    CellInput::empty(),
+                ],
+                vec![
+                    CellInput::text("soon"),
+                    CellInput::empty(),
+                    CellInput::text("Odd"),
+                    CellInput::text("active"),
+                    CellInput::number(2.5),
+                ],
+            ],
+        );
+        assert_eq!(unreadable, 0);
+        assert_eq!(
+            rows,
+            [
+                row("Vercel", "2026-11-30", "30", "active"),
+                row("Notion", "2026-12-15", "", "trial"),
+                row("Odd", "soon", "2.5", "active"),
+            ]
+        );
+
+        // A sheet that lacks a heading: each row below the headings is unreadable.
+        let (rows, unreadable) = rows_of(
+            &harness,
+            vec![
+                text_row(&["vendor", "renews_on", "status"]),
+                text_row(&["A", "2026-11-30", "active"]),
+                text_row(&["B", "2026-11-30", "active"]),
+                Vec::new(),
+                text_row(&["C", "2026-11-30", "active"]),
+            ],
+        );
+        assert_eq!((rows.len(), unreadable), (0, 3), "the empty row is no row");
+        // Headings that are not in the first row are no headings: each of the three rows that
+        // hold something is below an empty first row.
+        let (rows, unreadable) = rows_of(
+            &harness,
+            vec![
+                Vec::new(),
+                Vec::new(),
+                text_row(&["vendor", "renews_on", "notice_days", "status"]),
+                vendor_row("A", "2026-11-30", "0", "active"),
+                vendor_row("B", "2026-11-30", "0", "active"),
+            ],
+        );
+        assert_eq!((rows.len(), unreadable), (0, 3));
+        // A sheet with no rows at all, and no sheet named Vendors, each count one.
+        let (rows, unreadable) = rows_of(&harness, Vec::new());
+        assert_eq!((rows.len(), unreadable), (0, 1));
+        let folder = harness.procurement_folder();
+        std::fs::remove_file(&path).expect("the register goes");
+        write_new_workbook(
+            &folder,
+            &path,
+            &[SheetInput::new(
+                "Other",
+                vec![text_row(&["a"]), text_row(&["b"])],
+            )],
+        )
+        .expect("a workbook");
+        assert_eq!(read_register(&path).expect("it reads"), (Vec::new(), 1));
+        // A file that is no workbook counts one too, and a missing file is an error to the tick.
+        std::fs::write(&path, b"not a workbook").expect("a file");
+        assert_eq!(read_register(&path).expect("it reads"), (Vec::new(), 1));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_check_counts_the_rows_of_a_register_it_cannot_read_by_heading() {
+        let harness = Harness::with_procurement("procurement-renewals-headless");
+        write_register(
+            &harness,
+            vec![
+                text_row(&["vendor", "renews_on", "status"]),
+                text_row(&["Vercel", "2026-10-20", "active"]),
+                text_row(&["Notion", "2026-10-21", "active"]),
+            ],
+        );
+        let clock = Arc::new(MovableClock::new(utc("2026-10-05T08:00:00Z")));
+        let orchestrator = harness.orchestrator_on(harness.recorded(Vec::new()), clock);
+
+        orchestrator.tick().await.expect("a tick");
+
+        let checked = harness.events(&[EventKind::RenewalChecked]);
+        let EventBody::RenewalChecked(body) = &checked[0].body else {
+            panic!("a check");
+        };
+        assert_eq!(
+            (body.due, body.unreadable),
+            (0, 2),
+            "none flagged by guessing"
+        );
+        assert!(harness.events(&[EventKind::RenewalFlagged]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_tick_scoped_to_a_task_leaves_the_clock_s_work_alone() {
+        let harness = Harness::with_procurement("procurement-scoped");
+        let start = utc("2026-09-01T09:00:00Z");
+        drafted(&harness, 1, start);
+        let clock = Arc::new(MovableClock::new(start + Duration::days(31)));
+        let orchestrator = harness.orchestrator_on(harness.recorded(Vec::new()), clock);
+
+        let scope = crate::orchestrator::TickScope {
+            task_id: Some("FRK-1".parse().expect("a task id")),
+            ..crate::orchestrator::TickScope::default()
+        };
+        orchestrator
+            .tick_within(&scope)
+            .await
+            .expect("a scoped tick");
+        assert_eq!(states(&harness), [(1, OrderState::Drafted)]);
+
+        orchestrator.tick().await.expect("a tick");
+        assert_eq!(states(&harness), [(1, OrderState::Expired)]);
+    }
 }

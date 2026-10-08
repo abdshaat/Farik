@@ -901,7 +901,7 @@ fn baseline_folder(call: &Call<'_>, folder: &str) -> Result<String, ToolError> {
 }
 
 /// The bytes of the workbook file at `path`, which is `shown` to the agent.
-fn read_workbook_file(path: &Path, shown: &str) -> Result<Vec<u8>, ToolError> {
+pub(crate) fn read_workbook_file(path: &Path, shown: &str) -> Result<Vec<u8>, ToolError> {
     match fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => {}
         Ok(_) => return Err(sheet_refused(format!("{shown} is not a workbook file"))),
