@@ -427,6 +427,7 @@ function Editor({
 			{saved.role === "procurement_specialist" && (
 				<OrdersSection
 					name={name}
+					agents={team.agents}
 					pm={
 						team.agents.find(
 							(a) => a.role === "product_manager" && a.status !== "retired",

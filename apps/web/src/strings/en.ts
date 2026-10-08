@@ -2147,6 +2147,7 @@ export const en = {
 	orderStatusProblem: "A problem",
 	ordersNoNews: "No news yet.",
 	ordersByAgent: "{name}, from a follow-up {day}:",
+	ordersDraftedBy: "Set up by {name}.",
 	ordersByYou: "You corrected it {day}:",
 	ordersExpected: "Expected {day}.",
 	ordersOverdue: "Overdue",

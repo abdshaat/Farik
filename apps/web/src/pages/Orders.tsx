@@ -40,9 +40,20 @@ const expectedOn = (order: OrderItem) =>
  * "Orders" on the Procurement Specialist's page: the orders approved for the owner to place, the
  * orders placed with where each stands, and the last five that ended. The agent suggests and
  * follows up; the owner places, pays and receives, so every step here is the owner's, and each acts
- * at once, not through "Save changes" (spec 6.10).
+ * at once, not through "Save changes" (spec 6.10). It lists every order of the project, and each
+ * names the agent that set it up, which is the one that follows it up (only that agent's
+ * follow-ups count), retired or not, so that a retired agent's paid orders stay in sight.
  */
-export function OrdersSection({ name, pm }: { name: string; pm: string }) {
+export function OrdersSection({
+	name,
+	pm,
+	agents,
+}: {
+	name: string;
+	pm: string;
+	/** Every agent of the team, retired ones included, to name each order's own. */
+	agents: { id: string; displayName: string }[];
+}) {
 	const { data, again } = useQuery<{ orders: OrderItem[] }>(
 		"purchase_orders.list",
 		{},
@@ -61,6 +72,7 @@ export function OrdersSection({ name, pm }: { name: string; pm: string }) {
 	const begin = (kind: Step["kind"], order: OrderItem) => {
 		setStep({ kind, order });
 	};
+	const who = (order: OrderItem) => nameOf(agents, order);
 	return (
 		<section className={styles.section} aria-labelledby="orders-heading">
 			<h2 id="orders-heading">{t("ordersTitle")}</h2>
@@ -73,7 +85,7 @@ export function OrdersSection({ name, pm }: { name: string; pm: string }) {
 					<ul className={styles.orders} aria-labelledby="orders-to-place">
 						{approved.map((order) => (
 							<li key={order.order}>
-								<OrderHead order={order} />
+								<OrderHead order={order} agent={who(order)} />
 								<p>
 									{t("ordersApproved", {
 										day: pastDay(order.decidedAt ?? order.draftedAt, now),
@@ -107,7 +119,7 @@ export function OrdersSection({ name, pm }: { name: string; pm: string }) {
 							<PlacedOrder
 								key={order.order}
 								order={order}
-								name={name}
+								agent={who(order)}
 								now={now}
 								onStep={begin}
 							/>
@@ -131,6 +143,9 @@ export function OrdersSection({ name, pm }: { name: string; pm: string }) {
 									{visibly(order.seller)}
 								</span>
 								<span className={styles.muted}>{ended(order, now)}</span>
+								<span className={styles.muted}>
+									{t("ordersDraftedBy", { name: who(order) })}
+								</span>
 							</li>
 						))}
 					</ul>
@@ -139,7 +154,7 @@ export function OrdersSection({ name, pm }: { name: string; pm: string }) {
 			{step?.kind === "place" && (
 				<MarkPlaced
 					order={step.order}
-					agent={name}
+					agent={who(step.order)}
 					onDone={again}
 					onClose={() => setStep(undefined)}
 				/>
@@ -147,7 +162,7 @@ export function OrdersSection({ name, pm }: { name: string; pm: string }) {
 			{step?.kind === "receive" && (
 				<MarkReceived
 					order={step.order}
-					agent={name}
+					agent={who(step.order)}
 					onDone={again}
 					onClose={() => setStep(undefined)}
 				/>
@@ -155,7 +170,7 @@ export function OrdersSection({ name, pm }: { name: string; pm: string }) {
 			{step?.kind === "correct" && (
 				<CorrectStatus
 					order={step.order}
-					agent={name}
+					agent={who(step.order)}
 					onDone={again}
 					onClose={() => setStep(undefined)}
 				/>
@@ -163,14 +178,17 @@ export function OrdersSection({ name, pm }: { name: string; pm: string }) {
 			{step?.kind === "close" && (
 				<CloseOrder
 					order={step.order.order}
-					agent={name}
+					agent={who(step.order)}
 					onDone={again}
 					onClose={() => setStep(undefined)}
 				/>
 			)}
 			{step?.kind === "follow" && (
 				<AskTeam
-					title={t("followUpTitle", { name, order: step.order.order })}
+					title={t("followUpTitle", {
+						name: who(step.order),
+						order: step.order.order,
+					})}
 					draft={t("followUpDraft", {
 						order: step.order.order,
 						seller: visibly(step.order.seller),
@@ -183,14 +201,28 @@ export function OrdersSection({ name, pm }: { name: string; pm: string }) {
 	);
 }
 
-/** An order's number and seller (the agent's words), then its total and period. */
-function OrderHead({ order }: { order: OrderItem }) {
+/** The name of the agent that set `order` up: the team's, or its id when the team has no such agent. */
+function nameOf(
+	agents: { id: string; displayName: string }[],
+	order: OrderItem,
+): string {
+	return (
+		agents.find((agent) => agent.id === order.agentId)?.displayName ??
+		order.agentId
+	);
+}
+
+/** An order's number and seller (the agent's words), who set it up, then its total and period. */
+function OrderHead({ order, agent }: { order: OrderItem; agent: string }) {
 	return (
 		<>
 			<div className={styles.orderHead}>
 				<span className={styles.orderNumber}>PO-{order.order}</span>
 				<span className={styles.orderSeller}>{visibly(order.seller)}</span>
 			</div>
+			<span className={styles.muted}>
+				{t("ordersDraftedBy", { name: agent })}
+			</span>
 			<span>
 				<span className={styles.orderAmount}>
 					{amount(order.total, order.currency)}
@@ -204,12 +236,13 @@ function OrderHead({ order }: { order: OrderItem }) {
 /** A placed order: when and what was paid, what the last follow-up learned, and the owner's steps. */
 function PlacedOrder({
 	order,
-	name,
+	agent,
 	now,
 	onStep,
 }: {
 	order: OrderItem;
-	name: string;
+	/** The agent that set the order up, whose follow-ups the status is. */
+	agent: string;
 	now: Date;
 	onStep: (kind: Step["kind"], order: OrderItem) => void;
 }) {
@@ -217,7 +250,7 @@ function PlacedOrder({
 	const expected = expectedOn(order);
 	return (
 		<li>
-			<OrderHead order={order} />
+			<OrderHead order={order} agent={agent} />
 			<p>
 				{t("ordersPlacedOn", { day: pastDay(order.placedOn ?? "", now) })}
 				{order.paid &&
@@ -234,7 +267,7 @@ function PlacedOrder({
 						</span>
 						<span>
 							{t(status.by === "owner" ? "ordersByYou" : "ordersByAgent", {
-								name,
+								name: agent,
 								day: pastDay(status.at, now),
 							})}
 						</span>

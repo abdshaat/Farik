@@ -1,3 +1,4 @@
+import { uiStrings } from "@farik/ui";
 import { expectNoAxeViolations } from "@farik/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,15 +9,19 @@ import { at, EFFECTIVE, MARKUP, NOW, ORDERS, TEAM } from "../test/orders.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 import { SITES } from "../test/sites.ts";
 
-/** One agent's page, its orders answered unless `orders` is left out. */
-async function opened(agent: string, orders: object | null = ORDERS) {
+/** One agent's page, its orders answered unless `orders` is left out, on `team`. */
+async function opened(
+	agent: string,
+	orders: object | null = ORDERS,
+	team: object = TEAM,
+) {
 	vi.useFakeTimers({ toFake: ["Date"] });
 	vi.setSystemTime(NOW);
 	const { container, socket } = await renderApp(`/team/${agent}`);
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", {
-		team: TEAM,
+		team,
 		agents: EFFECTIVE,
 		judges: { auto: null, architect: null, scrum_master: null },
 		max_agents: 7,
@@ -153,7 +158,7 @@ describe("the orders on the Procurement Specialist's page", () => {
 			await screen.findByRole("list", { name: "Recent orders" }),
 		).getAllByRole("listitem");
 		expect(recent.map((one) => one.textContent)).toEqual([
-			"PO-9Pie Tin SupplyReceived on 30 September, paid 88.50 EUR",
+			"PO-9Pie Tin SupplyReceived on 30 September, paid 88.50 EURSet up by Ivo.",
 		]);
 		// Something to place and something to receive: nothing says there is nothing.
 		expect(screen.queryByText("Nothing to place or receive.")).toBeNull();
@@ -189,11 +194,11 @@ describe("the orders on the Procurement Specialist's page", () => {
 
 		// The five that ended last, newest first; the sixth is left out.
 		expect(recent).toEqual([
-			"PO-5Cog & CoYou closed it on 12 October: it did not come.",
-			"PO-9Pie Tin SupplyReceived on 30 September, paid 88.50 EUR",
-			"PO-8Box & Bag CoYou rejected it on 25 September.",
-			`PO-7Bake ${MARKUP} CoClosed by itself on 21 September: not marked placed within 30 days of your approval.`,
-			"PO-6Bake Supply CoClosed by itself on 20 September: not decided within 30 days.",
+			"PO-5Cog & CoYou closed it on 12 October: it did not come.Set up by Ivo.",
+			"PO-9Pie Tin SupplyReceived on 30 September, paid 88.50 EURSet up by Ivo.",
+			"PO-8Box & Bag CoYou rejected it on 25 September.Set up by Ivo.",
+			`PO-7Bake ${MARKUP} CoClosed by itself on 21 September: not marked placed within 30 days of your approval.Set up by Ivo.`,
+			"PO-6Bake Supply CoClosed by itself on 20 September: not decided within 30 days.Set up by Ivo.",
 		]);
 		expect(screen.queryByText("Old Mill")).toBeNull();
 	});
@@ -868,8 +873,85 @@ describe("the orders on the Procurement Specialist's page", () => {
 			await screen.findByRole("list", { name: "Recent orders" }),
 		).getAllByRole("listitem");
 		expect(recent.map((one) => one.textContent)).toEqual([
-			"PO-21Old MillReceived on 10 September.",
+			"PO-21Old MillReceived on 10 September.Set up by Ivo.",
 		]);
+	});
+
+	it("names_the_agent_that_set_up_each_order_and_asks_that_one_to_follow_up", async () => {
+		// Kai was a second Procurement Specialist and has been retired; its paid orders stay here,
+		// and only its own follow-ups count on them, so it is Kai the owner asks, not Ivo.
+		const kai = {
+			id: "kai",
+			display_name: "Kai",
+			role: "procurement_specialist",
+			avatar: "extra-6",
+			persona: "Kai persona",
+			status: "retired",
+		};
+		const own = ORDERS.orders.find((one) => one.order === 11);
+		const approved = ORDERS.orders.find((one) => one.order === 12);
+		await opened(
+			"ivo",
+			{
+				orders: [
+					own,
+					{
+						...own,
+						order: 30,
+						agent_id: "kai",
+						seller: "Tin Town",
+						status: {
+							status: "shipped",
+							note: "Left the depot.",
+							by: "agent",
+							at: at(25, 10),
+						},
+					},
+					{ ...approved, order: 31, agent_id: "kai", seller: "Cog & Co" },
+				],
+			},
+			{ ...TEAM, agents: [...TEAM.agents, kai] },
+		);
+
+		// Each order says who set it up, and a status says whose follow-up it was.
+		const ivos = await itemOf(en.ordersPlacedTitle, "11");
+		expect(ivos.textContent).toContain("Set up by Ivo.");
+		expect(ivos.textContent).toContain("Ivo, from a follow-up yesterday:");
+		const kais = await itemOf(en.ordersPlacedTitle, "30");
+		expect(kais.textContent).toContain("Set up by Kai.");
+		expect(kais.textContent).toContain("Kai, from a follow-up yesterday:");
+		expect(kais.textContent).not.toContain("Ivo");
+		const waiting = await itemOf(en.ordersToPlace, "31");
+		expect(waiting.textContent).toContain("Set up by Kai.");
+		// The page is still Ivo's.
+		expect(
+			screen.getByText(/^Ivo suggests orders and follows them up\./),
+		).toBeTruthy();
+
+		// The request to follow it up goes to the agent that set it up.
+		fireEvent.click(
+			within(kais).getByRole("button", { name: "Ask for a follow-up" }),
+		);
+		expect(
+			await screen.findByRole("dialog", {
+				name: "Ask Kai to follow up PO-30?",
+			}),
+		).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: uiStrings.close }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+		// So does the tick box of "Mark placed".
+		fireEvent.click(
+			within(waiting).getByRole("button", { name: "Mark placed" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Mark PO-31 from Cog & Co placed?",
+		});
+		expect(
+			within(dialog).getByRole("checkbox", {
+				name: "Ask Kai to follow up until it arrives",
+			}),
+		).toBeTruthy();
 	});
 
 	it("a_page_of_another_role_has_no_orders", async () => {
