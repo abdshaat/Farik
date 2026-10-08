@@ -1,6 +1,6 @@
 # The Marketing Specialist: brand, plan, social presence and budget
 
-Status: approved by the founder on 2026-10-05, in conversation (ADR 0042). It is the design input to phase 7 steps 08b to 08f.
+Status: approved by the founder on 2026-10-05, in conversation (ADR 0042). It is the design input to phase 7 steps 08b to 08g.
 
 ## Why
 
@@ -33,7 +33,7 @@ The agent proposes a plan in the `implement` session of a marketing task with `f
   starts_on, ends_on,        // ISO dates, at most 92 days, starts_on no earlier than yesterday's UTC date (so an owner west of UTC is not refused their own today)
   currency,                  // ISO 4217, the ad account's
   budget: { total, google_ads },
-  campaigns: [ { key, channel: "google_ads", name, goal, budget, starts_on, ends_on } ],   // 0 to 10
+  campaigns: [ { key, channel: "google_ads", name, goal, advertises, budget, starts_on, ends_on } ],   // 0 to 10; advertises: what it sells, 3 to 200 characters (step 08g)
   posts: [ { key, channel, on, topic } ],     // 0 to 200; channel: instagram, x, facebook, linkedin, threads, bluesky, tiktok, pinterest, youtube, google_business, mastodon
   measures: [ "..." ] }      // 1 to 10
 ```
@@ -67,11 +67,11 @@ A Farik connector of its own (ADR 0038), `google-ads`, run as `farik connector g
 
 "Plan" means the tool is marked approved by the marketing plan: the hook runs it while a plan is active, and Farik's server refuses (`not_in_marketing_plan`) every call the active plan does not cover. Nothing deletes, and nothing touches billing, account access, conversion tracking, other campaign types or other accounts' campaigns. Other campaign types (Performance Max, Demand Gen, video) are candidates for a later plan.
 
-**The hard stop.** A campaign's budget is a total budget where Google offers one for it; otherwise a daily budget no larger than what the plan campaign has left divided by its days left, so Google's own charging limit bounds the spend while Farik is not running. While Farik runs, a tick with no model reads each active plan campaign's cost every 15 minutes (`report`, through Farik's own call). When a campaign's cost reaches its budget, or the plan's total reaches the plan's, Farik pauses the campaigns concerned itself, records `marketing_budget.reached`, and Today asks the owner to "Raise the budget" (a new version of the plan to approve) or "End the plan". The spec says Google may spend up to one tick's worth past a cap while Farik runs.
+**The hard stop.** A campaign's budget is a total budget where Google offers one for it; otherwise a daily budget no larger than what the plan campaign has left divided by its days left, so Google's own charging limit bounds the spend while Farik is not running. While Farik runs, a watch of its own beside the ticks, with no model, reads each active plan's cost every 15 minutes (a `Search` for each ad account, through the daemon's own connection, not a session's call). When a campaign's cost reaches its budget, or the plan's reaches its Google Ads budget, Farik pauses the campaigns concerned itself, records `marketing_budget.reached`, and Today asks the owner to "Raise the budget" (a new version of the plan to approve, whose request skips the sprint queue) or "End the plan". A plan that ends has the campaigns the active plan does not carry paused within a minute, and removing Google Ads pauses them first. Google reports cost up to about an hour late, so a campaign at a daily budget may spend about an hour past its cap while Farik runs; a total budget is never passed, which is why each campaign says what it advertises and shows whether its price is fixed before the owner approves (step 08g; SPEC 6.5 has it as built).
 
 ## Skills
 
-The kit's skills after step 08 and 08b, gaining in 08c and 08f:
+The kit's skills after step 08 and 08b, gaining in 08c, 08f and 08g:
 
 | Skill | Step | What it teaches |
 |---|---|---|
@@ -79,13 +79,14 @@ The kit's skills after step 08 and 08b, gaining in 08c and 08f:
 | `keeping-the-brand-kit` | 08c | what the kit holds, how to build it from the business's existing material, naming and describing the user's own logo and pictures, and asking for any that is missing |
 | `writing-the-brand-persona` | 08c | the persona's parts, sample replies, per-network differences, what it never says |
 | `researching-the-market` | 08c | audience, competitors, search words, channel costs, each fact sourced and dated |
-| `writing-the-marketing-plan` | 08c | from research to goals, channels, budget split, calendar, campaigns and measures; proposing it; what the owner sees |
+| `writing-the-marketing-plan` | 08c | from research to goals, channels, budget split, calendar, campaigns and measures; proposing it; what the owner sees. 08g: what each campaign advertises, and a preference for a fixed price |
 | `running-social-channels` | 08d | cadence per network, formats and lengths, scheduling inside the plan's slots, reading results, never a customer's data |
-| `running-search-ads` | 08f | keywords and match types, negatives, ads, budgets and bids, reading search terms and cost per result, pausing what does not work |
+| `running-search-ads` | 08f | keywords and match types, negatives, ads, budgets and bids, reading search terms and cost per result, pausing what does not work. 08g: campaigns at a fixed price (3 to 90 days, made two days ahead), and raising a paused campaign's budget once the owner approves the raised version |
+| 08g | The budget's hard stop: the watch and its 15-minute spend read across ad accounts, the pause at a cap and on a plan's end, removing Google Ads pausing first, `marketing_budget.reached` and `marketing_campaign.paused`, what each campaign advertises and whether its price is fixed, Today's raise or end and the raise's request that skips the sprint queue (mocked up first; SPEC 6.5) |
 
 ## Events
 
-`marketing_plan.proposed`, `marketing_plan.approved`, `marketing_plan.returned`, `marketing_plan.ended`; `social_post.scheduled`, `social_post.requested`, `social_post.sent`, `social_post.stopped`, `social_post.missed`, `social_post.failed`; `marketing_budget.reached`.
+`marketing_plan.proposed`, `marketing_plan.approved`, `marketing_plan.returned`, `marketing_plan.ended`; `social_post.scheduled`, `social_post.requested`, `social_post.sent`, `social_post.stopped`, `social_post.missed`, `social_post.failed`; `marketing_campaign.created` (08f); `marketing_budget.reached` and `marketing_campaign.paused` (08g).
 
 ## Steps
 
@@ -95,7 +96,7 @@ The kit's skills after step 08 and 08b, gaining in 08c and 08f:
 | 08c | The brand and the marketing plan: the role's mandate, four skills, `farik_propose_marketing_plan`, the plan's events, page and Today gate (mocked up first), `farik marketing plan`, `marketing_paths_owned` |
 | 08d | Posting through the plan: Farik calling a service itself, `farik_schedule_post`, the hold and Stop, `social_post.*`, Today's "Going out" (mocked up first), Buffer's writes `denied` to the agent, the skill `running-social-channels` |
 | 08e | Google's sign-in, pulled forward: route 2 for Google, the founder's Google Cloud project, the `adwords` scope, verification as a launch dependency (amended 2026-10-06 by ADR 0043: the user's own Google Cloud project and Desktop client, step 03f; verifying an app of Farik's is phase 15's; and by ADR 0044: Farik's own app again, held by Farik Cloud from phase 11, where its verification and the live sign-in are; step 03f dropped; Task 8 removes the build-time secret) |
-| 08f | Google Ads: Farik's own `google-ads` connector, the plan mark, the spend tick and the hard stop, `marketing_budget.reached`, Today's raise or end, the skill `running-search-ads` (amended 2026-10-06 by ADR 0044: built and tested against a fake Google Ads server; no user can sign in to Google until Farik Cloud runs, so the founder's live check is phase 11's, on Farik Cloud's shared quota) |
+| 08f | Google Ads: Farik's own `google-ads` connector, the plan mark, the skill `running-search-ads` (amended 2026-10-06 by ADR 0044: built and tested against a fake Google Ads server; no user can sign in to Google until Farik Cloud runs, so the founder's live check is phase 11's, on Farik Cloud's shared quota) |
 
 ## Not now
 
