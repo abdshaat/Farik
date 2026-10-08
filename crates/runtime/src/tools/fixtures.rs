@@ -550,6 +550,30 @@ impl TestProject {
     }
 }
 
+/// Runs `step` on a thread of its own while this one holds `lock`, and answers what it answers once
+/// the lock is let go. Fails unless the step is still waiting 300 milliseconds in and has recorded
+/// nothing meanwhile: how a test shows that a step takes the lock before it reads or records.
+pub(crate) fn waits_for_the_lock<Answer: Send>(
+    lock: &std::sync::Mutex<()>,
+    project: &TestProject,
+    step: impl FnOnce() -> Answer + Send,
+) -> Answer {
+    let held = crate::locked(lock);
+    let before = project.event_count();
+    std::thread::scope(|scope| {
+        let running = scope.spawn(step);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!running.is_finished(), "the step waits for the lock");
+        assert_eq!(
+            project.event_count(),
+            before,
+            "the step records nothing while it waits"
+        );
+        drop(held);
+        running.join().expect("the step ends")
+    })
+}
+
 /// `agent`'s tiers as the team file says now, which a session starting now is given; none for an
 /// agent the team does not have.
 pub(crate) fn tiers_of(deps: &ToolDeps, agent: &str) -> Vec<PermissionTier> {

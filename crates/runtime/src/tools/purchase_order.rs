@@ -668,7 +668,7 @@ mod tests {
     use crate::session::SessionPurpose;
     use crate::tools::ToolError;
     use crate::tools::fixtures::{
-        TestProject, a_team_of_three, run, with_the_finance_specialist,
+        TestProject, a_team_of_three, run, waits_for_the_lock, with_the_finance_specialist,
         with_the_procurement_specialist,
     };
 
@@ -1430,6 +1430,23 @@ mod tests {
         let answer = draft(&project, &an_order("Seller 21")).expect("a place is free");
         assert_eq!(answer["order"], 21);
     }
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_draft_waits_for_the_orders_lock() {
+        let project = a_project("po-draft-lock");
+
+        // Held by another step, the draft has read no order and numbered none; once the lock is
+        // free it goes on. Without the lock, two drafts racing past the open-order check and the
+        // cap would both pass it.
+        let answer = waits_for_the_lock(&crate::procurement::ORDERS, &project, || {
+            draft(&project, &an_order("Acme"))
+        })
+        .expect("the draft goes on once the lock is free");
+
+        assert_eq!(answer["order"], 1);
+        assert_eq!(project.events(&[EventKind::PurchaseOrderDrafted]).len(), 1);
+    }
+
     /// Records the owner's step on order `number`: an event with the order's task and no agent.
     fn owner(project: &TestProject, kind: &str, body: &Value) {
         project.record("FRK-1", kind, body);
@@ -1730,6 +1747,24 @@ mod tests {
             &json!({ "order": 3, "status": "problem", "note": "Out of stock." }),
         )
         .expect("a problem");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_follow_up_waits_for_the_orders_lock() {
+        let project = a_project_with_orders("po-update-lock");
+
+        // The follow-up reads the order's state under the lock, so that the owner's step on the
+        // order (closing it, say) and the follow-up are not both taken.
+        waits_for_the_lock(&crate::procurement::ORDERS, &project, || {
+            follow_up(
+                &project,
+                &json!({ "order": 3, "status": "shipped", "note": "Left the depot." }),
+            )
+        })
+        .expect("the follow-up goes on once the lock is free");
+
+        assert_eq!(project.events(&[EventKind::PurchaseOrderUpdated]).len(), 1);
     }
 
     #[test]

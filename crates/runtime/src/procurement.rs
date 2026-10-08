@@ -465,6 +465,7 @@ mod tests {
     use serde_json::json;
 
     use crate::orchestrator::fixtures::Harness;
+    use crate::tools::fixtures::waits_for_the_lock;
     use crate::tools::sheets::{CellInput, SheetInput, write_new_workbook};
 
     fn utc(text: &str) -> DateTime<Utc> {
@@ -609,6 +610,47 @@ mod tests {
         orchestrator.tick().await.expect("a tick");
 
         assert_eq!(states(&harness), [(1, OrderState::Expired)]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_expiry_waits_for_the_orders_lock() {
+        let harness = Harness::with_procurement("procurement-expiry-lock");
+        let start = utc("2026-09-01T09:00:00Z");
+        drafted(&harness, 1, start);
+
+        // An expiry that did not wait could land between the owner's placing of an order, read,
+        // and its record: the owner would be told "Marked placed" and the fold would say expired.
+        waits_for_the_lock(&super::ORDERS, &harness.project, || {
+            super::expire_orders(&harness.project.deps, start + Duration::days(31))
+        })
+        .expect("the expiry goes on once the lock is free");
+
+        assert_eq!(states(&harness), [(1, OrderState::Expired)]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_renewal_check_waits_for_the_renewals_lock() {
+        let harness = Harness::with_procurement("procurement-renewals-lock");
+        write_register(
+            &harness,
+            vec![
+                text_row(&["vendor", "renews_on", "notice_days", "status"]),
+                vendor_row("Vercel", "2026-10-20", "7", "active"),
+            ],
+        );
+        let team = harness.project.deps.files.read_team().expect("the team");
+
+        // The check and the owner's dismissal hold one lock, so that a dismissal is never taken
+        // between the check's read of the flagged renewals and its record.
+        waits_for_the_lock(&super::RENEWALS, &harness.project, || {
+            super::check_renewals(&harness.project.deps, &team, utc("2026-10-05T08:00:00Z"))
+        })
+        .expect("the check goes on once the lock is free");
+
+        assert_eq!(harness.events(&[EventKind::RenewalFlagged]).len(), 1);
+        assert_eq!(harness.events(&[EventKind::RenewalChecked]).len(), 1);
     }
 
     /// The Procurement Specialist's register with `rows` under its headings, replacing any.
