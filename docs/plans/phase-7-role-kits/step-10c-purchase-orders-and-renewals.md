@@ -128,7 +128,7 @@ Files: `TodayPurchaseOrder.dc.html`, `PhonePurchaseOrder.dc.html` (Today's row o
 - `once_per_vendor_and_date`: with `("vercel", 2026-11-30)` flagged, `"Vercel"` renewing then is not due and renewing `2026-12-31` is; two rows of one vendor and date give one. RED: no such function.
 - `an_unreadable_row_is_counted_not_guessed`: `renews_on` `"next month"` or `"30/11/2026"`, `notice_days` `"-3"`, `"366"` or `"ten"`, `vendor` `""`, 101 characters or `"A\nB"`: each counted once and none due; a blank `renews_on` is neither due nor counted. RED: no such function.
 
-- [ ] `feat(core): total a purchase order and find the renewals due`
+- [x] `feat(core): total a purchase order and find the renewals due`
 
 ### Task 2: The events and the store
 
@@ -219,4 +219,14 @@ Then, in the web app, by the founder: the Procurement Specialist drafts an order
 
 ## Execution notes
 
-None yet.
+Corrections against the code, read at HEAD `a18d6b8` on 2026-10-08 before Task 1 (steps 10b2 and 08g landed since the plan's citations at `b4b345b`). The plan's intent holds in every case; nothing here needed a decision.
+
+- **Numbers this step takes**: the latest spec revision is 0.73 (2026-10-08, the `farik-ops` pointers), so this step's is **0.74**, not 0.72; `EVERY_KIND` counts **78** at HEAD (not 76), so it counts **89** after the eleven kinds (not 87), and the same number is in `KINDS` of `crates/protocol/src/lib.rs` and in every `EVERY_KIND.len()` assertion; the next free migration is `0016` (`0015_skips_sprints.sql` is 08g's), and this step takes none. The `TOOLS` order and the read-tier slice hold: `farik_read_sites` follows `farik_write_evaluation` (`tools.rs:339`), the slice is `[..32]` (`tools.rs:721`) and goes to `[..35]`; `daemon/mcp.rs:480`'s count is 39 and goes to 42.
+- **Cited lines that moved**: `marketing_plans` is `store/marketing.rs:99` (plan: `:98`); `decision_on` is `store/waiting.rs:215` (plan: `:194`); `NUMBERING` is `tools/marketing.rs:130` (plan: `:127`); `waiting_line` is `store/activity.rs:177` (plan: `:174`); `waiting_on_human` is the `TaskProjection` field at `projections.rs:63`, set at `:554` and `:586` (plan: `:452`); `decide_tool_call` is `orchestrator/human.rs:494` (plan: `:478`); the gates' `METHODS` is `daemon/gates.rs:49` (`[&str; 4]`, which becomes 5) and the `request.file` arm `:611` (plan: `:43`); `tick_within` is `orchestrator.rs:468` with `end_marketing_plans` at `:473` (plan: `:464`); `here_or_sent` is `cli/src/start.rs:136` (plan: `:109`); `gives_a_session_the_farik_tools_of_its_tiers` is `orchestrator/rules.rs:5121` (plan: `:5080`) and `gives_a_chat_the_read_tier_alone` `:7695`, whose filter of `farik_read_sites` is `:7742`. Every other cite holds at its line: `in_its_own_implement_session` `tools/sheets.rs:647`, `write_workbook` `:550`, `store_file` `:587`, `CHAT_TOOLS` `rules.rs:683`, `tools.rs:339` and `:721`, `mcp.rs:480`.
+- **Task 0** is ticked already at HEAD (the mockups and their approval landed before this execution); the boards of `TodayPurchaseOrder` and `PhonePurchaseOrder` at HEAD are step 10f's redraw, so Task 8 builds them as approved at `355a13c`, as its text says.
+
+### Task 1: The totals and the due renewals
+
+- **RED, as run** (`cargo test -p farik-core --lib -- order:: renewals::`, the two modules holding only their tests): `error[E0425]: cannot find function `due_renewals` in this scope`, `cannot find function `order_total``, `cannot find function `line_total``, `error[E0422]: cannot find struct ... `RegisterRow``, `error[E0433]: cannot find type `OrderError` in this scope`; `could not compile `farik-core` (lib test) due to 21 previous errors`. Each of the five named tests (and the sixth, `a_line_total_past_a_machine_word_is_none`, which holds `line_total`'s `None`) fails because the module has none of the items, not for a typo.
+- **GREEN**: `6 passed; 0 failed`.
+- **Mutants** (by hand, each restored; 23 run): window one day late or early, 13 days, status untrimmed, status case-sensitive, flagged ignored, flagged compared with case, blank date counted, notice 366, a sign allowed, blank notice unreadable, vendor of 101 and of 100 characters, a control character allowed, a short date (`2026-1-5`) allowed, one fault counted twice, the limit off by a hundredth either way, a wrapping line total, a saturation to 0, the quantity ignored: all killed. Two survived and were dealt with: "flagged compared with case" (the test's flagged vendor was already lower case, so the test now flags `Vercel` and reads `vercel`) is killed now; "flagged compared untrimmed" was an equivalent mutant, since a flagged vendor is the trimmed one `renewal.flagged` recorded, so the `trim` was removed from the code. Two more were added to the test after the first run found them unlisted: `+30` and `2026-1-5` among the unreadable rows.
