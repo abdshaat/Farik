@@ -172,6 +172,8 @@ Superseded 2026-10-06 by ADR 0043: nothing below is committed before phase 15. T
 
 Moved 2026-10-06 by ADR 0044 to phase 11's Farik Cloud steps (step 03f is dropped): the founder registers Farik's GitHub App there, and its client id and any secret are set in Farik Cloud, not committed. The settings below are a starting point that phase 11's brainstorm revisits: a sign-in of one click is GitHub's web flow, which needs a Callback URL at Farik Cloud and a client secret, which Farik Cloud holds.
 
+Moved again 2026-10-08 by ADR 0047: registering Farik's GitHub App, its settings and its secret are planned separately in `farik-ops`, the private operations repository, so the founder's action that listed the app's settings below is now a pointer. The live check in the app stays here, phase 11 step 01f's.
+
 Gate: the founder's actions below are done, and the founder gives the GitHub App's client id and slug in conversation. The executor commits them; it never signs in to the founder's accounts.
 
 Files: `registered_apps.rs` (the entry: `github`, `GitHub`, host `api.githubcopilot.com`, Device at `https://github.com/login/device/code` with `verification_uri` `https://github.com/login/device`, issuer `https://github.com/login/oauth`, token `https://github.com/login/oauth/access_token`, no revocation, `install_url` `https://github.com/apps/<slug>/installations/new`), `docs/SPEC.md` (6.7: Farik's registered apps and the device flow; 8.6: no secret shipped, the host binding, Farik's ids only on their own hosts, the code warning; F9: `provider`, `user_code`, `install_url`), `docs/plans/project-plan.md` (row 03b, corrected if execution changed it), `docs/design/role-kits.md` (its steps table).
@@ -181,7 +183,7 @@ Files: `registered_apps.rs` (the entry: `github`, `GitHub`, host `api.githubcopi
 - [ ] `feat(runtime): ship Farik's GitHub client id`
 
 Founder's actions (none is an agent's; no agent creates an account or holds the founder's credentials):
-- [ ] **The GitHub App**, under the founder's account or organisation: name "Farik"; homepage `https://github.com/abdshaat/Farik`, the repository's page (GitHub accepts any address, and nothing in this phase needs Farik's own domain; the website may replace it once phase 11 step 01 is live); Callback URL empty and "Request user authorization (OAuth) during installation" off, so no web flow exists to misuse with the id; "Enable Device Flow" on; "Expire user authorization tokens" left on; webhook off; repository permissions Metadata read, Contents read, Issues read, Pull requests read, nothing else; account permissions none; installable by any account. Give the client id and the slug. No client secret is generated for Farik's use.
+- [ ] **The GitHub App**: registered by the founder; planned separately in `farik-ops` (ADR 0047).
 - [ ] **A GitHub account with no paid Copilot** for the live check (ADR 0035's amendment: whether GitHub's remote MCP server needs a Copilot licence is unconfirmed).
 
 ## Verification
