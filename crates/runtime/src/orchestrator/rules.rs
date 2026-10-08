@@ -679,7 +679,8 @@ const CONVERSATION_TOOLS: &[&str] = &[
 ];
 
 /// The Farik tools a chat session is offered (ADR 0026): the reading tools and its one reply, and
-/// the list of sites, which `offered_tools` keeps for a role held to approved sites alone.
+/// the list of sites and of purchase orders, which `offered_tools` keeps for the role they are the
+/// Procurement Specialist's alone.
 pub(super) const CHAT_TOOLS: &[&str] = &[
     "farik_read_task",
     "farik_read_board",
@@ -687,6 +688,7 @@ pub(super) const CHAT_TOOLS: &[&str] = &[
     "farik_read_criteria",
     "farik_read_decisions",
     "farik_read_sites",
+    "farik_read_purchase_orders",
     "farik_chat_reply",
 ];
 
@@ -5148,6 +5150,8 @@ mod tests {
                     "farik_request_sites",
                     "farik_read_sites",
                     "farik_draft_purchase_order",
+                    "farik_read_purchase_orders",
+                    "farik_update_purchase_order",
                     "farik_schedule_post",
                 ]
                 .contains(&tool.name)
@@ -7740,7 +7744,7 @@ mod tests {
         let developers_chat: Vec<&str> = super::CHAT_TOOLS
             .iter()
             .copied()
-            .filter(|tool| *tool != "farik_read_sites")
+            .filter(|tool| *tool != "farik_read_sites" && *tool != "farik_read_purchase_orders")
             .collect();
         assert_eq!(spec.farik_tools, developers_chat);
         assert_eq!(

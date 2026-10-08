@@ -951,6 +951,60 @@ mod tests {
         }
     }
 
+    /// Step 10c: the role suggests an order and tracks it, and its prompt and its skill say that it
+    /// never places, pays for, confirms or cancels one, nor marks one placed or received (ADR
+    /// 0039). The tool names are held to tools Farik lists by `kit_skills_name_only_tools_farik_lists`
+    /// in the runtime.
+    #[test]
+    fn sourcing_a_product_says_how_to_suggest_and_track_an_order() {
+        let definition = loaded(Role::ProcurementSpecialist);
+        let flatten = |text: &str| {
+            text.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        };
+        let prompt = flatten(&definition.system_prompt);
+        let skill = flatten(&definition.skills[0].body);
+        for phrase in [
+            "suggest an order with `farik_draft_purchase_order`",
+            "`farik_update_purchase_order`",
+            "`farik_read_purchase_orders`",
+            "place, pay for, confirm or cancel an order",
+            "mark one placed or received",
+        ] {
+            assert!(
+                prompt.contains(phrase),
+                "the prompt lost \"{phrase}\": {prompt}"
+            );
+        }
+        // "What you may not do" lists it, not only the mandate.
+        let may_not = prompt
+            .split_once("## what you may not do")
+            .map(|(_, rest)| rest.split("##").next().unwrap_or_default())
+            .expect("the prompt lists what the role may not do");
+        assert!(
+            may_not.contains("place, pay for, confirm or cancel an order"),
+            "{may_not}"
+        );
+        for phrase in [
+            "`farik_draft_purchase_order`",
+            "`evaluations/<name>.md`",
+            "on a site the owner allowed",
+            "ask for it with `farik_request_sites`",
+            "`farik_read_purchase_orders`",
+            "`farik_update_purchase_order`",
+            "`preparing`, `shipped`, `delayed`",
+            "`problem`",
+            "never place, pay for, confirm or cancel an order",
+            "never mark one placed or received",
+            "`purchase` column",
+            "`farik_ask_human`",
+        ] {
+            assert!(skill.contains(phrase), "the skill lost {phrase}: {skill}");
+        }
+    }
+
     /// Step 10b: the Finance Specialist reads the register, the one file of the procurement folder
     /// it may read, and says the register's contents are data.
     #[test]

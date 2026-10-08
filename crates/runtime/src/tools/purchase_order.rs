@@ -12,7 +12,7 @@ use farik_core::governor::sites::site_of;
 use farik_core::marketing::{Amount, parse_amount};
 use farik_core::order::{OrderError, OrderLine, line_total, order_total};
 use farik_core::team::private_folder;
-use farik_protocol::event::{EventBody, PurchaseOrderDraftedBody};
+use farik_protocol::event::{EventBody, PurchaseOrderDraftedBody, PurchaseOrderUpdatedBody};
 use farik_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -25,7 +25,7 @@ use super::sheets::{
 };
 use super::sites::{approved_set, shown};
 use super::{Call, ToolError, failed};
-use crate::procurement::ORDERS;
+use crate::procurement::{ORDERS, check_follow_up, order_row};
 
 /// The most lines an order has.
 const MOST_LINES: usize = 50;
@@ -531,6 +531,128 @@ fn drafted_body(
         "why": input.why,
     }))
     .map_err(failed)
+}
+
+/// `farik_update_purchase_order`'s input.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct UpdatePurchaseOrderInput {
+    /// The order's number, the n of PO-n, of an order you drafted that the owner placed.
+    order: u64,
+    /// What your follow-up learned: `preparing` (the seller is making or packing it), `shipped`,
+    /// `delayed` (with what you know in `note` and the day in `expected_on`) or `problem` (out of
+    /// stock, a payment refused, cancelled by the seller: say what in `note`). Nothing else: only
+    /// the owner marks an order placed or received.
+    status: String,
+    /// What you know, 0 to 300 characters on one line, from the seller's page; required for
+    /// `delayed` and `problem`. Say only what the page says.
+    #[serde(default)]
+    note: String,
+    /// The day the seller expects the order to arrive, `YYYY-MM-DD`, today or later; required for
+    /// `delayed`.
+    #[serde(default)]
+    expected_on: Option<String>,
+}
+
+/// `farik_read_purchase_orders`: every order of the project, oldest first, with its state, lines
+/// and total, the owner's notes as they wrote them, when it was placed, what was paid and in
+/// which currency, when it was received and when it renews, its latest follow-up status with who
+/// recorded it, and whether it is overdue. Records nothing.
+///
+/// # Errors
+///
+/// `purchase_order_refused` for a role other than the Procurement Specialist; `Failed` when the
+/// log cannot be read.
+pub(super) fn read_purchase_orders(call: &Call<'_>) -> Result<Value, ToolError> {
+    if call.role() != Role::ProcurementSpecialist {
+        return Err(refused(
+            "purchase_order_refused",
+            "only the Procurement Specialist reads the purchase orders",
+        ));
+    }
+    let deps = call.deps();
+    let today = deps.clock.now().date_naive();
+    let records = purchase_orders(&deps.log).map_err(failed)?;
+    Ok(json!({
+        "orders": records
+            .iter()
+            .map(|record| order_row(record, today, true))
+            .collect::<Vec<_>>(),
+    }))
+}
+
+/// `farik_update_purchase_order`: records what a follow-up learned about an order the owner
+/// placed, as `purchase_order.updated` with the agent's envelope and the order's task, so that it
+/// never counts as the owner's. Only the agent that drafted the order records one, in the
+/// implement session of a task it is the assignee of, which is its follow-up task; it sends
+/// nothing and cannot mark an order placed, received or paid.
+///
+/// # Errors
+///
+/// `purchase_order_update_refused` outside that session or for another role,
+/// `unknown_purchase_order`, `purchase_order_not_yours` for an order another agent drafted,
+/// `purchase_order_not_placed` for an order the owner has not placed, or has received or closed,
+/// `purchase_order_status_invalid` for a status or note or day its rules refuse; `Failed` when the
+/// log cannot be read or written.
+pub(super) fn update_purchase_order(
+    call: &Call<'_>,
+    input: &UpdatePurchaseOrderInput,
+) -> Result<Value, ToolError> {
+    let refuse = |why: &str| refused("purchase_order_update_refused", format!("only {why}"));
+    if call.role() != Role::ProcurementSpecialist {
+        return Err(refuse("the Procurement Specialist records a follow-up"));
+    }
+    in_its_own_implement_session(call, "a follow-up", &refuse)?;
+    let _held = crate::locked(&ORDERS);
+    let deps = call.deps();
+    let records = purchase_orders(&deps.log).map_err(failed)?;
+    let Some(record) = records.iter().find(|record| record.order == input.order) else {
+        return Err(refused(
+            "unknown_purchase_order",
+            format!("there is no order PO-{}", input.order),
+        ));
+    };
+    if record.agent_id != call.agent_id() {
+        return Err(refused(
+            "purchase_order_not_yours",
+            format!("PO-{} was drafted by another agent", record.order),
+        ));
+    }
+    if record.state != OrderState::Placed {
+        return Err(refused(
+            "purchase_order_not_placed",
+            format!(
+                "PO-{} is {}, and a follow-up is of an order the owner placed and has not yet \
+                 received or closed",
+                record.order,
+                record.state.as_str()
+            ),
+        ));
+    }
+    let today = deps.clock.now().date_naive();
+    let fields = check_follow_up(
+        &input.status,
+        &input.note,
+        input.expected_on.as_deref(),
+        today,
+    )
+    .map_err(|why| refused("purchase_order_status_invalid", why))?;
+    let mut body = json!({
+        "order": record.order,
+        "status": fields.status.to_string(),
+        "note": fields.note,
+    });
+    if let Some(day) = fields.expected_on {
+        body["expected_on"] = json!(day.to_string());
+    }
+    let body: PurchaseOrderUpdatedBody = serde_json::from_value(body).map_err(failed)?;
+    call.append(Some(&record.task_id), EventBody::PurchaseOrderUpdated(body))?;
+    Ok(json!({
+        "order": record.order,
+        "status": input.status,
+        "next": "the owner sees it on your page and may correct it; you never mark an order \
+                 placed or received",
+    }))
 }
 
 #[cfg(test)]
@@ -1307,5 +1429,387 @@ mod tests {
         );
         let answer = draft(&project, &an_order("Seller 21")).expect("a place is free");
         assert_eq!(answer["order"], 21);
+    }
+    /// Records the owner's step on order `number`: an event with the order's task and no agent.
+    fn owner(project: &TestProject, kind: &str, body: &Value) {
+        project.record("FRK-1", kind, body);
+    }
+
+    /// `farik_read_purchase_orders` as `proc` in its implement session of FRK-1.
+    fn read_orders(project: &TestProject) -> Result<Value, ToolError> {
+        project.call(
+            "proc",
+            Some("FRK-1"),
+            "farik_read_purchase_orders",
+            json!({}),
+        )
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one order for each outcome the tool shows"
+    )]
+    fn reads_every_order_and_its_outcome() {
+        let project = a_project("po-read");
+        for seller in ["A", "B", "C", "D", "E", "F", "G", "H"] {
+            draft(&project, &an_order(seller)).expect("an order is drafted");
+        }
+        let approve = |order: u64, note: &str| {
+            owner(
+                &project,
+                "purchase_order.approved",
+                &json!({ "order": order, "note": note }),
+            );
+        };
+        let place = |order: u64, on: &str, extra: Value| {
+            let mut body = json!({ "order": order, "placed_on": on });
+            for (field, value) in extra.as_object().into_iter().flatten() {
+                body[field] = value.clone();
+            }
+            owner(&project, "purchase_order.placed", &body);
+        };
+        // 1 stays drafted; 2 is approved with a note; 3 is rejected with one.
+        approve(2, "Go ahead, <b>B</b>.");
+        owner(
+            &project,
+            "purchase_order.rejected",
+            &json!({ "order": 3, "note": "Too dear." }),
+        );
+        // 4 is placed long ago, with an amount, and followed up by its agent.
+        approve(4, "");
+        place(
+            4,
+            "2026-08-01",
+            json!({ "paid": "1450.00", "currency": "EUR" }),
+        );
+        project.record_by(
+            Some("proc"),
+            crate::tools::fixtures::at(),
+            "FRK-1",
+            "purchase_order.updated",
+            &json!({ "order": 4, "status": "shipped", "note": "Left the depot." }),
+        );
+        // 5 came, and the owner paid in the order's currency; 6 was closed.
+        approve(5, "");
+        place(5, "2026-09-20", json!({}));
+        owner(
+            &project,
+            "purchase_order.received",
+            &json!({ "order": 5, "received_on": "2026-09-21", "paid": "99.50", "renews_on": "2027-09-21" }),
+        );
+        approve(6, "");
+        place(6, "2026-09-01", json!({}));
+        owner(
+            &project,
+            "purchase_order.closed",
+            &json!({ "order": 6, "note": "It was lost." }),
+        );
+        // 7 expired; 8 is placed lately, with the owner's own status.
+        owner(&project, "purchase_order.expired", &json!({ "order": 7 }));
+        approve(8, "");
+        place(8, "2026-09-20", json!({}));
+        owner(
+            &project,
+            "purchase_order.updated",
+            &json!({ "order": 8, "status": "delayed", "note": "The seller called.", "expected_on": "2026-10-30" }),
+        );
+
+        let answer = read_orders(&project).expect("the orders are read");
+
+        let orders = answer["orders"].as_array().expect("a list of orders");
+        let states: Vec<&str> = orders
+            .iter()
+            .map(|one| one["state"].as_str().expect("a state"))
+            .collect();
+        assert_eq!(
+            states,
+            [
+                "drafted", "approved", "rejected", "placed", "received", "closed", "expired",
+                "placed"
+            ],
+            "oldest first, each with its state"
+        );
+        let numbers: Vec<u64> = orders
+            .iter()
+            .map(|one| one["order"].as_u64().expect("a number"))
+            .collect();
+        assert_eq!(numbers, [1, 2, 3, 4, 5, 6, 7, 8]);
+        let first = &orders[0];
+        assert_eq!(first["seller"], "A");
+        assert_eq!(first["total"], "59.98");
+        assert_eq!(first["currency"], "USD");
+        assert_eq!(first["period"], "once");
+        assert_eq!(first["lines"][0]["item"], "Baby car mirror");
+        assert_eq!(first["lines"][0]["quantity"], 3);
+        assert_eq!(first["lines"][0]["line_total"], "59.97");
+        assert_eq!(first["task_id"], "FRK-1");
+        assert_eq!(first["overdue"], false);
+        assert!(
+            first.get("note").is_none() && first.get("status").is_none(),
+            "{first}"
+        );
+        // The owner's words are theirs: shown as written, not wrapped as untrusted content.
+        assert_eq!(orders[1]["note"], "Go ahead, <b>B</b>.");
+        assert_eq!(orders[2]["note"], "Too dear.");
+        assert_eq!(orders[5]["close_note"], "It was lost.");
+        assert!(!answer.to_string().contains("<untrusted"), "{answer}");
+        // A placed order: its day, what was paid, the agent's status, and overdue past 30 days.
+        let placed = &orders[3];
+        assert_eq!(placed["placed_on"], "2026-08-01");
+        assert_eq!(placed["paid"], "1450.00");
+        assert_eq!(placed["paid_currency"], "EUR");
+        assert_eq!(placed["status"]["status"], "shipped");
+        assert_eq!(placed["status"]["note"], "Left the depot.");
+        assert_eq!(placed["status"]["by"], "agent");
+        assert_eq!(placed["overdue"], true);
+        // A received one: what was paid in the order's own currency, and when it renews.
+        let received = &orders[4];
+        assert_eq!(received["received_on"], "2026-09-21");
+        assert_eq!(received["paid"], "99.50");
+        assert_eq!(received["paid_currency"], "USD");
+        assert_eq!(received["renews_on"], "2027-09-21");
+        assert_eq!(
+            received["overdue"], false,
+            "a received order is never overdue"
+        );
+        // The owner's correction says who made it, and its day keeps the order from being late.
+        let corrected = &orders[7];
+        assert_eq!(corrected["status"]["by"], "owner");
+        assert_eq!(corrected["status"]["expected_on"], "2026-10-30");
+        assert_eq!(corrected["overdue"], false);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_the_orders_in_a_chat_and_to_no_one_else() {
+        let project = a_project("po-read-who");
+        draft(&project, &an_order("Acme")).expect("an order is drafted");
+        let mut chat = project.context("proc", None);
+        chat.purpose = SessionPurpose::Chat;
+        let answer = run(&chat, "farik_read_purchase_orders", json!({})).expect("a chat reads");
+        assert_eq!(answer["orders"].as_array().map(Vec::len), Some(1));
+        for (who, task) in [("fin", "FRK-2"), ("dev-a", "FRK-3"), ("pm", "FRK-1")] {
+            let reason =
+                refusal_of(project.call(who, Some(task), "farik_read_purchase_orders", json!({})));
+            assert!(
+                reason.starts_with("purchase_order_refused:"),
+                "{who}: {reason}"
+            );
+        }
+    }
+
+    /// A project with a second Procurement Specialist, `proc-b`, whose task FRK-5 is in progress,
+    /// and the orders 1 to 5 of `proc` on FRK-1 in the states a follow-up meets: 1 drafted, 2
+    /// approved, 3 placed, 4 received, 5 closed.
+    fn a_project_with_orders(name: &str) -> TestProject {
+        let project = TestProject::new(
+            name,
+            &a_team_of_three(|wire| {
+                with_the_finance_specialist(wire);
+                with_the_procurement_specialist(wire);
+                wire["agents"]
+                    .as_array_mut()
+                    .expect("a list of agents")
+                    .push(farik_core::team::fixtures::an_agent_wire(
+                        "proc-b",
+                        "procurement_specialist",
+                    ));
+            }),
+        );
+        for (task, role, assignee) in [
+            ("FRK-1", "procurement_specialist", "proc"),
+            ("FRK-4", "procurement_specialist", "proc"),
+            ("FRK-5", "procurement_specialist", "proc-b"),
+            ("FRK-2", "finance_specialist", "fin"),
+        ] {
+            project.filed_with(task, "assigned", "task", None, |wire| {
+                wire["assignee_role"] = json!(role);
+                wire["reviewer_role"] = json!("product_manager");
+            });
+            project.moved(
+                task,
+                "assigned",
+                "in_progress",
+                &json!({ "assignee": assignee, "reviewer": "pm" }),
+            );
+        }
+        project
+            .call(
+                "proc",
+                Some("FRK-1"),
+                "farik_write_evaluation",
+                json!({ "name": "mirrors", "text": "# Mirrors" }),
+            )
+            .expect("the comparison is written");
+        for seller in ["A", "B", "C", "D", "E"] {
+            draft(&project, &an_order(seller)).expect("an order is drafted");
+        }
+        for order in 2..=5 {
+            owner(
+                &project,
+                "purchase_order.approved",
+                &json!({ "order": order, "note": "" }),
+            );
+        }
+        for order in 3..=5 {
+            owner(
+                &project,
+                "purchase_order.placed",
+                &json!({ "order": order, "placed_on": "2026-09-20" }),
+            );
+        }
+        owner(
+            &project,
+            "purchase_order.received",
+            &json!({ "order": 4, "received_on": "2026-09-21" }),
+        );
+        owner(
+            &project,
+            "purchase_order.closed",
+            &json!({ "order": 5, "note": "" }),
+        );
+        project
+    }
+
+    /// `farik_update_purchase_order` as `proc` in its implement session of its follow-up task FRK-4.
+    fn follow_up(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
+        project.call(
+            "proc",
+            Some("FRK-4"),
+            "farik_update_purchase_order",
+            input.clone(),
+        )
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_a_follow_up_on_its_own_placed_order() {
+        let project = a_project_with_orders("po-update");
+
+        // A follow-up task of its own records on the order, which stays in the order's task.
+        follow_up(
+            &project,
+            &json!({ "order": 3, "status": "shipped", "note": "Left the depot.", "expected_on": "2026-10-02" }),
+        )
+        .expect("the follow-up is recorded");
+        let updated = project.events(&[EventKind::PurchaseOrderUpdated]);
+        assert_eq!(updated.len(), 1);
+        let ids = &updated[0].envelope.ids;
+        assert_eq!(
+            ids.agent_id.as_deref(),
+            Some("proc"),
+            "it never counts as the owner's"
+        );
+        assert_eq!(ids.session_id.as_deref(), Some("session-1"));
+        assert_eq!(
+            ids.task_id.as_ref().map(|task| task.as_str()),
+            Some("FRK-1")
+        );
+        let EventBody::PurchaseOrderUpdated(body) = &updated[0].body else {
+            panic!("a purchase_order.updated event carries its body");
+        };
+        assert_eq!(body.order.get(), 3);
+        assert_eq!(body.status.to_string(), "shipped");
+        assert_eq!(body.note.to_string(), "Left the depot.");
+        assert_eq!(
+            body.expected_on.map(|day| day.to_string()),
+            Some("2026-10-02".to_string())
+        );
+        // The note and the day are optional for a status that needs neither.
+        follow_up(
+            &project,
+            &json!({ "order": 3, "status": "preparing", "note": "" }),
+        )
+        .expect("preparing");
+        follow_up(&project, &json!({ "order": 3, "status": "delayed", "note": "Short of flour.", "expected_on": "2026-09-22" }))
+            .expect("a day that is today is not before it");
+        follow_up(
+            &project,
+            &json!({ "order": 3, "status": "problem", "note": "Out of stock." }),
+        )
+        .expect("a problem");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_follow_up_it_may_not_record() {
+        let project = a_project_with_orders("po-update-refused");
+        let before = project.event_count();
+
+        let invalid = [
+            json!({ "order": 3, "status": "delayed", "note": "Late." }),
+            json!({ "order": 3, "status": "delayed", "note": "", "expected_on": "2026-10-02" }),
+            json!({ "order": 3, "status": "problem", "note": "" }),
+            json!({ "order": 3, "status": "problem", "note": "   " }),
+            json!({ "order": 3, "status": "shipped", "note": "x".repeat(301) }),
+            json!({ "order": 3, "status": "shipped", "note": "a\nb" }),
+            json!({ "order": 3, "status": "shipped", "note": "", "expected_on": "2026-09-21" }),
+            json!({ "order": 3, "status": "shipped", "note": "", "expected_on": "soon" }),
+            json!({ "order": 3, "status": "shipped", "note": "", "expected_on": "2026-9-30" }),
+            json!({ "order": 3, "status": "placed", "note": "Done.", "expected_on": "2026-10-02" }),
+            json!({ "order": 3, "status": "received", "note": "Done.", "expected_on": "2026-10-02" }),
+            json!({ "order": 3, "status": "paid", "note": "Done.", "expected_on": "2026-10-02" }),
+            json!({ "order": 3, "status": "confirmed", "note": "Done.", "expected_on": "2026-10-02" }),
+            json!({ "order": 3, "status": "cancelled", "note": "Done.", "expected_on": "2026-10-02" }),
+        ];
+        for input in &invalid {
+            let reason = refusal_of(follow_up(&project, input));
+            assert!(
+                reason.starts_with("purchase_order_status_invalid:"),
+                "{input}: {reason}"
+            );
+        }
+        // Not placed: drafted, approved, received or closed; and a number nobody drafted.
+        for order in [1, 2, 4, 5] {
+            let reason = refusal_of(follow_up(
+                &project,
+                &json!({ "order": order, "status": "shipped", "note": "" }),
+            ));
+            assert!(
+                reason.starts_with("purchase_order_not_placed:"),
+                "{order}: {reason}"
+            );
+        }
+        let reason = refusal_of(follow_up(
+            &project,
+            &json!({ "order": 99, "status": "shipped", "note": "" }),
+        ));
+        assert!(reason.starts_with("unknown_purchase_order:"), "{reason}");
+        // Another Procurement Specialist's order is not this one's to follow up.
+        let reason = refusal_of(project.call(
+            "proc-b",
+            Some("FRK-5"),
+            "farik_update_purchase_order",
+            json!({ "order": 3, "status": "shipped", "note": "" }),
+        ));
+        assert!(reason.starts_with("purchase_order_not_yours:"), "{reason}");
+        // Its chat, another role and a session of a task another agent has follow up nothing.
+        let mut chat = project.context("proc", None);
+        chat.purpose = SessionPurpose::Chat;
+        for (what, context) in [
+            ("its chat", chat),
+            (
+                "the Finance Specialist",
+                project.context("fin", Some("FRK-2")),
+            ),
+            (
+                "a task another agent has",
+                project.context("proc", Some("FRK-5")),
+            ),
+            ("no task", project.context("proc", None)),
+        ] {
+            let reason = refusal_of(run(
+                &context,
+                "farik_update_purchase_order",
+                json!({ "order": 3, "status": "shipped", "note": "" }),
+            ));
+            assert!(
+                reason.starts_with("purchase_order_update_refused:"),
+                "{what}: {reason}"
+            );
+        }
+        assert_eq!(project.event_count(), before, "nothing was recorded on any");
     }
 }

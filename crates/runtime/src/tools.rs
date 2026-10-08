@@ -346,6 +346,16 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "Set up a purchase order for the owner to approve or reject: the seller, each line with its quantity and unit price, the currency, delivery and terms, the seller's page on a site the owner allowed, and the comparison it rests on. Farik writes it as orders/PO-<n>.xlsx in your folder and your task goes on while the owner decides. You never place, pay for, confirm or cancel an order.",
         ),
+        tool::<NoInput>(
+            "farik_read_purchase_orders",
+            Read,
+            "List every purchase order, oldest first: its state (drafted, approved, rejected, placed, received, closed or expired), lines and total, the owner's notes in their own words, when it was placed, what was paid, when it was received, its latest follow-up status and whether it is overdue.",
+        ),
+        tool::<purchase_order::UpdatePurchaseOrderInput>(
+            "farik_update_purchase_order",
+            Read,
+            "Record what a follow-up of an order the owner placed learned: preparing, shipped, delayed (with what you know and the day it is expected) or problem (with what is wrong). Say only what the seller's page says. You cannot mark an order placed or received: only the owner does, and the owner may correct what you record.",
+        ),
         tool::<exec::ExecInput>(
             "farik_exec",
             Execute,
@@ -478,6 +488,12 @@ pub async fn call_tool(
         "farik_request_sites" => sites::request_sites(&call, &parse(input)?),
         "farik_read_sites" => nothing_in(input).and_then(|()| sites::read_sites(&call)),
         "farik_draft_purchase_order" => purchase_order::draft_purchase_order(&call, &parse(input)?),
+        "farik_read_purchase_orders" => {
+            nothing_in(input).and_then(|()| purchase_order::read_purchase_orders(&call))
+        }
+        "farik_update_purchase_order" => {
+            purchase_order::update_purchase_order(&call, &parse(input)?)
+        }
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -702,6 +718,8 @@ mod tests {
             "farik_request_sites",
             "farik_read_sites",
             "farik_draft_purchase_order",
+            "farik_read_purchase_orders",
+            "farik_update_purchase_order",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -726,7 +744,7 @@ mod tests {
             tier("farik_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..33] {
+        for tool in &tools[..35] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

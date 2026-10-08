@@ -822,6 +822,11 @@ const REQUEST_SITES_TOOL: &str = "farik_request_sites";
 const READ_SITES_TOOL: &str = "farik_read_sites";
 /// The tool that suggests a purchase order, the Procurement Specialist's alone (ADR 0039).
 const DRAFT_PURCHASE_ORDER_TOOL: &str = "farik_draft_purchase_order";
+/// The tool that reads every purchase order: the Procurement Specialist's, in the implement session
+/// of a task and in its chat.
+const READ_PURCHASE_ORDERS_TOOL: &str = "farik_read_purchase_orders";
+/// The tool that records a placed order's follow-up status, the Procurement Specialist's alone.
+const UPDATE_PURCHASE_ORDER_TOOL: &str = "farik_update_purchase_order";
 
 /// The Farik tools a read-only session is not offered: the command runner, which has no
 /// executor there, and the git writes, which only the assignee may make.
@@ -867,10 +872,16 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
             }
             // A comparison is written, and an order suggested from it, in the implement session of
             // the task they belong to.
-            WRITE_EVALUATION_TOOL | DRAFT_PURCHASE_ORDER_TOOL => {
+            WRITE_EVALUATION_TOOL | DRAFT_PURCHASE_ORDER_TOOL | UPDATE_PURCHASE_ORDER_TOOL => {
                 ask.agent.role == RoleWire::ProcurementSpecialist
                     && ask.purpose == SessionPurpose::Implement
                     && ask.contract.is_some()
+            }
+            // The orders are read where the role works on a task and where it is asked about them.
+            READ_PURCHASE_ORDERS_TOOL => {
+                ask.agent.role == RoleWire::ProcurementSpecialist
+                    && ((ask.purpose == SessionPurpose::Implement && ask.contract.is_some())
+                        || ask.purpose == SessionPurpose::Chat)
             }
             // The sites are the held role's: it asks in the implement session of a task, the one
             // session that can wait for the owner, and reads the list there and in its chat.
@@ -2325,6 +2336,107 @@ mod tests {
                 SessionPurpose::Chat,
                 None,
                 "a Marketing Specialist's chat",
+            ),
+            (
+                "dev-a",
+                SessionPurpose::Implement,
+                Some(&developers),
+                "a Developer's implement session",
+            ),
+            ("dev-a", SessionPurpose::Chat, None, "a Developer's chat"),
+            (
+                "pm",
+                SessionPurpose::Implement,
+                Some(&procurement),
+                "the Product Manager's implement session about its task",
+            ),
+        ] {
+            assert_eq!(offered(who, purpose, about), Vec::<&str>::new(), "{what}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_the_order_tools_to_procurement_alone() {
+        use crate::tools::fixtures::{
+            with_the_finance_specialist, with_the_marketing_specialist,
+            with_the_procurement_specialist,
+        };
+        let harness = Harness::new("session-orders-offer", |wire| {
+            with_the_finance_specialist(wire);
+            with_the_marketing_specialist(wire);
+            with_the_procurement_specialist(wire);
+        });
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.finance_task("FRK-2", Some("in_progress"));
+        harness.in_progress("FRK-3", "dev-a", "dev-b");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let read = |task: &str| {
+            deps.tools
+                .files
+                .read_contract(&task.parse().expect("an id"))
+                .expect("the contract")
+        };
+        let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
+        let order_tools = [
+            "farik_draft_purchase_order",
+            "farik_read_purchase_orders",
+            "farik_update_purchase_order",
+        ];
+        let offered = |who: &str, purpose: SessionPurpose, about| {
+            let mut ask = asked(deps, agent(&team, who), purpose, about);
+            ask.read_only = purpose == SessionPurpose::Verify;
+            let given = session_spec(deps, &team, &ask)
+                .expect("the spec")
+                .farik_tools;
+            order_tools
+                .into_iter()
+                .filter(|tool| given.iter().any(|one| one == tool))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            offered("proc", SessionPurpose::Implement, Some(&procurement)),
+            order_tools,
+            "its task's implement session is offered the three"
+        );
+        assert_eq!(
+            offered("proc", SessionPurpose::Chat, None),
+            ["farik_read_purchase_orders"],
+            "its chat reads the orders and changes none"
+        );
+        for (who, purpose, about, what) in [
+            (
+                "proc",
+                SessionPurpose::Implement,
+                None,
+                "an implement session about no task",
+            ),
+            (
+                "proc",
+                SessionPurpose::Verify,
+                Some(&procurement),
+                "a verify session",
+            ),
+            (
+                "fin",
+                SessionPurpose::Implement,
+                Some(&finance),
+                "a Finance Specialist's implement session",
+            ),
+            (
+                "fin",
+                SessionPurpose::Chat,
+                None,
+                "a Finance Specialist's chat",
+            ),
+            (
+                "kai",
+                SessionPurpose::Implement,
+                Some(&procurement),
+                "a Marketing Specialist's implement session",
             ),
             (
                 "dev-a",
