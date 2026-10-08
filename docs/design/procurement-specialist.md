@@ -60,13 +60,19 @@ The register's `Vendors` sheet has these columns, in order: `vendor`, `what_for`
 
 ## Purchase orders (step 10c)
 
-`farik_draft_purchase_order { seller, seller_contact, lines, currency, period, delivery, terms, url, evaluation, why }` writes `orders/PO-<n>.xlsx` (a header block and a line table, all values, totals computed by Farik) and records `purchase_order.drafted`. It never reaches the seller.
+The agent suggests an order and tracks it; it never places, pays for, confirms or cancels one (ADR 0039's amendment of 2026-10-07, "suggest, then track"), and no Farik tool records one of those steps or what was paid.
 
-The founder sees it on Today in `PurchaseOrder`: the seller, each line, the total, the why, "Read the comparison", "Open the order", and the seller's address with its host in bold. The answers are "Approve, I'll place it myself", "Approve and send to <seller>" (from step 10f, which sends the order with the agent's covering message, editable, as one message the founder sends), and "Reject", each with an optional note: `purchase_order.approved` or `purchase_order.rejected`. Later, on the agent's page, "Mark received" records what was paid (`purchase_order.fulfilled`). Only the founder decides. `farik_read_purchase_orders` gives the agent every order and its state, so its next task updates the register.
+`farik_draft_purchase_order { seller, seller_contact, lines, currency, period, delivery, terms, url, evaluation, why }` writes `orders/PO-<n>.xlsx` (one sheet, `Order`: a header block and a line table, all values, totals computed by Farik) and records `purchase_order.drafted`. The seller's page `url` must be on an approved site (the founder: "Yes, approved sites only"), else the agent asks for the site first. The order waits for the owner and holds no task; it never reaches the seller. The agent cannot write `orders/`.
+
+The owner sees it on Today in `PurchaseOrder`: the seller, each line with its amounts, the total, the contact, delivery and terms, the seller's page with its host in bold, why, "Read the comparison", "Download PO-<n>.xlsx", and the day it closes by itself. The answers are "Approve, I'll place it myself" and "Reject", each with an optional note (`purchase_order.approved`, `purchase_order.rejected`); step 10f adds "Approve and send to <seller>". The owner places and pays for the order themselves, then marks it placed on the agent's page, with what they paid if they know (`purchase_order.placed`), and marks it received (`purchase_order.received`) or closes it when it will not come (`purchase_order.closed`). "Mark placed" offers to ask the agent to follow up until it arrives, and "Mark received" to update the register, each ticked and each a request the owner reads and may change first.
+
+From placing to receiving the agent follows up, reading the seller's pages on approved sites, and records what it learns with `farik_update_purchase_order { order, status, note, expected_on? }`: `preparing`, `shipped`, `delayed` (with the reason and the expected day) or `problem`. It never records "placed", "received" or "paid". The owner can correct any status. `farik_read_purchase_orders` gives the agent every order and its state, so its next task updates the register.
+
+An order not decided within 30 days of its drafting, or approved and not marked placed within 30 days of its approval, closes by itself (`purchase_order.expired`). A placed order never does: the owner has paid, so it shows as overdue once its expected day has passed, until it is received or closed.
 
 ## Renewals (step 10c)
 
-Once a day, with no model and no session, Farik reads `vendors.xlsx` and records `renewal.flagged { vendor, renews_on, decide_by }` for an `active` or `trial` row whose decision date (`renews_on` less `notice_days`) is 14 days off or nearer, once per vendor and date; `renewal.checked` records each day's run. Today offers "Ask for a review", which files an ordinary request, and "Dismiss". A date it cannot read is counted, never guessed.
+Once a day, with no model and no session, Farik reads `vendors.xlsx` and records `renewal.flagged { vendor, renews_on, decide_by }` for an `active` or `trial` row whose decision date (`renews_on` less `notice_days`) is 14 days off or nearer, once per vendor and date; `renewal.checked { due, unreadable }` records each day's run. Today lists the renewals coming up with "Ask for a review", which opens a request in the owner's words and files it, and "Dismiss" (`renewal.dismissed`). A date it cannot read is counted and said on Today, never guessed.
 
 ## Data pipeline requests (step 10e)
 
@@ -95,8 +101,9 @@ The user keeps a procurement mailbox of their own, a second address or alias at 
 | `farik_write_evaluation` | `read` | Procurement Specialist | Writes `evaluations/<name>.md` and keeps the previous version | 10b |
 | `farik_request_sites` | `read` | Procurement Specialist, in its own implement session | Asks the owner for one to ten sites with the reason, records `site.requested`; the task waits | 10b2 |
 | `farik_read_sites` | `read` | Procurement Specialist, in its implement session and its chat | The sites it may read, Farik's and the owner's, and for its task the ones waiting and the ones declined | 10b2 |
-| `farik_draft_purchase_order` | `read` | Procurement Specialist | Writes `orders/PO-<n>.xlsx`, records `purchase_order.drafted` | 10c |
-| `farik_read_purchase_orders` | `read` | Procurement Specialist | Every order and its state | 10c |
+| `farik_draft_purchase_order` | `read` | Procurement Specialist, in its own implement session | Writes `orders/PO-<n>.xlsx`, records `purchase_order.drafted`; the seller's page on an approved site | 10c |
+| `farik_read_purchase_orders` | `read` | Procurement Specialist, in its implement session and its chat | Every order, its state, the owner's notes and its latest status | 10c |
+| `farik_update_purchase_order` | `read` | Procurement Specialist, in its own implement session | Records `purchase_order.updated`: the follow-up status of a placed order it drafted | 10c |
 | `farik_request_data_pipeline` | `read` | Procurement Specialist | Records `data_pipeline.requested` | 10e |
 | `farik_read_data_pipelines` | `read` | Procurement Specialist | Every pipeline request and its outcome | 10e |
 | `farik_decide_data_pipeline` | `read` | Product Manager, in its decision session alone | Approves, declines or escalates; `approve` refused for a cost | 10e |
