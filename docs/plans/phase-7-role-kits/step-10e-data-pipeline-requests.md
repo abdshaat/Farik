@@ -1,6 +1,6 @@
 # Phase 7, step 10e: Data pipeline requests
 
-Status: ready (executes after steps 10c and 10d land)
+Status: executed 2026-10-08; its landing review follows
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 5.7, 5.16, 6.1, 6.10, 8.5, 8.6; F3, F9
 Depends on: the commits of step 10c (`crates/runtime/src/procurement.rs` and its `ORDERS` lock, the three order tools after `farik_read_sites` in `TOOLS` with the read-tier slice at `[..35]`, `daemon/mcp.rs`'s count at 42 and `EVERY_KIND` at 87, `CHAT_TOOLS` holding `farik_read_purchase_orders`, the `purchase_order` waiting row that holds no task, Today's `PurchaseOrderRow`, its `PurchaseOrder` dialog and `visibly`) and of step 10d (the role's kit with its twelve skills; 10d adds no Farik tool and no event kind); both ready, not yet executed: execution starts only after both steps' commits exist. Step 10b2 (`site_of` in `farik_core::governor::sites`, `farik_request_sites`, the `site_request` row, `siteRequestScript`); step 10b (the role, `Role::ProcurementSpecialist`); step 06 (the Product Manager's kit, five skills); phase 6 step 11 (the Designer's plan decision, `orchestrator/design.rs`'s `decide` and `DECIDE_TOOL`, whose one-tool session this step copies without its contract); phase 6 (merged in #19). File:line citations are at 0dc45aa; the names are what count.
@@ -236,3 +236,7 @@ Corrections against the code, read at HEAD `9028296` on 2026-10-08 before Task 1
 
 - No test; documents. `docs/SPEC.md` is revision 0.76: 6.10 (rewritten data pipelines paragraph: the tools' limits, the decision session about no task, three tries, the owner-only rule, the filed request's author, `auto` as step 10h builds it), 6.1, 5.7 (the waiting row and `data_pipeline_decide`), 5.16, 8.5 (the four kinds, `session.started`'s `pipeline`, 93 kinds in place of 89), 8.6, F3, and the revision line. `docs/design/procurement-specialist.md`: the pipeline section and the candidates' "Gate" column. Project plan row 10e. No phase numbers in the new text beyond phase 7 step 10e and 10h.
 - **Choice the plan left open**: the "89 kinds" sentence is moved to one total in the new 8.5 paragraph rather than kept beside it, so that the spec states one count.
+
+## Verification, 2026-10-08, on e2f531e
+
+`sh fullcheck-lean.sh` (the container's `cargo xtask check --integration` under its two workarounds), log `/tmp/claude-0/fullcheck-10e.log`, ended `FULLCHECK EXIT 0`: runtime lib `1477 passed`, core `472`, protocol `87`, store `177`, the `farik` package's tests all passing, web `426 passed` in 42 files, ui `49`, brand `35`, protocol-client `16`, end-to-end `15 passed`. Format, clippy, the bare-TODO check and the core no-I/O check ran in it.
