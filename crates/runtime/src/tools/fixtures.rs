@@ -521,6 +521,29 @@ impl TestProject {
         kind: &str,
         body: &Value,
     ) -> FarikEvent {
+        self.record_in_at(recorded_at, (agent, None), task, kind, body)
+    }
+
+    /// `record`, by `agent` in its session `session` when they are named: how a session records.
+    pub(crate) fn record_in(
+        &self,
+        agent: Option<&str>,
+        session: Option<&str>,
+        task: &str,
+        kind: &str,
+        body: &Value,
+    ) -> FarikEvent {
+        self.record_in_at(at(), (agent, session), task, kind, body)
+    }
+
+    fn record_in_at(
+        &self,
+        recorded_at: DateTime<Utc>,
+        (agent, session): (Option<&str>, Option<&str>),
+        task: &str,
+        kind: &str,
+        body: &Value,
+    ) -> FarikEvent {
         let mut wire = json!({
             "seq": 1,
             "recorded_at": recorded_at.to_rfc3339(),
@@ -534,6 +557,9 @@ impl TestProject {
         }
         if let Some(agent) = agent {
             wire["agent_id"] = json!(agent);
+        }
+        if let Some(session) = session {
+            wire["session_id"] = json!(session);
         }
         let event = event_from_value(&wire).expect("the fixture is schema-valid");
         let appended = self

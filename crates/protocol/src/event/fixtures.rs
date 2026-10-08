@@ -221,6 +221,30 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         }),
         EventKind::RenewalDismissed => json!({ "renewal": 7 }),
         EventKind::RenewalChecked => json!({ "due": 1, "unreadable": 0 }),
+        EventKind::DataPipelineRequested => json!({
+            "name": "Firecrawl",
+            "what": "Prices as clean text from the seller pages the task has to compare.",
+            "source_url": "https://www.firecrawl.dev/pricing",
+            "why": "Three sellers hide their prices behind scripts that the plain page fetch cannot read.",
+            "cost": "paid",
+            "needs_account": true,
+            "sends_project_data": false
+        }),
+        EventKind::DataPipelineEscalated => json!({
+            "pipeline": 7,
+            "reason": "It costs money and the owner decides what the team spends."
+        }),
+        EventKind::DataPipelineApproved => json!({
+            "pipeline": 7,
+            "by": "human",
+            "reason": "",
+            "request": "FRK-9"
+        }),
+        EventKind::DataPipelineDeclined => json!({
+            "pipeline": 7,
+            "by": "product_manager",
+            "reason": "The plain pages answer the question, so use them."
+        }),
         EventKind::MarketingCampaignCreated => json!({
             "plan": "MP-1",
             "key": "search-launch",

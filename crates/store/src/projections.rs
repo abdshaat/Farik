@@ -752,7 +752,13 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::PurchaseOrderExpired(_)
         | EventBody::RenewalFlagged(_)
         | EventBody::RenewalDismissed(_)
-        | EventBody::RenewalChecked(_) => Ok(()),
+        | EventBody::RenewalChecked(_)
+        // A data pipeline request is folded from the log when it is asked for, and holds no
+        // task: it waits for the Product Manager or the owner while its task goes on.
+        | EventBody::DataPipelineRequested(_)
+        | EventBody::DataPipelineEscalated(_)
+        | EventBody::DataPipelineApproved(_)
+        | EventBody::DataPipelineDeclined(_) => Ok(()),
     }
 }
 

@@ -21,6 +21,8 @@ pub mod marketing;
 pub mod metrics;
 /// The database's shape, as SQL applied in order.
 pub mod migrations;
+/// The data pipelines the log holds.
+pub mod pipelines;
 /// The board, derived from the log.
 pub mod projections;
 /// The purchase orders the log holds.

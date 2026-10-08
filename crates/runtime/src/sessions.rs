@@ -53,6 +53,7 @@ pub fn record_session_started(
             }
             _ => None,
         },
+        pipeline: None,
     };
     let ids = EventIds {
         task_id: spec.task_id.clone(),

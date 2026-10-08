@@ -701,8 +701,8 @@ const CONVERSATION_TOOLS: &[&str] = &[
 ];
 
 /// The Farik tools a chat session is offered (ADR 0026): the reading tools and its one reply, and
-/// the list of sites and of purchase orders, which `offered_tools` keeps for the role they are the
-/// Procurement Specialist's alone.
+/// the lists of sites, of purchase orders and of data pipeline requests, which `offered_tools`
+/// keeps for the role they are the Procurement Specialist's alone.
 pub(super) const CHAT_TOOLS: &[&str] = &[
     "farik_read_task",
     "farik_read_board",
@@ -711,6 +711,7 @@ pub(super) const CHAT_TOOLS: &[&str] = &[
     "farik_read_decisions",
     "farik_read_sites",
     "farik_read_purchase_orders",
+    "farik_read_data_pipelines",
     "farik_chat_reply",
 ];
 
@@ -5174,6 +5175,8 @@ mod tests {
                     "farik_draft_purchase_order",
                     "farik_read_purchase_orders",
                     "farik_update_purchase_order",
+                    "farik_request_data_pipeline",
+                    "farik_read_data_pipelines",
                     "farik_schedule_post",
                 ]
                 .contains(&tool.name)
@@ -7761,12 +7764,19 @@ mod tests {
         );
         let spec = &adapter.started()[0];
         assert_eq!(spec.purpose, SessionPurpose::Chat);
-        // The list of sites is the Procurement Specialist's alone, so a Developer's chat has the
-        // rest.
+        // The lists of sites, orders and data pipeline requests are the Procurement Specialist's
+        // alone, so a Developer's chat has the rest.
         let developers_chat: Vec<&str> = super::CHAT_TOOLS
             .iter()
             .copied()
-            .filter(|tool| *tool != "farik_read_sites" && *tool != "farik_read_purchase_orders")
+            .filter(|tool| {
+                ![
+                    "farik_read_sites",
+                    "farik_read_purchase_orders",
+                    "farik_read_data_pipelines",
+                ]
+                .contains(tool)
+            })
             .collect();
         assert_eq!(spec.farik_tools, developers_chat);
         assert_eq!(
@@ -7781,6 +7791,40 @@ mod tests {
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn gives_the_procurement_specialists_chat_its_lists() {
+        // The role the lists are for gets every chat tool: sites, orders and data pipeline
+        // requests among them.
+        let harness = Harness::with_procurement("orch-chat-procurement");
+        chatted(&harness, "proc", "human", "Status?", None);
+        let adapter = harness.recorded(vec![chat_answers_with_a_request()]);
+
+        harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let spec = &adapter.started()[0];
+        assert_eq!(spec.purpose, SessionPurpose::Chat);
+        let given: BTreeSet<&str> = spec.farik_tools.iter().map(String::as_str).collect();
+        assert_eq!(
+            given,
+            BTreeSet::from([
+                "farik_read_task",
+                "farik_read_board",
+                "farik_read_rules",
+                "farik_read_criteria",
+                "farik_read_decisions",
+                "farik_read_sites",
+                "farik_read_purchase_orders",
+                "farik_read_data_pipelines",
+                "farik_chat_reply",
+            ])
         );
     }
 

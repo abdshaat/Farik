@@ -48,6 +48,11 @@ pub use crate::generated::event::{
     BlockerWire, GateId as GateWire, RejectionWire, TaskStatus as TaskStatusWire,
     TransitionActor as TransitionActorWire,
 };
+/// The bodies of the four `data_pipeline.` kinds, with the vocabularies they repeat.
+pub use crate::generated::event::{
+    DataPipelineApprovedBody, DataPipelineCost, DataPipelineDecidedBy, DataPipelineDeclinedBody,
+    DataPipelineEscalatedBody, DataPipelineRequestedBody,
+};
 /// The channel's vocabularies, named for what they are rather than for the body they sit in.
 pub use crate::generated::event::{MessagePostedBodyKind as MessageKind, Thread};
 /// The bodies of the eight `purchase_order.` kinds, with the vocabularies they repeat: an
@@ -213,6 +218,10 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::RenewalFlagged => "renewalFlaggedBody",
         EventKind::RenewalDismissed => "renewalDismissedBody",
         EventKind::RenewalChecked => "renewalCheckedBody",
+        EventKind::DataPipelineRequested => "dataPipelineRequestedBody",
+        EventKind::DataPipelineEscalated => "dataPipelineEscalatedBody",
+        EventKind::DataPipelineApproved => "dataPipelineApprovedBody",
+        EventKind::DataPipelineDeclined => "dataPipelineDeclinedBody",
     }
 }
 
@@ -268,6 +277,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::PurchaseOrderReceived
             | EventKind::PurchaseOrderClosed
             | EventKind::PurchaseOrderExpired
+            | EventKind::DataPipelineRequested
     )
 }
 
@@ -291,7 +301,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// `social_post.` kinds name no one in the body either: the agent that wrote a post is on the
 /// envelope of `scheduled` and `requested`, and the other four are the owner's or Farik's. Nor
 /// do the four `site.` kinds: the agent that asked is on the envelope of `site.requested`, and the
-/// other three are the owner's.
+/// other three are the owner's. Nor do the four `data_pipeline.` kinds: the agent that asked is on
+/// the envelope of `data_pipeline.requested`, and `by` of an approval or a decline says whether
+/// the Product Manager or the owner decided it.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -382,13 +394,17 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::PurchaseOrderExpired(_)
         | EventBody::RenewalFlagged(_)
         | EventBody::RenewalDismissed(_)
-        | EventBody::RenewalChecked(_) => None,
+        | EventBody::RenewalChecked(_)
+        | EventBody::DataPipelineRequested(_)
+        | EventBody::DataPipelineEscalated(_)
+        | EventBody::DataPipelineApproved(_)
+        | EventBody::DataPipelineDeclined(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 89] = [
+pub const EVERY_KIND: [EventKind; 93] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -478,6 +494,10 @@ pub const EVERY_KIND: [EventKind; 89] = [
     EventKind::RenewalFlagged,
     EventKind::RenewalDismissed,
     EventKind::RenewalChecked,
+    EventKind::DataPipelineRequested,
+    EventKind::DataPipelineEscalated,
+    EventKind::DataPipelineApproved,
+    EventKind::DataPipelineDeclined,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -785,6 +805,19 @@ pub enum EventBody {
     /// Farik read the vendors register for the day.
     #[serde(rename = "renewal.checked")]
     RenewalChecked(RenewalCheckedBody),
+    /// The Procurement Specialist asked for a source of data it lacks.
+    #[serde(rename = "data_pipeline.requested")]
+    DataPipelineRequested(DataPipelineRequestedBody),
+    /// A data pipeline request goes to the owner: the Product Manager passed it on, or did not
+    /// decide it.
+    #[serde(rename = "data_pipeline.escalated")]
+    DataPipelineEscalated(DataPipelineEscalatedBody),
+    /// A data pipeline request was approved, and the team asked to set the source up.
+    #[serde(rename = "data_pipeline.approved")]
+    DataPipelineApproved(DataPipelineApprovedBody),
+    /// A data pipeline request was declined.
+    #[serde(rename = "data_pipeline.declined")]
+    DataPipelineDeclined(DataPipelineDeclinedBody),
 }
 
 impl EventBody {
@@ -881,6 +914,10 @@ impl EventBody {
             Self::RenewalFlagged(_) => EventKind::RenewalFlagged,
             Self::RenewalDismissed(_) => EventKind::RenewalDismissed,
             Self::RenewalChecked(_) => EventKind::RenewalChecked,
+            Self::DataPipelineRequested(_) => EventKind::DataPipelineRequested,
+            Self::DataPipelineEscalated(_) => EventKind::DataPipelineEscalated,
+            Self::DataPipelineApproved(_) => EventKind::DataPipelineApproved,
+            Self::DataPipelineDeclined(_) => EventKind::DataPipelineDeclined,
         }
     }
 }
@@ -1890,7 +1927,107 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 89);
+        assert_eq!(EVERY_KIND.len(), 93);
+    }
+
+    #[test]
+    fn round_trips_every_pipeline_event() {
+        let kinds = [
+            EventKind::DataPipelineRequested,
+            EventKind::DataPipelineEscalated,
+            EventKind::DataPipelineApproved,
+            EventKind::DataPipelineDeclined,
+        ];
+        for kind in kinds {
+            assert!(EVERY_KIND.contains(&kind), "{kind} is counted");
+            let wire = a_full_event_wire(kind);
+            let event = event_from_value(&wire).expect("a valid data pipeline event");
+            assert_eq!(event.body.kind(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+            // The request is about its task, which waits on nothing; a decision is about the
+            // request, and names no task of its own.
+            assert_eq!(
+                is_about_one_contract(kind),
+                kind == EventKind::DataPipelineRequested,
+                "{kind}"
+            );
+        }
+        assert_eq!(EVERY_KIND.len(), 93);
+
+        // A decision session says which request it decides.
+        let mut started = an_event_wire(EventKind::SessionStarted);
+        started["body"]["pipeline"] = json!(4);
+        let event = event_from_value(&started).expect("a session started for a pipeline");
+        assert_eq!(event_to_value(&event), started);
+        started["body"]["pipeline"] = json!(0);
+        assert!(
+            !refusal(&started).is_empty(),
+            "a request is numbered from 1"
+        );
+
+        // A request is numbered by its place in the log, so it carries no number.
+        let mut numbered = an_event_wire(EventKind::DataPipelineRequested);
+        numbered["body"]["pipeline"] = json!(4);
+        assert!(
+            !refusal(&numbered).is_empty(),
+            "a request carrying a number"
+        );
+        // An approval names the request it filed; a decline files none.
+        let mut approved = an_event_wire(EventKind::DataPipelineApproved);
+        approved["body"]
+            .as_object_mut()
+            .expect("an object")
+            .remove("request");
+        assert!(!refusal(&approved).is_empty(), "an approval without it");
+        let mut declined = an_event_wire(EventKind::DataPipelineDeclined);
+        declined["body"]["request"] = json!("FRK-9");
+        assert!(!refusal(&declined).is_empty(), "a decline with one");
+        // Two deciders: the Product Manager and the owner. `auto` is step 10h's.
+        for kind in [
+            EventKind::DataPipelineApproved,
+            EventKind::DataPipelineDeclined,
+        ] {
+            for by in ["product_manager", "human"] {
+                let mut wire = an_event_wire(kind);
+                wire["body"]["by"] = json!(by);
+                event_from_value(&wire).expect("a decider");
+            }
+            for by in ["auto", "farik", "agent"] {
+                let mut wire = an_event_wire(kind);
+                wire["body"]["by"] = json!(by);
+                assert!(!refusal(&wire).is_empty(), "{kind} by {by}");
+            }
+        }
+        // What a request says of the source is held to the same words the tool holds it to.
+        for (field, value) in [
+            ("name", json!("")),
+            ("name", json!("x".repeat(101))),
+            ("name", json!("Fire\ncrawl")),
+            ("what", json!("x".repeat(19))),
+            ("what", json!("x".repeat(601))),
+            ("why", json!("x".repeat(19))),
+            ("why", json!("x".repeat(601))),
+            ("source_url", json!("")),
+            ("source_url", json!("x".repeat(2001))),
+            ("cost", json!("cheap")),
+            ("needs_account", json!("yes")),
+            ("sends_project_data", json!(null)),
+        ] {
+            let mut wire = an_event_wire(EventKind::DataPipelineRequested);
+            wire["body"][field] = value.clone();
+            assert!(!refusal(&wire).is_empty(), "{field} {value}");
+        }
+        for field in ["needs_account", "sends_project_data", "cost"] {
+            let mut wire = an_event_wire(EventKind::DataPipelineRequested);
+            wire["body"]
+                .as_object_mut()
+                .expect("an object")
+                .remove(field);
+            assert!(!refusal(&wire).is_empty(), "a request without {field}");
+        }
+        let mut escalated = an_event_wire(EventKind::DataPipelineEscalated);
+        escalated["body"]["pipeline"] = json!(0);
+        assert!(!refusal(&escalated).is_empty(), "escalating request 0");
     }
 
     #[test]
@@ -1956,7 +2093,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 89);
+        assert_eq!(EVERY_KIND.len(), 93);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -2271,7 +2408,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 89);
+        assert_eq!(EVERY_KIND.len(), 93);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

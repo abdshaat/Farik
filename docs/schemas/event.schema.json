@@ -145,7 +145,11 @@
         "purchase_order.expired",
         "renewal.flagged",
         "renewal.dismissed",
-        "renewal.checked"
+        "renewal.checked",
+        "data_pipeline.requested",
+        "data_pipeline.escalated",
+        "data_pipeline.approved",
+        "data_pipeline.declined"
       ]
     },
     "eventBodyWire": {
@@ -230,7 +234,11 @@
         { "$ref": "#/$defs/purchaseOrderExpiredBody" },
         { "$ref": "#/$defs/renewalFlaggedBody" },
         { "$ref": "#/$defs/renewalDismissedBody" },
-        { "$ref": "#/$defs/renewalCheckedBody" }
+        { "$ref": "#/$defs/renewalCheckedBody" },
+        { "$ref": "#/$defs/dataPipelineRequestedBody" },
+        { "$ref": "#/$defs/dataPipelineEscalatedBody" },
+        { "$ref": "#/$defs/dataPipelineApprovedBody" },
+        { "$ref": "#/$defs/dataPipelineDeclinedBody" }
       ]
     },
     "contractSummary": {
@@ -1454,6 +1462,74 @@
         "unreadable": { "type": "integer", "minimum": 0, "maximum": 1000000 }
       }
     },
+    "dataPipelineNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615,
+      "description": "A data pipeline request's number: the sequence number of its data_pipeline.requested."
+    },
+    "dataPipelineCost": {
+      "type": "string",
+      "enum": ["free", "paid", "unknown"],
+      "description": "What a data source costs to use, as the agent says on asking: free only when the source's own page says so, paid, or unknown."
+    },
+    "dataPipelineDecidedBy": {
+      "type": "string",
+      "enum": ["product_manager", "human"],
+      "description": "Who decided a request: the Product Manager, in the session that was asked to, or the owner. Under auto (phase 7 step 10h) a third word joins them."
+    },
+    "dataPipelineRequestedBody": {
+      "title": "Data Pipeline Requested Body",
+      "description": "The Procurement Specialist asked for a source of prices or provider data it lacks (docs/SPEC.md 6.10; ADR 0039): name the source in 1 to 100 characters on one line, what it would give, source_url the source's own page exactly as the agent wrote it (an address site_of accepts), and why the recommendation would change, each of the three 20 to 600 characters (what and why may hold line breaks). All of them are the agent's words, untrusted, shown as text. cost is free only when the source's own page says so; needs_account and sends_project_data are the agent's answers, which decide who may approve (docs/SPEC.md 6.10). The event's sequence number is the request's number; the envelope names its task, agent and session, and the task goes on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "what", "source_url", "why", "cost", "needs_account", "sends_project_data"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[^\\r\\n]+$" },
+        "what": { "type": "string", "minLength": 20, "maxLength": 600 },
+        "source_url": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "why": { "type": "string", "minLength": 20, "maxLength": 600 },
+        "cost": { "$ref": "#/$defs/dataPipelineCost" },
+        "needs_account": { "type": "boolean" },
+        "sends_project_data": { "type": "boolean" }
+      }
+    },
+    "dataPipelineEscalatedBody": {
+      "title": "Data Pipeline Escalated Body",
+      "description": "A request goes to the owner (docs/SPEC.md 6.10; ADR 0039): the Product Manager passed it on, with its reason on one line of its own words (the envelope names the Product Manager and its decision session), or Farik did after three decision sessions ended without a word (the reason is Farik's sentence and the envelope names no agent and no session). pipeline is the request's number. About the request and no task of its own.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pipeline", "reason"],
+      "properties": {
+        "pipeline": { "$ref": "#/$defs/dataPipelineNumber" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 600 }
+      }
+    },
+    "dataPipelineApprovedBody": {
+      "title": "Data Pipeline Approved Body",
+      "description": "A request was approved, and the team was asked to set the source up (docs/SPEC.md 6.10; ADR 0039): by the Product Manager, from the decision session of this request, or by the owner, whose envelope names no agent and no session. reason is the Product Manager's reason or the owner's note, empty when the owner said nothing; request is the id of the ordinary request that was filed, the only thing an approval does. About the request and no task of its own.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pipeline", "by", "reason", "request"],
+      "properties": {
+        "pipeline": { "$ref": "#/$defs/dataPipelineNumber" },
+        "by": { "$ref": "#/$defs/dataPipelineDecidedBy" },
+        "reason": { "type": "string", "maxLength": 600 },
+        "request": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+      }
+    },
+    "dataPipelineDeclinedBody": {
+      "title": "Data Pipeline Declined Body",
+      "description": "A request was declined, and nothing was filed (docs/SPEC.md 6.10; ADR 0039): by the Product Manager, from the decision session of this request, or by the owner, whose envelope names no agent and no session. reason is the Product Manager's reason or the owner's note, empty when the owner said nothing. About the request and no task of its own.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pipeline", "by", "reason"],
+      "properties": {
+        "pipeline": { "$ref": "#/$defs/dataPipelineNumber" },
+        "by": { "$ref": "#/$defs/dataPipelineDecidedBy" },
+        "reason": { "type": "string", "maxLength": 600 }
+      }
+    },
     "connectorTag": {
       "type": "string",
       "enum": ["network", "external_effect", "denied"],
@@ -1553,7 +1629,8 @@
         "effort": { "type": "string", "enum": ["low", "medium", "high"] },
         "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "thread": { "$ref": "#/$defs/thread" },
-        "chat": { "type": "string", "minLength": 1, "description": "The agent whose one-to-one chat a chat session answers, which the envelope also names; only on purpose chat." }
+        "chat": { "type": "string", "minLength": 1, "description": "The agent whose one-to-one chat a chat session answers, which the envelope also names; only on purpose chat." },
+        "pipeline": { "$ref": "#/$defs/dataPipelineNumber", "description": "The data pipeline request a Product Manager's decision session decides (docs/SPEC.md 6.10), which it is the only session to name; only on purpose verify, about no task." }
       }
     },
     "sessionEndedBody": {

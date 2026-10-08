@@ -33,6 +33,12 @@ pub(crate) static ORDERS: Mutex<()> = Mutex::new(());
 /// and by the owner's dismissal.
 pub(crate) static RENEWALS: Mutex<()> = Mutex::new(());
 
+/// Held from the first read of the data pipeline requests to the record that changes them: by an
+/// agent's request, by each decision (the Product Manager's and the owner's) and by Farik's
+/// escalation after three tries, so that two of them never take one name or the limit, decide one
+/// request twice, or file its request twice. One lock for every project in the process.
+pub(crate) static PIPELINES: Mutex<()> = Mutex::new(());
+
 /// The most characters a follow-up status's note has.
 const MOST_STATUS_NOTE: usize = 300;
 
