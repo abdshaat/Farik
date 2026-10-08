@@ -446,12 +446,22 @@ pub(crate) fn check_renewals(
         .map_err(|error| failed(&error))?;
         record_event(tools, None, EventBody::RenewalFlagged(body), now)?;
     }
-    let body: RenewalCheckedBody = serde_json::from_value(json!({
-        "due": due.len(),
-        "unreadable": unreadable.saturating_add(unread),
-    }))
-    .map_err(|error| failed(&error))?;
+    let body = checked_body(due.len(), unreadable.saturating_add(unread))
+        .map_err(|error| failed(&error))?;
     record_event(tools, None, EventBody::RenewalChecked(body), now)
+}
+
+/// The most either count of `renewal.checked` holds: the event's schema takes no more.
+const MOST_COUNTED: u32 = 1_000_000;
+
+/// The body of `renewal.checked` for a run that flagged `due` renewals and could not read
+/// `unreadable` rows, each count held to what the schema takes, so that a register with more rows
+/// than that cannot make every tick fail on it.
+fn checked_body(due: usize, unreadable: u32) -> Result<RenewalCheckedBody, serde_json::Error> {
+    serde_json::from_value(json!({
+        "due": u32::try_from(due).unwrap_or(MOST_COUNTED).min(MOST_COUNTED),
+        "unreadable": unreadable.min(MOST_COUNTED),
+    }))
 }
 
 #[cfg(test)]
@@ -947,6 +957,30 @@ mod tests {
             "none flagged by guessing"
         );
         assert!(harness.events(&[EventKind::RenewalFlagged]).is_empty());
+    }
+
+    #[test]
+    fn counts_past_a_million_are_held_to_a_million() {
+        use farik_protocol::event::event_from_value;
+        // A register can hold more rows than the event's schema counts. The log reads every event
+        // back through the schema, so one it refuses would fail every later read of its kind, the
+        // next tick's included, and stop the team: the check records the most the schema counts.
+        let wire = |body: &super::RenewalCheckedBody| {
+            json!({
+                "seq": 1, "recorded_at": "2026-10-05T08:00:00Z", "team_id": "farik",
+                "project_id": "farik", "kind": "renewal.checked",
+                "body": serde_json::to_value(body).expect("a body is a value"),
+            })
+        };
+        let body = super::checked_body(2_000_000, u32::MAX).expect("a body");
+        event_from_value(&wire(&body)).expect("the schema takes it");
+        assert_eq!((body.due, body.unreadable), (1_000_000, 1_000_000));
+        // Fewer are counted as they are.
+        let body = super::checked_body(3, 7).expect("a body");
+        assert_eq!((body.due, body.unreadable), (3, 7));
+        let body = super::checked_body(1_000_000, 1_000_000).expect("a body");
+        event_from_value(&wire(&body)).expect("the schema takes it");
+        assert_eq!((body.due, body.unreadable), (1_000_000, 1_000_000));
     }
 
     #[tokio::test]
