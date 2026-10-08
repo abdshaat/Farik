@@ -769,6 +769,56 @@ mod tests {
     }
 
     #[test]
+    fn a_status_that_names_an_agent_or_a_session_alone_is_not_the_owner_s() {
+        let board = Board::new("orders-status-alone");
+        draft(&board, 0, 1, "Acme");
+        owner(
+            &board,
+            1,
+            "purchase_order.approved",
+            json!({ "order": 1, "note": "" }),
+        );
+        owner(
+            &board,
+            2,
+            "purchase_order.placed",
+            json!({ "order": 1, "placed_on": "2026-09-28" }),
+        );
+        let problem = json!({ "order": 1, "status": "problem", "note": "Out of stock." });
+
+        // Another agent's, with no session: not the owner's correction, and not its agent's.
+        board.put(
+            at(10, 3),
+            Some("FRK-1"),
+            Some("kai"),
+            "purchase_order.updated",
+            problem.clone(),
+        );
+        // A session with no agent: nothing the owner's command records.
+        board.put_with(
+            at(10, 4),
+            Some("FRK-1"),
+            None,
+            Some("session-9"),
+            "purchase_order.updated",
+            problem,
+        );
+        assert!(only(&board).status.is_none(), "neither counts");
+
+        // The order's own agent with no session is the agent's, never the owner's.
+        board.put(
+            at(10, 5),
+            Some("FRK-1"),
+            Some("ivo"),
+            "purchase_order.updated",
+            json!({ "order": 1, "status": "shipped", "note": "" }),
+        );
+        let status = only(&board).status.expect("the agent's status counts");
+        assert_eq!(status.status, FollowUp::Shipped);
+        assert!(!status.by_owner);
+    }
+
+    #[test]
     fn a_later_amount_paid_replaces_the_first() {
         let board = Board::new("orders-paid");
         for (order, minute) in [(1, 0), (2, 1)] {
