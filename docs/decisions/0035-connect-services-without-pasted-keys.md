@@ -13,6 +13,7 @@ Amended 2026-10-06 by ADR 0044 (the founder, later the same day: "Lets change th
 Amended 2026-10-08 by ADR 0047 (the founder: "Keep it public but just modify the files to say plan separately in farik ops"): the relay's server side, its hosting, its limits and its operations are planned separately in `farik-ops`, the private operations repository; the app's side and the API it calls stay here (phase 7 step 03d). This record stays as the decision of its day.
 
 Resolves step 03's O2 (`docs/plans/phase-7-role-kits/step-03-signing-in-to-a-service.md`). ADR 0033, written in step 03's Task 2, keeps its registration order; this ADR adds two routes before its refusal.
+Amended 2026-10-08 by ADR 0048 (the founder: "Lets set up the infra repository as well as the cloud hosting, landing page, etc. in phase 8"): Farik Cloud, with routes 2 and 3 and Farik's own apps, starts in a new phase 8, after the role kits, not at the web launch, now phase 12; Slack's app and its listing stay in Premium, now phase 16. The phases after phase 7 moved up by one; the numbers below are the old ones.
 
 ## Context
 

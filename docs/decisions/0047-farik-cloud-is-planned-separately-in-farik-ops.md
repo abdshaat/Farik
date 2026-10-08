@@ -3,6 +3,7 @@
 Date: 2026-10-08
 Status: accepted (the founder, 2026-10-08, in conversation). Numbered 0047 because phase 7 step 11's plan reserves 0045 (`0045-devops-deploys-watching-and-incidents.md`) and step 12d's reserves 0046 (`0046-fixed-settings-and-file-keys-in-a-kit-server.md`). Amends ADR 0017 and ADR 0044 (where what Farik hosts, and Farik Cloud's service, are planned) and ADR 0035 (where the relay's server side is planned).
 Amended 2026-10-08 by the founder's two answers of the same day: the website's code (homepage, downloads, privacy page) lives in `farik-ops` too ("farik-ops"), and the paid cloud's code that runs customers' workspaces is private there as well, not only its hosting ("Code private too"); this repository keeps only the app's side of connecting to it.
+Amended 2026-10-08 by ADR 0048 (the founder, later the same day: "Lets set up the infra repository as well as the cloud hosting, landing page, etc. in phase 8. Any cloud hosting related planning must be done in the ops repository."): `farik-ops` and Farik Cloud's own hosting are set up in a new phase 8, Farik Cloud, as its step 01, after the role kits; Farik Cloud's steps of phase 11 are phase 8's, the paid cloud is Premium, phase 16, and the phases after phase 7 moved up by one. The numbers below are the old ones.
 
 ## Context
 

@@ -5,6 +5,7 @@ Status: accepted
 Amended 2026-10-06 by phase 7 step 08e: a `stdio` entry that is Farik's own connector may carry `oauth`. See "Amendment of 2026-10-06".
 Amended 2026-10-06 by ADR 0043: until phase 15 the app a service's sign-in uses is the customer's own, never Farik's, and client metadata documents wait for phase 15. See "Amendment by ADR 0043".
 Amended 2026-10-06 by ADR 0044: the customer's own app is dropped; from the web launch, phase 11, a service that registers no client signs in with Farik's own app through Farik Cloud, and before then takes a pasted key or is not offered. See "Amendment by ADR 0044".
+Amended 2026-10-08 by ADR 0048 (the founder: "Lets set up the infra repository as well as the cloud hosting, landing page, etc. in phase 8"): Farik Cloud's sign-ins start in a new phase 8, after the role kits, not at the web launch, now phase 12; whether client metadata documents come with Farik Cloud's site is phase 8's to decide; Premium is phase 16. The phases after phase 7 moved up by one; the numbers below are the old ones.
 
 ## Context
 

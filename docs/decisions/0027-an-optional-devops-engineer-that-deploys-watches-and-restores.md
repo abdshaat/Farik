@@ -4,6 +4,7 @@ Date: 2026-09-30
 Status: accepted
 Amended 2026-10-01 by ADR 0029: the role kits are phase 7, so the role and its flow are phase 7 step 09, its connectors step 10 and the kit check step 11; the step references below are updated. Renumbered 2026-10-01 by the project plan's revision 27, which split phase 7 step 01 and added a sign-in step: steps 11, 12 and 13.
 Amended 2026-10-05 by the founder (answering the DevOps plans' O1 to O3): Farik's `farik_deploy`, `farik_restart` and `farik_roll_back` reach each platform by whichever official path works there, the platform's own server where it can deploy (Vercel, AWS, Kubernetes), the platform's own API with the same key (Render, Netlify), or Farik's own small server (Railway, Fly); a platform whose narrowest key reaches a whole account or team is accepted, with setup copy that says so; and an incident's first restart is made by Farik at once, with no model and no session, the DevOps Engineer's session investigating after (phase 7 steps 11d, 12, 12b and 12c).
+Amended 2026-10-08 by ADR 0048 (the founder: "Lets set up the infra repository as well as the cloud hosting, landing page, etc. in phase 8"): a phase, Farik Cloud, follows the role kits as phase 8, so the phases after phase 7 moved up by one (Engines and providers 9, Ecosystem 10, Proof of concept 11, Web launch 12, Business workspaces 13, Desktop 14, Native mobile 15, Premium 16); the numbers below are the old ones.
 
 ## Context
 

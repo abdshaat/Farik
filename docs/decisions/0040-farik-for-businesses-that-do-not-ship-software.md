@@ -2,6 +2,7 @@
 
 Date: 2026-10-05
 Status: accepted. The founder set the direction on 2026-10-05 ("I am looking to generalize farik for non technical products as well. For example car flipping business, selling items on amazon, car rentals, etc.") and, the same day, decided it ("Restructure farik around being for all businesses both software and non software"), answering G1 to G6 below. G6 has its own record, ADR 0041. Amends ADRs 0017, 0021, 0025 and 0035 in one respect only: the phases after the web launch are renumbered, Desktop from 12 to 13, Native mobile from 13 to 14, Premium from 14 to 15, to make room for this phase.
+Amended 2026-10-08 by ADR 0048 (the founder: "Lets set up the infra repository as well as the cloud hosting, landing page, etc. in phase 8"): a phase, Farik Cloud, follows the role kits as phase 8, so the phases after phase 7 moved up by one: the proof of concept is phase 11, the web launch phase 12, Business workspaces 13, Desktop 14, Native mobile 15, and Premium 16, which still hosts paying customers' workspaces; the numbers below are the old ones.
 
 ## Context
 
