@@ -1212,6 +1212,53 @@ mod tests {
         }
     }
 
+    /// The first of the ways to tell an agent to buy that `text` holds, in any case.
+    fn telling_to_buy(text: &str) -> Option<&'static str> {
+        let lower = text.to_lowercase();
+        [
+            "place the order",
+            "place an order",
+            "pay the seller",
+            "confirm the order",
+            "check out",
+        ]
+        .into_iter()
+        .find(|phrase| lower.contains(phrase))
+    }
+
+    /// Nothing in the kit can buy, so no skill of it may tell the agent to: the rule that it never
+    /// does is said once, in `writing-purchase-orders`, and the words that order a purchase are
+    /// said nowhere. The check is shown to find each phrase, in any case, or it would pass by
+    /// never matching.
+    #[test]
+    fn no_procurement_skill_tells_the_agent_to_buy() {
+        for (text, found) in [
+            ("then place the order and pay for it", "place the order"),
+            ("Place An Order with the maker", "place an order"),
+            ("PAY THE SELLER by card", "pay the seller"),
+            ("Confirm the order today", "confirm the order"),
+            ("check out before noon", "check out"),
+        ] {
+            assert_eq!(telling_to_buy(text), Some(found), "{text}");
+        }
+        assert_eq!(
+            telling_to_buy("You never place, pay for or cancel one."),
+            None
+        );
+        let kit = load_kit(Role::ProcurementSpecialist).expect("the Procurement Specialist's kit");
+        assert!(!kit.skills.is_empty());
+        for skill in &kit.skills {
+            for text in skill.session_files.values() {
+                assert_eq!(
+                    telling_to_buy(text),
+                    None,
+                    "{} tells the agent to buy",
+                    skill.name
+                );
+            }
+        }
+    }
+
     /// Step 10d: `fx` is Farik's own server over Frankfurter, started by its bare name, with no
     /// key; its three tools only read, each with a label, and the copy is the plan's.
     #[test]
