@@ -7,6 +7,7 @@ import { useQuery } from "../app/store.ts";
 import { codeOf } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
+import { type AdsAsk, AdsRow } from "./AdsRow.tsx";
 import { type Allowances, useAllowances } from "./allowances.tsx";
 import { type Backlog, moreWaits } from "./Board.tsx";
 import { ChannelPreview } from "./Channel.tsx";
@@ -67,11 +68,13 @@ type Waiting = {
 		| "tool_approval"
 		| "marketing_plan"
 		| "social_post"
-		| "site_request";
+		| "site_request"
+		| AdsAsk["kind"];
 	agentId: string | null;
 	title: string;
 	line: string;
 } & Partial<ToolAsk> &
+	Partial<Omit<AdsAsk, "kind" | "taskId" | "agentId" | "plan">> &
 	Partial<PlanAsk> &
 	Partial<PostAsk> &
 	Partial<SiteAsk>;
@@ -129,6 +132,12 @@ const KINDS: Record<
 
 const DAY_MS = 86_400_000;
 
+/** Whether a row is about a marketing plan's ads and their budget (step 08g). */
+const isAds = (kind: Waiting["kind"]): kind is AdsAsk["kind"] =>
+	kind === "marketing_budget" ||
+	kind === "marketing_ads_running" ||
+	kind === "marketing_spend_unread";
+
 /** The home page: the team, the request box, what waits on the human, and what moved. */
 export function Today() {
 	const { data: team } = useQuery<{ team: Team; kits?: RoleKit[] }>(
@@ -151,6 +160,7 @@ export function Today() {
 				item.kind === "marketing_plan" ||
 				item.kind === "social_post" ||
 				item.kind === "site_request" ||
+				isAds(item.kind) ||
 				item.kind in KINDS,
 		),
 	};
@@ -250,6 +260,12 @@ export function Today() {
 										item={item}
 										agent={agent(item.agentId)}
 										now={new Date()}
+									/>
+								) : isAds(item.kind) ? (
+									<AdsRow
+										key={`${item.kind}-${item.plan}`}
+										item={item as AdsAsk}
+										agent={agent(item.agentId)}
 									/>
 								) : item.kind === "site_request" ? (
 									<SiteRequestRow

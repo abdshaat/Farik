@@ -1172,6 +1172,9 @@ export const en = {
 	connectorSettings: "{host}’s settings",
 	connectorRemoveOthersSigned:
 		"Nobody else on the team is affected. To use it again, add it again and sign in.",
+	connectorRemoveGoogleAds:
+		"Farik pauses your marketing plan’s running ads first, since without this connection it could not stop them at their budget. If Google refuses, Google Ads is removed anyway, and the ads keep running at Google until their end date or their budget there; pause them in Google Ads.",
+	connectorRemoveAgainSigned: "To use it again, add it again and sign in.",
 	connectorCustom: "A custom connector",
 	connectorCustomNote:
 		"Any connector, by the command that starts it or its web address. Farik has not checked it, so you label each of its tools yourself. A connector started by a command runs on this computer with your rights, so add only one you trust. It runs in a folder Farik keeps for it, so give a file of yours by its full path, starting with /.",
@@ -1718,9 +1721,9 @@ export const en = {
 	marketingAllowsPostsOne:
 		"Post the post below on its day, without asking you each time.",
 	marketingAllowsAds:
-		"Spend up to {amount} on the {n} Google Ads campaigns below, each within its own budget and dates.",
+		"Spend up to {amount} on the {n} Google Ads campaigns below, each within its own budget and dates. Farik pauses a campaign when it reaches its budget.",
 	marketingAllowsAdsOne:
-		"Spend up to {amount} on the Google Ads campaign below, within its budget and dates.",
+		"Spend up to {amount} on the Google Ads campaign below, within its budget and dates. Farik pauses it when it reaches its budget.",
 	marketingAllowsNothing:
 		"Nothing else. Another post, another campaign or a bigger budget still asks you first.",
 	marketingAllowsEnd: "You can end the plan at any time on this page.",
@@ -1792,6 +1795,110 @@ export const en = {
 		"{name} cannot post or advertise for this plan again. For more, {name} proposes a new plan for you to approve.",
 	marketingEndNote: "A note for {name} (optional)",
 	marketingEndKeep: "Keep the plan",
+	// A marketing plan's ads and their budget (ADR 0042, step 08g).
+	marketingAdvertisesLabel: "Advertises:",
+	marketingNotStated: "Not stated",
+	marketingPriceLabel: "Price:",
+	marketingPriceFixed: "fixed at {amount} {currency}",
+	marketingPriceNotFixed:
+		"up to {amount} {currency}, may run over by about an hour’s spend",
+	marketingPriceNote:
+		"A fixed price is a total that Google itself never charges past. Google keeps one only for a campaign of 3 to 90 days; any other has a daily budget, and since Google reports cost up to about an hour late, Farik may pause it after about an hour’s more spend.",
+	marketingPricesAsApproved: "Prices as on the day you approved the plan.",
+	marketingAllowsNotFixed:
+		"{name} is not at a fixed price, so it may run over by about an hour’s spend.",
+	marketingBarRunsOver: "1 campaign may run over by about an hour’s spend.",
+	marketingBarRunsOverMany:
+		"{n} campaigns may run over by about an hour’s spend.",
+	marketingSpentTitle: "Spent so far",
+	marketingSpentEndedTitle: "Spent",
+	marketingSpentOf: "{spent} of {budget} {currency}",
+	marketingSpentMeter: "{percent} per cent of the budget spent",
+	marketingSpentRead:
+		"Google Ads’ own figures, read {when}. Farik reads them every 15 minutes while it runs.",
+	marketingSpentReadStale: "Google Ads’ own figures, read {when}.",
+	marketingSpentReadEnded:
+		"Google Ads’ own figures, last read {when}, before the plan ended. Google Ads itself has the final figures.",
+	marketingSpentUnread:
+		"Farik can’t read the spend now: {reason} Last tried {when}; Farik tries again every 15 minutes. Until a read works, Farik cannot pause the ads at their budget.",
+	marketingTodayAt: "today at {time}",
+	marketingColSpent: "Spent so far",
+	marketingColSpentEnded: "Spent",
+	marketingPausedAtBudget: "Paused at its budget",
+	marketingPausedPlanEnded: "Paused: the plan ended",
+	marketingPausedRemoved: "Paused: Google Ads was removed",
+	marketingPausesTitle: "Ads Farik paused",
+	marketingPauseBudget:
+		"{name}: it reached its budget, {spent} of {budget} {currency}.",
+	marketingPauseBudgetPlan:
+		"{name}: the plan’s ads reached their budget, {spent} of {budget} {currency}.",
+	marketingPauseBudgetBare: "{name}: it reached its budget.",
+	marketingPausePlanEnded: "{name}: the plan ended.",
+	marketingPauseRemoved: "{name}: Google Ads was removed.",
+	marketingEndAds: "Farik pauses its running ads within a minute.",
+	marketingEndAdsSpent:
+		"Farik pauses its running ads within a minute. {spent} is spent so far, by Google’s figures at {time}.",
+	marketingEndHintAds:
+		"Ending pauses the ads within a minute and stops the posts not yet sent.",
+	marketingEndHintAdsOnly: "Ending pauses the ads within a minute.",
+	// Today's rows about a plan's ads: the budget reached, ads that may still run, a spend not read.
+	waitingBudgetTitle: "Ads budget reached: {plan}",
+	waitingBudgetCampaign:
+		"Its campaign {name} reached its budget: {spent} of {budget} {currency}.",
+	waitingBudgetPlan:
+		"Its ads reached their budget: {spent} of {budget} {currency}.",
+	waitingBudgetPaused: "Farik paused {them}.",
+	waitingBudgetStuck:
+		"Farik could not pause {them}: {reason} Farik tries again every 15 minutes; pause {them} in Google Ads.",
+	waitingBudgetRaising:
+		"You asked {name} for a new version with a raised budget. It waits for you here when it is ready.",
+	waitingBudgetSpent: "Google Ads: {spent} of {budget} {currency} spent",
+	waitingBudgetEnds: "Ends {day}",
+	waitingRaise: "Raise the budget",
+	waitingOpenAds: "Open Google Ads",
+	waitingRunningTitle: "Ads still running: {plan}",
+	waitingRunningLine:
+		"Farik could not pause its ads: {reason} They keep running at Google until {day} or their budget there. Pause them in Google Ads.",
+	waitingUnreadTitle: "Can’t read the ad spend: {plan}",
+	waitingUnreadLine:
+		"Farik can’t read its ad spend: {reason} Any of its ads still running keep running at Google until {day} or their budget there; pause them in Google Ads.",
+	waitingUnreadLast: "Last read {when}: {spent} of {budget} {currency}",
+	// The raise of a marketing budget.
+	raiseTitle: "Raise the budget of {plan}",
+	raiseLeadCampaign:
+		"{names} reached its budget. Choose the new budgets, and {agent} writes a new version of the plan with them for you to approve.",
+	raiseLeadCampaigns:
+		"{names} reached their budgets. Choose the new budgets, and {agent} writes a new version of the plan with them for you to approve.",
+	raiseLeadPlan:
+		"Its ads reached their budget. Choose the new budgets, and {agent} writes a new version of the plan with them for you to approve.",
+	raiseGoogleAds: "Google Ads budget",
+	raiseGoogleAdsHint:
+		"For the whole plan. Now {budget} {currency}, of which {spent} is spent.",
+	raiseCampaignHint: "Now {budget} {currency}, all of it spent.",
+	raiseCampaignHintSome: "Now {budget} {currency}, of which {spent} is spent.",
+	raiseTotal:
+		"The plan’s total rises by the same amount, from {from} to {to} {currency}.",
+	raiseNext: "What happens next",
+	raiseNextWrites:
+		"{agent} writes the new version at once, from today to {day}: it does not wait for a sprint.",
+	raiseNextWaits:
+		"It waits for you on Today, like any plan. {names} stays paused until you approve it.",
+	raiseNextWaitsMany:
+		"It waits for you on Today, like any plan. {names} stay paused until you approve it.",
+	raiseNextApproved:
+		"Once you approve it, {agent} raises the budget at Google and starts {names} again.",
+	raiseSend: "Ask {agent} for the new version",
+	raiseItsAds: "Its ads",
+	raiseItsAdsAgain: "its ads",
+	raiseMoreThanSpent: "Make it more than the {spent} {currency} already spent.",
+	raiseAtLeastNow: "Make it at least the {budget} {currency} it is now.",
+	raiseSumOver:
+		"The campaigns’ budgets add up to {sum} {currency}: make this at least that.",
+	raiseNotAnAmount: "Type an amount, like 500.00.",
+	refuseRaiseRefused:
+		"Farik could not take those amounts. Check them and try again.",
+	refuseRaiseOpen:
+		"A new version with a raised budget is already being written.",
 	refuseMarketingPlanDecided: "You decided this plan already.",
 	refuseMarketingPlanExpired:
 		"This plan’s last day has passed, so it cannot be approved.",

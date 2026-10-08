@@ -53,6 +53,9 @@ const WORDS: Record<string, keyof typeof en> = {
 	unknown_marketing_plan: "refuseMarketingPlanUnknown",
 	marketing_plan_not_approved: "refuseMarketingPlanNotApproved",
 	marketing_plan_ended: "refuseMarketingPlanEnded",
+	// The raise of a marketing budget (SPEC 6.5).
+	raise_refused: "refuseRaiseRefused",
+	raise_open: "refuseRaiseOpen",
 	// The owner's decisions on a post (SPEC 6.5).
 	post_not_taken_back: "refusePostNotTakenBack",
 	post_being_handed_over: "refusePostBeingHandedOver",

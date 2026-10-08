@@ -67,6 +67,9 @@ type Checked = {
 };
 
 /** Each tier, in the order the page lists them, with its words. */
+/** The kit connector whose running ads Farik pauses before it is removed (step 08g). */
+const GOOGLE_ADS = "google-ads";
+
 const TIERS = [
 	["read", "tierRead", "tierReadNote"],
 	["write_workspace", "tierWrite", "tierWriteNote"],
@@ -264,6 +267,11 @@ function Editor({
 	);
 	const stateOf = (server: string) =>
 		connectors.find((c) => c.agent === saved.id && c.server === server);
+	/** What Remove calls a connector: Google Ads by the kit's title, as its board draws it. */
+	const removalName = (server: string) =>
+		server === GOOGLE_ADS
+			? (offered.find((one) => one.name === server)?.title ?? server)
+			: server;
 	const removeBody = {
 		keychain: "connectorRemoveBodyKeychain",
 		file: "connectorRemoveBodyFile",
@@ -592,7 +600,10 @@ function Editor({
 			{removing && (
 				<Dialog
 					open
-					title={t("connectorRemoveTitle", { server: removing, name })}
+					title={t("connectorRemoveTitle", {
+						server: removalName(removing),
+						name,
+					})}
 					onClose={() => setRemoving(undefined)}
 					actions={
 						<>
@@ -604,18 +615,22 @@ function Editor({
 								busy={busy}
 								onClick={() => remove(removing)}
 							>
-								{t("connectorRemoveLabel", { server: removing })}
+								{t("connectorRemoveLabel", { server: removalName(removing) })}
 							</Button>
 						</>
 					}
 				>
+					{/* Google Ads holds ads that run at Google: Farik pauses them before it lets go. */}
+					{removing === GOOGLE_ADS && <p>{t("connectorRemoveGoogleAds")}</p>}
 					<p>{removeWords(removing)}</p>
 					<p className={styles.muted}>
-						{t(
-							stateOf(removing)?.auth === "oauth"
-								? "connectorRemoveOthersSigned"
-								: "connectorRemoveOthers",
-						)}
+						{removing === GOOGLE_ADS
+							? t("connectorRemoveAgainSigned")
+							: t(
+									stateOf(removing)?.auth === "oauth"
+										? "connectorRemoveOthersSigned"
+										: "connectorRemoveOthers",
+								)}
 					</p>
 					{removeRefused && (
 						<p role="alert" className={styles.alert}>

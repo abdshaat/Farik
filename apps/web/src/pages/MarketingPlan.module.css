@@ -192,6 +192,79 @@ stays there for a screen reader. */
 	padding-inline-start: var(--farik-space-5);
 }
 
+/* Where Farik left a campaign, beside its name: it paused it, and why. */
+.state {
+	display: block;
+	color: var(--farik-color-status-waiting);
+	font-weight: 600;
+}
+
+/* What a campaign advertises and its price, under its goal. */
+.adv,
+.price {
+	display: block;
+	margin-top: var(--farik-space-1);
+}
+
+.price[data-price="not-fixed"] {
+	color: var(--farik-color-status-waiting);
+}
+
+/* Why a price is not fixed, once, under the table. */
+.note {
+	max-width: 65ch;
+}
+
+/* The spend against the budget: the figures large, a bar under them. */
+.big {
+	margin: 0;
+	font-family: var(--farik-type-code-family);
+	font-size: var(--farik-type-heading-size);
+	font-variant-numeric: tabular-nums;
+}
+
+.meter {
+	height: var(--farik-space-2);
+	max-width: 32rem;
+	background: var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+	overflow: hidden;
+}
+
+.meter > span {
+	display: block;
+	height: 100%;
+	background: var(--farik-color-ink);
+}
+
+/* Farik cannot read the spend: said where the owner reads the spend. */
+.unread {
+	margin: 0;
+	padding: var(--farik-space-3);
+	max-width: 65ch;
+	border: 1px solid var(--farik-color-status-waiting);
+	border-radius: var(--farik-radius-control);
+}
+
+.pauses {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: var(--farik-space-2);
+}
+
+.pauses li {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-1) var(--farik-space-3);
+}
+
+.pauses time {
+	color: var(--farik-color-ink-muted);
+	white-space: nowrap;
+}
+
 /* On a phone each row stacks: its name above, then its dates and its budget. */
 @media not (min-width: 640px) {
 	.budget thead {

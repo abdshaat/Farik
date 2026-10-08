@@ -37,14 +37,42 @@ type Campaign = {
 	key: string;
 	name: string;
 	goal: string;
+	/** What it advertises, in the agent's words; empty for a plan proposed before campaigns said. */
+	advertises?: string;
+	/** Whether Google keeps its budget as a total, which it never charges past (`fixed`), or not. */
+	price?: "fixed" | "not_fixed";
 	budget: string;
 	startsOn: string;
 	endsOn: string;
 };
+/** The last spend Farik read of a plan's Google Ads, and the last read that failed (step 08g). */
+type Spend = {
+	readAt?: string;
+	total?: string;
+	byKey?: Record<string, string>;
+	failed?: string;
+	failedAt?: string;
+};
+/** A budget the plan's ads reached, as the plan's page tells it. */
+type Reached = {
+	scope: "campaign" | "plan";
+	key?: string;
+	spent: string;
+	budget: string;
+	failed?: string;
+	at: string;
+};
+/** An ad Farik paused on its own, and why. */
+type Paused = {
+	key: string;
+	name: string;
+	why: "budget_reached" | "plan_ended" | "connection_removed";
+	at: string;
+};
 type Post = { key: string; channel: string; on: string; topic: string };
 type State = "proposed" | "returned" | "approved" | "active" | "ended";
 /** A plan as `marketing_plan.get` answers it, in camelCase. */
-type Plan = {
+export type Plan = {
 	plan: string;
 	title: string;
 	summary: string;
@@ -77,6 +105,10 @@ type Plan = {
 		/** The plan that took its place. */
 		replacedBy?: string;
 	} | null;
+	/** What Farik's watch knows of the ads' spend; left out until it has tried. */
+	spend?: Spend;
+	reached?: Reached[];
+	paused?: Paused[];
 };
 
 /** What the daemon takes in a note. */
@@ -122,6 +154,15 @@ export function MarketingPlan() {
 		)
 		.join(", ");
 	const ads = plan.campaigns.length;
+	// What Farik's watch last read of the ads' spend, and what it paused on its own.
+	const ended = plan.state === "ended";
+	const spend = plan.spend;
+	const seen = spend?.total !== undefined && ads > 0;
+	const reached = plan.reached ?? [];
+	const paused = plan.paused ?? [];
+	const notFixed = plan.campaigns.filter((one) => one.price === "not_fixed");
+	const standing = (key: string) =>
+		paused.filter((one) => one.key === key).at(-1);
 	const what = [
 		plan.posts.length > 0 &&
 			(plan.posts.length === 1
@@ -249,6 +290,12 @@ export function MarketingPlan() {
 													amount: cash(plan.budget.googleAds),
 													n: ads,
 												})}
+										{notFixed.map((one) => (
+											<Fragment key={one.key}>
+												{" "}
+												{t("marketingAllowsNotFixed", { name: one.name })}
+											</Fragment>
+										))}
 									</li>
 								)}
 								<li>{t("marketingAllowsNothing")}</li>
@@ -262,6 +309,10 @@ export function MarketingPlan() {
 							{t(ads > 0 ? "marketingBudgetIn" : "marketingBudgetInPlain", {
 								currency: currencyWords(plan.currency),
 							})}
+							{/* A price the owner saw is the price they approved, as of that day. */}
+							{ads > 0 && plan.decided?.decision === "approved" && (
+								<> {t("marketingPricesAsApproved")}</>
+							)}
 						</p>
 						<section
 							className={own.scroll}
@@ -280,6 +331,15 @@ export function MarketingPlan() {
 										<th scope="col" className={own.number}>
 											{t("marketingColBudget")}
 										</th>
+										{seen && (
+											<th scope="col" className={own.number}>
+												{t(
+													ended
+														? "marketingColSpentEnded"
+														: "marketingColSpent",
+												)}
+											</th>
+										)}
 									</tr>
 								</thead>
 								<tbody>
@@ -307,21 +367,44 @@ export function MarketingPlan() {
 												<td className={own.number}>
 													{cash(plan.budget.googleAds)}
 												</td>
-											</tr>
-											{plan.campaigns.map((campaign) => (
-												<tr key={campaign.key} className={own.campaign}>
-													<td>
-														{campaign.name}
-														<span className={own.sub}>{campaign.goal}</span>
-													</td>
-													<td>
-														{shortRange(campaign.startsOn, campaign.endsOn)}
-													</td>
+												{seen && (
 													<td className={own.number}>
-														{cash(campaign.budget)}
+														{cash(spend?.total ?? "0.00")}
 													</td>
-												</tr>
-											))}
+												)}
+											</tr>
+											{plan.campaigns.map((campaign) => {
+												const pause = standing(campaign.key);
+												return (
+													<tr key={campaign.key} className={own.campaign}>
+														<td>
+															{campaign.name}
+															{pause && (
+																<span className={own.state}>
+																	{t(PAUSED_WORDS[pause.why])}
+																</span>
+															)}
+															<span className={own.sub}>{campaign.goal}</span>
+															<Advertises
+																campaign={campaign}
+																cash={cash}
+																currency={plan.currency}
+															/>
+														</td>
+														<td>
+															{shortRange(campaign.startsOn, campaign.endsOn)}
+														</td>
+														<td className={own.number}>
+															{cash(campaign.budget)}
+														</td>
+														{seen && (
+															<td className={own.number}>
+																{cash(spend?.byKey?.[campaign.key] ?? "0.00")}
+															</td>
+														)}
+													</tr>
+												);
+											})}
 										</>
 									)}
 									{channels.map((channel) => {
@@ -339,6 +422,9 @@ export function MarketingPlan() {
 												</td>
 												<td>{shortRange(days[0] ?? "", days.at(-1) ?? "")}</td>
 												<td className={own.number}>{t("marketingNoCost")}</td>
+												{seen && (
+													<td className={own.number}>{t("marketingNoCost")}</td>
+												)}
 											</tr>
 										);
 									})}
@@ -354,11 +440,27 @@ export function MarketingPlan() {
 												currency: plan.currency,
 											})}
 										</td>
+										{seen && (
+											<td className={own.number}>
+												{cash(spend?.total ?? "0.00")}
+											</td>
+										)}
 									</tr>
 								</tfoot>
 							</table>
 						</section>
+						{notFixed.length > 0 && (
+							<p className={`${styles.muted} ${own.note}`}>
+								{t("marketingPriceNote")}
+							</p>
+						)}
 					</div>
+					{!proposed && ads > 0 && spend && (
+						<SpendSection plan={plan} spend={spend} ended={ended} />
+					)}
+					{paused.length > 0 && (
+						<PausesSection plan={plan} paused={paused} reached={reached} />
+					)}
 					{(proposed || live || written.length > 0) &&
 						plan.posts.length > 0 && (
 							<section className={styles.section} aria-labelledby="calendar">
@@ -464,6 +566,14 @@ export function MarketingPlan() {
 					{what.length > 0 && (
 						<p className={styles.muted}>
 							{t("marketingBarLead", { name, what: what.join(" and ") })}
+							{notFixed.length > 0 && (
+								<>
+									{" "}
+									{notFixed.length === 1
+										? t("marketingBarRunsOver")
+										: t("marketingBarRunsOverMany", { n: notFixed.length })}
+								</>
+							)}
 						</p>
 					)}
 				</div>
@@ -475,7 +585,13 @@ export function MarketingPlan() {
 							{t("marketingEnd")}
 						</Button>
 					</div>
-					<p className={styles.muted}>{t("marketingEndHint", { name })}</p>
+					<p className={styles.muted}>
+						{ads === 0
+							? t("marketingEndHint", { name })
+							: plan.posts.length > 0
+								? t("marketingEndHintAds")
+								: t("marketingEndHintAdsOnly")}
+					</p>
 				</div>
 			)}
 			{asking === "back" && (
@@ -751,7 +867,7 @@ function SendBack({
 }
 
 /** "End the plan": what ending does first, then the optional note. */
-function EndPlan({
+export function EndPlan({
 	plan,
 	name,
 	now,
@@ -809,6 +925,16 @@ function EndPlan({
 			}
 		>
 			<p>{line}</p>
+			{plan.campaigns.length > 0 && (
+				<p>
+					{plan.spend?.total !== undefined && plan.spend.readAt
+						? t("marketingEndAdsSpent", {
+								spent: money(plan.spend.total, plan.currency),
+								time: plan.spend.readAt.slice(11, 16),
+							})
+						: t("marketingEndAds")}
+				</p>
+			)}
 			{endingPosts(plan.writtenPosts ?? [], instant).map((words) => (
 				<p key={words}>{words}</p>
 			))}
@@ -821,5 +947,171 @@ function EndPlan({
 			/>
 			{refusal && <p role="alert">{refusal}</p>}
 		</Dialog>
+	);
+}
+
+/** Where a campaign stands once Farik paused it, by why. */
+const PAUSED_WORDS = {
+	budget_reached: "marketingPausedAtBudget",
+	plan_ended: "marketingPausedPlanEnded",
+	connection_removed: "marketingPausedRemoved",
+} as const;
+
+/** What a campaign advertises, in the agent's words, and its price as the owner reads it. */
+function Advertises({
+	campaign,
+	cash,
+	currency,
+}: {
+	campaign: Campaign;
+	cash: (amount: string) => string;
+	currency: string;
+}) {
+	return (
+		<>
+			<span className={own.adv}>
+				<strong>{t("marketingAdvertisesLabel")}</strong>{" "}
+				{/* The agent's own words: React shows them as typed, never as markup. */}
+				{campaign.advertises ? (
+					campaign.advertises
+				) : (
+					<span className={styles.muted}>{t("marketingNotStated")}</span>
+				)}
+			</span>
+			{campaign.price && (
+				<span
+					className={own.price}
+					data-price={campaign.price === "fixed" ? "fixed" : "not-fixed"}
+				>
+					<strong>{t("marketingPriceLabel")}</strong>{" "}
+					{t(
+						campaign.price === "fixed"
+							? "marketingPriceFixed"
+							: "marketingPriceNotFixed",
+						{ amount: cash(campaign.budget), currency },
+					)}
+				</span>
+			)}
+		</>
+	);
+}
+
+/** When Farik read something: "today at 10:15" for a time today, else the day too. */
+function readAt(time: string): string {
+	return time.slice(0, 10) === today()
+		? t("marketingTodayAt", { time: time.slice(11, 16) })
+		: when(time);
+}
+
+/** The plan's ads' spend against their budget, as Google Ads last said it, and why a read failed. */
+function SpendSection({
+	plan,
+	spend,
+	ended,
+}: {
+	plan: Plan;
+	spend: Spend;
+	ended: boolean;
+}) {
+	const budget = Number(plan.budget.googleAds);
+	const percent =
+		spend.total !== undefined && budget > 0
+			? Math.min(100, Math.round((Number(spend.total) / budget) * 100))
+			: 0;
+	return (
+		<section className={styles.section} aria-labelledby="spent">
+			<h2 id="spent">
+				{t(ended ? "marketingSpentEndedTitle" : "marketingSpentTitle")}
+			</h2>
+			{spend.total !== undefined && spend.readAt && (
+				<>
+					<p className={own.big}>
+						{t("marketingSpentOf", {
+							spent: money(spend.total, plan.currency),
+							budget: money(plan.budget.googleAds, plan.currency),
+							currency: plan.currency,
+						})}
+					</p>
+					<div
+						className={own.meter}
+						role="img"
+						aria-label={t("marketingSpentMeter", { percent })}
+					>
+						<span style={{ width: `${percent}%` }} />
+					</div>
+					<p className={styles.muted}>
+						{t(
+							ended
+								? "marketingSpentReadEnded"
+								: spend.failed
+									? "marketingSpentReadStale"
+									: "marketingSpentRead",
+							{ when: readAt(spend.readAt) },
+						)}
+					</p>
+				</>
+			)}
+			{!ended && spend.failed && spend.failedAt && (
+				<p role="status" className={own.unread}>
+					{t("marketingSpentUnread", {
+						reason: spend.failed.trim().replace(/([^.!?”"])$/, "$1."),
+						when: readAt(spend.failedAt),
+					})}
+				</p>
+			)}
+		</section>
+	);
+}
+
+/** Each ad Farik paused on its own, newest first, with when and why. */
+function PausesSection({
+	plan,
+	paused,
+	reached,
+}: {
+	plan: Plan;
+	paused: Paused[];
+	reached: Reached[];
+}) {
+	const cash = (amount: string) => money(amount, plan.currency);
+	const words = (one: Paused): string => {
+		if (one.why === "plan_ended")
+			return t("marketingPausePlanEnded", { name: one.name });
+		if (one.why === "connection_removed")
+			return t("marketingPauseRemoved", { name: one.name });
+		// The budget it reached: the newest of its own or the plan's up to its pause.
+		const cap = [...reached]
+			.reverse()
+			.find(
+				(each) =>
+					each.at <= one.at && (each.scope === "plan" || each.key === one.key),
+			);
+		if (!cap) return t("marketingPauseBudgetBare", { name: one.name });
+		return t(
+			cap.scope === "plan"
+				? "marketingPauseBudgetPlan"
+				: "marketingPauseBudget",
+			{
+				name: one.name,
+				spent: cash(cap.spent),
+				budget: cash(cap.budget),
+				currency: plan.currency,
+			},
+		);
+	};
+	return (
+		<section className={styles.section} aria-labelledby="paused">
+			<h2 id="paused">{t("marketingPausesTitle")}</h2>
+			<ul className={own.pauses}>
+				{[...paused].reverse().map((one) => (
+					<li key={`${one.key}-${one.why}-${one.at}`}>
+						<time dateTime={one.at}>
+							{`${shortDay(one.at)}, ${one.at.slice(11, 16)}`}
+						</time>
+						<span>{words(one)}</span>
+					</li>
+				))}
+			</ul>
+		</section>
 	);
 }

@@ -29,6 +29,8 @@ export const TEXT =
 export const NAME = `Pie pre-orders ${MARKUP}`;
 export const GOAL = `Thanksgiving pie pre-orders from <i>people</i> searching ${MARKUP}`;
 export const TOPIC = `Our autumn menu ${MARKUP}`;
+/** What a campaign says it advertises: the agent's words, to be shown as typed. */
+export const ADVERTISES = `Thanksgiving pies to pre-order: pumpkin, pecan and apple ${MARKUP}`;
 
 /** MP-3 as `marketing_plan.get` answers it while it waits on the owner. */
 export const PLAN = {
@@ -47,6 +49,8 @@ export const PLAN = {
 			channel: "google_ads",
 			name: NAME,
 			goal: GOAL,
+			advertises: ADVERTISES,
+			price: "fixed",
 			budget: "300.00",
 			starts_on: "2026-10-26",
 			ends_on: "2026-11-22",
@@ -56,6 +60,8 @@ export const PLAN = {
 			channel: "google_ads",
 			name: "Bakery near me",
 			goal: "New customers searching for a bakery within 2 miles",
+			advertises: "The bakery itself: bread and pastries fresh from 7 am",
+			price: "fixed",
 			budget: "150.00",
 			starts_on: "2026-10-12",
 			ends_on: "2026-11-22",

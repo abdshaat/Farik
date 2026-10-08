@@ -2557,3 +2557,93 @@ describe("signing in with one of Farik's own apps", () => {
 		await expectNoAxeViolations(container);
 	});
 });
+
+describe("removing Google Ads from an agent", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+		localStorage.clear();
+	});
+
+	const service = {
+		...KIT_LINEAR,
+		name: "google-ads",
+		title: "Google Ads",
+		auth: "oauth",
+	};
+	const held = {
+		name: "google-ads",
+		source: "kit",
+		transport: "stdio",
+		command: "farik",
+		args: ["connector", "google-ads"],
+		oauth: {},
+		tools: { search: "network" },
+	};
+	const signedIn = {
+		agent: "theo",
+		server: "google-ads",
+		state: "connected",
+		auth: "oauth",
+		source: "kit",
+		revokes: false,
+		stored_in: "keychain",
+		provider: "Google",
+		settings_url: "https://myaccount.google.com/connections",
+	};
+
+	it("removing_google_ads_says_it_pauses_first", async () => {
+		const { container, s } = await openedWithKit([service], [held], [signedIn]);
+		fireEvent.click(
+			within(kitRow("Google Ads")).getByRole("button", {
+				name: "Remove google-ads",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Remove Google Ads from Theo?",
+		});
+		// Without the connection Farik could not stop the ads at their budget, so it pauses them first;
+		// if Google refuses, Google Ads goes all the same, and what that leaves running is said now.
+		const paragraphs = within(dialog)
+			.getAllByText(/./, { selector: "p" })
+			.map((p) => p.textContent);
+		expect(paragraphs).toEqual([
+			"Farik pauses your marketing plan’s running ads first, since without this connection it could not stop them at their budget. If Google refuses, Google Ads is removed anyway, and the ads keep running at Google until their end date or their budget there; pause them in Google Ads.",
+			"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in Google’s settings.",
+			"To use it again, add it again and sign in.",
+		]);
+		// The pause stops ads another Marketing Specialist may run, so nobody is "not affected".
+		expect(within(dialog).queryByText(/Nobody else on the team/)).toBeNull();
+		expect(
+			within(dialog).getByRole("button", { name: "Remove Google Ads" }),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		// Confirming sends the same removal as for any connector.
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Remove Google Ads" }),
+		);
+		const removal = await sent(s, "connector.disconnect");
+		expect(removal.params).toEqual({ agent: "theo", server: "google-ads" });
+	});
+
+	it("removing_another_connector_says_nothing_of_ads", async () => {
+		await openedWithKit(
+			[KIT_LINEAR],
+			[kitEntry("linear", "http")],
+			[KIT_STATES[0] as object],
+		);
+		fireEvent.click(
+			within(kitRow("Linear")).getByRole("button", { name: "Remove linear" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Remove linear from Theo?",
+		});
+		expect(dialog.textContent).not.toContain("marketing plan");
+		expect(
+			within(dialog).getByText(
+				"Nobody else on the team is affected. To use it again, add it again and sign in.",
+			),
+		).toBeTruthy();
+	});
+});

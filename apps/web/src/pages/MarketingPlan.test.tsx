@@ -10,8 +10,10 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
+import { RUNNING_PLAN } from "../test/ads.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import {
+	ADVERTISES,
 	GOAL,
 	NAME,
 	PLAN,
@@ -123,10 +125,11 @@ describe("marketing plan page", () => {
 			"Google Ads2 campaigns|12 Oct to 22 Nov|$450.00",
 		);
 		expect(cells(rows[2] as HTMLElement)).toBe(
-			`${NAME}${GOAL}|26 Oct to 22 Nov|$300.00`,
+			`${NAME}${GOAL}Advertises: ${ADVERTISES}Price: fixed at $300.00 USD|26 Oct to 22 Nov|$300.00`,
 		);
 		expect(cells(rows[3] as HTMLElement)).toBe(
-			"Bakery near meNew customers searching for a bakery within 2 miles|12 Oct to 22 Nov|$150.00",
+			"Bakery near meNew customers searching for a bakery within 2 miles" +
+				"Advertises: The bakery itself: bread and pastries fresh from 7 amPrice: fixed at $150.00 USD|12 Oct to 22 Nov|$150.00",
 		);
 		expect(cells(rows[4] as HTMLElement)).toBe(
 			"Instagram4 posts|12 Oct to 26 Oct|No cost",
@@ -714,5 +717,314 @@ describe("a plan's posts", () => {
 		const none = await ask([]);
 		expect(within(none.dialog).queryByText(/not yet sent/)).toBeNull();
 		expect(within(none.dialog).queryByText(/with Buffer/)).toBeNull();
+	});
+});
+
+describe("a plan's ads and their budget", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	/** The page of MP-3 on 12 November at 11:00 UTC, day 32 of 42, with `plan` answered. */
+	async function onThe12th(plan: object) {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-11-12T11:00:00Z"));
+		return opened(plan);
+	}
+
+	const budgetTable = () =>
+		screen.getByRole("table", { name: "Budget by channel and campaign" });
+
+	it("the_plan_shows_what_each_campaign_advertises_and_its_price", async () => {
+		const daily = {
+			...PLAN,
+			campaigns: [
+				PLAN.campaigns[0],
+				{ ...PLAN.campaigns[1], price: "not_fixed" },
+			],
+		};
+		const { container } = await opened(daily);
+		await screen.findByRole("heading", { level: 1, name: TITLE });
+		const rows = within(budgetTable()).getAllByRole("row");
+		// What the agent says it advertises is shown as typed, and the price as the owner reads it.
+		expect(cells(rows[2] as HTMLElement)).toContain(
+			`Advertises: ${ADVERTISES}Price: fixed at $300.00 USD`,
+		);
+		expect(cells(rows[3] as HTMLElement)).toContain(
+			"Price: up to $150.00 USD, may run over by about an hour’s spend",
+		);
+		expect(container.querySelector("script, i, b")).toBeNull();
+		// Why a price is not fixed, once, under the table; no day was fixed yet.
+		expect(
+			screen.getByText(
+				"A fixed price is a total that Google itself never charges past. Google keeps one only for a campaign of 3 to 90 days; any other has a daily budget, and since Google reports cost up to about an hour late, Farik may pause it after about an hour’s more spend.",
+			),
+		).toBeTruthy();
+		expect(screen.queryByText(/Prices as on the day you approved/)).toBeNull();
+		// Approving says so too: in what it lets Kai do, and in the bar.
+		const allows = screen.getByRole("region", {
+			name: "What approving lets Kai do",
+		});
+		expect(allows.textContent).toContain(
+			"Farik pauses a campaign when it reaches its budget. Bakery near me is not at a fixed price, so it may run over by about an hour’s spend.",
+		);
+		expect(
+			screen.getByText(/^Approving lets Kai post these 6 posts and spend up to/)
+				.textContent,
+		).toContain(" 1 campaign may run over by about an hour’s spend.");
+		await expectNoAxeViolations(container);
+	});
+
+	it("a_plan_with_only_fixed_prices_says_nothing_of_running_over", async () => {
+		await opened();
+		await screen.findByRole("heading", { level: 1, name: TITLE });
+		expect(screen.queryByText(/may run over/)).toBeNull();
+		expect(screen.queryByText(/A fixed price is a total/)).toBeNull();
+		expect(
+			cells(within(budgetTable()).getAllByRole("row")[3] as HTMLElement),
+		).toContain("Price: fixed at $150.00 USD");
+	});
+
+	it("a_plan_proposed_before_campaigns_said_what_they_advertise_says_not_stated", async () => {
+		const older = {
+			...PLAN,
+			campaigns: PLAN.campaigns.map((one) => ({ ...one, advertises: "" })),
+		};
+		await opened(older);
+		await screen.findByRole("heading", { level: 1, name: TITLE });
+		expect(
+			within(budgetTable()).getAllByText("Advertises:", { exact: false }),
+		).toHaveLength(2);
+		expect(
+			cells(within(budgetTable()).getAllByRole("row")[2] as HTMLElement),
+		).toContain("Advertises: Not stated");
+	});
+
+	it("an_approved_plan_says_its_prices_are_as_on_the_day_it_was_approved", async () => {
+		await onThe12th({ ...RUNNING_PLAN, spend: undefined, paused: [] });
+		await screen.findByRole("heading", { level: 1, name: TITLE });
+		expect(
+			screen.getByText(
+				"In US dollars, the currency of your Google Ads account. Prices as on the day you approved the plan.",
+			),
+		).toBeTruthy();
+	});
+
+	it("the_plan_page_shows_spend_against_budget", async () => {
+		const { container } = await onThe12th(RUNNING_PLAN);
+		const spent = await screen.findByRole("region", { name: "Spent so far" });
+		expect(spent.textContent).toContain("$318.65 of $450.00 USD");
+		expect(
+			within(spent).getByRole("img", {
+				name: "71 per cent of the budget spent",
+			}),
+		).toBeTruthy();
+		expect(
+			within(spent).getByText(
+				"Google Ads’ own figures, read today at 10:15. Farik reads them every 15 minutes while it runs.",
+			),
+		).toBeTruthy();
+		// A failed read is not shown while the last one worked.
+		expect(within(spent).queryByRole("status")).toBeNull();
+
+		// Each campaign against its budget, and where it stands: Farik paused Bakery near me.
+		const rows = within(budgetTable()).getAllByRole("row");
+		expect(
+			within(rows[0] as HTMLElement)
+				.getAllByRole("columnheader")
+				.map((h) => h.textContent),
+		).toEqual(["Channel and campaign", "Dates", "Budget", "Spent so far"]);
+		expect(cells(rows[1] as HTMLElement)).toBe(
+			"Google Ads2 campaigns|12 Oct to 22 Nov|$450.00|$318.65",
+		);
+		expect(cells(rows[2] as HTMLElement)).toBe(
+			`${NAME}${GOAL}Advertises: ${ADVERTISES}Price: fixed at $300.00 USD|26 Oct to 22 Nov|$300.00|$168.65`,
+		);
+		expect(cells(rows[3] as HTMLElement)).toBe(
+			"Bakery near mePaused at its budgetNew customers searching for a bakery within 2 miles" +
+				"Advertises: The bakery itself: bread and pastries fresh from 7 amPrice: fixed at $150.00 USD|12 Oct to 22 Nov|$150.00|$150.00",
+		);
+		expect(cells(rows[4] as HTMLElement)).toBe(
+			"Instagram4 posts|12 Oct to 26 Oct|No cost|No cost",
+		);
+		expect(rows.at(-1)?.textContent).toBe("Total$450.00 USD$318.65");
+
+		// Each pause Farik made, with its time and why.
+		const paused = screen.getByRole("region", { name: "Ads Farik paused" });
+		expect(
+			within(paused)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual([
+			"Thu 12 Nov, 10:15Bakery near me: it reached its budget, $150.00 of $150.00 USD.",
+		]);
+		await expectNoAxeViolations(container);
+	});
+
+	it("the_plan_page_says_when_the_spend_cannot_be_read", async () => {
+		await onThe12th({
+			...RUNNING_PLAN,
+			spend: {
+				...RUNNING_PLAN.spend,
+				failed:
+					"Kai's sign-in to Google has ended; sign Kai in again on Kai's page",
+				failed_at: "2026-11-12T10:45:00Z",
+			},
+		});
+		const spent = await screen.findByRole("region", { name: "Spent so far" });
+		// The last spend Farik read stays, with when, and the failure is said beside it.
+		expect(spent.textContent).toContain("$318.65 of $450.00 USD");
+		expect(
+			within(spent).getByText("Google Ads’ own figures, read today at 10:15."),
+		).toBeTruthy();
+		expect(within(spent).getByRole("status").textContent).toBe(
+			"Farik can’t read the spend now: Kai's sign-in to Google has ended; sign Kai in again on Kai's page. Last tried today at 10:45; Farik tries again every 15 minutes. Until a read works, Farik cannot pause the ads at their budget.",
+		);
+	});
+
+	it("an_ended_plan_shows_the_last_spend_and_why_each_ad_is_paused", async () => {
+		await onThe12th({
+			...RUNNING_PLAN,
+			state: "ended",
+			ended: { why: "by_owner", at: "2026-11-12T10:40:00Z" },
+			spend: {
+				...RUNNING_PLAN.spend,
+				read_at: "2026-11-12T10:30:00Z",
+				failed: "Google is down",
+				failed_at: "2026-11-12T10:32:00Z",
+			},
+			paused: [
+				...RUNNING_PLAN.paused,
+				{
+					key: "pies",
+					name: NAME,
+					why: "plan_ended",
+					at: "2026-11-12T10:41:00Z",
+				},
+			],
+		});
+		const spent = await screen.findByRole("region", { name: "Spent" });
+		expect(
+			within(spent).getByText(
+				"Google Ads’ own figures, last read today at 10:30, before the plan ended. Google Ads itself has the final figures.",
+			),
+		).toBeTruthy();
+		// A read that failed before the plan ended is not a warning any more: nothing is watched.
+		expect(within(spent).queryByRole("status")).toBeNull();
+		const rows = within(budgetTable()).getAllByRole("row");
+		expect(
+			within(rows[0] as HTMLElement)
+				.getAllByRole("columnheader")
+				.map((h) => h.textContent),
+		).toEqual(["Channel and campaign", "Dates", "Budget", "Spent"]);
+		expect(cells(rows[2] as HTMLElement)).toContain(
+			`${NAME}Paused: the plan ended`,
+		);
+		expect(cells(rows[3] as HTMLElement)).toContain(
+			"Bakery near mePaused at its budget",
+		);
+		// The newest pause first.
+		expect(
+			within(screen.getByRole("region", { name: "Ads Farik paused" }))
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual([
+			`Thu 12 Nov, 10:41${NAME}: the plan ended.`,
+			"Thu 12 Nov, 10:15Bakery near me: it reached its budget, $150.00 of $150.00 USD.",
+		]);
+	});
+
+	it("a_campaign_paused_twice_shows_its_newest_pause", async () => {
+		await onThe12th({
+			...RUNNING_PLAN,
+			paused: [
+				...RUNNING_PLAN.paused,
+				{
+					key: "near-me",
+					name: "Bakery near me",
+					why: "plan_ended",
+					at: "2026-11-12T10:41:00Z",
+				},
+			],
+		});
+		await screen.findByRole("region", { name: "Spent so far" });
+		expect(
+			cells(within(budgetTable()).getAllByRole("row")[3] as HTMLElement),
+		).toContain("Bakery near mePaused: the plan ended");
+	});
+
+	it("a_pause_for_google_ads_removed_is_told_as_that", async () => {
+		await onThe12th({
+			...RUNNING_PLAN,
+			paused: [
+				{
+					key: "near-me",
+					name: "Bakery near me",
+					why: "connection_removed",
+					at: "2026-11-12T10:50:00Z",
+				},
+			],
+		});
+		await screen.findByRole("region", { name: "Spent so far" });
+		expect(
+			cells(within(budgetTable()).getAllByRole("row")[3] as HTMLElement),
+		).toContain("Bakery near mePaused: Google Ads was removed");
+		expect(
+			within(screen.getByRole("region", { name: "Ads Farik paused" }))
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual(["Thu 12 Nov, 10:50Bakery near me: Google Ads was removed."]);
+	});
+
+	it("a_plan_with_no_ads_has_no_spend_section", async () => {
+		await onThe12th({
+			...RUNNING_PLAN,
+			campaigns: [],
+			budget: { total: "450.00", google_ads: "0.00" },
+			spend: undefined,
+			reached: [],
+			paused: [],
+		});
+		await screen.findByRole("heading", { level: 1, name: TITLE });
+		expect(screen.queryByRole("region", { name: "Spent so far" })).toBeNull();
+		expect(
+			screen.queryByRole("region", { name: "Ads Farik paused" }),
+		).toBeNull();
+	});
+
+	it("the_end_confirmation_says_the_ads_pause", async () => {
+		const { s } = await onThe12th(RUNNING_PLAN);
+		// The hint beside End says what ending does to the ads and the posts.
+		expect(
+			await screen.findByText(
+				"Ending pauses the ads within a minute and stops the posts not yet sent.",
+			),
+		).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: "End the plan" }));
+		const dialog = await screen.findByRole("dialog", {
+			name: "End this plan now?",
+		});
+		// First thing: the ads pause, and what has been spent by Google's last figures.
+		const [first] = within(dialog).getAllByText(/./, { selector: "p" });
+		expect(first?.textContent).toBe(`${TITLE}, MP-3, on day 32 of 42.`);
+		expect(dialog.textContent).toContain(
+			"Farik pauses its running ads within a minute. $318.65 is spent so far, by Google’s figures at 10:15.",
+		);
+		expect(s.calls("command")).toHaveLength(0);
+	});
+
+	it("the_end_confirmation_with_no_read_says_only_that_the_ads_pause", async () => {
+		await onThe12th({ ...RUNNING_PLAN, spend: undefined });
+		fireEvent.click(
+			await screen.findByRole("button", { name: "End the plan" }),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "End this plan now?",
+		});
+		expect(dialog.textContent).toContain(
+			"Farik pauses its running ads within a minute.",
+		);
+		expect(dialog.textContent).not.toContain("is spent so far");
 	});
 });

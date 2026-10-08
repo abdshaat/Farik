@@ -12,8 +12,21 @@ import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectionProvider } from "../app/connection.tsx";
 import { en } from "../strings/en.ts";
+import {
+	BUDGET_ROW,
+	PLAN_BUDGET_ROW,
+	REFUSED,
+	RUNNING_PLAN,
+	RUNNING_ROW,
+	UNREAD_ROW,
+} from "../test/ads.ts";
 import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
-import { PLAN, SUMMARY, TITLE } from "../test/marketing.ts";
+import {
+	TEAM as MARKETING_TEAM,
+	PLAN,
+	SUMMARY,
+	TITLE,
+} from "../test/marketing.ts";
 import { GOING_OUT, MARKUP, POST_ROW, todayWith } from "../test/posts.ts";
 import {
 	answerQuery,
@@ -1081,5 +1094,163 @@ describe("a site the Procurement Specialist asks to read", () => {
 			within(row).getByText("https://pieboxpros.com/a\\u{202e}b"),
 		).toBeTruthy();
 		expect(row.textContent).toContain("Quote \\u{202e}this");
+	});
+});
+
+describe("a marketing plan's ads and their budget", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	/** The one row, with the list's other rows left out. */
+	async function rowOf(...waiting: unknown[]) {
+		const { container, s } = await todayWith({
+			waiting,
+			team: MARKETING_TEAM,
+		});
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const [row] = within(list).getAllByRole("listitem");
+		return { container, s, row: row as HTMLElement };
+	}
+
+	it("today_offers_to_raise_or_end", async () => {
+		const { container, row } = await rowOf(BUDGET_ROW);
+		expect(
+			screen.getByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		// The row is Farik's own, so it carries Farik's picture; the plan's title is text.
+		expect(within(row).getByRole("img", { name: "Farik" })).toBeTruthy();
+		expect(
+			within(row).getByText(`Ads budget reached: ${TITLE}`, {
+				selector: "strong",
+			}),
+		).toBeTruthy();
+		expect(row.textContent).toContain(
+			"Its campaign Bakery near me reached its budget: $150.00 of $150.00 USD. Farik paused it.",
+		);
+		expect(row.textContent).toContain(
+			"Google Ads: $318.65 of $450.00 USD spent",
+		);
+		expect(row.textContent).toContain("Ends Sunday 22 November");
+		expect(container.querySelector("b")).toBeNull();
+		// Farik paused it: nothing is left running to stop at Google.
+		expect(
+			within(row).queryByRole("link", { name: "Open Google Ads" }),
+		).toBeNull();
+		for (const name of ["Raise the budget", "End the plan"])
+			expect(within(row).getByRole("button", { name })).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		// The plan's own budget, and Google would not take the pause: it says what Google answered,
+		// and where to stop the ads by hand.
+		cleanup();
+		const refused = await rowOf(PLAN_BUDGET_ROW);
+		expect(refused.row.textContent).toContain(
+			"Its ads reached their budget: $450.00 of $450.00 USD. Farik could not pause them: Google answered “The service is currently unavailable.” Farik tries again every 15 minutes; pause them in Google Ads.",
+		);
+		const ads = within(refused.row).getByRole("link", {
+			name: "Open Google Ads",
+		});
+		expect(ads.getAttribute("href")).toBe("https://ads.google.com");
+		expect(ads.getAttribute("target")).toBe("_blank");
+		expect(ads.getAttribute("rel")).toContain("noopener");
+		await expectNoAxeViolations(refused.container);
+
+		// While the owner's raise is open, the row says so, and only "End the plan" is left.
+		cleanup();
+		const raising = await rowOf({ ...BUDGET_ROW, raising: "FRK-40" });
+		expect(raising.row.textContent).toContain(
+			"Farik paused it. You asked Kai for a new version with a raised budget. It waits for you here when it is ready.",
+		);
+		expect(
+			within(raising.row).queryByRole("button", { name: "Raise the budget" }),
+		).toBeNull();
+		expect(
+			within(raising.row).getByRole("button", { name: "End the plan" }),
+		).toBeTruthy();
+	});
+
+	it("the_row_speaks_of_the_cap_the_daemon_names", async () => {
+		// The campaign's pause was refused and stands; the plan's own cap, reached after it, was
+		// paused. The words are about the campaign's cap, not the newest.
+		const { row } = await rowOf({
+			...BUDGET_ROW,
+			reason: REFUSED,
+			caps: [
+				BUDGET_ROW.cap,
+				{ scope: "plan", spent: "450.00", budget: "450.00" },
+			],
+		});
+		expect(row.textContent).toContain(
+			"Its campaign Bakery near me reached its budget: $150.00 of $150.00 USD. Farik could not pause it: Google answered “The service is currently unavailable.” Farik tries again every 15 minutes; pause it in Google Ads.",
+		);
+		expect(row.textContent).not.toContain("$450.00 of $450.00");
+	});
+
+	it("end_sends_marketing_plan_end", async () => {
+		const { s, row } = await rowOf(BUDGET_ROW);
+		fireEvent.click(within(row).getByRole("button", { name: "End the plan" }));
+		// The question is the plan page's own, so it asks for the plan.
+		await answerQuery(s, "marketing_plan.get", RUNNING_PLAN);
+		expect(
+			s.calls("query").find((q) => q.params.name === "marketing_plan.get")
+				?.params.params,
+		).toEqual({ plan: "MP-3" });
+		const dialog = await screen.findByRole("dialog", {
+			name: "End this plan now?",
+		});
+		expect(dialog.textContent).toContain(
+			"Farik pauses its running ads within a minute. $318.65 is spent so far, by Google’s figures at 10:15.",
+		);
+		// Asking first: nothing is sent until it is confirmed.
+		expect(s.calls("command")).toHaveLength(0);
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "End the plan" }),
+		);
+		const ending = await sent(s);
+		expect(ending.params).toEqual({
+			command: { command: "marketing_plan_end", body: { plan: "MP-3" } },
+		});
+		await s.reply(ending, { said: "ended", events: [10] });
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	});
+
+	it("today_says_when_ads_keep_running", async () => {
+		const { container, row } = await rowOf(RUNNING_ROW);
+		expect(within(row).getByRole("img", { name: "Farik" })).toBeTruthy();
+		expect(
+			within(row).getByText(`Ads still running: ${TITLE}`, {
+				selector: "strong",
+			}),
+		).toBeTruthy();
+		expect(row.textContent).toContain(
+			"Farik could not pause its ads: Google answered “The service is currently unavailable.” They keep running at Google until Sunday 22 November or their budget there. Pause them in Google Ads.",
+		);
+		expect(
+			within(row)
+				.getByRole("link", { name: "Open Google Ads" })
+				.getAttribute("href"),
+		).toBe("https://ads.google.com");
+		// Nothing to raise: the plan ended.
+		expect(within(row).queryAllByRole("button")).toHaveLength(0);
+		await expectNoAxeViolations(container);
+	});
+
+	it("today_says_when_the_spend_cannot_be_read", async () => {
+		const { container, row } = await rowOf(UNREAD_ROW);
+		expect(
+			within(row).getByText(`Can’t read the ad spend: ${TITLE}`, {
+				selector: "strong",
+			}),
+		).toBeTruthy();
+		expect(row.textContent).toContain(
+			"Farik can’t read its ad spend: Kai's sign-in to Google has ended; sign Kai in again on Kai's page. Any of its ads still running keep running at Google until Sunday 22 November or their budget there; pause them in Google Ads.",
+		);
+		// The last spend Farik could read stays on the row, with when.
+		expect(row.textContent).toContain(
+			"Last read Thursday 12 November at 10:15: $318.65 of $450.00 USD",
+		);
+		expect(
+			within(row).getByRole("link", { name: "Open Google Ads" }),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
 	});
 });
