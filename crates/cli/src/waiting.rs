@@ -153,6 +153,13 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
                 format!("farik order approve {order}, or farik order reject {order}"),
             )
         }
+        WaitingKind::DataPipeline => {
+            let pipeline = item.pipeline.as_ref().map_or(0, |ask| ask.pipeline);
+            (
+                format!("waits: {}", item.line),
+                format!("farik pipeline approve {pipeline}, or farik pipeline decline {pipeline}"),
+            )
+        }
         WaitingKind::Integration => (
             "waits for you to integrate it".to_string(),
             format!("farik integrate {id}"),
@@ -202,6 +209,7 @@ mod tests {
             post: None,
             site: None,
             order: None,
+            pipeline: None,
         }
     }
 

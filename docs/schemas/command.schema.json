@@ -52,7 +52,8 @@
         "purchase_order_receive",
         "purchase_order_close",
         "purchase_order_update",
-        "renewal_dismiss"
+        "renewal_dismiss",
+        "data_pipeline_decide"
       ]
     },
     "commandBodyWire": {
@@ -89,6 +90,7 @@
         { "$ref": "#/$defs/purchaseOrderStepBody" },
         { "$ref": "#/$defs/purchaseOrderUpdateBody" },
         { "$ref": "#/$defs/renewalDismissBody" },
+        { "$ref": "#/$defs/dataPipelineDecideBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -399,6 +401,18 @@
       "required": ["renewal"],
       "properties": {
         "renewal": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "dataPipelineDecideBody": {
+      "title": "Data Pipeline Decide Body",
+      "description": "The owner approves (decision approve: the team is asked to set the source up, in the owner's name) or declines (decision decline) a data pipeline request the Product Manager passed to them, pipeline being its number (docs/SPEC.md 6.10; ADR 0039). note is what the owner says to the agent, whichever they decide, at most 600 characters. data_pipeline.approved or data_pipeline.declined is appended with by human, the note as its reason, and no agent and no session on the envelope; an approval files an ordinary request in the owner's name and records its id. Refused unknown_pipeline when pipeline names no request, pipeline_decided when it was approved or declined before, pipeline_not_escalated when it is still the Product Manager's to decide, pipeline_not_filed when the request could not be filed and pipeline_note_too_long past 600 characters. Only the owner decides an escalated request, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pipeline", "decision"],
+      "properties": {
+        "pipeline": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "decision": { "type": "string", "enum": ["approve", "decline"] },
+        "note": { "type": "string", "maxLength": 600 }
       }
     },
     "skillLevel": {

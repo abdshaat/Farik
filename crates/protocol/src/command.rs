@@ -14,16 +14,17 @@ pub use farik_core::contract::{TaskContract, TaskId, ValidationError};
 
 pub use crate::generated::command::CommandName;
 use crate::generated::command::{
-    AgentUpdateBody, ChatMessagePostBody, ConnectorConnectBody, ConnectorDisconnectBody, EmptyBody,
-    EscalationResolveBody, FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject,
-    HumanSendBackBody, HumanSendBackBodySubject, MarketingPlanDecideBody,
-    MarketingPlanDecideBodyDecision, MarketingPlanEndBody, MessagePostBody,
-    PurchaseOrderDecideBody, PurchaseOrderDecideBodyDecision, PurchaseOrderStepBody,
-    PurchaseOrderUpdateBody, QuestionAnswerBody, RenewalDismissBody, RequestTriageBody,
-    RequestTriageBodySize, SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody,
-    SkillConfirmBody, SkillLevel, SkillRemoveBody, SkillSaveBody, SocialPostDecideBody,
-    SocialPostDecideBodyDecision, SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody,
-    TaskTransitionBody, ToolDecisionBody,
+    AgentUpdateBody, ChatMessagePostBody, ConnectorConnectBody, ConnectorDisconnectBody,
+    DataPipelineDecideBody, DataPipelineDecideBodyDecision, EmptyBody, EscalationResolveBody,
+    FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
+    HumanSendBackBodySubject, MarketingPlanDecideBody, MarketingPlanDecideBodyDecision,
+    MarketingPlanEndBody, MessagePostBody, PurchaseOrderDecideBody,
+    PurchaseOrderDecideBodyDecision, PurchaseOrderStepBody, PurchaseOrderUpdateBody,
+    QuestionAnswerBody, RenewalDismissBody, RequestTriageBody, RequestTriageBodySize,
+    SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody, SkillConfirmBody, SkillLevel,
+    SkillRemoveBody, SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision,
+    SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
+    ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -368,6 +369,16 @@ pub enum Command {
         /// The renewal's number, the seq of its `renewal.flagged`.
         renewal: u64,
     },
+    /// Approve a data pipeline request the Product Manager passed to the owner, or decline it
+    /// (ADR 0039).
+    DataPipelineDecide {
+        /// The request's number.
+        pipeline: u64,
+        /// Whether the owner approves it (false: declines it).
+        approve: bool,
+        /// What the owner says to the agent.
+        note: Option<String>,
+    },
     /// Allow a post written outside the plan, or not allow it (ADR 0042).
     SocialPostDecide {
         /// The post's number.
@@ -614,6 +625,14 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             let body: RenewalDismissBody = read_body(body, name)?;
             Ok(Command::RenewalDismiss {
                 renewal: body.renewal.get(),
+            })
+        }
+        CommandName::DataPipelineDecide => {
+            let body: DataPipelineDecideBody = read_body(body, name)?;
+            Ok(Command::DataPipelineDecide {
+                pipeline: body.pipeline.get(),
+                approve: body.decision == DataPipelineDecideBodyDecision::Approve,
+                note: body.note.map(|note| note.as_str().to_string()),
             })
         }
         CommandName::SocialPostDecide => {
@@ -879,6 +898,21 @@ pub fn command_to_value(command: &Command) -> Value {
             ),
         ),
         Command::SocialPostStop { post } => (CommandName::SocialPostStop, json!({ "post": post })),
+        Command::DataPipelineDecide {
+            pipeline,
+            approve,
+            note,
+        } => (
+            CommandName::DataPipelineDecide,
+            with_optional(
+                json!({
+                    "pipeline": pipeline,
+                    "decision": if *approve { "approve" } else { "decline" },
+                }),
+                "note",
+                note.as_ref().map(|note| json!(note)),
+            ),
+        ),
         Command::PurchaseOrderDecide {
             order,
             approve,
@@ -2025,6 +2059,52 @@ mod tests {
         read(
             "purchase_order_update",
             &json!({ "order": 1, "status": "placed" }),
+        );
+    }
+
+    #[test]
+    fn reads_and_writes_the_data_pipeline_decide_command() {
+        for (body, command) in [
+            (
+                json!({ "pipeline": 4, "decision": "approve" }),
+                Command::DataPipelineDecide {
+                    pipeline: 4,
+                    approve: true,
+                    note: None,
+                },
+            ),
+            (
+                json!({ "pipeline": 5, "decision": "decline", "note": "Use the plain pages." }),
+                Command::DataPipelineDecide {
+                    pipeline: 5,
+                    approve: false,
+                    note: Some("Use the plain pages.".to_string()),
+                },
+            ),
+        ] {
+            assert_eq!(read("data_pipeline_decide", &body), command);
+            assert_eq!(
+                command_to_value(&command),
+                json!({ "command": "data_pipeline_decide", "body": body })
+            );
+        }
+        for body in [
+            json!({ "pipeline": 1 }),
+            json!({ "decision": "approve" }),
+            json!({ "pipeline": 0, "decision": "approve" }),
+            json!({ "pipeline": "1", "decision": "approve" }),
+            // The owner approves or declines: passing a request on is the Product Manager's.
+            json!({ "pipeline": 1, "decision": "escalate" }),
+            json!({ "pipeline": 1, "decision": "reject" }),
+            json!({ "pipeline": 1, "decision": "approve", "note": "x".repeat(601) }),
+            json!({ "pipeline": 1, "decision": "approve", "reason": "x" }),
+        ] {
+            let errors = refusal(&json!({ "command": "data_pipeline_decide", "body": body }));
+            assert!(!errors.is_empty(), "{body}");
+        }
+        read(
+            "data_pipeline_decide",
+            &json!({ "pipeline": 1, "decision": "approve", "note": "x".repeat(600) }),
         );
     }
 

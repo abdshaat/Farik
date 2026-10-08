@@ -17,6 +17,7 @@ use farik_core::governor::transition_table::TransitionActor;
 use farik_core::marketing::{
     CapScope, PlanSpend, RaiseAsk, Raised, active_plan, check_raise, parse_amount,
 };
+use farik_core::pipeline::PipelineCost;
 use farik_core::team::Team;
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{
@@ -28,6 +29,7 @@ use farik_store::diff::diff_of;
 use farik_store::marketing::{
     BudgetReached, MarketingPlan, budgets_reached, created_campaigns, marketing_plans, social_posts,
 };
+use farik_store::pipelines::data_pipelines;
 use farik_store::purchase_orders::purchase_orders;
 use farik_store::requests::{
     RequestError, TOO_SHORT, contract_write, file_raise_request, file_request,
@@ -41,6 +43,7 @@ use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
 use crate::cost::extra_tries;
 use crate::marketing::ads::{ads_rows, open_raise, spend_and_pauses};
 use crate::marketing::{going_out, kinds_made, known_spend, list_row, states_today, whole};
+use crate::procurement::{kit_connector_title, pipeline_request_text};
 use crate::tools::ToolDeps;
 use crate::tools::contracts::changed_fields;
 use crate::tools::design::ReviewState;
@@ -130,7 +133,7 @@ fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Fa
 /// One row of `waiting.list`; a connector call's also names its approval, server, tool and input,
 /// a post's its number, network, text, pictures and time, and a site request's its number, site,
 /// address and reason.
-fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
+fn waiting_row(deps: &ToolDeps, item: &farik_store::waiting::Waiting) -> Value {
     let mut row = json!({
         "task_id": item.task_id,
         "kind": item.kind.as_str(),
@@ -188,6 +191,30 @@ fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
         row["at"] = json!(time(ask.at));
         row["expires_at"] = json!(time(ask.expires_at));
     }
+    if let Some(ask) = &item.pipeline {
+        row["pipeline"] = json!(ask.pipeline);
+        row["name"] = json!(ask.name);
+        row["what"] = json!(ask.what);
+        row["url"] = json!(ask.url);
+        row["host"] = json!(ask.host);
+        row["why"] = json!(ask.why);
+        row["cost"] = json!(match ask.cost {
+            PipelineCost::Free => "free",
+            PipelineCost::Paid => "paid",
+            PipelineCost::Unknown => "unknown",
+        });
+        row["needs_account"] = json!(ask.needs_account);
+        row["sends_project_data"] = json!(ask.sends_project_data);
+        if let Some(reason) = &ask.reason {
+            row["reason"] = json!(reason);
+        }
+        row["at"] = json!(ask.at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true));
+        // What the team would be asked, so that the owner reads it before they approve: the
+        // same text approving files.
+        if let Some(text) = pipeline_text(deps, ask.pipeline) {
+            row["request_text"] = json!(text);
+        }
+    }
     if let Some(ask) = &item.post {
         row["post"] = json!(ask.post);
         row["channel"] = json!(ask.channel.as_str());
@@ -204,6 +231,19 @@ fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
         row["at"] = json!(ask.at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true));
     }
     row
+}
+
+/// The text of the request an approval of data pipeline request `pipeline` files, which the owner
+/// reads on Today first: `None` when the log has no such request.
+fn pipeline_text(deps: &ToolDeps, pipeline: u64) -> Option<String> {
+    let record = data_pipelines(&deps.log)
+        .ok()?
+        .into_iter()
+        .find(|record| record.pipeline == pipeline)?;
+    let connector = (deps.kits)(Role::ProcurementSpecialist)
+        .ok()
+        .and_then(|kit| kit_connector_title(&kit, record.requested.name.as_str()));
+    Some(pipeline_request_text(&record, connector.as_deref()))
 }
 
 /// The gates' queries, whose params the schema already passed.
@@ -226,7 +266,7 @@ pub(super) fn query(
                 .map_err(|e| internal(&e))?;
             // What Farik could not keep within a budget or keep paused comes first: it is money.
             let mut rows = ads_rows(state, deps).map_err(|e| internal(&e))?;
-            rows.extend(listed.iter().map(waiting_row));
+            rows.extend(listed.iter().map(|item| waiting_row(deps, item)));
             rows.extend(design_reviews_waiting(deps, &team)?);
             Ok(json!({ "waiting": rows }))
         }
@@ -4438,6 +4478,139 @@ pub(super) mod tests {
         );
         assert_eq!(after["waiting"].as_array().map(Vec::len), Some(1));
         assert_eq!(after["waiting"][0]["order"], 2);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one row for each thing the owner reads of a request"
+    )]
+    fn waiting_list_gives_an_escalated_requests_host_and_the_text_it_would_file() {
+        let harness = Harness::with_procurement("gates-pipeline-waits");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let name = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team")
+            .agents
+            .iter()
+            .find(|agent| agent.id.as_str() == "proc")
+            .map(|agent| agent.display_name.to_string())
+            .expect("proc");
+        let kit = farik_roles::load_kit(farik_core::contract::Role::ProcurementSpecialist)
+            .expect("the shipped kit");
+        let farik_roles::KitConnector::Server { copy, .. } = &kit.connectors[0] else {
+            panic!("the kit's first service is a server");
+        };
+        let asked = |source: &str, url: &str| {
+            harness
+                .project
+                .record_in(
+                    Some("proc"),
+                    Some("session-proc"),
+                    "FRK-1",
+                    "data_pipeline.requested",
+                    &json!({
+                        "name": source,
+                        "what": "Reads a seller's page as text.\nEven where prices need a browser.",
+                        "source_url": url,
+                        "why": "Two of the five sellers show their prices only in a full browser.",
+                        "cost": "paid", "needs_account": true, "sends_project_data": false
+                    }),
+                )
+                .envelope
+                .seq
+        };
+        let rows = |harness: &Harness| {
+            query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult",
+            )["waiting"]
+                .clone()
+        };
+        let first = asked("Firecrawl", "https://www.Firecrawl.dev/pricing?plan=big");
+        let second = asked(&copy.title, "https://goshippo.com/shipping-api");
+        // Open, a request waits on the Product Manager and is not listed.
+        assert_eq!(rows(&harness), json!([]));
+
+        // The Product Manager passes the first on in its decision session; Farik the second.
+        harness.project.record_in(
+            Some("pm"),
+            Some("session-pm"),
+            "",
+            "session.started",
+            &json!({ "purpose": "verify", "model": "claude-opus-5-5", "effort": "high",
+                     "pipeline": first }),
+        );
+        harness.project.record_in(
+            Some("pm"),
+            Some("session-pm"),
+            "",
+            "data_pipeline.escalated",
+            &json!({ "pipeline": first, "reason": "It needs a paid plan, so it is your call." }),
+        );
+        harness.project.record(
+            "",
+            "data_pipeline.escalated",
+            &json!({ "pipeline": second, "reason": "The Product Manager did not decide" }),
+        );
+
+        let row = |pipeline: u64, source: &str, url: &str, host: &str, text: &str| {
+            json!({
+                "task_id": "FRK-1", "kind": "data_pipeline", "agent_id": "proc",
+                "title": "Add a login page",
+                "line": format!("{name} asks for a data source: {source}"),
+                "pipeline": pipeline, "name": source,
+                "what": "Reads a seller's page as text.\nEven where prices need a browser.",
+                "url": url, "host": host,
+                "why": "Two of the five sellers show their prices only in a full browser.",
+                "cost": "paid", "needs_account": true, "sends_project_data": false,
+                "at": "2026-09-22T12:00:00Z", "request_text": text,
+            })
+        };
+        let mut listed = row(
+            first,
+            "Firecrawl",
+            "https://www.Firecrawl.dev/pricing?plan=big",
+            "firecrawl.dev",
+            "Set up Firecrawl for the Procurement Specialist.\n\
+             What it gives: Reads a seller's page as text. Even where prices need a browser.\n\
+             Source: https://www.Firecrawl.dev/pricing?plan=big\n\
+             Asked because: Two of the five sellers show their prices only in a full browser.",
+        );
+        listed["reason"] = json!("It needs a paid plan, so it is your call.");
+        // A source of the kit says so in the text the owner reads, and Farik's own passing on
+        // gives no reason of the manager's.
+        let kit_text = row(
+            second,
+            &copy.title,
+            "https://goshippo.com/shipping-api",
+            "goshippo.com",
+            &format!(
+                "Set up {title} for the Procurement Specialist.\n\
+                 What it gives: Reads a seller's page as text. Even where prices need a browser.\n\
+                 Source: https://goshippo.com/shipping-api\n\
+                 Asked because: Two of the five sellers show their prices only in a full browser.\n\
+                 Connect {title} on the Procurement Specialist's page.",
+                title = copy.title
+            ),
+        );
+        assert_eq!(rows(&harness), json!([listed, kit_text]));
+
+        // Decided, it is gone from Today.
+        harness.project.record(
+            "",
+            "data_pipeline.declined",
+            &json!({ "pipeline": first, "by": "human", "reason": "No." }),
+        );
+        let after = rows(&harness);
+        assert_eq!(after.as_array().map(Vec::len), Some(1));
+        assert_eq!(after[0]["pipeline"], second);
     }
 
     #[test]

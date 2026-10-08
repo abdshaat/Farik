@@ -14,10 +14,12 @@ use farik_core::sprint::{Sprint, SprintStatus};
 use farik_core::team::{Agent, AgentStatus, Team, custom_server, plain_role};
 use farik_protocol::command::{AcceptSubject, Command, RequestSize, SkillScope};
 use farik_protocol::event::{
-    AgentUpdatedBody, ConnectorDisconnectedBody, EscalationRaisedBodyReason,
-    EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
-    HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody, SiteDecisionBody, new_event,
+    AgentUpdatedBody, ConnectorDisconnectedBody, DataPipelineApprovedBody, DataPipelineDecidedBy,
+    DataPipelineDeclinedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventBody,
+    EventIds, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MessageKind,
+    QuestionAnsweredBody, SiteDecisionBody, new_event,
 };
+use farik_store::pipelines::{PipelineState, data_pipelines};
 use farik_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
 use farik_store::requests::{RequestError, hold_contract, triage_by_human};
 use farik_store::sites::{SiteRequest, site_requests};
@@ -32,7 +34,7 @@ use crate::daemon::DaemonState;
 use crate::daemon::{secret_at, with_server};
 use crate::marketing::{decide_plan, decide_post, end_plan, stop_post};
 use crate::pause::paused;
-use crate::procurement::{ORDERS, check_follow_up};
+use crate::procurement::{ORDERS, PIPELINES, check_follow_up, file_pipeline_request};
 use crate::skills::{
     SkillCommandError, SkillLevel, confirm_skill, confirmed_sentence, remove_skill,
     removed_sentence, save_skill, saved_sentence,
@@ -230,6 +232,11 @@ pub(super) async fn handle(
             note,
             expected_on,
         } => order_update(tools, order, &status, note, expected_on),
+        Command::DataPipelineDecide {
+            pipeline,
+            approve,
+            note,
+        } => pipeline_decide(tools, pipeline, approve, note),
         Command::RenewalDismiss { renewal } => renewal_dismiss(tools, renewal),
         Command::ToolApprove { approval, note } => decide_tool_call(tools, approval, note, true),
         Command::ToolRefuse { approval, note } => decide_tool_call(tools, approval, note, false),
@@ -952,6 +959,94 @@ fn order_decide(
     };
     Ok(CommandReport {
         said,
+        events: vec![seq],
+    })
+}
+
+/// The most characters the owner's note on a data pipeline request has.
+const MOST_PIPELINE_NOTE: usize = 600;
+
+/// Approves (`approve`) or declines the escalated data pipeline request `pipeline`, once:
+/// `data_pipeline.approved` or `.declined` by the owner, with the owner's `note` as its reason
+/// (empty when they said none) and no agent, session or task on its envelope. An approval files
+/// an ordinary request in the owner's name first, and records itself naming it; nothing is
+/// recorded when the filing fails. Refused `unknown_pipeline`, `pipeline_not_escalated` for a
+/// request that is still the Product Manager's, `pipeline_decided` for one decided before,
+/// `pipeline_note_too_long` and `pipeline_not_filed`. Under ADR 0041's `auto` nothing else
+/// decides an escalated request: this command, from the daemon's token or the browser's cookie,
+/// is the only door.
+fn pipeline_decide(
+    tools: &ToolDeps,
+    pipeline: u64,
+    approve: bool,
+    note: Option<String>,
+) -> Result<CommandReport, CommandError> {
+    let said = note.map(|text| text.trim().to_string()).unwrap_or_default();
+    if said.chars().count() > MOST_PIPELINE_NOTE {
+        return Err(order_refusal(
+            "pipeline_note_too_long",
+            format!("a note is at most {MOST_PIPELINE_NOTE} characters"),
+        ));
+    }
+    let _deciding = crate::locked(&PIPELINES);
+    let records = data_pipelines(&tools.log).map_err(failed)?;
+    let Some(record) = records.iter().find(|record| record.pipeline == pipeline) else {
+        return Err(order_refusal(
+            "unknown_pipeline",
+            format!("{pipeline} is no data source the Procurement Specialist asked for"),
+        ));
+    };
+    let source = crate::tools::sites::shown(record.requested.name.as_str());
+    match record.state {
+        PipelineState::Escalated => {}
+        PipelineState::Open => {
+            return Err(order_refusal(
+                "pipeline_not_escalated",
+                format!("the Product Manager has not passed {source} to you yet"),
+            ));
+        }
+        PipelineState::Approved | PipelineState::Declined => {
+            return Err(order_refusal(
+                "pipeline_decided",
+                format!("{source} was decided already"),
+            ));
+        }
+    }
+    let number = NonZeroU64::new(pipeline).ok_or_else(|| failed("a request is numbered from 1"))?;
+    let by = DataPipelineDecidedBy::Human;
+    if !approve {
+        let seq = append(
+            tools,
+            None,
+            EventBody::DataPipelineDeclined(DataPipelineDeclinedBody {
+                pipeline: number.into(),
+                by,
+                reason: said.try_into().map_err(failed)?,
+            }),
+        )?;
+        return Ok(CommandReport {
+            said: format!("Declined {source}."),
+            events: vec![seq],
+        });
+    }
+    let team = tools.files.read_team().map_err(failed)?;
+    let filed = file_pipeline_request(tools, &team, record, HUMAN, &tools.ids)
+        .map_err(|why| order_refusal("pipeline_not_filed", why))?;
+    let seq = append(
+        tools,
+        None,
+        EventBody::DataPipelineApproved(DataPipelineApprovedBody {
+            pipeline: number.into(),
+            by,
+            reason: said.try_into().map_err(failed)?,
+            request: filed.as_str().to_string().try_into().map_err(failed)?,
+        }),
+    )?;
+    Ok(CommandReport {
+        said: format!(
+            "Approved {source}. The team has your request, {}, to set it up.",
+            filed.as_str()
+        ),
         events: vec![seq],
     })
 }
@@ -5777,6 +5872,281 @@ mod tests {
             );
         }
     }
+    /// `proc`'s request for the data source `name` on `task_id`, in its session: a paid one that
+    /// needs an account. Answers its number.
+    fn pipeline_asked(harness: &Harness, task_id: &str, name: &str) -> u64 {
+        harness
+            .project
+            .record_in(
+                Some("proc"),
+                Some("session-proc"),
+                task_id,
+                "data_pipeline.requested",
+                &json!({
+                    "name": name,
+                    "what": "Reads a seller's page as text, even where prices need a browser.",
+                    "source_url": "https://www.firecrawl.dev/pricing",
+                    "why": "Two of the five sellers show their prices only in a full browser.",
+                    "cost": "paid", "needs_account": true, "sends_project_data": false
+                }),
+            )
+            .envelope
+            .seq
+    }
+
+    /// Farik passes request `pipeline` to the owner after the manager's three tries.
+    fn pipeline_passed_on(harness: &Harness, pipeline: u64) {
+        harness.project.record(
+            "",
+            "data_pipeline.escalated",
+            &json!({ "pipeline": pipeline, "reason": "The Product Manager did not decide" }),
+        );
+    }
+
+    fn pipelines_now(harness: &Harness) -> Vec<farik_store::pipelines::PipelineRecord> {
+        farik_store::pipelines::data_pipelines(&harness.project.deps.log).expect("the log reads")
+    }
+
+    fn pipelines_waiting(harness: &Harness) -> usize {
+        let team = harness.project.deps.files.read_team().expect("the team");
+        farik_store::waiting::waiting(
+            &harness.project.deps.projections,
+            &harness.project.deps.log,
+            &harness.project.deps.files,
+            &team,
+        )
+        .expect("the store reads")
+        .iter()
+        .filter(|item| item.kind == farik_store::waiting::WaitingKind::DataPipeline)
+        .count()
+    }
+
+    fn decide_pipeline(pipeline: u64, approve: bool, note: Option<&str>) -> Command {
+        Command::DataPipelineDecide {
+            pipeline,
+            approve,
+            note: note.map(ToString::to_string),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one row for each decision and each refusal"
+    )]
+    async fn only_the_human_decides_an_escalated_request() {
+        let harness = Harness::with_procurement("human-pipeline-decide");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let orchestrator = an_orchestrator(&harness);
+        let first = pipeline_asked(&harness, "FRK-1", "Firecrawl");
+        let second = pipeline_asked(&harness, "FRK-1", "Shippo");
+        let open = pipeline_asked(&harness, "FRK-1", "Tavily");
+        pipeline_passed_on(&harness, first);
+        pipeline_passed_on(&harness, second);
+        assert_eq!(
+            pipelines_waiting(&harness),
+            2,
+            "the open one waits on the manager"
+        );
+        let tasks = harness.events(&[EventKind::TaskCreated]).len();
+
+        // An approval takes the row off Today, files the request and records it.
+        let report = handled(
+            &orchestrator,
+            decide_pipeline(first, true, Some("  Go, but only prices.  ")),
+        )
+        .await;
+        let approved = last(&harness, EventKind::DataPipelineApproved).expect("recorded");
+        assert_eq!(report.events, vec![approved.envelope.seq]);
+        assert_eq!(approved.envelope.ids.agent_id, None, "never an agent's");
+        assert_eq!(approved.envelope.ids.session_id, None, "never a session's");
+        assert_eq!(
+            approved.envelope.ids.task_id, None,
+            "a decision names no task"
+        );
+        let EventBody::DataPipelineApproved(body) = &approved.body else {
+            panic!("an approval");
+        };
+        assert_eq!(body.pipeline.get(), first);
+        assert_eq!(body.by.to_string(), "human");
+        assert_eq!(body.reason.as_str(), "Go, but only prices.");
+        let filed = harness
+            .project
+            .deps
+            .files
+            .read_contract(&task(body.request.as_str()))
+            .expect("the request's contract");
+        assert_eq!(
+            filed.title.as_str(),
+            "Set up Firecrawl for the Procurement Specialist."
+        );
+        assert_eq!(harness.events(&[EventKind::TaskCreated]).len(), tasks + 1);
+        assert_eq!(pipelines_waiting(&harness), 1);
+        let record = &pipelines_now(&harness)[0];
+        assert_eq!(
+            record.state,
+            farik_store::pipelines::PipelineState::Approved
+        );
+        assert_eq!(
+            record.request.as_ref().map(|id| id.as_str().to_string()),
+            Some(body.request.as_str().to_string())
+        );
+        assert!(
+            !harness.row("FRK-1").waiting_on_human,
+            "a request never held the task"
+        );
+
+        // A decline files nothing, and says what the owner said, if anything.
+        handled(&orchestrator, decide_pipeline(second, false, None)).await;
+        let declined = last(&harness, EventKind::DataPipelineDeclined).expect("recorded");
+        let EventBody::DataPipelineDeclined(body) = &declined.body else {
+            panic!("a decline");
+        };
+        assert_eq!(
+            (body.pipeline.get(), body.by.to_string()),
+            (second, "human".to_string())
+        );
+        assert_eq!(
+            body.reason.as_str(),
+            "",
+            "empty when the owner said nothing"
+        );
+        assert_eq!(declined.envelope.ids.agent_id, None);
+        assert_eq!(declined.envelope.ids.session_id, None);
+        assert_eq!(declined.envelope.ids.task_id, None);
+        assert_eq!(harness.events(&[EventKind::TaskCreated]).len(), tasks + 1);
+        assert_eq!(pipelines_waiting(&harness), 0);
+
+        // What is not the owner's to decide, or was decided, or does not exist, is refused.
+        let not_yet = refused(&orchestrator, decide_pipeline(open, true, None)).await;
+        assert!(not_yet.starts_with("pipeline_not_escalated: "), "{not_yet}");
+        for decision in [true, false] {
+            let again = refused(&orchestrator, decide_pipeline(first, decision, None)).await;
+            assert!(again.starts_with("pipeline_decided: "), "{again}");
+            let again = refused(&orchestrator, decide_pipeline(second, decision, None)).await;
+            assert!(again.starts_with("pipeline_decided: "), "{again}");
+        }
+        let nothing = refused(&orchestrator, decide_pipeline(9_999, true, None)).await;
+        assert!(nothing.starts_with("unknown_pipeline: "), "{nothing}");
+        // A request that is no request: the seq of another kind of event.
+        let task_event = harness.events(&[EventKind::TaskCreated])[0].envelope.seq;
+        let neither = refused(&orchestrator, decide_pipeline(task_event, true, None)).await;
+        assert!(neither.starts_with("unknown_pipeline: "), "{neither}");
+        assert_eq!(harness.events(&[EventKind::DataPipelineApproved]).len(), 1);
+        assert_eq!(harness.events(&[EventKind::DataPipelineDeclined]).len(), 1);
+
+        // The owner's note is at most 600 characters.
+        let third = pipeline_asked(&harness, "FRK-1", "Open Meteo");
+        pipeline_passed_on(&harness, third);
+        let long = refused(
+            &orchestrator,
+            decide_pipeline(third, false, Some(&"x".repeat(601))),
+        )
+        .await;
+        assert!(long.starts_with("pipeline_note_too_long: "), "{long}");
+        assert_eq!(pipelines_waiting(&harness), 1, "a refusal decides nothing");
+        handled(
+            &orchestrator,
+            decide_pipeline(third, false, Some(&"x".repeat(600))),
+        )
+        .await;
+        assert_eq!(pipelines_waiting(&harness), 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_filed_request_names_who_approved_it() {
+        let harness = Harness::with_procurement("human-pipeline-author");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let orchestrator = an_orchestrator(&harness);
+        let pipeline = pipeline_asked(&harness, "FRK-1", "Firecrawl");
+        pipeline_passed_on(&harness, pipeline);
+        let tasks = harness.events(&[EventKind::TaskCreated]).len();
+
+        handled(&orchestrator, decide_pipeline(pipeline, true, None)).await;
+
+        let created = harness.events(&[EventKind::TaskCreated]);
+        assert_eq!(created.len(), tasks + 1);
+        let EventBody::TaskCreated(body) = &created[tasks].body else {
+            panic!("a request");
+        };
+        assert_eq!(body.created_by, "human");
+        let id = created[tasks]
+            .envelope
+            .ids
+            .task_id
+            .clone()
+            .expect("the request's id");
+        let filed = harness
+            .project
+            .deps
+            .files
+            .read_contract(&id)
+            .expect("the contract");
+        assert_eq!(filed.created_by.as_deref(), Some("human"));
+        assert_eq!(created[tasks].envelope.ids.agent_id, None);
+        assert_eq!(created[tasks].envelope.ids.session_id, None);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn two_owner_decisions_at_once_record_one() {
+        let harness = Harness::with_procurement("human-pipeline-lock");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let deps = &harness.project.deps;
+        let first = pipeline_asked(&harness, "FRK-1", "Firecrawl");
+        pipeline_passed_on(&harness, first);
+
+        // While another step holds the lock, a decision has recorded nothing and filed nothing.
+        let held = crate::locked(&crate::procurement::PIPELINES);
+        let before = harness.project.event_count();
+        std::thread::scope(|scope| {
+            let running = scope.spawn(|| super::pipeline_decide(deps, first, true, None));
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            assert!(!running.is_finished(), "a decision waits for the lock");
+            assert_eq!(
+                harness.project.event_count(),
+                before,
+                "and records nothing yet"
+            );
+            drop(held);
+            running
+                .join()
+                .expect("the decision ends")
+                .expect("it goes on once the lock is free");
+        });
+        assert_eq!(
+            harness.project.event_count(),
+            before + 2,
+            "a request and its approval"
+        );
+
+        // Two at once: one is recorded, the other is told it was decided.
+        let second = pipeline_asked(&harness, "FRK-1", "Shippo");
+        pipeline_passed_on(&harness, second);
+        let answers: Vec<_> = std::thread::scope(|scope| {
+            let one = scope.spawn(|| super::pipeline_decide(deps, second, true, None));
+            let other = scope.spawn(|| super::pipeline_decide(deps, second, false, None));
+            vec![one.join().expect("ends"), other.join().expect("ends")]
+        });
+        assert_eq!(
+            answers.iter().filter(|answer| answer.is_ok()).count(),
+            1,
+            "{answers:?}"
+        );
+        assert_eq!(
+            harness
+                .events(&[
+                    EventKind::DataPipelineApproved,
+                    EventKind::DataPipelineDeclined
+                ])
+                .len(),
+            2,
+            "one for each request"
+        );
+    }
+
     /// A renewal Farik flagged: the vendor Vercel renewing on 2026-11-30, decide by 2026-10-31.
     fn renewal_flagged(harness: &Harness, vendor: &str) -> u64 {
         harness
