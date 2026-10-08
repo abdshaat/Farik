@@ -27,11 +27,20 @@
 //! each service has; the kit itself asks Kick for `mcp:read` alone. Kick lists fewer tools to a
 //! narrower grant, so the run also records what an `mcp:read` grant lists.
 //!
-//! A connector Farik runs itself (`command: farik`, the Architect's OSV and the Marketing
-//! Specialist's Google Ads) is skipped, with a line saying so: its pin is the offline test
-//! `osv_server_lists_the_kits_tools` or `google_ads_server_lists_the_kits_tools`, since its tools
-//! are Farik's own and change only with a Farik release. The comparison is also proven by
-//! `pin_drift`'s tests and `fixture_mcp.rs`.
+//! The Procurement Specialist's four third-party services join them since step 10d, each with what
+//! it needs: Exa takes no key; `SerpApi` takes `FARIK_KIT_SERPAPI_SERPAPI_KEY`, a free account's
+//! private key; AWS Pricing takes `FARIK_KIT_AWS_PRICING_AWS_ACCESS_KEY_ID` and
+//! `FARIK_KIT_AWS_PRICING_AWS_SECRET_ACCESS_KEY`, a key of a user allowed only the pricing reads,
+//! and needs the program `uv`; and Brex, which the user signs in to, takes `FARIK_KIT_BREX_BEARER`,
+//! which is an API token from Brex's Developer settings, made by an admin after the Developer API
+//! agreement, since Brex's server accepts one as a bearer. Run it twice and note the first and
+//! the second time `aws-pricing` takes to list: the first downloads Python and the package.
+//!
+//! A connector Farik runs itself (`command: farik`: the Architect's OSV, the Marketing
+//! Specialist's Google Ads and the Procurement Specialist's `fx`) is skipped, with a line naming
+//! its pin: the offline test `crates/cli/tests/{file}_server.rs`, `{file}` the connector's name
+//! with each `-` made `_`, since its tools are Farik's own and change only with a Farik release.
+//! The comparison is also proven by `pin_drift`'s tests and `fixture_mcp.rs`.
 
 use std::collections::BTreeMap;
 
@@ -39,6 +48,12 @@ use farik_core::team::{CustomTransport, McpServerSource, custom_server};
 use farik_roles::{KitConnector, SHIPPED_ROLES, is_farik_connector, load_kit, pin_drift};
 use farik_runtime::claude::Secret;
 use farik_runtime::connectors::list_tools;
+
+/// The integration test that pins one of Farik's own connectors offline: `crates/cli/tests/` and
+/// the connector's name with each `-` made `_`, then `_server.rs`.
+fn offline_pin(connector: &str) -> String {
+    format!("crates/cli/tests/{}_server.rs", connector.replace('-', "_"))
+}
 
 /// The variable holding `connector`'s `key` for the live run.
 fn variable(connector: &str, key: &str) -> String {
@@ -78,8 +93,8 @@ async fn live_kit_pins_hold() {
                 && is_farik_connector(command, args)
             {
                 eprintln!(
-                    "skipped {role}'s {name}: Farik's own server, pinned offline by \
-                     osv_server_lists_the_kits_tools or google_ads_server_lists_the_kits_tools"
+                    "skipped {role}'s {name}: Farik's own server, pinned offline by {}",
+                    offline_pin(&args[1])
                 );
                 continue;
             }
@@ -122,6 +137,39 @@ async fn live_kit_pins_hold() {
         "kit pins drifted; a pin update re-reviews every tag:\n{}",
         drifted.join("\n")
     );
+}
+
+#[test]
+fn names_the_offline_pin_of_each_farik_connector() {
+    assert_eq!(offline_pin("fx"), "crates/cli/tests/fx_server.rs");
+    assert_eq!(
+        offline_pin("google-ads"),
+        "crates/cli/tests/google_ads_server.rs"
+    );
+    // Every connector of Farik's own in a shipped kit has the test its skip line names.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut found: Vec<String> = Vec::new();
+    for role in SHIPPED_ROLES {
+        for connector in &load_kit(role).expect("a shipped kit loads").connectors {
+            let KitConnector::Server { entry, .. } = connector else {
+                continue;
+            };
+            let server = custom_server(entry).expect("a kit entry");
+            if let CustomTransport::Stdio { command, args, .. } = &server.transport
+                && is_farik_connector(command, args)
+            {
+                let pin = offline_pin(&args[1]);
+                assert!(
+                    root.join(&pin).is_file(),
+                    "{role}'s {}: no {pin}",
+                    server.name
+                );
+                found.push(args[1].clone());
+            }
+        }
+    }
+    found.sort();
+    assert_eq!(found, ["fx", "google-ads", "osv"]);
 }
 
 #[test]

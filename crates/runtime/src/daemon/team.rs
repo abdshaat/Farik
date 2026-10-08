@@ -5187,6 +5187,63 @@ pub(super) mod tests {
         }
     }
 
+    /// A guard: each of the Procurement Specialist's five services connects by name, Brex signed in
+    /// to with its four read scopes and the others not signed in, `SerpApi` with its one allowance,
+    /// and none is the Finance Specialist's (step 10d).
+    #[test]
+    fn connects_each_procurement_service_by_name() {
+        use farik_core::contract::Role;
+        let team = crate::tools::fixtures::a_team_of_three(|wire| {
+            crate::tools::fixtures::with_the_procurement_specialist(wire);
+            wire["agents"].as_array_mut().expect("agents").push(
+                farik_core::team::fixtures::an_agent_wire("fin", "finance_specialist"),
+            );
+        });
+        let procurement = farik_roles::load_kit(Role::ProcurementSpecialist)
+            .expect("the Procurement Specialist's kit");
+        let names = ["fx", "exa", "serpapi", "brex", "aws-pricing"];
+        for name in names {
+            let (_, server) = super::kit_entry(&procurement, &team, "proc", name, &BTreeMap::new())
+                .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
+            assert!(super::matches_kit(&procurement, &server), "{name}");
+            let scopes = server.oauth().map(|settings| settings.scopes.clone());
+            let signs_in_to = (name == "brex").then(|| {
+                [
+                    "offline_access",
+                    "vendors.readonly",
+                    "expenses.card.readonly",
+                    "departments.readonly",
+                ]
+                .map(String::from)
+                .to_vec()
+            });
+            assert_eq!(scopes, signs_in_to, "{name}");
+            let allowed = if name == "serpapi" {
+                BTreeMap::from([("search".to_string(), 50)])
+            } else {
+                BTreeMap::new()
+            };
+            assert_eq!(server.allowances, allowed, "{name}");
+        }
+        // None is the Finance Specialist's: not by its role, and not by its kit.
+        let finance =
+            farik_roles::load_kit(Role::FinanceSpecialist).expect("the Finance Specialist's kit");
+        for name in names {
+            let refused = super::kit_entry(&procurement, &team, "fin", name, &BTreeMap::new())
+                .expect_err("the Finance Specialist is not the Procurement Specialist");
+            assert!(
+                refused[0].message.starts_with("connector_not_in_kit: "),
+                "{name}: {refused:?}"
+            );
+            let refused = super::kit_entry(&finance, &team, "fin", name, &BTreeMap::new())
+                .expect_err("the Finance Specialist's kit has no procurement service");
+            assert!(
+                refused[0].message.starts_with("connector_not_in_kit: "),
+                "{name}: {refused:?}"
+            );
+        }
+    }
+
     /// A guard: every `farik_*` tool a role's skill or a kit's skill names is one Farik lists.
     #[test]
     fn kit_skills_name_only_tools_farik_lists() {
