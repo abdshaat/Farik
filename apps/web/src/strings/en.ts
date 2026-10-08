@@ -2189,6 +2189,8 @@ export const en = {
 	correctNote: "What you know",
 	correctExpected: "Expected on",
 	correctBody: "{name} reads your correction in its next piece of work.",
+	correctNoteLong: "A note here is at most 300 characters.",
+	correctDayPast: "Pick today or a later day.",
 	correctSave: "Save the status",
 	closeTitle: "Close PO-{order} without receiving it?",
 	closeBody:
@@ -2211,7 +2213,7 @@ export const en = {
 	refusePurchaseOrderCurrency:
 		"Write the currency as three capital letters, like USD.",
 	refusePurchaseOrderStatus:
-		"Delayed needs what you know and the day it is expected; A problem needs what you know.",
+		"That status was not taken. Delayed needs what you know and the day it is expected; A problem needs what you know; a note is at most 300 characters; and the day can’t be before today.",
 	refusePurchaseOrderNote: "A note is at most 600 characters.",
 	refuseRenewalDismissed: "You dismissed this renewal already.",
 	refuseRenewalUnknown: "There is no such renewal.",

@@ -672,6 +672,59 @@ describe("the orders on the Procurement Specialist's page", () => {
 		await waitFor(() => expect(asked(s)).toBe(before + 1));
 	});
 
+	it("the_correction_holds_the_note_and_the_day_to_their_rules_in_its_own_words", async () => {
+		const { s } = await opened("ivo");
+		fireEvent.click(
+			within(await itemOf(en.ordersPlacedTitle, "10")).getByRole("button", {
+				name: "Correct the status",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Correct the status of PO-10?",
+		});
+		const save = () =>
+			within(dialog).getByRole("button", {
+				name: "Save the status",
+			}) as HTMLButtonElement;
+		const note = within(dialog).getByLabelText(/What you know/);
+		const day = within(dialog).getByLabelText(
+			/Expected on/,
+		) as HTMLInputElement;
+
+		// A note is at most 300 characters, so a longer one is said so here, not sent for a
+		// refusal that talks of Delayed.
+		fireEvent.change(note, { target: { value: "n".repeat(301) } });
+		expect(within(dialog).getByText(en.correctNoteLong)).toBeTruthy();
+		expect(save().disabled).toBe(true);
+		fireEvent.change(note, { target: { value: "n".repeat(300) } });
+		expect(within(dialog).queryByText(en.correctNoteLong)).toBeNull();
+		expect(save().disabled).toBe(false);
+
+		// The day is today or later: the picker starts there, and an earlier one typed is refused.
+		expect(day.min).toBe("2026-10-26");
+		fireEvent.change(day, { target: { value: "2026-10-25" } });
+		expect(within(dialog).getByText(en.correctDayPast)).toBeTruthy();
+		expect(save().disabled).toBe(true);
+		fireEvent.change(day, { target: { value: "2026-10-26" } });
+		expect(within(dialog).queryByText(en.correctDayPast)).toBeNull();
+		expect(save().disabled).toBe(false);
+
+		// What the daemon still refuses under this code is told in words that cover every rule.
+		fireEvent.click(save());
+		const sent = await sentCommand(s);
+		await s.reply(sent, {
+			error: {
+				kind: "refused",
+				detail:
+					"purchase_order_status_invalid: expected_on is 2026-10-26, before today, 2026-10-27",
+			},
+		});
+		const refusal = (await within(dialog).findByRole("alert")).textContent;
+		expect(refusal).toBe(en.refusePurchaseOrderStatus);
+		expect(refusal).toContain("300 characters");
+		expect(refusal).toContain("before today");
+	});
+
 	it("a_status_that_needs_nothing_is_sent_as_chosen", async () => {
 		const { s } = await opened("ivo");
 		// No status yet: Being prepared is where it starts.

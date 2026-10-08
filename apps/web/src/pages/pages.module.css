@@ -787,6 +787,11 @@
 	gap: var(--farik-space-1);
 }
 
+.dayError {
+	margin: 0;
+	font-weight: 600;
+}
+
 .dayField input {
 	font:
 		var(--farik-type-body-weight) var(--farik-type-body-size) /
