@@ -746,7 +746,7 @@ mod tests {
         };
         draft(&project, &follow_up(14)).expect("a follow-up of a placed order");
         // Not a drafted one, not another agent's, and a quote request names no order at all.
-        for order in [12, 13] {
+        for order in [12, 13, 15] {
             let reason = refusal_of(draft(&project, &follow_up(order)));
             assert!(
                 reason.starts_with("seller_message_order_invalid: "),
