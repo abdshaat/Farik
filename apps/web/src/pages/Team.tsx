@@ -6,6 +6,7 @@ import { commandSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import { SaveTemplate } from "./dialogs/SaveTemplate.tsx";
+import { visibly } from "./dialogs/ToolApproval.tsx";
 import { UseTemplate } from "./dialogs/UseTemplate.tsx";
 import styles from "./pages.module.css";
 import {
@@ -235,8 +236,10 @@ export function Team() {
 							<p className={styles.muted}>
 								{paused
 									? t("agentPaused")
-									: (activity?.activity.find((a) => a.agentId === agent.id)
-											?.line ?? t("agentActive"))}
+									: visibly(
+											activity?.activity.find((a) => a.agentId === agent.id)
+												?.line ?? t("agentActive"),
+										)}
 							</p>
 							<dl className={styles.facts}>
 								<dt>{t("agentModel")}</dt>

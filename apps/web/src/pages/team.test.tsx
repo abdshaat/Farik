@@ -301,6 +301,32 @@ describe("team page", () => {
 		});
 	});
 
+	it("writes_out_what_hides_text_in_an_agents_activity_line", async () => {
+		const { s } = await opened("/team");
+		const list = await screen.findByRole("list", { name: en.teamMembers });
+		const card = within(list)
+			.getByText("Kai persona")
+			.closest("li") as HTMLElement;
+		// A waiting order's line holds the seller, which the agent wrote: U+202E would reverse the
+		// words after it, so the owner reads it written out.
+		await answerQuery(s, "team.activity", {
+			activity: [
+				{
+					agent_id: "kai",
+					state: "idle",
+					line: "Waiting on you: Kai set up an order from Acme\u202e Co: 59.98 USD",
+					task_id: "FRK-21",
+				},
+			],
+		});
+		expect(
+			await within(card).findByText(
+				"Waiting on you: Kai set up an order from Acme\\u{202e} Co: 59.98 USD",
+			),
+		).toBeTruthy();
+		expect(card.textContent).not.toContain("\u202e");
+	});
+
 	it("the_team_page_adds_finance", async () => {
 		const { s } = await opened("/team");
 		const select = (await screen.findByLabelText(
