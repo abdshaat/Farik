@@ -38,6 +38,15 @@ import {
 	todayWithOrders,
 	WRITTEN_ROW,
 } from "../test/orders.ts";
+import {
+	DATA_ROW,
+	ODD_ADDRESS_ROW,
+	PAID_ROW,
+	MARKUP as PIPELINE_MARKUP,
+	TEAM as PIPELINE_TEAM,
+	SCRIPT_PIPELINE_ROW,
+	UNDECIDED_ROW,
+} from "../test/pipelines.ts";
 import { GOING_OUT, MARKUP, POST_ROW, todayWith } from "../test/posts.ts";
 import {
 	answerQuery,
@@ -1981,5 +1990,119 @@ describe("the renewals coming up", () => {
 		expect(s.calls("request.file")).toHaveLength(1);
 		await s.reply(second, { said: "dismissed", events: [83] });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	});
+});
+
+describe("a data pipeline waiting on the owner", () => {
+	afterEach(() => vi.useRealTimers());
+
+	const rowOf = async (name: string) => {
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const found = within(list)
+			.getAllByRole("listitem")
+			.find((one) =>
+				within(one).queryByText(new RegExp(`data source: ${name}`)),
+			);
+		if (!found) throw new Error(`no row for ${name}`);
+		return found;
+	};
+
+	it("shows_why_the_owner_is_asked", async () => {
+		await todayWith({
+			waiting: [PAID_ROW, DATA_ROW, UNDECIDED_ROW],
+			team: PIPELINE_TEAM,
+		});
+		const paid = await rowOf("Firecrawl");
+		expect(
+			within(paid).getByText("Ivo asks for a data source: Firecrawl", {
+				selector: "strong",
+			}),
+		).toBeTruthy();
+		expect(within(paid).getByText(/Ivo goes on without it\./)).toBeTruthy();
+		const why = within(paid).getByRole("group", {
+			name: "Why it comes to you",
+		});
+		// Farik's sentences, in their order, then the Product Manager's reason.
+		expect(why.textContent).toBe(
+			`It costs money.The Product Manager asks you:It needs a paid plan, so it is your call.\\u{202e} ${PIPELINE_MARKUP}`,
+		);
+		const shippo = await rowOf("Shippo");
+		expect(
+			within(shippo).getByRole("group", { name: "Why it comes to you" })
+				.textContent,
+		).toContain("It sends your data to Shippo.The Product Manager asks you:");
+		expect(within(shippo).queryByText("It costs money.")).toBeNull();
+		// Three tries: Farik says so, and there is no reason to show.
+		const undecided = await rowOf("Azure prices");
+		const unclear = within(undecided).getByRole("group", {
+			name: "Why it comes to you",
+		});
+		expect(unclear.textContent).toBe(
+			"Its cost is not known.The Product Manager did not decide.",
+		);
+		expect(within(undecided).queryByText(en.pipelineAsks)).toBeNull();
+	});
+
+	it("shows_what_the_agent_wrote_as_text", async () => {
+		const { container } = await todayWith({
+			waiting: [PAID_ROW, DATA_ROW, SCRIPT_PIPELINE_ROW, ODD_ADDRESS_ROW],
+			team: PIPELINE_TEAM,
+		});
+		const paid = await rowOf("Firecrawl");
+		expect(
+			within(paid).getByText("firecrawl.dev", { selector: "strong" }),
+		).toBeTruthy();
+		for (const name of [
+			"What it would give Ivo",
+			"Why, in Ivo’s words",
+			en.pipelineAsks,
+		]) {
+			const frame = within(paid).getByRole("group", { name });
+			expect(frame.tagName).toBe("FIELDSET");
+			expect(frame.getAttribute("data-trust")).toBe("untrusted");
+		}
+		// The agent's and the Product Manager's words are framed as theirs; markup stays text.
+		const what = within(paid).getByRole("group", {
+			name: "What it would give Ivo",
+		});
+		expect(what.getAttribute("data-trust")).toBe("untrusted");
+		expect(what.textContent).toContain(`.\\u{202e} ${PIPELINE_MARKUP}`);
+		expect(
+			within(paid)
+				.getByRole("group", { name: "Why, in Ivo’s words" })
+				.getAttribute("data-trust"),
+		).toBe("untrusted");
+		expect(container.querySelector("b")).toBeNull();
+		// The address is text, with a link to open it that leaves nothing behind.
+		expect(
+			within(paid)
+				.getByText("https://www.firecrawl.dev/pricing", {
+					selector: "code",
+				})
+				.closest("a"),
+		).toBeNull();
+		const open = within(paid).getByRole("link", { name: "Open" });
+		expect(open.getAttribute("href")).toBe("https://www.firecrawl.dev/pricing");
+		expect(open.getAttribute("target")).toBe("_blank");
+		expect(open.getAttribute("rel")).toBe("noopener noreferrer");
+		// An address that is not a web page is text alone.
+		const odd = await rowOf("Odd");
+		expect(within(odd).getByText("javascript:alert(1)")).toBeTruthy();
+		expect(within(odd).queryByRole("link", { name: "Open" })).toBeNull();
+		// The account line only when one is needed; the closing words always.
+		expect(within(paid).getByText(en.pipelineAccount)).toBeTruthy();
+		const shippo = await rowOf("Shippo");
+		expect(within(shippo).queryByText(en.pipelineAccount)).toBeNull();
+		for (const row of [paid, shippo]) {
+			expect(
+				within(row).getByText(/Ivo filled these in from the source’s pages/),
+			).toBeTruthy();
+			expect(within(row).getByText(en.pipelineNothingYet)).toBeTruthy();
+		}
+		// Another alphabet is warned of, a plain name is not.
+		const script = await rowOf("Ulіne");
+		expect(within(script).getByText(en.siteRequestScriptWhat)).toBeTruthy();
+		expect(within(paid).queryByText(en.siteRequestScriptWhat)).toBeNull();
+		await expectNoAxeViolations(container);
 	});
 });

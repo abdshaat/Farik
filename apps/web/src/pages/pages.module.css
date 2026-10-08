@@ -918,3 +918,21 @@
 	padding: var(--farik-space-2) 0;
 	border-bottom: 1px solid var(--farik-color-rule);
 }
+
+/* The request an approved data source files: the owner's words and the agent's, shown as text. */
+.pipelineHeading {
+	font-weight: 600;
+}
+
+.pipelineFrame {
+	min-width: 0;
+	margin: 0;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	font-family: var(--farik-type-code-family);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-left: 3px solid var(--farik-color-ink);
+	border-radius: var(--farik-radius-control);
+}

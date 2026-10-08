@@ -429,3 +429,15 @@ phone, then the total, the order's facts and the file. */
 	height: 32px;
 	color: var(--farik-color-ink);
 }
+
+/* Why a data source comes to the owner: Farik's sentences, then the Product Manager's reason. */
+.pipelineWhy {
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.pipelineWhy p {
+	margin: 0;
+}

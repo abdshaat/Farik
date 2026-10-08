@@ -69,6 +69,10 @@ const WORDS: Record<string, keyof typeof en> = {
 	site_already_allowed: "refuseSiteAlreadyAllowed",
 	site_not_allowed: "refuseSiteNotAllowed",
 	site_request_decided: "refuseSiteRequestDecided",
+	pipeline_decided: "refusePipelineDecided",
+	pipeline_not_escalated: "refusePipelineNotEscalated",
+	unknown_pipeline: "refusePipelineUnknown",
+	pipeline_note_too_long: "refusePipelineNoteLong",
 	unknown_site_request: "refuseSiteRequestUnknown",
 	site_note_too_long: "refuseSiteNoteTooLong",
 	// The owner's steps on a purchase order, and on a renewal (SPEC 6.10).

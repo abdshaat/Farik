@@ -11,6 +11,7 @@ import { type AdsAsk, AdsRow } from "./AdsRow.tsx";
 import { type Allowances, useAllowances } from "./allowances.tsx";
 import { type Backlog, moreWaits } from "./Board.tsx";
 import { ChannelPreview } from "./Channel.tsx";
+import { DataPipeline, type PipelineAsk } from "./dialogs/DataPipeline.tsx";
 import {
 	isScript,
 	ScriptWarning,
@@ -73,6 +74,7 @@ type Waiting = {
 		| "social_post"
 		| "site_request"
 		| "purchase_order"
+		| "data_pipeline"
 		| AdsAsk["kind"];
 	agentId: string | null;
 	title: string;
@@ -82,7 +84,8 @@ type Waiting = {
 	Partial<PlanAsk> &
 	Partial<PostAsk> &
 	Partial<SiteAsk> &
-	Partial<OrderAsk>;
+	Partial<OrderAsk> &
+	Partial<PipelineAsk>;
 type Moved = { at: string; line: string };
 type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
@@ -166,6 +169,7 @@ export function Today() {
 				item.kind === "social_post" ||
 				item.kind === "site_request" ||
 				item.kind === "purchase_order" ||
+				item.kind === "data_pipeline" ||
 				isAds(item.kind) ||
 				item.kind in KINDS,
 		),
@@ -285,6 +289,12 @@ export function Today() {
 										item={item as OrderWaiting}
 										agent={agent(item.agentId)}
 										now={new Date()}
+									/>
+								) : item.kind === "data_pipeline" ? (
+									<PipelineRow
+										key={`${item.kind}-${item.pipeline}`}
+										item={item}
+										agent={agent(item.agentId)}
 									/>
 								) : (
 									<WaitingRow
@@ -655,6 +665,135 @@ function SiteRequestRow({
 					ask={ask}
 					agent={name}
 					allow={dialog === "allow"}
+					onClose={() => setDialog(undefined)}
+				/>
+			)}
+		</li>
+	);
+}
+
+/**
+ * A data source the Procurement Specialist asked for and the Product Manager passed on: why it
+ * comes to the owner in Farik's words, then everything others wrote, each in a frame that says
+ * whose words they are, and "Approve" or "Decline", each of which asks for a note (spec 6.10).
+ */
+function PipelineRow({
+	item,
+	agent,
+}: {
+	item: Waiting;
+	agent: Agent | undefined;
+}) {
+	const name = agent?.displayName ?? item.agentId ?? "";
+	const source = visibly(item.name ?? "");
+	const host = item.host ?? "";
+	const url = item.url ?? "";
+	const titleId = `waiting-pipeline-${item.pipeline}`;
+	const [dialog, setDialog] = useState<"approve" | "decline">();
+	const [forTask, forTaskEnd] = t("pipelineTask", {
+		task: "{task}",
+		name,
+	}).split("{task}");
+	const ask: PipelineAsk = {
+		pipeline: item.pipeline ?? 0,
+		name: item.name ?? "",
+		what: item.what ?? "",
+		url,
+		host,
+		why: item.why ?? "",
+		cost: item.cost ?? "unknown",
+		needsAccount: item.needsAccount ?? false,
+		sendsProjectData: item.sendsProjectData ?? false,
+		...(item.reason ? { reason: item.reason } : {}),
+		requestText: item.requestText ?? "",
+	};
+	const ids = (part: string) => `${titleId}-${part}`;
+	return (
+		<li className={styles.row}>
+			{agent?.avatar && (
+				<Avatar avatarKey={agent.avatar as AvatarKey} name={name} size={32} />
+			)}
+			<div className={styles.rowText}>
+				<strong id={titleId}>{t("pipelineLine", { name, source })}</strong>
+				<span>
+					{forTask}
+					<Link to={`/tasks/${item.taskId}`}>
+						{item.taskId} {item.title}
+					</Link>
+					{forTaskEnd}
+				</span>
+				<span className={styles.muted} id={ids("why-you")}>
+					{t("pipelineWhyYou")}
+				</span>
+				<fieldset
+					className={styles.pipelineWhy}
+					aria-labelledby={ids("why-you")}
+				>
+					{ask.cost === "paid" && <p>{t("pipelinePaid")}</p>}
+					{ask.cost === "unknown" && <p>{t("pipelineUnknown")}</p>}
+					{ask.sendsProjectData && <p>{t("pipelineSendsData", { source })}</p>}
+					{ask.reason === undefined ? (
+						<p>{t("pipelineUndecided")}</p>
+					) : (
+						<>
+							<span id={ids("asks")}>{t("pipelineAsks")}</span>
+							<fieldset
+								aria-labelledby={ids("asks")}
+								data-trust="untrusted"
+								className={styles.frame}
+							>
+								{visibly(ask.reason)}
+							</fieldset>
+						</>
+					)}
+				</fieldset>
+				<span className={styles.muted} id={ids("what")}>
+					{t("pipelineWhat", { name })}
+				</span>
+				<fieldset
+					aria-labelledby={ids("what")}
+					data-trust="untrusted"
+					className={styles.frame}
+				>
+					{visibly(ask.what)}
+				</fieldset>
+				<span className={styles.muted} id={ids("why")}>
+					{t("pipelineWhy", { name })}
+				</span>
+				<fieldset
+					aria-labelledby={ids("why")}
+					data-trust="untrusted"
+					className={styles.frame}
+				>
+					{visibly(ask.why)}
+				</fieldset>
+				<span className={styles.muted}>{t("pipelineSource")}</span>
+				<strong className={styles.host}>{host}</strong>
+				{isScript(host) && <ScriptWarning className={styles.script} />}
+				<code className={styles.address}>{visibly(url)}</code>
+				{/^https?:\/\//.test(url) && (
+					<a href={url} target="_blank" rel="noopener noreferrer">
+						{t("pipelineOpen")}
+					</a>
+				)}
+				{ask.needsAccount && <span>{t("pipelineAccount")}</span>}
+				<span className={styles.muted}>{t("pipelineAsWritten", { name })}</span>
+				<span className={styles.muted}>{t("pipelineNothingYet")}</span>
+			</div>
+			{/* The group names the source, so that each row's "Approve" is told from the others. */}
+			<fieldset className={styles.decide} aria-labelledby={titleId}>
+				<Button kind="primary" onClick={() => setDialog("approve")}>
+					{t("pipelineApprove")}
+				</Button>
+				<Button onClick={() => setDialog("decline")}>
+					{t("pipelineDecline")}
+				</Button>
+			</fieldset>
+			{dialog && (
+				<DataPipeline
+					ask={ask}
+					agent={name}
+					approve={dialog === "approve"}
 					onClose={() => setDialog(undefined)}
 				/>
 			)}

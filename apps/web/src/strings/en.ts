@@ -2023,6 +2023,39 @@ export const en = {
 	siteDeclineTitle: "Don’t allow {name} to read {host}?",
 	siteDeclineBody:
 		"{name} is told you said no, with your note, and goes on without it.",
+	// A data source the Procurement Specialist asks for and the Product Manager passed on, on Today (SPEC 6.10).
+	pipelineLine: "{name} asks for a data source: {source}",
+	pipelineTask: "For {task}. {name} goes on without it.",
+	pipelineWhyYou: "Why it comes to you",
+	pipelinePaid: "It costs money.",
+	pipelineUnknown: "Its cost is not known.",
+	pipelineSendsData: "It sends your data to {source}.",
+	pipelineUndecided: "The Product Manager did not decide.",
+	pipelineAsks: "The Product Manager asks you:",
+	pipelineWhat: "What it would give {name}",
+	pipelineWhy: "Why, in {name}’s words",
+	pipelineSource: "The source",
+	pipelineOpen: "Open",
+	pipelineAccount: "Setting it up needs an account there.",
+	pipelineAsWritten:
+		"{name} filled these in from the source’s pages. Check them there before the team sets it up.",
+	pipelineNothingYet:
+		"Approving asks the team to set it up. It connects nothing and pays for nothing.",
+	pipelineApprove: "Approve",
+	pipelineDecline: "Decline",
+	pipelineApproveTitle: "Approve {source} for {name}?",
+	pipelineApproveBody:
+		"The team gets this request in your name. {name} wrote most of it: read it first.",
+	pipelineFiled: "The request",
+	pipelineDeclineTitle: "Decline {source} for {name}?",
+	pipelineDeclineBody:
+		"{name} reads your note in its next piece of work and goes on without it.",
+	pipelineNote: "A note for {name} (optional)",
+	refusePipelineDecided: "This request was decided already.",
+	refusePipelineNotEscalated:
+		"The Product Manager has not passed this request to you.",
+	refusePipelineUnknown: "There is no such request.",
+	refusePipelineNoteLong: "A note is at most 600 characters.",
 	// The Procurement Specialist's page: the sites it may read.
 	sitesTitle: "Sites it may read",
 	sitesLead:
