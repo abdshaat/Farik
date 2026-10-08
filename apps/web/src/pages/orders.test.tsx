@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { sentCommand } from "../test/gate.ts";
-import { EFFECTIVE, MARKUP, NOW, ORDERS, TEAM } from "../test/orders.ts";
+import { at, EFFECTIVE, MARKUP, NOW, ORDERS, TEAM } from "../test/orders.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 import { SITES } from "../test/sites.ts";
 
@@ -796,6 +796,80 @@ describe("the orders on the Procurement Specialist's page", () => {
 		await s.reply(filed as never, { task_id: "FRK-52" });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 		expect(s.calls("command")).toHaveLength(0);
+	});
+
+	it("writes_out_what_hides_text_in_the_agents_status_note", async () => {
+		// U+202E reverses what follows it: the owner must read it written out, not obey it.
+		const order = ORDERS.orders.find((one) => one.order === 11);
+		await opened("ivo", {
+			orders: [
+				{
+					...order,
+					status: {
+						status: "delayed",
+						note: "Flour is short.\u202e",
+						by: "agent",
+						at: at(25, 10),
+						expected_on: "2026-10-30",
+					},
+				},
+			],
+		});
+		const delayed = await itemOf(en.ordersPlacedTitle, "11");
+		const note = within(delayed).getByText(/Flour is short\./);
+		expect(note.getAttribute("data-trust")).toBe("untrusted");
+		expect(note.textContent).toContain("\\u{202e}");
+		expect(note.textContent).not.toContain("\u202e");
+	});
+
+	it("writes_out_what_hides_text_in_the_seller_of_a_follow_up_request", async () => {
+		const order = ORDERS.orders.find((one) => one.order === 11);
+		await opened("ivo", {
+			orders: [{ ...order, seller: "Northfield\u202e Mill" }],
+		});
+		fireEvent.click(
+			within(await itemOf(en.ordersPlacedTitle, "11")).getByRole("button", {
+				name: "Ask for a follow-up",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Ask Ivo to follow up PO-11?",
+		});
+		// The request is the owner's own words once sent: it says the seller as the owner reads it.
+		const request = (
+			within(dialog).getByRole("textbox", {
+				name: "Your request",
+			}) as HTMLTextAreaElement
+		).value;
+		expect(request).toBe(
+			"Follow up on PO-11 from Northfield\\u{202e} Mill: where is it, and when will it come?",
+		);
+	});
+
+	it("says_the_day_an_order_was_approved_not_the_day_it_was_drafted", async () => {
+		const order = ORDERS.orders.find((one) => one.order === 12);
+		// Drafted on 20 October and approved yesterday.
+		await opened("ivo", {
+			orders: [{ ...order, drafted_at: at(20, 9), decided_at: at(25, 9) }],
+		});
+		const toPlace = await itemOf(en.ordersToPlace, "12");
+		expect(toPlace.textContent).toContain("Approved yesterday.");
+		expect(toPlace.textContent).not.toContain("20 October");
+	});
+
+	it("a_received_order_with_no_price_says_none", async () => {
+		const received = ORDERS.orders.find((one) => one.order === 4);
+		await opened("ivo", {
+			orders: [
+				{ ...received, order: 21, paid: undefined, paid_currency: undefined },
+			],
+		});
+		const recent = within(
+			await screen.findByRole("list", { name: "Recent orders" }),
+		).getAllByRole("listitem");
+		expect(recent.map((one) => one.textContent)).toEqual([
+			"PO-21Old MillReceived on 10 September.",
+		]);
 	});
 
 	it("a_page_of_another_role_has_no_orders", async () => {
