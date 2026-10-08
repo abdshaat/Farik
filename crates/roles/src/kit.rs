@@ -1879,6 +1879,12 @@ mod tests {
         ] {
             assert!(text.contains(phrase), "lacks \"{phrase}\":\n{text}");
         }
+        // §3: an account is escalated unless the team has it already (the sentence wraps).
+        let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat.contains("Escalate it unless the team has the account already"),
+            "lacks the account rule:\n{text}"
+        );
         assert!(text.len() < 6 * 1024, "{} bytes", text.len());
         assert!(!text.contains(" @"), "no @ after a space");
     }
