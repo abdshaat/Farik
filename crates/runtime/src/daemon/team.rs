@@ -2884,6 +2884,40 @@ pub(super) mod tests {
         }
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn removing_google_ads_waits_for_a_google_ads_write() {
+        let ads = google_ads_with_two_campaigns_running("team-remove-lock").await;
+
+        // While a write to Google Ads holds the lock, nothing is paused and nothing is removed.
+        let held = ads.state().ads_writes().lock().await;
+        let removal = {
+            let daemon = Arc::clone(&ads.harness.daemon);
+            tokio::spawn(async move {
+                super::call(
+                    &daemon,
+                    "connector.disconnect",
+                    &json!({ "agent": "kai", "server": "google-ads" }),
+                )
+                .await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(
+            ads.google.requests().is_empty(),
+            "{:?}",
+            ads.google.requests()
+        );
+        assert!(!removal.is_finished());
+        assert!(ads.store.load(&ads.at).expect("reads").is_some());
+
+        // Released, the pause runs and the connection goes.
+        drop(held);
+        removal.await.expect("joined").expect("removed");
+        assert_eq!(ads.google.requests_of("mutate").len(), 2);
+        assert!(ads.store.load(&ads.at).expect("reads").is_none());
+    }
+
     /// Switching "Plan work in sprints" off frees the Backlog's work at once, not at the next
     /// minute's look (the step 15 journey).
     #[tokio::test]
