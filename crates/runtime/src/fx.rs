@@ -57,7 +57,8 @@ const MAX_CURRENCIES: usize = 400;
 const MAX_QUOTES: usize = 30;
 /// What a call says whenever Frankfurter does not answer with rates: never its own words.
 const REFUSED: &str = "Frankfurter could not answer that; check the codes and the date";
-/// The first day Frankfurter has rates for.
+/// The earliest day Farik asks Frankfurter for a rate. Frankfurter answers some earlier days (the
+/// dirham on 1997-06-02), so this is Farik's limit and not Frankfurter's first day.
 const FIRST_DAY: (i32, u32, u32) = (1999, 1, 4);
 
 /// The server, speaking to one address.
@@ -194,7 +195,7 @@ impl Fx {
         Ok(Value::Array(listed))
     }
 
-    /// The day `input` names: an ISO date from Frankfurter's first day to today in UTC.
+    /// The day `input` names: an ISO date from the earliest day Farik allows to today in UTC.
     fn day(&self, input: &Value) -> Result<String, String> {
         let text = input["date"]
             .as_str()
