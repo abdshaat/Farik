@@ -820,6 +820,8 @@ const WRITE_EVALUATION_TOOL: &str = "farik_write_evaluation";
 /// The Procurement Specialist's request for a site, and the list of what it may read.
 const REQUEST_SITES_TOOL: &str = "farik_request_sites";
 const READ_SITES_TOOL: &str = "farik_read_sites";
+/// The tool that suggests a purchase order, the Procurement Specialist's alone (ADR 0039).
+const DRAFT_PURCHASE_ORDER_TOOL: &str = "farik_draft_purchase_order";
 
 /// The Farik tools a read-only session is not offered: the command runner, which has no
 /// executor there, and the git writes, which only the assignee may make.
@@ -863,7 +865,9 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                     && ask.purpose == SessionPurpose::Implement
                     && ask.contract.is_some()
             }
-            WRITE_EVALUATION_TOOL => {
+            // A comparison is written, and an order suggested from it, in the implement session of
+            // the task they belong to.
+            WRITE_EVALUATION_TOOL | DRAFT_PURCHASE_ORDER_TOOL => {
                 ask.agent.role == RoleWire::ProcurementSpecialist
                     && ask.purpose == SessionPurpose::Implement
                     && ask.contract.is_some()

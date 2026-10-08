@@ -59,6 +59,9 @@ pub mod pause;
 mod ports;
 /// The project's preview, and the confined browser beside it.
 pub mod preview;
+/// The Procurement Specialist's purchase orders and renewals: the locks that number, decide and
+/// expire them, and what the clock closes.
+pub mod procurement;
 /// A session's system prompt, assembled in one fixed order.
 pub mod prompt;
 /// Sessions replayed from recorded transcripts.

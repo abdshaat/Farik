@@ -105,6 +105,49 @@ pub(crate) struct FormulaCell {
     formula: String,
 }
 
+impl SheetInput {
+    /// A sheet Farik builds itself, as it builds an order's workbook: no headings row, the rows
+    /// given.
+    pub(crate) fn new(name: &str, rows: Vec<Vec<CellInput>>) -> Self {
+        Self {
+            name: name.to_string(),
+            columns: Vec::new(),
+            rows,
+        }
+    }
+}
+
+impl CellInput {
+    /// A cell of text, never a formula.
+    pub(crate) fn text(text: &str) -> Self {
+        Self::Text(text.to_string())
+    }
+
+    /// A number cell.
+    pub(crate) fn number(number: f64) -> Self {
+        Self::Number(number)
+    }
+
+    /// An empty cell.
+    pub(crate) fn empty() -> Self {
+        Self::Empty(())
+    }
+
+    /// A date cell from an ISO date.
+    pub(crate) fn date(iso: &str) -> Self {
+        Self::Date(DateCell::new(iso))
+    }
+}
+
+impl DateCell {
+    /// A date cell from an ISO date, `YYYY-MM-DD`.
+    pub(crate) fn new(iso: &str) -> Self {
+        Self {
+            date: iso.to_string(),
+        }
+    }
+}
+
 /// What a workbook write did.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct WrittenWorkbook {
@@ -575,6 +618,54 @@ pub(crate) fn write_workbook(
     })
 }
 
+/// Writes the workbook of `sheets` to `path`, a path in `folder` that [`private_path`] passed, as
+/// a new file: one that is there already is never replaced, so Farik's own files cannot be
+/// overwritten by a second writer. The folders above `path` are made private when they are not
+/// there.
+///
+/// # Errors
+///
+/// `purchase_order_file_exists` when a file is at `path`, `sheet_refused`, `formula_refused` or
+/// `sheet_too_large` for a workbook out of bounds; `Failed` when the folder or the file cannot be
+/// written. Nothing is left behind for a refusal.
+pub(crate) fn write_new_workbook(
+    folder: &Path,
+    path: &Path,
+    sheets: &[SheetInput],
+) -> Result<(), ToolError> {
+    check_workbook(sheets)?;
+    let bytes = build(sheets)?;
+    if bytes.len() > MOST_BYTES {
+        return Err(refused(
+            "sheet_too_large",
+            format!(
+                "the workbook is {} bytes, and a workbook is at most {MOST_BYTES}",
+                bytes.len()
+            ),
+        ));
+    }
+    private_folder_at(path.parent().unwrap_or(folder)).map_err(failed)?;
+    let mut file = match create_private(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+            return Err(refused(
+                "purchase_order_file_exists",
+                format!(
+                    "{} is there already, and Farik never replaces an order",
+                    path.display()
+                ),
+            ));
+        }
+        Err(error) => return Err(failed(error)),
+    };
+    let written = file.write_all(&bytes).and_then(|()| file.sync_all());
+    if let Err(error) = written {
+        let _ = fs::remove_file(path);
+        return Err(failed(error));
+    }
+    Ok(())
+}
+
 /// Stores `bytes` at `path`, a path in `folder` that [`private_path`] passed, and answers whether a
 /// file was there already. The folders above `path` are made private when they are not there. A
 /// file that is there is copied under `.history/` first. The new file is written beside the target
@@ -670,6 +761,26 @@ pub(super) fn in_its_own_implement_session(
 pub(super) fn write_sheet(call: &Call<'_>, input: &WriteSheetInput) -> Result<Value, ToolError> {
     let folder = folder_to_write(call)?;
     workbook_only(&input.path)?;
+    // The procurement folder's `orders/` is Farik's: it writes each order's workbook there, and
+    // the agent reads them (spec 6.10). The check is of the path as written, so `Orders/` on a
+    // case-insensitive disk is `orders/`.
+    if call.role() == Role::ProcurementSpecialist
+        && input
+            .path
+            .split('/')
+            .next()
+            .is_some_and(|first| first.eq_ignore_ascii_case("orders"))
+    {
+        return Err(refused(
+            "orders_are_farik_s",
+            format!(
+                "{:?} is in orders/, where Farik writes each purchase order's workbook; draft an \
+                 order with farik_draft_purchase_order, and read the orders with \
+                 farik_read_sheet",
+                input.path
+            ),
+        ));
+    }
     let root = call.deps().files.root();
     let target = private_path(root, folder, &input.path)?;
     let written = write_workbook(
@@ -992,7 +1103,10 @@ mod tests {
     use calamine::{Data, DataType as _, Reader, Xlsx, open_workbook};
     use serde_json::{Value, json};
 
-    use super::{formula_reaches_outside, history_name, private_path};
+    use super::{
+        CellInput, SheetInput, formula_reaches_outside, history_name, private_path,
+        write_new_workbook,
+    };
     use crate::session::SessionPurpose;
     use crate::tools::ToolError;
     use crate::tools::fixtures::{
@@ -2491,9 +2605,12 @@ mod tests {
     fn finance_reads_the_register_and_nothing_else_there() {
         let project = a_procurement_project("sheets-finance-register");
         write_register(&project, &the_register()).expect("the register is written");
-        write_register(
-            &project,
-            &json!({ "path": "orders/PO-1.xlsx", "sheets": [sheet("Order", &[], &json!([["a"]]))] }),
+        // Farik writes an order's workbook, as the agent cannot.
+        let held = procurement_folder(&project);
+        write_new_workbook(
+            &held,
+            &held.join("orders/PO-1.xlsx"),
+            &[SheetInput::new("Order", vec![vec![CellInput::text("a")]])],
         )
         .expect("an order is written");
         let evaluations = procurement_folder(&project).join("evaluations");
@@ -2755,5 +2872,99 @@ mod tests {
             .expect("ten MiB");
         let reason = refusal_of(read(&project, "fin", &json!({ "path": "big.xlsx" })));
         assert!(reason.starts_with("sheet_refused: "), "{reason}");
+    }
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_agent_cannot_write_orders() {
+        let project = a_procurement_project("sheets-orders");
+        let rows = json!([["Acme", 1]]);
+
+        for path in ["orders/PO-1.xlsx", "Orders/PO-1.xlsx", "ORDERS/PO-1.xlsx"] {
+            let reason = refusal_of(write_register(&project, &one_sheet(path, &rows)));
+            assert!(
+                reason.starts_with("orders_are_farik_s: "),
+                "{path}: {reason}"
+            );
+            assert!(reason.contains(path), "{reason}");
+        }
+        assert!(
+            files_under(&procurement_folder(&project)).is_empty(),
+            "nothing was written: {:?}",
+            files_under(&procurement_folder(&project))
+        );
+
+        // Only the first part of a path is Farik's; the register and a folder of another name are
+        // the agent's, and so is a Finance Specialist's own `orders/`.
+        write_register(&project, &one_sheet("vendors.xlsx", &rows)).expect("the register");
+        write_register(&project, &one_sheet("quotes/orders.xlsx", &rows)).expect("another folder");
+        write(&project, &one_sheet("orders/books.xlsx", &rows))
+            .expect("the books' own folder is the Finance Specialist's");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn writes_a_new_workbook_and_never_replaces_one() {
+        let project = a_procurement_project("sheets-new-workbook");
+        let folder = procurement_folder(&project);
+        let path = folder.join("orders/PO-1.xlsx");
+        let sheets = |text: &str| {
+            vec![SheetInput::new(
+                "Order",
+                vec![vec![
+                    CellInput::text(text),
+                    CellInput::number(19.99),
+                    CellInput::date("2026-10-08"),
+                    CellInput::empty(),
+                ]],
+            )]
+        };
+
+        write_new_workbook(&folder, &path, &sheets("Acme")).expect("a new workbook is written");
+
+        let mut book = open(&path);
+        assert_eq!(book.sheet_names(), ["Order"]);
+        assert_eq!(
+            cell(&mut book, "Order", (0, 0)),
+            Data::String("Acme".to_string())
+        );
+        assert!(
+            matches!(cell(&mut book, "Order", (0, 1)), Data::Float(n) if (n - 19.99).abs() < 1e-9)
+        );
+        let Data::DateTime(day) = cell(&mut book, "Order", (0, 2)) else {
+            panic!("a date cell");
+        };
+        let (year, month, of_month, ..) = day.to_ymd_hms_milli();
+        assert_eq!((year, month, of_month), (2026, 10, 8));
+        let mode = |at: &Path| fs::metadata(at).expect("it is there").permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600, "private to this user");
+        assert_eq!(mode(&folder.join("orders")), 0o700, "private to this user");
+
+        // A second write to the same path refuses, and leaves the first workbook as it was.
+        let before = fs::read(&path).expect("the bytes");
+        let reason = match write_new_workbook(&folder, &path, &sheets("Bolt")) {
+            Err(ToolError::Refused { reason }) => reason,
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert!(
+            reason.starts_with("purchase_order_file_exists: "),
+            "{reason}"
+        );
+        assert_eq!(fs::read(&path).expect("the bytes"), before);
+        assert_eq!(
+            files_under(&folder),
+            ["orders/PO-1.xlsx"],
+            "no temporary file is left"
+        );
+
+        // A workbook out of bounds is refused before anything is made.
+        let too_many: Vec<SheetInput> = (0..21)
+            .map(|number| SheetInput::new(&format!("S{number}"), Vec::new()))
+            .collect();
+        let other = folder.join("orders/PO-2.xlsx");
+        assert!(matches!(
+            write_new_workbook(&folder, &other, &too_many),
+            Err(ToolError::Refused { .. })
+        ));
+        assert!(!other.exists());
     }
 }

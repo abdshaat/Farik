@@ -41,6 +41,7 @@ mod marketing;
 pub(crate) mod media;
 mod memory;
 mod posts;
+mod purchase_order;
 mod reading;
 pub(crate) mod refusal;
 mod retro;
@@ -340,6 +341,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "List the sites you may read, Farik's with each shop's category and then the owner's, and for this task the sites waiting for the owner and the ones the owner did not allow, with their notes.",
         ),
+        tool::<purchase_order::DraftPurchaseOrderInput>(
+            "farik_draft_purchase_order",
+            Read,
+            "Set up a purchase order for the owner to approve or reject: the seller, each line with its quantity and unit price, the currency, delivery and terms, the seller's page on a site the owner allowed, and the comparison it rests on. Farik writes it as orders/PO-<n>.xlsx in your folder and your task goes on while the owner decides. You never place, pay for, confirm or cancel an order.",
+        ),
         tool::<exec::ExecInput>(
             "farik_exec",
             Execute,
@@ -471,6 +477,7 @@ pub async fn call_tool(
         "farik_write_evaluation" => evaluation::write_evaluation(&call, &parse(input)?),
         "farik_request_sites" => sites::request_sites(&call, &parse(input)?),
         "farik_read_sites" => nothing_in(input).and_then(|()| sites::read_sites(&call)),
+        "farik_draft_purchase_order" => purchase_order::draft_purchase_order(&call, &parse(input)?),
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -694,6 +701,7 @@ mod tests {
             "farik_write_evaluation",
             "farik_request_sites",
             "farik_read_sites",
+            "farik_draft_purchase_order",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -718,7 +726,7 @@ mod tests {
             tier("farik_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..32] {
+        for tool in &tools[..33] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

@@ -39,7 +39,7 @@ fn refused(code: &'static str, detail: impl Into<String>) -> ToolError {
 
 /// Whether `name` is words of lower-case letters and digits joined by single hyphens, at most 64
 /// characters: `^[a-z0-9]+(-[a-z0-9]+)*$`.
-fn is_a_name(name: &str) -> bool {
+pub(super) fn is_a_name(name: &str) -> bool {
     name.len() <= MOST_NAME
         && name.split('-').all(|word| {
             !word.is_empty()

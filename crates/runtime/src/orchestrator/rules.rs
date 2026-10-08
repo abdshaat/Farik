@@ -5147,6 +5147,7 @@ mod tests {
                     "farik_write_evaluation",
                     "farik_request_sites",
                     "farik_read_sites",
+                    "farik_draft_purchase_order",
                     "farik_schedule_post",
                 ]
                 .contains(&tool.name)
