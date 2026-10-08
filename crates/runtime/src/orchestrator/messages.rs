@@ -14,6 +14,7 @@ use farik_protocol::event::{
 use farik_store::TaskProjection;
 use farik_store::git::HeadSummary;
 use farik_store::marketing::{PostState, SocialPost};
+use farik_store::pipelines::PipelineRecord;
 
 use crate::ceremonies::OpenEscalation;
 use crate::prompt::untrusted_block;
@@ -816,6 +817,37 @@ pub(super) fn decide_design_plan_message(contract: &TaskContract, plan: &str) ->
          Approve it or return it with `farik_decide_design_plan`, with your reason.",
         task = contract.id.as_str(),
         plan = untrusted_block("plan", plan, NOTE_CAP_BYTES)
+    )
+}
+
+/// The Product Manager's decision session's message for a data pipeline request: everything the
+/// agent wrote, which is its words and so untrusted, with its own answers about the cost, the
+/// account and the data, and the rule Farik holds the decision to.
+pub(super) fn decide_data_pipeline_message(record: &PipelineRecord) -> String {
+    let body = &record.requested;
+    let asked = format!(
+        "name: {}\nwhat it would give: {}\nthe source's own page: {}\nwhy it would change the \
+         recommendation: {}\nwhat it costs, as the agent says: {}\nneeds an account, as the agent \
+         says: {}\nsends the project's data out, as the agent says: {}",
+        body.name.as_str(),
+        body.what.as_str(),
+        body.source_url.as_str(),
+        body.why.as_str(),
+        body.cost,
+        if body.needs_account { "yes" } else { "no" },
+        if body.sends_project_data { "yes" } else { "no" },
+    );
+    format!(
+        "The Procurement Specialist asks for a source of data, request {number}. What it wrote: \
+         {asked}\n\nFarik holds your decision to one rule: you may approve a request only when \
+         it is free and sends none of the project's data out, and an approval of any other is \
+         refused. A request that costs money, whose cost is not known, or that sends the \
+         project's data out, you decline, or escalate to the owner, who alone may approve it. \
+         Whether a request that needs an account is worth the owner's trouble is your judgement. \
+         Decide it with `farik_decide_data_pipeline`: `approve`, `decline` or `escalate`, with \
+         your reason in 20 to 600 characters, which the owner reads.",
+        number = record.pipeline,
+        asked = untrusted_block("pipeline_request", &asked, NOTE_CAP_BYTES),
     )
 }
 

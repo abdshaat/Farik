@@ -5,8 +5,8 @@ use std::num::NonZeroU64;
 use farik_core::team::Effort;
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
-    EventBody, EventIds, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
-    SessionStartedBodyEffort, SessionStartedBodyPurpose, Thread, new_event,
+    DataPipelineNumber, EventBody, EventIds, SessionEndedBody, SessionEndedBodyReason,
+    SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyPurpose, Thread, new_event,
 };
 use farik_store::{EventLog, StoreError};
 
@@ -15,7 +15,8 @@ use crate::session::{EndReason, SessionPurpose, SessionSpec};
 /// Records `session.started` for `spec`: its purpose, model, and effort, on an envelope naming
 /// the spec's session, agent, and task, and `ids`' team and project. `in_reply_to` is, for a
 /// conversation, the seq of the latest message it was shown, which answers the mentions up to it;
-/// `thread` is a ceremony's, which says which ceremony it was.
+/// `thread` is a ceremony's, which says which ceremony it was; `pipeline` is, for the Product
+/// Manager's decision session, the number of the data pipeline request it decides.
 ///
 /// # Errors
 ///
@@ -26,6 +27,7 @@ pub fn record_session_started(
     spec: &SessionSpec,
     in_reply_to: Option<u64>,
     thread: Option<Thread>,
+    pipeline: Option<u64>,
     ids: &EventIds,
     clock: &dyn Clock,
 ) -> Result<(), StoreError> {
@@ -53,7 +55,9 @@ pub fn record_session_started(
             }
             _ => None,
         },
-        pipeline: None,
+        pipeline: pipeline
+            .and_then(NonZeroU64::new)
+            .map(DataPipelineNumber::from),
     };
     let ids = EventIds {
         task_id: spec.task_id.clone(),
@@ -176,11 +180,36 @@ mod tests {
     }
 
     #[test]
+    fn names_the_request_only_a_decision_session_decides() {
+        let log = a_log();
+        let spec = SessionSpec {
+            task_id: None,
+            ..spec()
+        };
+        let clock = FixedClock::new(at("2026-09-22T10:00:00Z"));
+        record_session_started(&log, &spec, None, None, Some(7), &ids(&spec), &clock)
+            .expect("recorded");
+        record_session_started(&log, &spec, None, None, None, &ids(&spec), &clock)
+            .expect("recorded");
+        let named: Vec<Option<u64>> = everything(&log)
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::SessionStarted(body) => {
+                    body.pipeline.as_ref().map(|number| number.get())
+                }
+                other => panic!("expected session.started, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(named, [Some(7), None]);
+    }
+
+    #[test]
     fn records_a_session_starting_and_ending() {
         let log = a_log();
         let spec = spec();
         let clock = FixedClock::new(at("2026-09-22T10:00:00Z"));
-        record_session_started(&log, &spec, None, None, &ids(&spec), &clock).expect("recorded");
+        record_session_started(&log, &spec, None, None, None, &ids(&spec), &clock)
+            .expect("recorded");
         record_session_ended(
             &log,
             &spec.session_id,
@@ -253,7 +282,8 @@ mod tests {
                 effort,
                 ..spec()
             };
-            record_session_started(&log, &spec, None, None, &ids(&spec), &clock).expect("recorded");
+            record_session_started(&log, &spec, None, None, None, &ids(&spec), &clock)
+                .expect("recorded");
             record_session_ended(&log, &spec.session_id, reason, "", &ids(&spec), &clock)
                 .expect("recorded");
             expected.push((purpose_wire, effort_wire, reason_wire));

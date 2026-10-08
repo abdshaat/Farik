@@ -51,7 +51,7 @@ pub use crate::generated::event::{
 /// The bodies of the four `data_pipeline.` kinds, with the vocabularies they repeat.
 pub use crate::generated::event::{
     DataPipelineApprovedBody, DataPipelineCost, DataPipelineDecidedBy, DataPipelineDeclinedBody,
-    DataPipelineEscalatedBody, DataPipelineRequestedBody,
+    DataPipelineEscalatedBody, DataPipelineNumber, DataPipelineRequestedBody,
 };
 /// The channel's vocabularies, named for what they are rather than for the body they sit in.
 pub use crate::generated::event::{MessagePostedBodyKind as MessageKind, Thread};

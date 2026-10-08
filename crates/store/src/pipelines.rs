@@ -8,8 +8,10 @@
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
+use farik_core::pipeline::PipelineCost;
 use farik_protocol::event::{
-    DataPipelineDecidedBy, DataPipelineRequestedBody, EventBody, EventKind, FarikEvent,
+    DataPipelineCost, DataPipelineDecidedBy, DataPipelineRequestedBody, EventBody, EventKind,
+    FarikEvent,
 };
 
 use crate::{EventLog, EventQuery, StoreError};
@@ -97,6 +99,16 @@ pub struct PipelineRecord {
     pub request: Option<TaskId>,
     /// The sessions that were asked to decide it, oldest first.
     pub tries: Vec<String>,
+}
+
+/// A request's cost as the governor's rule takes it.
+#[must_use]
+pub fn cost_of(cost: DataPipelineCost) -> PipelineCost {
+    match cost {
+        DataPipelineCost::Free => PipelineCost::Free,
+        DataPipelineCost::Paid => PipelineCost::Paid,
+        DataPipelineCost::Unknown => PipelineCost::Unknown,
+    }
 }
 
 /// Whether `event` was recorded by the owner or by Farik: its envelope names no agent and no

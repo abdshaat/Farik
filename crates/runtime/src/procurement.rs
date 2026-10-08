@@ -16,8 +16,13 @@ use farik_protocol::event::{
     EventBody, EventIds, PurchaseOrderExpiredBody, PurchaseOrderStatus, RenewalCheckedBody,
     RenewalFlaggedBody, new_event,
 };
+use farik_roles::{Kit, KitConnector};
+use farik_store::pipelines::PipelineRecord;
 use farik_store::purchase_orders::{PurchaseOrderRecord, expires_at, overdue, purchase_orders};
 use farik_store::renewals::{last_check, renewals};
+use farik_store::requests::{
+    RequestError, file_request, placeholder_budget_usd, request_from_text,
+};
 use farik_store::{EventLog, StoreError};
 use serde_json::{Value, json};
 
@@ -38,6 +43,87 @@ pub(crate) static RENEWALS: Mutex<()> = Mutex::new(());
 /// escalation after three tries, so that two of them never take one name or the limit, decide one
 /// request twice, or file its request twice. One lock for every project in the process.
 pub(crate) static PIPELINES: Mutex<()> = Mutex::new(());
+
+/// The title of the service of `kit` that `name` names, without regard to case: the service's name
+/// or its title. A data pipeline request for such a service asks the owner to connect it.
+pub(crate) fn kit_connector_title(kit: &Kit, name: &str) -> Option<String> {
+    let wanted = name.trim().to_lowercase();
+    kit.connectors.iter().find_map(|connector| match connector {
+        KitConnector::Server { entry, copy, .. }
+            if entry.name.as_str().to_lowercase() == wanted
+                || copy.title.to_lowercase() == wanted =>
+        {
+            Some(copy.title.clone())
+        }
+        _ => None,
+    })
+}
+
+/// The ordinary request an approval of a data pipeline files, in words: its first line is its
+/// title, then what the source gives, its page and why the agent asked, one line each (what the
+/// agent wrote across several lines is joined into one), and, when the source is a service of the
+/// role's kit (`kit_connector` is its title), that connecting it is the owner's, on the role's
+/// page (spec 6.7). All of it but the title's two phrases and the labels is the agent's.
+pub(crate) fn pipeline_request_text(
+    record: &PipelineRecord,
+    kit_connector: Option<&str>,
+) -> String {
+    let body = &record.requested;
+    let on_one_line = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut lines = vec![
+        format!(
+            "Set up {} for the Procurement Specialist.",
+            on_one_line(body.name.as_str())
+        ),
+        format!("What it gives: {}", on_one_line(body.what.as_str())),
+        format!("Source: {}", body.source_url.as_str()),
+        format!("Asked because: {}", on_one_line(body.why.as_str())),
+    ];
+    if let Some(title) = kit_connector {
+        lines.push(format!(
+            "Connect {title} on the Procurement Specialist's page."
+        ));
+    }
+    lines.join("\n")
+}
+
+/// Files the request an approval of `record` asks for, as `created_by`, past the filing lock, and
+/// answers its id.
+///
+/// # Errors
+///
+/// A sentence saying why the request was not filed.
+pub(crate) fn file_pipeline_request(
+    deps: &ToolDeps,
+    team: &Team,
+    record: &PipelineRecord,
+    created_by: &str,
+    ids: &EventIds,
+) -> Result<TaskId, String> {
+    let connector = (deps.kits)(Role::ProcurementSpecialist)
+        .ok()
+        .and_then(|kit| kit_connector_title(&kit, record.requested.name.as_str()));
+    let text = pipeline_request_text(record, connector.as_deref());
+    let wire = request_from_text(&text, placeholder_budget_usd(&team.rules()))?;
+    let filed = file_request(
+        &deps.files,
+        &deps.log,
+        wire,
+        created_by,
+        None,
+        deps.clock.now(),
+        ids,
+        None,
+    )
+    .map_err(|error| match error {
+        RequestError::Refused { reason } => format!("the request {reason}"),
+        other => other.to_string(),
+    })?;
+    deps.projections
+        .catch_up()
+        .map_err(|error| error.to_string())?;
+    Ok(filed.id)
+}
 
 /// The most characters a follow-up status's note has.
 const MOST_STATUS_NOTE: usize = 300;

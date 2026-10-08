@@ -190,6 +190,17 @@ pub const DESIGN_DECISION_INSTRUCTION: &str = "This session decides the UI/UX De
      what to change. End the session by calling `farik_decide_design_plan` with your decision \
      and your reason.";
 
+/// The closing of the Product Manager's session given `farik_decide_data_pipeline` alone.
+pub const PIPELINE_DECISION_INSTRUCTION: &str = "This session decides one request of the \
+     Procurement Specialist for a source of data, which the message you were given holds. \
+     Approve it only when it would change a decision the team makes this sprint or the next, it \
+     costs nothing, and it sends none of the project's data out: Farik refuses an approval \
+     otherwise. Decline what the team can do without, saying what to use instead. Pass to the \
+     owner, by escalating, what costs money or sends data out and still seems worth asking, \
+     and what needs an account the team does not have. End the session by calling \
+     `farik_decide_data_pipeline` with your decision and your reason in one line the owner can \
+     read.";
+
 /// The system prompt of one session: the sections of `PROMPT_SECTIONS`, in that order.
 ///
 /// # Errors

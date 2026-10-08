@@ -415,8 +415,16 @@ mod tests {
             agent_id: Some("dev-a".to_string()),
             ..farik_ids()
         };
-        record_session_started(&log, &spec, Some(shown), None, &ids, &FixedClock::new(at()))
-            .expect("recorded");
+        record_session_started(
+            &log,
+            &spec,
+            Some(shown),
+            None,
+            None,
+            &ids,
+            &FixedClock::new(at()),
+        )
+        .expect("recorded");
 
         let seqs: Vec<u64> = pending_mentions(&log, "dev-a")
             .expect("the log reads")
@@ -441,7 +449,7 @@ mod tests {
             agent_id: Some("dev-a".to_string()),
             ..farik_ids()
         };
-        record_session_started(&log, &spec, None, None, &ids, &FixedClock::new(at()))
+        record_session_started(&log, &spec, None, None, None, &ids, &FixedClock::new(at()))
             .expect("recorded");
         let later = mention(&log, "@dev-a and the tests?");
 

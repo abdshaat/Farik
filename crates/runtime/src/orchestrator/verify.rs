@@ -675,6 +675,7 @@ pub(super) fn read_only<'a>(
         in_reply_to: None,
         thread: None,
         initial_prompt,
+        pipeline: None,
     }
 }
 

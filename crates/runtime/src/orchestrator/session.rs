@@ -30,6 +30,7 @@ use sha2::{Digest as _, Sha256};
 
 use super::design::{DECIDE_TOOL, RECORD_DESIGN_REVIEW_TOOL};
 use super::messages::human_message;
+use super::pipeline::DECIDE_PIPELINE_TOOL;
 use super::verify::{append, append_stamped};
 use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
 use crate::channel::post_system;
@@ -42,8 +43,8 @@ use crate::preview::{
     has_playwright,
 };
 use crate::prompt::{
-    CEREMONY_INSTRUCTIONS, DESIGN_DECISION_INSTRUCTION, JUDGMENT_INSTRUCTION, PromptInput,
-    assemble_system_prompt,
+    CEREMONY_INSTRUCTIONS, DESIGN_DECISION_INSTRUCTION, JUDGMENT_INSTRUCTION,
+    PIPELINE_DECISION_INSTRUCTION, PromptInput, assemble_system_prompt,
 };
 use crate::session::{
     EndReason, McpServerConfig, McpTransport, SessionEvent, SessionHandle, SessionPurpose,
@@ -88,6 +89,9 @@ pub(super) struct SessionAsk<'a> {
     pub(super) in_reply_to: Option<u64>,
     /// A ceremony's thread, which its posts are in and its `session.started` names.
     pub(super) thread: Option<Thread>,
+    /// The data pipeline request a Product Manager's decision session decides, which its
+    /// `session.started` names and which the decision tool checks the session against.
+    pub(super) pipeline: Option<u64>,
     /// Its first message.
     pub(super) initial_prompt: String,
 }
@@ -178,7 +182,7 @@ pub(super) async fn run_session(
         role,
         ask.contract,
         ask.in_reply_to,
-        ask.thread,
+        (ask.thread, ask.pipeline),
         &spec,
     )
     .await;
@@ -911,11 +915,31 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
             }
             _ => true,
         })
+        // The Product Manager's decision of a data pipeline request is its decision session's
+        // alone, which gives it that one tool.
+        .filter(|tool| {
+            tool.name != DECIDE_PIPELINE_TOOL || ask.only_tool == Some(DECIDE_PIPELINE_TOOL)
+        })
         // The design review's answer is its session's alone, which lists it.
         .filter(|tool| tool.name != RECORD_DESIGN_REVIEW_TOOL || ask.tools.is_some())
         .filter(|tool| ask.only_tool.is_none_or(|only| tool.name == only))
         .filter(|tool| ask.tools.is_none_or(|listed| listed.contains(&tool.name)))
         .collect()
+}
+
+/// The instruction that closes the system prompt of `ask`'s session: a ceremony's, or the one of
+/// the single decision a session given one tool alone ends with.
+fn closing_instruction(ask: &SessionAsk<'_>) -> Option<&'static str> {
+    match (ask.thread, ask.only_tool) {
+        (Some(thread), _) => CEREMONY_INSTRUCTIONS
+            .iter()
+            .find(|(named, _)| *named == thread)
+            .map(|(_, text)| *text),
+        (None, Some(JUDGMENT_TOOL)) => Some(JUDGMENT_INSTRUCTION),
+        (None, Some(DECIDE_TOOL)) => Some(DESIGN_DECISION_INSTRUCTION),
+        (None, Some(DECIDE_PIPELINE_TOOL)) => Some(PIPELINE_DECISION_INSTRUCTION),
+        (None, _) => None,
+    }
 }
 
 /// The spec of the session `ask` describes, its prompt assembled from the files as they are now,
@@ -1011,15 +1035,7 @@ fn session_spec_without(
         builtin_tools: &builtin_tools,
         purpose: ask.purpose,
         human_message: human.as_deref(),
-        closing: match (ask.thread, ask.only_tool) {
-            (Some(thread), _) => CEREMONY_INSTRUCTIONS
-                .iter()
-                .find(|(named, _)| *named == thread)
-                .map(|(_, text)| *text),
-            (None, Some(JUDGMENT_TOOL)) => Some(JUDGMENT_INSTRUCTION),
-            (None, Some(DECIDE_TOOL)) => Some(DESIGN_DECISION_INSTRUCTION),
-            (None, _) => None,
-        },
+        closing: closing_instruction(ask),
         connectors: &connectors,
     })?;
     let limits = budget_state(
@@ -1064,7 +1080,7 @@ async fn drive(
     role: Role,
     contract: Option<&TaskContract>,
     in_reply_to: Option<u64>,
-    thread: Option<Thread>,
+    (thread, pipeline): (Option<Thread>, Option<u64>),
     spec: &SessionSpec,
 ) -> Result<SessionEnd, OrchestratorError> {
     let tools = &deps.tools;
@@ -1091,7 +1107,15 @@ async fn drive(
             clock,
         )
     };
-    record_session_started(&tools.log, spec, in_reply_to, thread, &tools.ids, clock)?;
+    record_session_started(
+        &tools.log,
+        spec,
+        in_reply_to,
+        thread,
+        pipeline,
+        &tools.ids,
+        clock,
+    )?;
     let mut costed = false;
     let mut crossed = Vec::new();
     let read = match deps.adapter.start_session(spec.clone()) {
@@ -1427,6 +1451,7 @@ mod tests {
             in_reply_to: None,
             thread: None,
             initial_prompt: "Look at the app.".to_string(),
+            pipeline: None,
         }
     }
 
@@ -1777,6 +1802,7 @@ mod tests {
                     in_reply_to: None,
                     thread: None,
                     initial_prompt: String::new(),
+                    pipeline: None,
                 },
             )
             .expect("the spec")
@@ -1826,6 +1852,7 @@ mod tests {
                     in_reply_to: None,
                     thread: None,
                     initial_prompt: String::new(),
+                    pipeline: None,
                 },
             )
             .expect("the spec")
@@ -1882,6 +1909,7 @@ mod tests {
                 in_reply_to: None,
                 thread: None,
                 initial_prompt: String::new(),
+                pipeline: None,
             },
         )
         .expect("the spec");
@@ -1914,6 +1942,7 @@ mod tests {
                 in_reply_to: None,
                 thread: None,
                 initial_prompt: String::new(),
+                pipeline: None,
             },
         )
         .expect("the spec");
@@ -1951,6 +1980,7 @@ mod tests {
             in_reply_to: None,
             thread: None,
             initial_prompt: String::new(),
+            pipeline: None,
         }
     }
 
@@ -2468,6 +2498,10 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one row for each session that is and is not offered the tools"
+    )]
     fn offers_the_pipeline_tools_to_procurement_alone() {
         use crate::tools::fixtures::{
             with_the_finance_specialist, with_the_marketing_specialist,
@@ -2491,7 +2525,13 @@ mod tests {
                 .expect("the contract")
         };
         let (procurement, finance, developers) = (read("FRK-1"), read("FRK-2"), read("FRK-3"));
-        let pipeline_tools = ["farik_request_data_pipeline", "farik_read_data_pipelines"];
+        let asked_and_read = ["farik_request_data_pipeline", "farik_read_data_pipelines"];
+        // The decision is offered to none of them: only the Product Manager's decision session.
+        let pipeline_tools = [
+            "farik_request_data_pipeline",
+            "farik_read_data_pipelines",
+            "farik_decide_data_pipeline",
+        ];
         let offered = |who: &str, purpose: SessionPurpose, about| {
             let mut ask = asked(deps, agent(&team, who), purpose, about);
             ask.read_only = purpose == SessionPurpose::Verify;
@@ -2506,7 +2546,7 @@ mod tests {
 
         assert_eq!(
             offered("proc", SessionPurpose::Implement, Some(&procurement)),
-            pipeline_tools,
+            asked_and_read,
             "its task's implement session is offered both"
         );
         assert_eq!(
@@ -2561,6 +2601,16 @@ mod tests {
         ] {
             assert_eq!(offered(who, purpose, about), Vec::<&str>::new(), "{what}");
         }
+        let mut decision = asked(deps, agent(&team, "pm"), SessionPurpose::Verify, None);
+        decision.read_only = true;
+        decision.only_tool = Some("farik_decide_data_pipeline");
+        assert_eq!(
+            session_spec(deps, &team, &decision)
+                .expect("the spec")
+                .farik_tools,
+            ["farik_decide_data_pipeline"],
+            "the Product Manager's decision session is given that tool alone"
+        );
     }
 
     #[test]
@@ -2706,6 +2756,7 @@ mod tests {
             in_reply_to: None,
             thread: Some(thread),
             initial_prompt: String::new(),
+            pipeline: None,
         }
     }
 
@@ -2943,6 +2994,7 @@ mod tests {
             in_reply_to: None,
             thread: (purpose == SessionPurpose::Ceremony).then_some(Thread::Standup),
             initial_prompt: String::new(),
+            pipeline: None,
         }
     }
 

@@ -434,6 +434,25 @@ pub fn decide_design_plan_returns_frk_1() -> Transcript {
     ))
 }
 
+/// The Product Manager's decision session of data pipeline request number `pipeline`:
+/// `farik_decide_data_pipeline` with `decision` (`approve`, `decline` or `escalate`) and `reason`.
+/// Hand-written.
+#[must_use]
+pub fn decide_data_pipeline(pipeline: u64, decision: &str, reason: &str) -> Transcript {
+    Transcript::from_jsonl(
+        &include_str!("transcripts/decide_data_pipeline.jsonl")
+            .replace("__PIPELINE__", &pipeline.to_string())
+            .replace("__DECISION__", decision)
+            .replace("__REASON__", reason),
+    )
+}
+
+/// A session that says it could not decide and ends, calling no tool. Hand-written.
+#[must_use]
+pub fn ends_without_a_decision() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/ends_without_a_decision.jsonl"))
+}
+
 /// `iris`'s implement session of FRK-1, as `implement_finishes_frk_1`: `touch done.txt`, a commit
 /// of it, C1 recorded as passed, a completion note, and `verifying` asked for. Hand-written.
 #[must_use]

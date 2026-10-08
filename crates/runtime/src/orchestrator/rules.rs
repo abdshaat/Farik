@@ -29,6 +29,7 @@ use super::messages::{
     planning_message, posts_heard, retro_message, sprint_review_message, standup_message,
     with_the_approved_plan,
 };
+use super::pipeline::decide_pipelines;
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
@@ -187,6 +188,9 @@ pub(super) async fn tick(
         }
     }
     if let Some(report) = budget_and_channel(deps, scope, &team, &board, &mut waiting).await? {
+        return Ok(report);
+    }
+    if let Some(report) = decide_pipelines(deps, scope, &team, &mut waiting).await? {
         return Ok(report);
     }
     if runs(3) {
@@ -433,6 +437,7 @@ async fn review_and_retro(
             in_reply_to: None,
             thread: Some(thread),
             initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
+            pipeline: None,
         },
     )
     .await?;
@@ -558,6 +563,7 @@ async fn sprint_planning(
             in_reply_to: None,
             thread: Some(Thread::Planning),
             initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
+            pipeline: None,
         },
     )
     .await?;
@@ -652,6 +658,7 @@ async fn standup(
             in_reply_to: None,
             thread: Some(Thread::Standup),
             initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
+            pipeline: None,
         },
     )
     .await?;
@@ -675,7 +682,7 @@ const CEREMONY_TOOLS: &[&str] = &[
 
 /// Whether the day's dollars stop a session about no task from starting; `day_spent` is set when
 /// they do, as `spent` sets it.
-fn day_is_spent(
+pub(super) fn day_is_spent(
     deps: &OrchestratorDeps,
     team: &Team,
     role: Role,
@@ -789,6 +796,7 @@ async fn chat(
                      message.\n\n{text}",
                     agent.display_name.as_str()
                 ),
+                pipeline: None,
             },
         )
         .await?;
@@ -839,6 +847,7 @@ async fn conversation(
                 in_reply_to: Some(latest.envelope.seq),
                 thread: None,
                 initial_prompt: mention_message(agent, &pending, &summary),
+                pipeline: None,
             },
         )
         .await?;
@@ -1257,6 +1266,7 @@ async fn in_progress(
                 Some(plan) => with_the_approved_plan(&message, plan),
                 None => message,
             },
+            pipeline: None,
         },
     )
     .await?;
@@ -1476,6 +1486,7 @@ async fn ready(
             in_reply_to: None,
             thread: None,
             initial_prompt: plan_message(&contract, &assignees, &reviewers),
+            pipeline: None,
         },
     )
     .await?;
@@ -1564,7 +1575,7 @@ pub(super) fn acted(
 }
 
 /// What a tick says of the session it ran: whose, for what, how it ended, and its last words.
-fn ran(agent: &Agent, purpose: &str, end: &SessionEnd) -> String {
+pub(super) fn ran(agent: &Agent, purpose: &str, end: &SessionEnd) -> String {
     let how = match end.reason {
         EndReason::Completed => "completed",
         EndReason::Aborted => "was aborted",
@@ -5177,6 +5188,7 @@ mod tests {
                     "farik_update_purchase_order",
                     "farik_request_data_pipeline",
                     "farik_read_data_pipelines",
+                    "farik_decide_data_pipeline",
                     "farik_schedule_post",
                 ]
                 .contains(&tool.name)
