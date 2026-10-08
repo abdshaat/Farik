@@ -243,6 +243,20 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "recommending-a-budget",
             "using-finance-sources",
         ),
+        Role::ProcurementSpecialist => embedded!("procurement_specialist":
+            "defining-the-need",
+            "finding-sellers-and-makers",
+            "comparing-offers",
+            "reading-terms-and-pricing",
+            "checking-a-seller",
+            "checking-product-safety",
+            "estimating-landed-cost",
+            "checking-a-used-vehicle",
+            "keeping-the-vendor-register",
+            "reviewing-renewals",
+            "writing-purchase-orders",
+            "using-procurement-sources",
+        ),
         _ => Vec::new(),
     }
 }
@@ -1066,14 +1080,136 @@ mod tests {
         ));
     }
 
-    /// Step 10b: the Procurement Specialist's kit is empty until step 10d, which gives it its
-    /// fourteen skills and seven services; its one skill, `sourcing-a-product`, is the role's own.
+    /// Step 10d: the Procurement Specialist's kit carries twelve skills, in this order, each with
+    /// the description its plan gives and its `SKILL.md`; its role's own `sourcing-a-product` is
+    /// not among them.
     #[test]
-    fn its_kit_is_empty_until_step_10d() {
+    fn procurement_kit_carries_its_skills() {
         let kit = load_kit(Role::ProcurementSpecialist).expect("the Procurement Specialist's kit");
         assert_eq!(kit.role, Role::ProcurementSpecialist);
-        assert!(kit.skills.is_empty(), "{:?}", kit.skills);
-        assert!(kit.connectors.is_empty(), "{:?}", kit.connectors);
+        let skills: Vec<(&str, &str)> = kit
+            .skills
+            .iter()
+            .map(|skill| (skill.name.as_str(), skill.description.as_str()))
+            .collect();
+        assert_eq!(
+            skills,
+            [
+                (
+                    "defining-the-need",
+                    "Use when a request names a thing to buy, before searching."
+                ),
+                (
+                    "finding-sellers-and-makers",
+                    "Use when building the seller list: maker first, then authorised sellers, then marketplaces, asking for any site not yet approved."
+                ),
+                (
+                    "comparing-offers",
+                    "Use when there is more than one offer: unit price, breaks, shipping, warranty, returns, totals, one currency."
+                ),
+                (
+                    "reading-terms-and-pricing",
+                    "Use when about to recommend: what the price includes, minimums, delivery, warranty, renewals."
+                ),
+                (
+                    "checking-a-seller",
+                    "Use when about to trust a seller: age, address, reviews, scam signs; a software service's trust page."
+                ),
+                (
+                    "checking-product-safety",
+                    "Use when the thing to buy is a physical product: recalls, the standard it must meet and the mark to look for."
+                ),
+                (
+                    "estimating-landed-cost",
+                    "Use when goods ship: price, shipping, insurance, duty, tax and fees per unit delivered."
+                ),
+                (
+                    "checking-a-used-vehicle",
+                    "Use when the thing to buy is a used car: VIN, recalls, title, history report, inspection, comparable prices."
+                ),
+                (
+                    "keeping-the-vendor-register",
+                    "Use when a task touches `vendors.xlsx`."
+                ),
+                (
+                    "reviewing-renewals",
+                    "Use when a renewal is to be reviewed."
+                ),
+                (
+                    "writing-purchase-orders",
+                    "Use when suggesting an order for the founder to place, or following up one the founder placed."
+                ),
+                (
+                    "using-procurement-sources",
+                    "Use when a connector is connected: exchange rates, Exa, SerpApi, Brex or AWS prices."
+                ),
+            ]
+        );
+        for skill in &kit.skills {
+            assert!(
+                skill.session_files.contains_key("SKILL.md"),
+                "{}",
+                skill.name
+            );
+            assert_ne!(skill.name, "sourcing-a-product");
+        }
+    }
+
+    /// Step 10d: the skills whose rules protect the user each say them, and the role's own loop and
+    /// its sites section are said once, in `sourcing-a-product`, never again in a kit skill.
+    #[test]
+    fn the_procurement_skills_say_what_protects_the_user() {
+        let said = |name: &str, phrases: &[&str]| {
+            let (_, text) = kit_skill(Role::ProcurementSpecialist, name);
+            for phrase in phrases {
+                assert!(text.contains(phrase), "{name} lacks \"{phrase}\":\n{text}");
+            }
+            assert!(text.len() < 6 * 1024, "{name}: {} bytes", text.len());
+            assert!(!text.contains(" @"), "{name}: no @ after a space");
+        };
+        said(
+            "writing-purchase-orders",
+            &[
+                "You never place, pay for, confirm or cancel an order",
+                "`farik_update_purchase_order`",
+            ],
+        );
+        said(
+            "checking-product-safety",
+            &[
+                "never recommend a product with an open recall",
+                "`farik_request_sites`",
+            ],
+        );
+        said(
+            "checking-a-used-vehicle",
+            &["never say a car is sound", "`farik_request_sites`"],
+        );
+        said(
+            "using-procurement-sources",
+            &[
+                "vendors and amounts, never people",
+                "never set `category` to `people`",
+            ],
+        );
+        said("finding-sellers-and-makers", &["`farik_request_sites`"]);
+        said("checking-a-seller", &["`farik_request_sites`"]);
+        // The never-place rule is restated where the order is written, and nowhere else.
+        let kit = load_kit(Role::ProcurementSpecialist).expect("the Procurement Specialist's kit");
+        for skill in &kit.skills {
+            assert!(
+                !skill.session_files["SKILL.md"].contains("Sites you may read"),
+                "{} repeats the role's own section",
+                skill.name
+            );
+            let restates = skill.session_files["SKILL.md"].contains("pay for, confirm or cancel");
+            assert_eq!(
+                restates,
+                skill.name == "writing-purchase-orders",
+                "{}",
+                skill.name
+            );
+        }
     }
 
     /// Step 10: the Finance Specialist's kit carries six skills, in this order, each with the
