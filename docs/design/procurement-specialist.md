@@ -124,17 +124,17 @@ The kit's skills, loaded on demand:
 | Skill | Step | Use when |
 |---|---|---|
 | `defining-the-need` | 10d | a request names a thing to buy, before searching |
-| `finding-sellers-and-makers` | 10d | building the seller list: maker first, then authorised sellers, then marketplaces |
+| `finding-sellers-and-makers` | 10d | building the seller list: maker first, then authorised sellers, then marketplaces, asking for any site not yet approved |
 | `comparing-offers` | 10d | there is more than one offer: unit price, breaks, shipping, warranty, returns, totals, one currency |
-| `reading-terms-and-pricing` | 10d | before recommending: what the price includes, minimums, delivery, warranty, renewals |
-| `checking-a-seller` | 10d | before trusting a seller: age, address, reviews, scam signs; a software service's trust page |
-| `checking-product-safety` | 10d | any physical product: recalls, the standard it must meet and the mark to look for |
-| `estimating-landed-cost` | 10d | goods that ship: price, shipping, insurance, duty, tax and fees per unit delivered |
-| `checking-a-used-vehicle` | 10d | a used car: VIN, recalls, title, history report, inspection, comparable prices |
+| `reading-terms-and-pricing` | 10d | about to recommend: what the price includes, minimums, delivery, warranty, renewals |
+| `checking-a-seller` | 10d | about to trust a seller: age, address, reviews, scam signs; a software service's trust page |
+| `checking-product-safety` | 10d | the thing to buy is a physical product: recalls, the standard it must meet and the mark to look for |
+| `estimating-landed-cost` | 10d | goods ship: price, shipping, insurance, duty, tax and fees per unit delivered |
+| `checking-a-used-vehicle` | 10d | the thing to buy is a used car: VIN, recalls, title, history report, inspection, comparable prices |
 | `keeping-the-vendor-register` | 10d | a task touches `vendors.xlsx` |
-| `reviewing-renewals` | 10d | a renewal review |
-| `writing-purchase-orders` | 10d | setting up an order |
-| `using-procurement-sources` | 10d | a connector is connected |
+| `reviewing-renewals` | 10d | a renewal is to be reviewed |
+| `writing-purchase-orders` | 10d | suggesting an order for the founder to place, or following up one the founder placed |
+| `using-procurement-sources` | 10d | a connector is connected: exchange rates, Exa, SerpApi, Brex or AWS prices |
 | `requesting-a-data-pipeline` | 10e | a source it lacks would change the recommendation |
 | `contacting-sellers` | 10f | asking a seller or maker for a quote, a price list or an answer |
 
@@ -147,7 +147,7 @@ Each chosen by ADR 0020's order and ADR 0035's routes, researched 2026-10-05. On
 | Connector | What for | Server | Route | Tags | Step |
 |---|---|---|---|---|---|
 | `fx` | one currency | Farik's own over Frankfurter `v2` | none | 3 `network` | 10d |
-| `exa` | finding makers, sellers and price pages | official, `https://mcp.exa.ai/mcp` | none (about 150 calls a day) | `web_search_exa`, `web_fetch_exa` `network` | 10d |
+| `exa` | finding makers, sellers and price pages | official, `https://mcp.exa.ai/mcp` | none (free, rate-limited) | `web_search_exa` `network`, `web_fetch_exa` `denied` (it fetches on Exa's servers and follows redirects, out of the approved-sites check's sight; its search results can show the agent text from any site, which its setup says) | 10d |
 | `serpapi` | Google Shopping, Amazon, eBay and Walmart prices | official, `https://mcp.serpapi.com/mcp` | key, as a bearer header | `search` `external_effect`, allowance 50 a sprint; 2 `denied` | 10d |
 | `brex` | what the company already spends with a seller | official, `https://api.brex.com/mcp` | 1, read-only scopes | 11 `network`, 32 `denied` | 10d |
 | `aws-pricing` | AWS list prices, for a software team | official, `uvx awslabs.aws-pricing-mcp-server==1.1.1` | key, pricing reads only; needs `uv` | 6 `network`, 3 `denied` | 10d |
