@@ -100,7 +100,9 @@ fn warned(err: &str) -> bool {
         // ADR 0030: the token also gets a connector's keys, as does its process's environment.
         // ADR 0034: a command that reads the token can also send `skill_save`, which counts as the
         // person's confirmation of a skill.
-        && err.contains("approve, accept, answer, add skills, and integrate")
+        // Step 10c: it can also send `purchase_order_place` and `purchase_order_receive`, which an
+        // order's fold counts as the owner's own marking of it placed and received.
+        && err.contains("approve, accept, answer, add skills, mark orders placed and received, and integrate")
         && err.contains("and get the keys you gave a connector")
         && err.contains("/proc/<pid>/environ")
 }
