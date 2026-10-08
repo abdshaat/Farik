@@ -84,7 +84,7 @@ impl fmt::Debug for RegisteredApp {
 
 /// Farik's Google app, which signs in for Farik's `google-ads` connector alone (ADR 0042) with
 /// the one scope it needs, `id` and `secret` being its client id and client secret. No build holds
-/// either (ADR 0044): the tests make an entry from ids of their own, and phase 11's sign-in
+/// either (ADR 0044): the tests make an entry from ids of their own, and phase 8's sign-in
 /// through Farik Cloud, which holds Farik's, builds on these facts.
 #[cfg(test)]
 const fn google(id: &'static str, secret: &'static str) -> RegisteredApp {
@@ -109,7 +109,7 @@ const fn google(id: &'static str, secret: &'static str) -> RegisteredApp {
     }
 }
 
-/// Every app Farik has registered: none. No build carries an app of Farik's, and from phase 11
+/// Every app Farik has registered: none. No build carries an app of Farik's, and from phase 8
 /// Farik Cloud serves Farik's apps (ADR 0044); the tests pass tables of their own.
 pub static REGISTERED_APPS: &[RegisteredApp] = &[];
 

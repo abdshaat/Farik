@@ -1,7 +1,7 @@
 //! The open-source code never holds a credential of Farik's, and no source reads a variable at
 //! build time but those Cargo sets (ADR 0044): a build with the variable set would carry it into
 //! every binary, where it protects nothing. Farik Cloud holds Farik's apps and their secrets from
-//! phase 11.
+//! phase 8.
 
 use std::path::{Path, PathBuf};
 
