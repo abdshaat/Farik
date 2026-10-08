@@ -37,7 +37,9 @@ mod design;
 pub(crate) mod fixtures;
 pub(crate) mod hand_over;
 mod human;
-pub(crate) use human::{forget_removed_keys, status_effects, update_agent_held, without_connector};
+pub(crate) use human::{
+    forget_removed_keys, status_effects, update_agent_held, with_status, without_connector,
+};
 mod integrate;
 mod messages;
 mod recover;

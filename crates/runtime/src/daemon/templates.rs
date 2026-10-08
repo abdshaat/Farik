@@ -691,14 +691,16 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn applying_a_template_that_removes_an_agent_with_google_ads_pauses_first() {
+    async fn applying_a_template_that_retires_or_removes_agents_with_google_ads_pauses_first() {
+        use crate::connectors::ConnectorSecrets as _;
         use crate::daemon::team::tests::{
             after_the_fixture, kai_and_lia_with_google_ads, paused_at_google,
         };
 
-        // Kai made the campaigns and so only retires; Lia never worked, so "Pair", which names
-        // neither, removes her, with her Google Ads.
-        let (ads, lia) = kai_and_lia_with_google_ads("templates-remove-ads").await;
+        // Kai made the campaigns and so is retired, which deletes his keys; Lia never worked, so
+        // "Pair", which names neither, removes her, with her Google Ads. Farik pauses once, with
+        // the sign-in of the first of them to lose it, since a second pause finds nothing left.
+        let (ads, _lia) = kai_and_lia_with_google_ads("templates-remove-ads").await;
         let folder = std::env::temp_dir()
             .join(format!(
                 "farik-daemon-templates-{}-templates-remove-ads",
@@ -720,24 +722,25 @@ mod tests {
         .await
         .expect("applied");
 
-        // Paused with Lia's sign-in, before the team was written.
+        // Paused with Kai's sign-in, before the team was written and his keys deleted.
         assert_eq!(paused_at_google(&ads).len(), 2);
-        let lia_bearer = format!("Bearer {}", lia.access_token.expose());
+        let kai_bearer = format!("Bearer {}", ads.grant.access_token.expose());
         for seen in ads.google.requests() {
             assert_eq!(
                 seen.headers.get("authorization").map(String::as_str),
-                Some(lia_bearer.as_str())
+                Some(kai_bearer.as_str())
             );
         }
-        let kinds = after_the_fixture(&ads);
         assert_eq!(
-            kinds[..3],
+            after_the_fixture(&ads),
             [
                 "marketing_campaign.paused",
                 "marketing_campaign.paused",
+                "agent.updated",
                 "team.updated"
             ]
         );
+        assert!(ads.store.load(&ads.at).expect("reads").is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]

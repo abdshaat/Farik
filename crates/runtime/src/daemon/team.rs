@@ -1678,12 +1678,14 @@ pub(super) fn worked(deps: &ToolDeps, agent_id: &str) -> Result<bool, Failure> {
     Ok(!seen.is_empty())
 }
 
-/// `agent.replace`: the agent retired and the newcomer added in one write, checked as a save is
-/// against the team it replaces, under the lock from the read to the write; then `agent.updated`
-/// and `team.updated`.
-fn replace(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<(), Failure> {
+/// `agent.replace`'s newcomer, as the team that makes it validates it: the agent to retire and the
+/// agent in its place, with no skills, since only the skill commands pin one. The refusal when
+/// there is no such agent or the team it makes is not valid.
+fn replacement(
+    deps: &ToolDeps,
+    params: &Value,
+) -> Result<(String, Option<farik_core::team::Agent>), Failure> {
     let agent_id = params["agent_id"].as_str().unwrap_or_default();
-    let writing = state.team_writes();
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
     let mut wire = serde_json::to_value(&team).map_err(|e| internal(&e))?;
     let Some(at) = team
@@ -1701,15 +1703,23 @@ fn replace(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<(), F
         agents.push(params["newcomer"].clone());
     }
     let after = validate_team(&wire).map_err(|errors| Failure::from(Refused::Errors(errors)))?;
-    // A newcomer starts with no skills: only the skill commands pin one.
     let newcomer = after.agents.last().cloned().map(|mut agent| {
         agent.skills.clear();
         agent
     });
+    Ok((agent_id.to_string(), newcomer))
+}
+
+/// `agent.replace`: the agent retired and the newcomer added in one write, checked as a save is
+/// against the team it replaces, under the lock from the read to the write; then `agent.updated`
+/// and `team.updated`.
+fn replace(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<(), Failure> {
+    let writing = state.team_writes();
+    let (agent_id, newcomer) = replacement(deps, params)?;
     let report = crate::orchestrator::update_agent_held(
         deps,
         state,
-        agent_id,
+        &agent_id,
         farik_core::team::AgentStatus::Retired,
         newcomer,
     );
@@ -1845,6 +1855,13 @@ pub(super) async fn call(
             Ok(json!({}))
         }
         "agent.replace" => {
+            // Retiring deletes the agent's keys (ADR 0030): Google Ads' campaigns are paused first.
+            let (held, asked) = (Arc::clone(&deps), params.clone());
+            if let Ok((agent_id, newcomer)) =
+                off_the_worker(move || replacement(&held, &asked)).await
+            {
+                super::ads_calls::pause_before_retiring(state, &deps, &agent_id, newcomer).await;
+            }
             let holder = Arc::clone(state);
             off_the_worker(move || replace(&deps, &holder, &params)).await?;
             // A newcomer can take ready work at once.
@@ -1887,7 +1904,8 @@ pub(super) async fn call(
 }
 
 /// Before a save or a start writes the team `wire`: when it would take Google Ads from an agent
-/// (the entry dropped, or the agent gone) and the team would be written, pauses the plan's
+/// (the entry dropped, or the agent gone; a save cannot retire one) and the team would be written,
+/// pauses the plan's
 /// campaigns for each as removing the connection does, whatever Google answers. A team that would
 /// be refused pauses nothing. Worked out once more under the lock that writes the team, but the
 /// pause cannot be made there, where nothing may wait for Google.
@@ -2961,6 +2979,7 @@ pub(super) mod tests {
                 EventKind::MarketingCampaignPaused,
                 EventKind::TeamUpdated,
                 EventKind::ConnectorDisconnected,
+                EventKind::AgentUpdated,
             ])
             .into_iter()
             .filter(|event| {
@@ -2969,6 +2988,174 @@ pub(super) mod tests {
             })
             .map(|event| event.body.kind().to_string())
             .collect()
+    }
+
+    /// The reply to `method` as the browser's socket gets it.
+    async fn answered(ads: &Ads, method: &str, params: &Value) -> Value {
+        let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
+        crate::daemon::web::answer(ads.state(), &frame.to_string(), &mut None).await
+    }
+
+    /// The `command` params that retire `agent`.
+    fn retiring(agent: &str) -> Value {
+        json!({ "command": { "command": "agent_update",
+            "body": { "agent_id": agent, "status": "retired" } } })
+    }
+
+    /// Every request Google was sent carried Kai's sign-in.
+    fn all_with_kais_sign_in(ads: &Ads) {
+        let bearer = format!("Bearer {}", ads.grant.access_token.expose());
+        let seen = ads.google.requests();
+        assert!(!seen.is_empty());
+        for each in seen {
+            assert_eq!(
+                each.headers.get("authorization").map(String::as_str),
+                Some(bearer.as_str())
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retiring_the_marketing_specialist_with_google_ads_pauses_first() {
+        let ads = google_ads_with_two_campaigns_running("team-retire-ads").await;
+
+        let reply = answered(&ads, "command", &retiring("kai")).await;
+
+        assert!(reply["result"]["said"].is_string(), "{reply}");
+        // Both campaigns were paused at Google with Kai's sign-in, each recorded before Kai was
+        // retired, and retiring deleted his keys last (ADR 0030).
+        assert_eq!(paused_at_google(&ads).len(), 2);
+        all_with_kais_sign_in(&ads);
+        assert_eq!(
+            after_the_fixture(&ads),
+            [
+                "marketing_campaign.paused",
+                "marketing_campaign.paused",
+                "agent.updated"
+            ]
+        );
+        assert!(ads.store.load(&ads.at).expect("reads").is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retiring_goes_on_when_google_refuses_to_pause() {
+        let ads = google_ads_with_two_campaigns_running("team-retire-ads-refused").await;
+        ads.google.script(|script| {
+            for number in [11, 21] {
+                script.refuse_pause.insert(
+                    format!("customers/1234567890/campaigns/{number}"),
+                    "Mutations are disabled".to_string(),
+                );
+            }
+        });
+
+        let reply = answered(&ads, "command", &retiring("kai")).await;
+
+        // Retired all the same, its keys deleted, and each plan says its ads keep running.
+        assert!(reply["result"]["said"].is_string(), "{reply}");
+        assert_eq!(after_the_fixture(&ads), ["agent.updated"]);
+        assert!(ads.store.load(&ads.at).expect("reads").is_none());
+        let reads = ads.harness.daemon.spend_reads();
+        for plan in ["MP-1", "MP-2"] {
+            assert_eq!(
+                reads.get(plan).and_then(|read| read.unstopped.as_deref()),
+                Some("Google answered “Mutations are disabled”"),
+                "{plan}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_refused_retirement_pauses_nothing() {
+        let ads = google_ads_with_two_campaigns_running("team-retire-ads-refused-checks").await;
+        // The team's only Product Manager has Google Ads too, and the team cannot do without
+        // one: the command refuses, and the ads of the plans keep running as they were.
+        let files = &ads.harness.project.deps.files;
+        let team = files.read_team().expect("the team");
+        let entry = team
+            .agents
+            .iter()
+            .filter(|agent| agent.id.as_str() == "kai")
+            .flat_map(|agent| agent.mcp_servers.iter().flatten())
+            .find(|entry| entry.name.as_str() == "google-ads")
+            .and_then(|entry| serde_json::to_value(entry).ok())
+            .expect("Kai's entry");
+        let team = crate::daemon::with_server(&team, "pm", "google-ads", Some(&entry))
+            .expect("a team with it");
+        files.write_team(&team).expect("the team is written");
+
+        let reply = answered(&ads, "command", &retiring("pm")).await;
+
+        assert!(reply["result"]["said"].is_null(), "{reply}");
+        assert!(
+            ads.google.requests().is_empty(),
+            "{:?}",
+            ads.google.requests()
+        );
+        assert!(ads.harness.daemon.spend_reads().is_empty());
+        assert_eq!(after_the_fixture(&ads), [] as [String; 0]);
+    }
+
+    /// Noor, a Marketing Specialist to take Kai's place.
+    fn noor() -> Value {
+        json!({
+            "id": "noor", "display_name": "Noor", "role": "marketing_specialist",
+            "avatar": "extra-1", "status": "active",
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn replacing_the_marketing_specialist_with_google_ads_pauses_first() {
+        let ads = google_ads_with_two_campaigns_running("team-replace-ads").await;
+
+        let reply = answered(
+            &ads,
+            "agent.replace",
+            &json!({ "agent_id": "kai", "newcomer": noor() }),
+        )
+        .await;
+
+        assert_eq!(reply["result"], json!({}), "{reply}");
+        assert_eq!(paused_at_google(&ads).len(), 2);
+        all_with_kais_sign_in(&ads);
+        assert_eq!(
+            after_the_fixture(&ads),
+            [
+                "marketing_campaign.paused",
+                "marketing_campaign.paused",
+                "agent.updated",
+                "team.updated"
+            ]
+        );
+        assert!(ads.store.load(&ads.at).expect("reads").is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_refused_replacement_pauses_nothing() {
+        let ads = google_ads_with_two_campaigns_running("team-replace-ads-refused").await;
+        let mut newcomer = noor();
+        newcomer["role"] = json!("no_such_role");
+
+        let reply = answered(
+            &ads,
+            "agent.replace",
+            &json!({ "agent_id": "kai", "newcomer": newcomer }),
+        )
+        .await;
+
+        assert!(reply["error"].is_object(), "{reply}");
+        assert!(
+            ads.google.requests().is_empty(),
+            "{:?}",
+            ads.google.requests()
+        );
+        assert_eq!(after_the_fixture(&ads), [] as [String; 0]);
+        assert!(ads.store.load(&ads.at).expect("reads").is_some());
     }
 
     /// The campaigns each `mutate` Google was sent paused, in order.

@@ -111,7 +111,20 @@ pub(super) async fn handle(
             reason,
         } => transition(tools, &task_id, to, &reason),
         Command::TaskIntegrate { task_id } => integrate(orchestrator, &task_id).await,
-        Command::AgentUpdate { agent_id, status } => update_agent(orchestrator, &agent_id, status),
+        Command::AgentUpdate { agent_id, status } => {
+            // Retiring deletes the agent's keys (ADR 0030), so Farik could no longer stop its
+            // campaigns at their budget: it pauses them first, as removing Google Ads does.
+            if status == AgentStatus::Retired {
+                crate::daemon::ads_calls::pause_before_retiring(
+                    &orchestrator.deps.daemon,
+                    tools,
+                    &agent_id,
+                    None,
+                )
+                .await;
+            }
+            update_agent(orchestrator, &agent_id, status)
+        }
         Command::SessionStop { session_id } => stop_session(orchestrator, &session_id),
         Command::SprintStart { budget_usd } => sprint(
             tools,
@@ -1214,7 +1227,29 @@ pub(crate) fn update_agent_held(
     status: AgentStatus,
     newcomer: Option<Agent>,
 ) -> Result<CommandReport, CommandError> {
-    let mut team = tools.files.read_team().map_err(failed)?;
+    let team = with_status(
+        &tools.files.read_team().map_err(failed)?,
+        agent_id,
+        status,
+        newcomer,
+    )?;
+    tools.files.write_team(&team).map_err(failed)?;
+    Ok(CommandReport {
+        said: format!("{agent_id} is {status}"),
+        events: status_effects(tools, daemon, &team, agent_id, status)?,
+    })
+}
+
+/// `team` with `agent_id` in `status` and `newcomer` added: the team `update_agent` writes, or its
+/// refusal (no such agent, the same status, or a gap in the team). The daemon asks it before it
+/// pauses Google Ads' campaigns for a retirement, so that a refused one pauses nothing.
+pub(crate) fn with_status(
+    team: &Team,
+    agent_id: &str,
+    status: AgentStatus,
+    newcomer: Option<Agent>,
+) -> Result<Team, CommandError> {
+    let mut team = team.clone();
     let Some(agent) = team
         .agents
         .iter_mut()
@@ -1235,11 +1270,7 @@ pub(crate) fn update_agent_held(
     if let Some(reason) = leaves_a_gap(&team, &name, role, status) {
         return Err(CommandError::Refused { reason });
     }
-    tools.files.write_team(&team).map_err(failed)?;
-    Ok(CommandReport {
-        said: format!("{agent_id} is {status}"),
-        events: status_effects(tools, daemon, &team, agent_id, status)?,
-    })
+    Ok(team)
 }
 
 /// What follows from `agent_id`'s status becoming `status` in `team`, already written:

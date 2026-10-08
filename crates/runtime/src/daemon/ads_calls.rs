@@ -20,7 +20,7 @@ use farik_core::marketing::{
     PlanProposal, PlanRecord, ZERO_DECIMAL, active_plan, campaign_budget, check_ads_write,
     first_day, to_pause_for_end,
 };
-use farik_core::team::{CustomServer, Team, custom_server};
+use farik_core::team::{Agent, AgentStatus, CustomServer, Team, custom_server};
 use farik_protocol::event::{
     EventBody, EventIds, MarketingCampaignCreatedBody, MarketingCampaignCreatedBodyBudgetKind,
     MarketingCampaignPausedBody,
@@ -41,6 +41,7 @@ use crate::google_ads::{
     list_accounts, negative_keyword_operations, report, resource_customer, spend_by_campaign,
     spend_query, status_operations, status_query,
 };
+use crate::orchestrator::with_status;
 use crate::tools::ToolDeps;
 
 /// The name of Farik's Google Ads connector, in a kit and in a team file.
@@ -592,12 +593,14 @@ pub(crate) async fn pause_before_removing(
     first.map_or(Ok(()), Err)
 }
 
-/// The agents whose `google-ads` entry `before` has and `after` does not: the entry taken out, or
-/// the agent gone. Retiring an agent keeps its entry, and so is not one.
+/// The agents whose Google Ads sign-in `before` has and `after` does not: the entry taken out, the
+/// agent gone, or the agent retired, which deletes its keys (ADR 0030) though the entry stays in
+/// the team file. An agent retired already had its keys deleted then, so it has none to lose.
 pub(crate) fn google_ads_taken_out(before: &Team, after: &Team) -> Vec<String> {
     let has = |team: &Team, id: &str| {
         team.agents.iter().any(|agent| {
             agent.id.as_str() == id
+                && agent.status != AgentStatus::Retired
                 && agent
                     .mcp_servers
                     .iter()
@@ -614,17 +617,39 @@ pub(crate) fn google_ads_taken_out(before: &Team, after: &Team) -> Vec<String> {
 }
 
 /// Before a write of the team file that takes Google Ads from `agents` (`google_ads_taken_out`):
-/// pauses the plan's campaigns for each as removing the connection does (`pause_before_removing`),
-/// whatever Google answers, since the write goes ahead all the same. Every path that takes a
-/// `google-ads` entry out of the team file but `connector.disconnect` asks it first.
+/// pauses the plan's campaigns for the first of them whose pause leaves nothing running, as
+/// removing the connection does (`pause_before_removing`), whatever Google answers, since the
+/// write goes ahead all the same. A later agent's pause would find everything paused already.
+/// Every path that takes a `google-ads` sign-in away but `connector.disconnect` asks it first.
 pub(crate) async fn pause_before_dropping(
     state: &Arc<DaemonState>,
     deps: &ToolDeps,
     agents: &[String],
 ) {
     for agent in agents {
-        let _ = pause_before_removing(state, deps, agent).await;
+        if pause_before_removing(state, deps, agent).await.is_ok() {
+            break;
+        }
     }
+}
+
+/// Before `agent_id` is retired (with `newcomer` joining in its place, when there is one): pauses
+/// the plan's campaigns for it, as removing its Google Ads does, when it has a sign-in to lose
+/// and the retirement would be made; a refused one pauses nothing. Retiring deletes its keys
+/// (ADR 0030), and with them Farik's means to stop its campaigns at their budget.
+pub(crate) async fn pause_before_retiring(
+    state: &Arc<DaemonState>,
+    deps: &ToolDeps,
+    agent_id: &str,
+    newcomer: Option<Agent>,
+) {
+    let Ok(before) = deps.files.read_team() else {
+        return;
+    };
+    let Ok(after) = with_status(&before, agent_id, AgentStatus::Retired, newcomer) else {
+        return;
+    };
+    pause_before_dropping(state, deps, &google_ads_taken_out(&before, &after)).await;
 }
 
 /// The agent's access token, its sign-in refreshed first when it will not last the call.
@@ -1180,7 +1205,7 @@ mod tests {
     use crate::google_ads::WRITE_TOOLS;
 
     #[test]
-    fn google_ads_is_taken_out_by_a_dropped_entry_or_a_gone_agent_only() {
+    fn google_ads_is_taken_out_by_a_dropped_entry_a_gone_agent_or_a_retirement() {
         use super::google_ads_taken_out;
         use farik_core::team::Team;
 
@@ -1203,22 +1228,13 @@ mod tests {
         };
         let before = team(&|_| {});
 
-        // Another service taken from Kai, a retirement, and Google Ads given: none takes it out.
+        // Another service taken from Kai, and Google Ads given: neither takes it out.
         assert!(
             google_ads_taken_out(
                 &before,
                 &team(&|wire| {
                     wire["agents"][3]["mcp_servers"] =
                         json!([wire["agents"][3]["mcp_servers"][0].clone()]);
-                })
-            )
-            .is_empty()
-        );
-        assert!(
-            google_ads_taken_out(
-                &before,
-                &team(&|wire| {
-                    wire["agents"][3]["status"] = json!("retired");
                 })
             )
             .is_empty()
@@ -1247,6 +1263,14 @@ mod tests {
             wire["agents"].as_array_mut().expect("agents").pop();
         });
         assert_eq!(google_ads_taken_out(&before, &both), ["kai", "lia"]);
+
+        // A retirement deletes the agent's keys (ADR 0030), so it takes the sign-in out as well,
+        // though the entry stays in the team file; one retired already had its keys deleted then.
+        let retired = team(&|wire| {
+            wire["agents"][3]["status"] = json!("retired");
+        });
+        assert_eq!(google_ads_taken_out(&before, &retired), ["kai"]);
+        assert!(google_ads_taken_out(&retired, &retired).is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]

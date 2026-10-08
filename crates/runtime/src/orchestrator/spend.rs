@@ -336,10 +336,11 @@ impl Orchestrator {
 
     /// The agents whose Google Ads connection Farik may use for `plan`: every Marketing Specialist
     /// in the team file, whatever its status, since stopping spend is never paused (ADR 0042). A
-    /// paused agent keeps its sign-in; a retired agent's keys were deleted when it was retired
-    /// (ADR 0030), so it is tried last and is passed over unless one was kept. The plan's proposer
-    /// comes first, then the active ones, then the paused, then the retired, each in the team
-    /// file's order. The reason, when the team file cannot be read.
+    /// paused agent keeps its sign-in. A retired agent is tried last and finds one only when it
+    /// was retired outside Farik (a hand edit of the team file, or a pulled one): retiring it in
+    /// Farik pauses its ads first and deletes its keys (ADR 0030), so it is passed over
+    /// otherwise. The plan's proposer comes first, then the active ones, then the paused, then
+    /// the retired, each in the team file's order. The reason, when the team file cannot be read.
     fn agents_for(&self, plan: Option<&MarketingPlan>) -> Result<Vec<String>, String> {
         let team = self
             .deps
