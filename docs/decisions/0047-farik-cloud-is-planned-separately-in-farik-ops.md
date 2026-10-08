@@ -2,6 +2,7 @@
 
 Date: 2026-10-08
 Status: accepted (the founder, 2026-10-08, in conversation). Numbered 0047 because phase 7 step 11's plan reserves 0045 (`0045-devops-deploys-watching-and-incidents.md`) and step 12d's reserves 0046 (`0046-fixed-settings-and-file-keys-in-a-kit-server.md`). Amends ADR 0017 and ADR 0044 (where what Farik hosts, and Farik Cloud's service, are planned) and ADR 0035 (where the relay's server side is planned).
+Amended 2026-10-08 by the founder's two answers of the same day: the website's code (homepage, downloads, privacy page) lives in `farik-ops` too ("farik-ops"), and the paid cloud's code that runs customers' workspaces is private there as well, not only its hosting ("Code private too"); this repository keeps only the app's side of connecting to it.
 
 ## Context
 
