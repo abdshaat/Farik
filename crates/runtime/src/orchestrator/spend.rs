@@ -427,7 +427,10 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
+    use std::collections::BTreeMap;
+
     use chrono::{DateTime, Utc};
+    use farik_core::marketing::{Amount, PlanSpend};
     use farik_core::team::fixtures::an_agent_wire;
     use farik_protocol::clock::MovableClock;
     use farik_protocol::event::{EventBody, EventKind, FarikEvent};
@@ -1119,6 +1122,17 @@ mod tests {
             watching.ads.store.save(&at, &kept).expect("kept");
         };
 
+        // What the last read that worked said: 100.00 for the campaign's key, as of minute 15.
+        let last_good = || {
+            Some((
+                PlanSpend {
+                    by_key: BTreeMap::from([("search-launch".to_string(), Amount(10_000))]),
+                    total: Amount(10_000),
+                },
+                at() + chrono::Duration::minutes(15),
+            ))
+        };
+
         // The proposer's sign-in has ended: the read is made with Lia's.
         lapse("kai", true);
         watching.wakes().await;
@@ -1165,7 +1179,11 @@ mod tests {
                 read.failed.as_ref().map(|(why, _)| why.as_str()),
                 Some("Google answered “the search failed”")
             );
-            assert!(read.spend.is_some(), "the last good read is kept");
+            assert_eq!(
+                read.spend,
+                last_good(),
+                "the last good read is kept, with its time"
+            );
         }
 
         // With no sign-in left, the read fails with the last reason, and the next try is fifteen
@@ -1188,7 +1206,11 @@ mod tests {
                     at() + chrono::Duration::minutes(45)
                 ))
             );
-            assert!(read.spend.is_some(), "the last good read is kept beside it");
+            assert_eq!(
+                read.spend,
+                last_good(),
+                "the last good read is kept beside it, with its time"
+            );
         }
         let before = watching.ads.google.requests().len();
         watching.at(59);
