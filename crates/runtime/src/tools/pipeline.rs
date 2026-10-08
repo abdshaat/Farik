@@ -1371,9 +1371,14 @@ mod tests {
         );
         ask(&project, &firecrawl()).expect("the declined name is asked again");
         assert_eq!(project.events(&[EventKind::DataPipelineRequested]).len(), 4);
-        // Approved, it is not open either.
+        // Approved, it is not open either (the owner decides an escalated request).
         let open = project.events(&[EventKind::DataPipelineRequested]);
         let second = open[1].envelope.seq;
+        project.record(
+            "",
+            "data_pipeline.escalated",
+            &json!({ "pipeline": second, "reason": "The Product Manager did not decide" }),
+        );
         project.record(
             "",
             "data_pipeline.approved",

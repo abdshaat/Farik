@@ -8,7 +8,7 @@
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
-use farik_core::pipeline::PipelineCost;
+use farik_core::pipeline::{PipelineCost, pipeline_needs_owner};
 use farik_protocol::event::{
     DataPipelineCost, DataPipelineDecidedBy, DataPipelineRequestedBody, EventBody, EventKind,
     FarikEvent,
@@ -129,10 +129,11 @@ fn is_its_deciding_session(record: &PipelineRecord, event: &FarikEvent) -> bool 
 
 /// Every request the log holds, oldest first. A request is open until a decision it takes: an
 /// escalation counts from Farik (an envelope with no agent and no session) or from a session
-/// asked to decide this request, and an approval or a decline counts as the owner's (`by: human`)
-/// only from an envelope with no agent and no session, and as the Product Manager's
-/// (`by: product_manager`) only from a session asked to decide this request. The first decision a
-/// request takes is the only one. A try is a `session.started` that names the request.
+/// asked to decide this request. A decision counts from the state it may happen in: the owner's
+/// (`by: human`, an envelope with no agent and no session) only on an escalated request, and the
+/// Product Manager's (`by: product_manager`, a session asked to decide this request) only on an
+/// open one, an approval only when the request needs no owner (`pipeline_needs_owner`). The first
+/// decision a request takes is the only one. A try is a `session.started` that names the request.
 ///
 /// # Errors
 ///
@@ -233,11 +234,22 @@ fn decide(
     else {
         return;
     };
+    // The owner decides an escalated request alone. The Product Manager decides an open one from
+    // its deciding session, and approves it only when it needs no owner (spec 6.10): the tool
+    // refuses the rest, and the fold does not count what the tool would have refused.
     let counts = match by {
-        DecidedBy::Human => is_unattended(event),
-        DecidedBy::ProductManager => is_its_deciding_session(record, event),
+        DecidedBy::Human => is_unattended(event) && record.state == PipelineState::Escalated,
+        DecidedBy::ProductManager => {
+            is_its_deciding_session(record, event)
+                && record.state == PipelineState::Open
+                && (state != PipelineState::Approved
+                    || !pipeline_needs_owner(
+                        cost_of(record.requested.cost),
+                        record.requested.sends_project_data,
+                    ))
+        }
     };
-    if counts && matches!(record.state, PipelineState::Open | PipelineState::Escalated) {
+    if counts {
         record.state = state;
         record.by = Some(by);
         record.reason = Some(reason.to_string()).filter(|reason| !reason.is_empty());
@@ -267,6 +279,11 @@ mod tests {
 
     /// `proc`'s request for Firecrawl on FRK-1; answers its number.
     fn requested(board: &Board, minute: u32) -> u64 {
+        requested_as(board, minute, firecrawl())
+    }
+
+    /// `proc`'s request on FRK-1 with `body`; answers its number.
+    fn requested_as(board: &Board, minute: u32, body: Value) -> u64 {
         board
             .session(
                 at(10, minute),
@@ -274,10 +291,17 @@ mod tests {
                 "proc",
                 "session-proc",
                 "data_pipeline.requested",
-                firecrawl(),
+                body,
             )
             .envelope
             .seq
+    }
+
+    /// A request the Product Manager may approve: free, no data out.
+    fn free() -> Value {
+        let mut body = firecrawl();
+        body["cost"] = json!("free");
+        body
     }
 
     /// A session of `ada` that started, deciding `pipeline` when it names one.
@@ -415,7 +439,7 @@ mod tests {
     #[test]
     fn the_product_manager_decides_from_its_session_and_farik_escalates_on_none() {
         let board = Board::new("pipelines-pm");
-        let first = requested(&board, 1);
+        let first = requested_as(&board, 1, free());
         let second = requested(&board, 2);
         started(&board, 3, "session-1", Some(first));
         started(&board, 4, "session-2", Some(second));
@@ -517,5 +541,64 @@ mod tests {
         assert_eq!(all[0].by, None);
         assert_eq!(all[0].request, None);
         assert_eq!(all[1].state, PipelineState::Open);
+
+        // The reviewer's probe: a paid request escalated in its decision session, then approved
+        // by the Product Manager from that same session, stays escalated.
+        let third = requested(&board, 9);
+        started(&board, 10, "session-3", Some(third));
+        let escalate = |minute| {
+            board.put_with(
+                at(10, minute),
+                None,
+                Some("ada"),
+                Some("session-3"),
+                "data_pipeline.escalated",
+                json!({ "pipeline": third, "reason": "Mine to pass on." }),
+            );
+        };
+        // A paid request the Product Manager approves from `Open` does not count either.
+        decided(
+            &board,
+            11,
+            (Some("ada"), Some("session-3")),
+            "data_pipeline.approved",
+            third,
+            "product_manager",
+        );
+        // The owner's decision counts only on an escalated request: not on an open one.
+        decided(
+            &board,
+            12,
+            (None, None),
+            "data_pipeline.declined",
+            third,
+            "human",
+        );
+        let all = data_pipelines(&board.log).expect("the log reads");
+        assert_eq!(all[2].state, PipelineState::Open, "{:?}", all[2]);
+        escalate(13);
+        decided(
+            &board,
+            14,
+            (Some("ada"), Some("session-3")),
+            "data_pipeline.approved",
+            third,
+            "product_manager",
+        );
+        let all = data_pipelines(&board.log).expect("the log reads");
+        assert_eq!(all[2].state, PipelineState::Escalated, "{:?}", all[2]);
+        assert_eq!(all[2].by, None);
+        // The owner may then decide it.
+        decided(
+            &board,
+            15,
+            (None, None),
+            "data_pipeline.declined",
+            third,
+            "human",
+        );
+        let all = data_pipelines(&board.log).expect("the log reads");
+        assert_eq!(all[2].state, PipelineState::Declined, "{:?}", all[2]);
+        assert_eq!(all[2].by, Some(DecidedBy::Human));
     }
 }
