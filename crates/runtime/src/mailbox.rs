@@ -294,6 +294,23 @@ impl MailboxError {
     }
 }
 
+impl MailboxError {
+    /// Why a send failed, as a sentence for the log and the owner: Farik's, never the server's
+    /// words.
+    #[must_use]
+    pub fn why(&self) -> String {
+        match self {
+            Self::NeedsTls => "the mail server does not offer an encrypted connection".to_string(),
+            Self::Login => "the mailbox did not accept its sign-in; connect it again".to_string(),
+            Self::Certificate => {
+                "the mail server\u{2019}s certificate cannot be trusted".to_string()
+            }
+            Self::Unreachable => "the mail server could not be reached; try again".to_string(),
+            Self::Server(why) => why.trim_end_matches('.').to_lowercase(),
+        }
+    }
+}
+
 impl std::fmt::Display for MailboxError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -565,6 +582,104 @@ pub async fn check_login(
         error: None,
         restarted_at: None,
     })
+}
+
+/// A message to send: one plain-text part, and an order's workbook when it is one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Outgoing {
+    /// The seller's address.
+    pub to: String,
+    /// The subject, on one line.
+    pub subject: String,
+    /// The text, as the owner read it and with what Farik adds.
+    pub text: String,
+    /// The `Message-ID`, without angle brackets.
+    pub message_id: String,
+    /// The file name and bytes of the one attachment, an order's workbook.
+    pub attachment: Option<(String, Vec<u8>)>,
+}
+
+/// What a failure of sending means (not of signing in, which [`smtp_failure`] reads): a refused
+/// sign-in, a message the server will not take, or no server.
+fn send_failure(error: &lettre::transport::smtp::Error) -> MailboxError {
+    match tls_failure(error) {
+        MailboxError::Unreachable => {}
+        other => return other,
+    }
+    let code = error.status().map(|code| code.to_string());
+    match (code.as_deref(), error.is_permanent(), error.is_transient()) {
+        // 530, 534, 535 and 538 are the answers to a sign-in that was not accepted.
+        (Some("530" | "534" | "535" | "538"), _, _) => MailboxError::Login,
+        (_, true, _) => MailboxError::Server("The mail server refused the message.".to_string()),
+        (_, _, true) => {
+            MailboxError::Server("The mail server could not take the message just now.".to_string())
+        }
+        _ if error.is_client() && error.to_string().contains("STARTTLS") => MailboxError::NeedsTls,
+        _ if error.is_tls() => MailboxError::Certificate,
+        _ => MailboxError::Unreachable,
+    }
+}
+
+/// Sends `message` from the mailbox `settings` name, as plain UTF-8 text From
+/// `"<name> <address>"` (with the workbook attached when it carries one), over the encrypted
+/// connection `settings.smtp` describes and the certificate `trust` allows.
+///
+/// # Errors
+///
+/// As [`check_login`] for the connection and the sign-in, and `Server` for a message the server
+/// would not take.
+pub async fn send(
+    settings: &MailboxSettings,
+    password: &Secret,
+    trust: &Trust,
+    message: &Outgoing,
+) -> Result<(), MailboxError> {
+    use lettre::AsyncTransport as _;
+    use lettre::message::header::ContentType;
+    use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart};
+
+    let broken = |why: &str| MailboxError::Server(why.to_string());
+    let from = Mailbox::new(
+        Some(settings.name.clone()),
+        settings
+            .address
+            .parse()
+            .map_err(|_| broken("The mailbox\u{2019}s address does not fit."))?,
+    );
+    let to = Mailbox::new(
+        None,
+        message
+            .to
+            .parse()
+            .map_err(|_| broken("The seller\u{2019}s address does not fit."))?,
+    );
+    let builder = lettre::Message::builder()
+        .from(from)
+        .to(to)
+        .subject(message.subject.clone())
+        .message_id(Some(format!("<{}>", message.message_id)));
+    let text = SinglePart::plain(message.text.clone());
+    let built = match &message.attachment {
+        None => builder.singlepart(text),
+        Some((name, bytes)) => {
+            let workbook = ContentType::parse(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            .map_err(|_| broken("The workbook\u{2019}s type does not fit."))?;
+            builder.multipart(
+                MultiPart::mixed()
+                    .singlepart(text)
+                    .singlepart(Attachment::new(name.clone()).body(bytes.clone(), workbook)),
+            )
+        }
+    }
+    .map_err(|_| broken("The message could not be built."))?;
+    let transport = smtp_transport(settings, password, trust)?;
+    match tokio::time::timeout(STEP, transport.send(built)).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(error)) => Err(send_failure(&error)),
+        Err(_) => Err(MailboxError::Unreachable),
+    }
 }
 
 /// Where the procurement mailbox's password is kept: one per project on this computer, in the

@@ -19,12 +19,12 @@ use crate::generated::command::{
     FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
     HumanSendBackBodySubject, MarketingPlanDecideBody, MarketingPlanDecideBodyDecision,
     MarketingPlanEndBody, MessagePostBody, PurchaseOrderDecideBody,
-    PurchaseOrderDecideBodyDecision, PurchaseOrderStepBody, PurchaseOrderUpdateBody,
-    QuestionAnswerBody, RenewalDismissBody, RequestTriageBody, RequestTriageBodySize,
-    SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody, SkillConfirmBody, SkillLevel,
-    SkillRemoveBody, SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision,
-    SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
-    ToolDecisionBody,
+    PurchaseOrderDecideBodyDecision, PurchaseOrderSendBody, PurchaseOrderStepBody,
+    PurchaseOrderUpdateBody, QuestionAnswerBody, RenewalDismissBody, RequestTriageBody,
+    RequestTriageBodySize, SellerMessageDiscardBody, SellerMessageSendBody, SessionStopBody,
+    SiteAddBody, SiteDecideBody, SiteRemoveBody, SkillConfirmBody, SkillLevel, SkillRemoveBody,
+    SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision, SocialPostStopBody,
+    SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody, ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -321,6 +321,35 @@ pub enum Command {
         /// What the owner says to the agent.
         note: Option<String>,
     },
+    /// Send message `message` to a seller, with the subject and body the owner saw (ADR 0039).
+    SellerMessageSend {
+        /// The message's number.
+        message: u64,
+        /// The subject, as the owner saw it and may have edited it.
+        subject: String,
+        /// The body, as the owner saw it and may have edited it, without the signature and the
+        /// line Farik adds.
+        body: String,
+    },
+    /// Discard message `message` to a seller: nothing is sent (ADR 0039).
+    SellerMessageDiscard {
+        /// The message's number.
+        message: u64,
+    },
+    /// Approve an order and email it, with its workbook, to its seller in one press, which records
+    /// it placed: the owner pays the seller outside Farik (ADR 0039).
+    PurchaseOrderSend {
+        /// The order's number, the n of PO-n.
+        order: u64,
+        /// The order's message, the one that waits with it.
+        message: u64,
+        /// The subject, as the owner saw it and may have edited it.
+        subject: String,
+        /// The body, as the owner saw it and may have edited it.
+        body: String,
+        /// What the owner says to the agent.
+        note: Option<String>,
+    },
     /// Mark an approved order placed: the owner placed it and paid for it themselves (ADR 0039).
     PurchaseOrderPlace {
         /// The order's number.
@@ -576,6 +605,30 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             Ok(Command::PurchaseOrderDecide {
                 order: body.order.get(),
                 approve: body.decision == PurchaseOrderDecideBodyDecision::Approve,
+                note: body.note.map(|note| note.as_str().to_string()),
+            })
+        }
+        CommandName::SellerMessageSend => {
+            let body: SellerMessageSendBody = read_body(body, name)?;
+            Ok(Command::SellerMessageSend {
+                message: body.message.get(),
+                subject: body.subject.as_str().to_string(),
+                body: body.body.as_str().to_string(),
+            })
+        }
+        CommandName::SellerMessageDiscard => {
+            let body: SellerMessageDiscardBody = read_body(body, name)?;
+            Ok(Command::SellerMessageDiscard {
+                message: body.message.get(),
+            })
+        }
+        CommandName::PurchaseOrderSend => {
+            let body: PurchaseOrderSendBody = read_body(body, name)?;
+            Ok(Command::PurchaseOrderSend {
+                order: body.order.get(),
+                message: body.message.get(),
+                subject: body.subject.as_str().to_string(),
+                body: body.body.as_str().to_string(),
                 note: body.note.map(|note| note.as_str().to_string()),
             })
         }
@@ -921,6 +974,32 @@ pub fn command_to_value(command: &Command) -> Value {
             CommandName::PurchaseOrderDecide,
             with_optional(
                 json!({ "order": order, "decision": if *approve { "approve" } else { "reject" } }),
+                "note",
+                note.as_ref().map(|note| json!(note)),
+            ),
+        ),
+        Command::SellerMessageSend {
+            message,
+            subject,
+            body,
+        } => (
+            CommandName::SellerMessageSend,
+            json!({ "message": message, "subject": subject, "body": body }),
+        ),
+        Command::SellerMessageDiscard { message } => (
+            CommandName::SellerMessageDiscard,
+            json!({ "message": message }),
+        ),
+        Command::PurchaseOrderSend {
+            order,
+            message,
+            subject,
+            body,
+            note,
+        } => (
+            CommandName::PurchaseOrderSend,
+            with_optional(
+                json!({ "order": order, "message": message, "subject": subject, "body": body }),
                 "note",
                 note.as_ref().map(|note| json!(note)),
             ),
@@ -1800,6 +1879,124 @@ mod tests {
             (
                 "social_post_decide",
                 json!({ "plan": "MP-1", "decision": "post" }),
+            ),
+        ] {
+            let errors = refusal(&json!({ "command": name, "body": body }));
+            assert!(!errors.is_empty(), "{name} {body}");
+        }
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one row for each command and each body it refuses"
+    )]
+    fn reads_and_writes_the_seller_message_commands() {
+        for (name, body, command) in [
+            (
+                "seller_message_send",
+                json!({ "message": 3, "subject": "Quote for 500 boxes", "body": "Hello,\n\nThanks." }),
+                Command::SellerMessageSend {
+                    message: 3,
+                    subject: "Quote for 500 boxes".to_string(),
+                    body: "Hello,\n\nThanks.".to_string(),
+                },
+            ),
+            (
+                "seller_message_discard",
+                json!({ "message": 4 }),
+                Command::SellerMessageDiscard { message: 4 },
+            ),
+            (
+                "purchase_order_send",
+                json!({ "order": 12, "message": 5, "subject": "Order PO-12", "body": "Attached." }),
+                Command::PurchaseOrderSend {
+                    order: 12,
+                    message: 5,
+                    subject: "Order PO-12".to_string(),
+                    body: "Attached.".to_string(),
+                    note: None,
+                },
+            ),
+            (
+                "purchase_order_send",
+                json!({ "order": 12, "message": 5, "subject": "Order PO-12", "body": "Attached.",
+                        "note": "Go ahead." }),
+                Command::PurchaseOrderSend {
+                    order: 12,
+                    message: 5,
+                    subject: "Order PO-12".to_string(),
+                    body: "Attached.".to_string(),
+                    note: Some("Go ahead.".to_string()),
+                },
+            ),
+        ] {
+            assert_eq!(read(name, &body), command, "{name}");
+            assert_eq!(
+                command_to_value(&command),
+                json!({ "command": name, "body": body }),
+                "{name}"
+            );
+        }
+        for (name, body) in [
+            (
+                "seller_message_send",
+                json!({ "message": 3, "subject": "S" }),
+            ),
+            ("seller_message_send", json!({ "message": 3, "body": "B" })),
+            (
+                "seller_message_send",
+                json!({ "subject": "S", "body": "B" }),
+            ),
+            (
+                "seller_message_send",
+                json!({ "message": 0, "subject": "S", "body": "B" }),
+            ),
+            (
+                "seller_message_send",
+                json!({ "message": 3, "subject": "", "body": "B" }),
+            ),
+            (
+                "seller_message_send",
+                json!({ "message": 3, "subject": "S\nT", "body": "B" }),
+            ),
+            (
+                "seller_message_send",
+                json!({ "message": 3, "subject": "x".repeat(201), "body": "B" }),
+            ),
+            (
+                "seller_message_send",
+                json!({ "message": 3, "subject": "S", "body": "" }),
+            ),
+            (
+                "seller_message_send",
+                json!({ "message": 3, "subject": "S", "body": "x".repeat(8001) }),
+            ),
+            (
+                "seller_message_send",
+                json!({ "message": 3, "subject": "S", "body": "B", "note": "n" }),
+            ),
+            ("seller_message_discard", json!({})),
+            ("seller_message_discard", json!({ "message": 0 })),
+            (
+                "seller_message_discard",
+                json!({ "message": 1, "reply": 2 }),
+            ),
+            (
+                "purchase_order_send",
+                json!({ "order": 12, "subject": "S", "body": "B" }),
+            ),
+            (
+                "purchase_order_send",
+                json!({ "message": 5, "subject": "S", "body": "B" }),
+            ),
+            (
+                "purchase_order_send",
+                json!({ "order": 12, "message": 5, "subject": "S" }),
+            ),
+            (
+                "purchase_order_send",
+                json!({ "order": 12, "message": 5, "subject": "S", "body": "B", "note": "x".repeat(601) }),
             ),
         ] {
             let errors = refusal(&json!({ "command": name, "body": body }));

@@ -3,6 +3,14 @@
 //! of an order's follow-up status, how an order is worded on the wire, and the two rules the clock
 //! runs with no model: the orders that close by themselves and the renewals coming up.
 
+mod mail;
+
+pub(crate) use mail::{
+    Mailer, SendAsk, discard_message, order_is_sending, prepare, record_failed, record_sent,
+    send_message, transmit,
+};
+pub use mail::{add_order_send_fields, seller_messages_list};
+
 use std::io::Cursor;
 use std::path::Path;
 use std::sync::Mutex;
@@ -450,6 +458,8 @@ pub(crate) fn expire_orders(tools: &ToolDeps, now: DateTime<Utc>) -> Result<(), 
     for record in records
         .iter()
         .filter(|record| expires_at(record).is_some_and(|at| at <= now))
+        // An order being emailed is the owner's press in flight: it is decided or it fails first.
+        .filter(|record| !order_is_sending(tools, record.order))
     {
         let body: PurchaseOrderExpiredBody =
             serde_json::from_value(json!({ "order": record.order })).map_err(|error| {
@@ -715,7 +725,7 @@ impl From<MailboxError> for MailboxRefusal {
 }
 
 /// The refusal for a key store that could not keep or forget the password.
-fn store_refusal(error: CredentialError) -> MailboxRefusal {
+pub(crate) fn store_refusal(error: CredentialError) -> MailboxRefusal {
     let words = match error {
         CredentialError::NoKeychain => {
             "this computer has no keychain to keep the password in".to_string()
@@ -725,7 +735,7 @@ fn store_refusal(error: CredentialError) -> MailboxRefusal {
     MailboxRefusal::new("secret_store_unavailable", words)
 }
 
-fn mail_failed(error: impl std::fmt::Display) -> MailboxRefusal {
+pub(crate) fn mail_failed(error: impl std::fmt::Display) -> MailboxRefusal {
     MailboxRefusal::new(
         "mailbox_files",
         format!("Farik could not keep the mailbox: {error}"),
@@ -801,16 +811,18 @@ pub(crate) async fn connect_mailbox(
         purpose: MailboxPurpose::Procurement,
         address: settings.address.parse().map_err(mail_failed)?,
     });
-    record_unattended(deps, body, None).map_err(mail_failed)
+    record_unattended(deps, body, None)
+        .map(|_| ())
+        .map_err(mail_failed)
 }
 
 /// Records `body` as Farik's own: the envelope names no agent and no session, and `task` when the
-/// event is about one.
-fn record_unattended(
+/// event is about one. Answers the event's number.
+pub(crate) fn record_unattended(
     deps: &ToolDeps,
     body: EventBody,
     task: Option<TaskId>,
-) -> Result<(), ToolError> {
+) -> Result<u64, ToolError> {
     let ids = EventIds {
         task_id: task,
         ..deps.ids.clone()
@@ -825,7 +837,8 @@ fn record_unattended(
         .apply(&appended)
         .map_err(|error| ToolError::Failed {
             detail: error.to_string(),
-        })
+        })?;
+    Ok(appended.envelope.seq)
 }
 
 /// Disconnects the procurement mailbox: forgets its password and deletes `mail/mailbox.json`, keeps
@@ -908,6 +921,8 @@ pub fn mailbox_state(deps: &ToolDeps) -> Result<Value, StoreError> {
         state["name"] = json!(settings.name);
         state["provider"] = json!(settings.provider);
         state["folder"] = json!(settings.folder);
+        state["signature"] = json!(settings.signature);
+        state["disclose_ai"] = json!(settings.disclose_ai);
         if let Some(ledger) = mailbox_ledger(deps) {
             if let Some(checked) = ledger.checked_at {
                 state["checked_at"] = json!(checked);

@@ -13,12 +13,15 @@ use farik_core::governor::sites::site_of;
 use farik_core::marketing::{PostChannel, network_name};
 use farik_core::pipeline::PipelineCost;
 use farik_core::team::{Integration, Team};
-use farik_protocol::event::{EventBody, EventKind, FarikEvent, TaskStatusWire};
+use farik_protocol::event::{
+    EventBody, EventKind, FarikEvent, SellerMessagePurpose, TaskStatusWire,
+};
 
 use crate::files::ProjectFiles;
 use crate::marketing::{PostMedia, PostState, marketing_plans, social_posts};
 use crate::pipelines::{PipelineState, cost_of, data_pipelines};
 use crate::purchase_orders::{OrderState, expires_at, purchase_orders};
+use crate::seller_mail::{MessageState, seller_mail};
 use crate::sites::site_requests;
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
@@ -147,6 +150,19 @@ pub struct OrderAskLine {
     pub line_total: String,
 }
 
+/// The message that goes with a purchase order that waits, when the Procurement Specialist drafted
+/// one (step 10f): sent with the order when the owner presses Approve and send. Its text is in a
+/// file the runtime reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderSend {
+    /// The message's number.
+    pub message: u64,
+    /// The seller's address. The agent's words.
+    pub to: String,
+    /// The subject. The agent's words.
+    pub subject: String,
+}
+
 /// A purchase order that waits for the owner, as its `purchase_order.drafted` recorded it. Every
 /// text field is the agent's own words, which are untrusted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,6 +195,8 @@ pub struct OrderAsk {
     pub at: DateTime<chrono::Utc>,
     /// When Farik closes it by itself if nobody decides.
     pub expires_at: DateTime<chrono::Utc>,
+    /// The message that goes with it, while one waits.
+    pub send: Option<OrderSend>,
 }
 
 /// A site an agent asked to read, as its `site.requested` recorded it. Its host is in ASCII; its
@@ -648,6 +666,7 @@ fn orders_waiting(
     item: &impl Fn(&TaskProjection, WaitingKind, Option<&str>, String) -> Waiting,
 ) -> Result<Vec<Waiting>, StoreError> {
     let mut waiting = Vec::new();
+    let mail = seller_mail(log)?;
     for record in purchase_orders(log)?
         .into_iter()
         .filter(|record| record.state == OrderState::Drafted)
@@ -692,6 +711,20 @@ fn orders_waiting(
                 why: body.why.to_string(),
                 at: record.drafted_at,
                 expires_at: expires,
+                send: mail
+                    .messages
+                    .iter()
+                    .find(|message| {
+                        message.state == MessageState::Waiting
+                            && message.drafted.purpose == SellerMessagePurpose::PurchaseOrder
+                            && message.drafted.purchase_order.as_ref().map(|n| n.get())
+                                == Some(record.order)
+                    })
+                    .map(|message| OrderSend {
+                        message: message.message,
+                        to: message.drafted.to.to_string(),
+                        subject: message.drafted.subject.to_string(),
+                    }),
             }),
             ..item(
                 row,

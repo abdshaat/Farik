@@ -186,7 +186,7 @@ Files: `mailbox.rs`, `procurement.rs`, `command.rs`, the schemas, `human.rs`, `g
 - `a_failed_order_send_changes_nothing_on_the_order` (fixture): a refused send records only `failed`, the order still `drafted`; a rejected or an expired order gives 10c's codes, another order's message `seller_message_not_this_order`, the cap `seller_send_limit`. RED: approval is recorded first.
 - `the_lists_carry_what_today_shows`: `seller_messages.list` gives `domain` `pieboxpros.test` and `new_domain` true until a message there is sent; an order's waiting message is in `waiting.list`'s `send`, and gone once the order is rejected. RED: no such query.
 
-- [ ] `feat(runtime): send a seller message, or an order, when the founder presses Send`
+- [x] `feat(runtime): send a seller message, or an order, when the founder presses Send`
 
 ### Task 4: Replies
 

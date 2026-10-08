@@ -274,6 +274,7 @@ mod tests {
                 why: "It is the cheapest.".to_string(),
                 at,
                 expires_at: at + chrono::Duration::days(30),
+                send: None,
             }),
             ..a_plan_waiting()
         }

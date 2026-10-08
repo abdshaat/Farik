@@ -46,7 +46,7 @@ mod purchase_order;
 mod reading;
 pub(crate) mod refusal;
 mod retro;
-mod seller;
+pub(crate) mod seller;
 pub(crate) mod sheets;
 /// The Procurement Specialist's tools for the sites it may read, and what lists them.
 pub mod sites;

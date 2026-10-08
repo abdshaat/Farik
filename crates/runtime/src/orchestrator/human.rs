@@ -3,6 +3,7 @@
 //! that any process may handle one.
 
 use std::num::NonZeroU64;
+use std::sync::Arc;
 
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use farik_core::governor::gates::{Blocker, Rejection};
@@ -27,6 +28,7 @@ use farik_store::{EventQuery, TaskProjection};
 
 use super::requests::HUMAN;
 use super::verify::{governor_results, is_mechanical, since_verifying};
+
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
 use crate::chat::{ChatError, NewChatMessage, post_chat};
@@ -34,7 +36,11 @@ use crate::daemon::DaemonState;
 use crate::daemon::{secret_at, with_server};
 use crate::marketing::{decide_plan, decide_post, end_plan, stop_post};
 use crate::pause::paused;
-use crate::procurement::{ORDERS, PIPELINES, check_follow_up, file_pipeline_request};
+use crate::procurement::{
+    MailboxRefusal, Mailer, ORDERS, PIPELINES, check_follow_up, discard_message,
+    file_pipeline_request, order_is_sending, prepare, record_failed, record_sent, send_message,
+    transmit,
+};
 use crate::skills::{
     SkillCommandError, SkillLevel, confirm_skill, confirmed_sentence, remove_skill,
     removed_sentence, save_skill, saved_sentence,
@@ -212,6 +218,19 @@ pub(super) async fn handle(
             approve,
             note,
         } => order_decide(tools, order, approve, note),
+        Command::SellerMessageSend {
+            message,
+            subject,
+            body,
+        } => send_to_seller(orchestrator, message, &subject, &body).await,
+        Command::SellerMessageDiscard { message } => discard_to_seller(tools, message),
+        Command::PurchaseOrderSend {
+            order,
+            message,
+            subject,
+            body,
+            note,
+        } => send_order(orchestrator, order, message, (&subject, &body), note).await,
         Command::PurchaseOrderPlace {
             order,
             placed_on,
@@ -943,6 +962,15 @@ fn order_decide(
             format!("{} was decided already", seller_of(record)),
         ));
     }
+    if order_is_sending(tools, order) {
+        return Err(order_refusal(
+            "purchase_order_sending",
+            format!(
+                "{} is being emailed; try again in a moment",
+                seller_of(record)
+            ),
+        ));
+    }
     let wire = serde_json::json!({ "order": order, "note": note });
     let seq = if approve {
         order_step(tools, record, wire, EventBody::PurchaseOrderApproved)?
@@ -960,6 +988,123 @@ fn order_decide(
     Ok(CommandReport {
         said,
         events: vec![seq],
+    })
+}
+
+/// A mailbox command's refusal as the owner is shown it.
+fn mail_refusal(refusal: MailboxRefusal) -> CommandError {
+    order_refusal(refusal.code, refusal.words)
+}
+
+/// Where the procurement mailbox's password is, and whose certificates are trusted, for a send.
+fn mailer_of<'a>(
+    orchestrator: &Orchestrator,
+    secrets: &'a Arc<dyn crate::connectors::ConnectorSecrets>,
+) -> Result<Mailer<'a>, CommandError> {
+    let daemon = &orchestrator.deps.daemon;
+    let at = daemon
+        .mailbox_at(orchestrator.deps.tools.files.root())
+        .map_err(failed)?;
+    Ok(Mailer {
+        secrets: &**secrets,
+        at,
+        trust: daemon.mail_trust(),
+    })
+}
+
+/// `seller_message_send`: the message goes to its seller with the subject and body the owner saw,
+/// and `seller_message.sent` is recorded, or `seller_message.failed` when a server refuses it and
+/// the message waits. Refused as `procurement::send_message` refuses, and `seller_message_failed`.
+async fn send_to_seller(
+    orchestrator: &Orchestrator,
+    message: u64,
+    subject: &str,
+    body: &str,
+) -> Result<CommandReport, CommandError> {
+    let secrets = orchestrator.deps.daemon.connector_secrets();
+    let mailer = mailer_of(orchestrator, &secrets)?;
+    let (seq, seller) = send_message(&orchestrator.deps.tools, &mailer, message, subject, body)
+        .await
+        .map_err(mail_refusal)?;
+    Ok(CommandReport {
+        said: format!("Sent to {seller}."),
+        events: vec![seq],
+    })
+}
+
+/// `seller_message_discard`: nothing is sent; `seller_message.discarded` is recorded.
+fn discard_to_seller(tools: &ToolDeps, message: u64) -> Result<CommandReport, CommandError> {
+    let seq = discard_message(tools, message).map_err(mail_refusal)?;
+    Ok(CommandReport {
+        said: format!("Discarded message {message}."),
+        events: vec![seq],
+    })
+}
+
+/// `purchase_order_send`: Approve and send. The order and its message are checked and claimed under
+/// the locks, which are let go while the servers answer; only a message that went is followed by
+/// `purchase_order.approved`, `seller_message.sent` and `purchase_order.placed` (today, UTC), in
+/// that order, each with the order's task and no agent and no session. A message a server refused
+/// records `seller_message.failed` alone and the order still waits.
+async fn send_order(
+    orchestrator: &Orchestrator,
+    order: u64,
+    message: u64,
+    (subject, body): (&str, &str),
+    note: Option<String>,
+) -> Result<CommandReport, CommandError> {
+    let tools = &orchestrator.deps.tools;
+    let note = order_note(note)?;
+    let secrets = orchestrator.deps.daemon.connector_secrets();
+    let mailer = mailer_of(orchestrator, &secrets)?;
+    let (prepared, record) = {
+        let _checking = crate::locked(&ORDERS);
+        let records = purchase_orders(&tools.log).map_err(failed)?;
+        let record = open_order(&records, order)?;
+        if record.state != OrderState::Drafted {
+            return Err(order_refusal(
+                "purchase_order_decided",
+                format!("{} was decided already", seller_of(record)),
+            ));
+        }
+        let prepared = prepare(
+            tools,
+            &mailer,
+            crate::procurement::SendAsk {
+                message,
+                subject,
+                body,
+                order: Some(order),
+            },
+        )
+        .map_err(mail_refusal)?;
+        (prepared, record.clone())
+    };
+    if let Err(error) = transmit(&prepared).await {
+        return Err(mail_refusal(record_failed(tools, &prepared, &error)));
+    }
+    let _recording = crate::locked(&ORDERS);
+    let approved = order_step(
+        tools,
+        &record,
+        serde_json::json!({ "order": order, "note": note }),
+        EventBody::PurchaseOrderApproved,
+    )?;
+    let sent = record_sent(tools, &prepared).map_err(mail_refusal)?;
+    let day = tools.clock.now().date_naive();
+    let placed = order_step(
+        tools,
+        &record,
+        serde_json::json!({ "order": order, "placed_on": day.to_string() }),
+        EventBody::PurchaseOrderPlaced,
+    )?;
+    Ok(CommandReport {
+        said: format!(
+            "Approved {} and sent it to {}. You pay for it yourself; Farik never pays.",
+            seller_of(&record),
+            prepared.seller()
+        ),
+        events: vec![approved, sent, placed],
     })
 }
 

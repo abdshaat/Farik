@@ -69,7 +69,8 @@
         "purchase_orders.list",
         "purchase_order.evaluation",
         "renewals.list",
-        "procurement_mailbox.get"
+        "procurement_mailbox.get",
+        "seller_messages.list"
       ]
     },
     "subscribeRequest": {
@@ -308,6 +309,9 @@
             },
             {
               "$ref": "#/$defs/procurementMailboxGetQuery"
+            },
+            {
+              "$ref": "#/$defs/sellerMessagesListQuery"
             },
             {
               "$ref": "#/$defs/metricsQuery"
@@ -2584,6 +2588,19 @@
               "terms": { "type": "string" },
               "evaluation": { "type": "string" },
               "expires_at": { "type": "string", "format": "date-time" },
+              "send": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["message", "to", "domain", "new_domain", "subject", "body"],
+                "properties": {
+                  "message": { "type": "integer", "minimum": 1 },
+                  "to": { "type": "string" },
+                  "domain": { "type": ["string", "null"] },
+                  "new_domain": { "type": "boolean" },
+                  "subject": { "type": "string" },
+                  "body": { "type": "string" }
+                }
+              },
               "pipeline": { "type": "integer", "minimum": 1 },
               "name": { "type": "string" },
               "what": { "type": "string" },
@@ -3660,6 +3677,62 @@
         "unreadable": { "type": "integer", "minimum": 0 }
       }
     },
+    "procurementMailboxGetResult": {
+      "description": "The procurement mailbox (docs/SPEC.md 6.10; ADR 0039): connected; when it is, address, name (as sellers see it), provider (gmail, icloud, fastmail or other), folder, signature and disclose_ai (what Farik adds under each message), checked_at (when Farik last read the mailbox), error (Farik's own sentence about the last check that failed) and restarted_at (when the provider renumbered the folder); and always sent_today, the messages sent on the UTC day, and cap, the most Farik sends in one. The password is never in it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connected", "sent_today", "cap"],
+      "properties": {
+        "connected": { "type": "boolean" },
+        "address": { "type": "string" },
+        "name": { "type": "string" },
+        "provider": { "type": "string", "enum": ["gmail", "icloud", "fastmail", "other"] },
+        "folder": { "type": "string" },
+        "signature": { "type": "string" },
+        "disclose_ai": { "type": "boolean" },
+        "checked_at": { "type": "string", "format": "date-time" },
+        "error": { "type": "string" },
+        "restarted_at": { "type": "string", "format": "date-time" },
+        "sent_today": { "type": "integer", "minimum": 0 },
+        "cap": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "sellerMessagesListResult": {
+      "description": "Every message the Procurement Specialist drafted to a seller, oldest first (docs/SPEC.md 6.10; ADR 0039): message, its number; state, waiting, sent, discarded or closed (an order's message whose order was decided without it); seller, to, subject and body (the agent's words, untrusted; for a sent message the subject and the text the owner sent, with what Farik added); domain, the address's domain in its ASCII form; new_domain, whether no message sent before went to that domain; purpose; purchase_order, the order an order's message or a follow-up is about; task_id and agent_id; drafted_at; sent_at and edited, once sent; why, Farik's sentence about the last try that failed while the message waits. sent_today counts the messages sent on the UTC day, orders' included, and cap is the most Farik sends in one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messages", "sent_today", "cap"],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["message", "state", "seller", "to", "domain", "new_domain", "subject", "body", "purpose", "task_id", "agent_id", "drafted_at"],
+            "properties": {
+              "message": { "type": "integer", "minimum": 1 },
+              "state": { "type": "string", "enum": ["waiting", "sent", "discarded", "closed"] },
+              "seller": { "type": "string" },
+              "to": { "type": "string" },
+              "domain": { "type": ["string", "null"] },
+              "new_domain": { "type": "boolean" },
+              "subject": { "type": "string" },
+              "body": { "type": "string" },
+              "purpose": { "type": "string", "enum": ["quote_request", "question", "purchase_order"] },
+              "purchase_order": { "type": "integer", "minimum": 1 },
+              "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+              "agent_id": { "type": "string" },
+              "drafted_at": { "type": "string", "format": "date-time" },
+              "sent_at": { "type": "string", "format": "date-time" },
+              "edited": { "type": "boolean" },
+              "why": { "type": "string" }
+            }
+          }
+        },
+        "sent_today": { "type": "integer", "minimum": 0 },
+        "cap": { "type": "integer", "minimum": 1 }
+      }
+    },
     "purchaseOrderEvaluationResult": {
       "description": "The comparison an order rests on, evaluations/<name>.md in the agent's private folder, as text: the agent's own words, untrusted, shown as text and never as a page.",
       "type": "object",
@@ -3809,6 +3882,16 @@
             "index": { "type": "integer", "minimum": 0, "maximum": 3 }
           }
         }
+      }
+    },
+    "sellerMessagesListQuery": {
+      "title": "Seller Messages List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "seller_messages.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
       }
     },
     "procurementMailboxGetQuery": {

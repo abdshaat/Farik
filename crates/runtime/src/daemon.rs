@@ -202,6 +202,9 @@ pub struct DaemonState {
     connectors_kept: Arc<Mutex<BTreeMap<String, Kept>>>,
     /// The user's state folder, where each stdio connector runs (ADR 0030), once it is set.
     state_dir: OnceLock<std::path::PathBuf>,
+    /// The certificates a mailbox connection trusts: the platform's, unless a test names its own.
+    #[cfg(test)]
+    mail_trust: OnceLock<crate::mailbox::Trust>,
     /// The apps Farik has registered with a service (ADR 0035), once a table is set; until then
     /// `REGISTERED_APPS`.
     registered_apps: OnceLock<&'static [crate::registered_apps::RegisteredApp]>,
@@ -309,6 +312,8 @@ impl DaemonState {
             connector_secrets: OnceLock::new(),
             connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
+            #[cfg(test)]
+            mail_trust: OnceLock::new(),
             registered_apps: OnceLock::new(),
             own_program: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
@@ -337,6 +342,8 @@ impl DaemonState {
             connector_secrets: OnceLock::new(),
             connectors_kept: Arc::default(),
             state_dir: OnceLock::new(),
+            #[cfg(test)]
+            mail_trust: OnceLock::new(),
             registered_apps: OnceLock::new(),
             own_program: OnceLock::new(),
             entry_locks: Mutex::new(BTreeMap::new()),
@@ -486,6 +493,27 @@ impl DaemonState {
             std::io::Error::new(std::io::ErrorKind::NotFound, "no project is open")
         })?;
         crate::connectors::working_folder(self.state_dir()?, deps.files.root(), at)
+    }
+
+    /// Trusts `trust` for the mailbox connections from now on: a test\u{2019}s own certificate authority.
+    /// The product always trusts the platform\u{2019}s certificates and nothing else. Answers `true`, or
+    /// `false` when one was already set, which is kept.
+    #[cfg(test)]
+    pub(crate) fn set_mail_trust(&self, trust: crate::mailbox::Trust) -> bool {
+        self.mail_trust.set(trust).is_ok()
+    }
+
+    /// The certificates a mailbox connection trusts.
+    #[cfg_attr(
+        not(test),
+        allow(clippy::unused_self, reason = "only a test names its own")
+    )]
+    pub(crate) fn mail_trust(&self) -> crate::mailbox::Trust {
+        #[cfg(test)]
+        if let Some(trust) = self.mail_trust.get() {
+            return trust.clone();
+        }
+        crate::mailbox::Trust::Platform
     }
 
     /// Where the procurement mailbox\u{2019}s password is kept in the project at `root`
@@ -1918,6 +1946,106 @@ mod tests {
                 .daemon
                 .set_command_handler(command_handler(orchestrator))
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    async fn only_the_owner_s_door_sends_a_message_to_a_seller() {
+        use crate::greenmail::{Account, BUYING, GreenMail};
+        use crate::mailbox::{ProviderChoice, Security, Server, Trust};
+
+        const DANA: Account = Account {
+            login: "sales",
+            password: "seller-word",
+            address: "sales@pieboxpros.test",
+        };
+        let fixture = GreenMail::start("door", &[&BUYING, &DANA]);
+        let harness = Harness::with_procurement("daemon-send-door");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let store = Arc::new(crate::connectors::MemoryConnectorSecrets::default());
+        assert!(harness.daemon.set_connector_secrets(store.clone()));
+        assert!(
+            harness
+                .daemon
+                .set_mail_trust(Trust::Root(fixture.ca_der.clone()))
+        );
+        let server = |port: u16| Server {
+            host: "localhost".to_string(),
+            port,
+            security: Security::Tls,
+        };
+        let at = harness
+            .daemon
+            .mailbox_at(harness.project.deps.files.root())
+            .expect("the project's id");
+        crate::procurement::connect_mailbox(
+            &harness.project.deps,
+            &*store,
+            &at,
+            crate::procurement::MailboxConnect {
+                address: BUYING.address.to_string(),
+                name: "Sam Ortiz".to_string(),
+                provider: ProviderChoice::Other,
+                imap: server(fixture.imaps),
+                smtp: server(fixture.smtps),
+                username: BUYING.login.to_string(),
+                folder: "INBOX".to_string(),
+                signature: String::new(),
+                disclose_ai: true,
+            },
+            &crate::claude::Secret::new(BUYING.password.to_string()),
+            &Trust::Root(fixture.ca_der.clone()),
+        )
+        .await
+        .expect("connected");
+        let project = &harness.project;
+        let message = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    project
+                        .call(
+                            "proc",
+                            Some("FRK-1"),
+                            "farik_draft_seller_message",
+                            json!({ "seller": "Pie Box Pros", "to": DANA.address,
+                                    "subject": "Quote", "body": "Please quote.",
+                                    "purpose": "quote_request" }),
+                        )
+                        .expect("a draft")["message"]
+                        .as_u64()
+                        .expect("a number")
+                })
+                .join()
+                .expect("the draft ends")
+        });
+        let orchestrator = Arc::new(harness.orchestrator(harness.recorded(Vec::new())));
+        assert!(
+            harness
+                .daemon
+                .set_command_handler(command_handler(Arc::clone(&orchestrator)))
+        );
+        let send = |token: Option<&str>| {
+            router(harness.daemon.clone(), TOKEN, CancellationToken::new()).oneshot(post(
+                "/command",
+                token,
+                &json!({ "command": "seller_message_send",
+                         "body": { "message": message, "subject": "Quote", "body": "Please quote." } }),
+            ))
+        };
+        // No token, a wrong token: refused at the door, and nothing went.
+        for token in [None, Some("another-token")] {
+            let answer = send(token).await.expect("the router answers");
+            assert_eq!(answer.status(), StatusCode::UNAUTHORIZED, "{token:?}");
+        }
+        assert!(fixture.inbox(&DANA).is_empty());
+        assert!(harness.events(&[EventKind::SellerMessageSent]).is_empty());
+        // The daemon's token is the owner's: the message goes.
+        let answer = send(Some(TOKEN)).await.expect("the router answers");
+        assert_eq!(answer.status(), StatusCode::OK);
+        let body = body_of(answer).await;
+        assert!(body["said"].is_string(), "{body}");
+        assert_eq!(fixture.inbox(&DANA).len(), 1);
+        assert_eq!(harness.events(&[EventKind::SellerMessageSent]).len(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread")]

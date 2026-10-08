@@ -2036,7 +2036,7 @@ async fn mailbox_connect(
         &at,
         input,
         &password,
-        &crate::mailbox::Trust::Platform,
+        &state.mail_trust(),
     )
     .await
     .map_err(|refusal| mailbox_failure(&refusal))?;

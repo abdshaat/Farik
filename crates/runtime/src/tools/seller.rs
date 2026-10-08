@@ -86,12 +86,21 @@ fn refused(code: &'static str, detail: impl Into<String>) -> ToolError {
     .into()
 }
 
-/// A line of `text` held to its length, counted after trimming, with no control character.
-fn one_line(field: &str, text: &str, most: usize) -> Result<String, ToolError> {
+/// A line of `text` held to its length, counted after trimming, with no control character; the
+/// code and the words of the refusal when it is not.
+///
+/// # Errors
+///
+/// `seller_message_field_invalid` naming `field`.
+pub(crate) fn line_fault(
+    field: &str,
+    text: &str,
+    most: usize,
+) -> Result<String, (&'static str, String)> {
     let trimmed = text.trim();
     let length = trimmed.chars().count();
     if !(1..=most).contains(&length) || trimmed.chars().any(char::is_control) {
-        return Err(refused(
+        return Err((
             "seller_message_field_invalid",
             format!(
                 "{field} is 1 to {most} characters on one line with no control character, and \
@@ -100,6 +109,19 @@ fn one_line(field: &str, text: &str, most: usize) -> Result<String, ToolError> {
         ));
     }
     Ok(trimmed.to_string())
+}
+
+/// The subject, held to its rules: 1 to 200 characters on one line.
+///
+/// # Errors
+///
+/// As [`line_fault`].
+pub(crate) fn subject_fault(text: &str) -> Result<String, (&'static str, String)> {
+    line_fault("subject", text, MOST_SUBJECT)
+}
+
+fn one_line(field: &str, text: &str, most: usize) -> Result<String, ToolError> {
+    line_fault(field, text, most).map_err(|(code, detail)| refused(code, detail))
 }
 
 /// The address held to its rules: one address, no display name, no list, at most 254 characters,
@@ -133,8 +155,12 @@ fn address(text: &str, procurement: Option<&str>) -> Result<String, ToolError> {
 }
 
 /// The body, trimmed, its line ends made `\n`, with no control character but a line break and a
-/// tab; at most 8000 characters.
-fn body_of(text: &str) -> Result<String, ToolError> {
+/// tab; at most 8000 characters. The code and the words of the refusal when it is not.
+///
+/// # Errors
+///
+/// `seller_message_field_invalid` or `seller_message_too_long`.
+pub(crate) fn body_fault(text: &str) -> Result<String, (&'static str, String)> {
     let body = text.replace("\r\n", "\n");
     let body = body.trim();
     let length = body.chars().count();
@@ -143,19 +169,24 @@ fn body_of(text: &str) -> Result<String, ToolError> {
             .chars()
             .any(|one| one.is_control() && !matches!(one, '\n' | '\t'))
     {
-        return Err(refused(
+        return Err((
             "seller_message_field_invalid",
             "body is plain text of 1 to 8000 characters, with line breaks and tabs but no other \
-             control character",
+             control character"
+                .to_string(),
         ));
     }
     if length > MOST_BODY {
-        return Err(refused(
+        return Err((
             "seller_message_too_long",
             format!("body is at most {MOST_BODY} characters, and this one is {length}; say less"),
         ));
     }
     Ok(body.to_string())
+}
+
+fn body_of(text: &str) -> Result<String, ToolError> {
+    body_fault(text).map_err(|(code, detail)| refused(code, detail))
 }
 
 /// The order `number`, when it is the calling agent's own.
@@ -242,7 +273,8 @@ fn highest_on_disk(out: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-fn hex(bytes: &[u8]) -> String {
+/// `bytes` in lowercase hex.
+pub(crate) fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     bytes.iter().fold(String::new(), |mut hex, byte| {
         let _ = write!(hex, "{byte:02x}");
@@ -477,6 +509,66 @@ mod tests {
     /// The owner's step on `order`: no agent, no session.
     fn owner_decides(project: &TestProject, kind: &str, body: &Value) {
         project.record("FRK-1", kind, body);
+    }
+
+    /// Every `.rs` file under `folder`, without the tests at its end.
+    fn sources_under(folder: &std::path::Path, found: &mut Vec<(PathBuf, String)>) {
+        for entry in std::fs::read_dir(folder)
+            .expect("the folder reads")
+            .flatten()
+        {
+            let path = entry.path();
+            if path.is_dir() {
+                sources_under(&path, found);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                let text = std::fs::read_to_string(&path).expect("a source");
+                let code = text
+                    .split("#[cfg(test)]")
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                found.push((path, code));
+            }
+        }
+    }
+
+    #[test]
+    fn no_tool_of_an_agent_records_a_send_a_failure_a_discard_a_reply_or_a_mailbox() {
+        // Only the owner's commands and Farik's own checks record these: the one door that sends
+        // is the owner's press, so a tool that could record one is a tool that could send.
+        let mut found = Vec::new();
+        sources_under(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tools"),
+            &mut found,
+        );
+        assert!(
+            found.len() > 10,
+            "the tools' sources were found: {}",
+            found.len()
+        );
+        for (path, code) in found {
+            for kind in [
+                "EventBody::SellerMessageSent",
+                "EventBody::SellerMessageFailed",
+                "EventBody::SellerMessageDiscarded",
+                "EventBody::SellerReplyReceived",
+                "EventBody::SellerReplyDismissed",
+                "EventBody::MailboxConnected",
+                "EventBody::MailboxDisconnected",
+                "lettre::transport",
+                "lettre::AsyncTransport",
+                "lettre::Message",
+                "mailbox::send",
+                "procurement::send",
+                "send_message",
+            ] {
+                assert!(
+                    !code.contains(kind),
+                    "{} could record or send with {kind}",
+                    path.display()
+                );
+            }
+        }
     }
 
     #[test]

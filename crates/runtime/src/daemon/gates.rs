@@ -41,7 +41,7 @@ use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
 use crate::cost::extra_tries;
 use crate::marketing::ads::{ads_rows, open_raise, spend_and_pauses};
 use crate::marketing::{going_out, kinds_made, known_spend, list_row, states_today, whole};
-use crate::procurement::{add_pipeline_fields, pipeline_text};
+use crate::procurement::{add_order_send_fields, add_pipeline_fields, pipeline_text};
 use crate::tools::ToolDeps;
 use crate::tools::contracts::changed_fields;
 use crate::tools::design::ReviewState;
@@ -188,6 +188,9 @@ fn waiting_row(deps: &ToolDeps, item: &farik_store::waiting::Waiting) -> Value {
         row["why"] = json!(ask.why);
         row["at"] = json!(time(ask.at));
         row["expires_at"] = json!(time(ask.expires_at));
+        if let Some(send) = &ask.send {
+            add_order_send_fields(&mut row, deps, send);
+        }
     }
     if let Some(ask) = &item.pipeline {
         // What the team would be asked, so that the owner reads it before they approve: the same
@@ -286,6 +289,9 @@ pub(super) fn query(
             marketing_plan_get(state, deps, params["plan"].as_str().unwrap_or(""))
         }
         "sites.list" => crate::tools::sites::site_list(&deps.log).map_err(|e| internal(&e)),
+        "seller_messages.list" => {
+            crate::procurement::seller_messages_list(deps).map_err(|e| internal(&e))
+        }
         "procurement_mailbox.get" => {
             crate::procurement::mailbox_state(deps).map_err(|e| internal(&e))
         }
@@ -4584,6 +4590,121 @@ pub(super) mod tests {
         let after = rows(&harness);
         assert_eq!(after.as_array().map(Vec::len), Some(1));
         assert_eq!(after[0]["pipeline"], second);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one story, from a connected mailbox to a rejected order"
+    )]
+    fn lists_the_mailbox_the_messages_and_an_order_s_email() {
+        let harness = Harness::with_procurement("gates-seller-mail");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let project = &harness.project;
+        // A connected mailbox: the settings file and the record.
+        let mail = harness.procurement_folder().join("mail");
+        std::fs::create_dir_all(mail.join("out")).expect("the folder");
+        std::fs::write(
+            mail.join("mailbox.json"),
+            json!({
+                "address": "buying@bakery.test", "name": "Sam Ortiz", "provider": "other",
+                "imap": { "host": "mail.bakery.test", "port": 993, "security": "tls" },
+                "smtp": { "host": "mail.bakery.test", "port": 465, "security": "tls" },
+                "username": "buying", "folder": "INBOX", "signature": "Corner Bakery",
+                "disclose_ai": true
+            })
+            .to_string(),
+        )
+        .expect("the settings");
+        project.record(
+            "",
+            "mailbox.connected",
+            &json!({ "purpose": "procurement", "address": "buying@bakery.test" }),
+        );
+        let state = query(
+            &harness.daemon,
+            "procurement_mailbox.get",
+            &json!({}),
+            "procurementMailboxGetResult",
+        );
+        assert_eq!(state["connected"], true);
+        assert_eq!(state["address"], "buying@bakery.test");
+        assert_eq!(state["name"], "Sam Ortiz");
+        assert_eq!(state["signature"], "Corner Bakery");
+        assert_eq!(state["disclose_ai"], true);
+        assert_eq!(
+            (state["sent_today"].clone(), state["cap"].clone()),
+            (json!(0), json!(50))
+        );
+        assert!(state.get("password").is_none());
+
+        // A message waiting, and an order whose email waits with it.
+        let draft = |input: Value| {
+            project
+                .call("proc", Some("FRK-1"), "farik_draft_seller_message", input)
+                .expect("a draft")["message"]
+                .as_u64()
+                .expect("a number")
+        };
+        let quote = draft(json!({
+            "seller": "Pie Box Pros", "to": "sales@pieboxpros.test", "subject": "Quote",
+            "body": "Please quote 500 boxes.", "purpose": "quote_request"
+        }));
+        let listed = query(
+            &harness.daemon,
+            "seller_messages.list",
+            &json!({}),
+            "sellerMessagesListResult",
+        );
+        assert_eq!(listed["cap"], 50);
+        assert_eq!(listed["messages"][0]["message"], quote);
+        assert_eq!(listed["messages"][0]["domain"], "pieboxpros.test");
+        assert_eq!(listed["messages"][0]["new_domain"], true);
+        assert_eq!(listed["messages"][0]["body"], "Please quote 500 boxes.");
+
+        order_drafted(&harness, "Acme", false);
+        let email = draft(json!({
+            "seller": "Acme", "to": "sales@acme.example", "subject": "Order PO-1",
+            "body": "Our order is attached.", "purpose": "purchase_order", "purchase_order": 1
+        }));
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        let rows = waiting["waiting"].as_array().expect("rows");
+        let order = rows
+            .iter()
+            .find(|row| row["kind"] == "purchase_order")
+            .expect("the order waits");
+        assert_eq!(
+            order["send"],
+            json!({
+                "message": email, "to": "sales@acme.example", "domain": "acme.example",
+                "new_domain": true, "subject": "Order PO-1", "body": "Our order is attached."
+            })
+        );
+        // Once the order is rejected its email is not on any row.
+        project.record(
+            "FRK-1",
+            "purchase_order.rejected",
+            &json!({ "order": 1, "note": "" }),
+        );
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert!(
+            waiting["waiting"]
+                .as_array()
+                .expect("rows")
+                .iter()
+                .all(|row| row["kind"] != "purchase_order")
+        );
     }
 
     #[test]
