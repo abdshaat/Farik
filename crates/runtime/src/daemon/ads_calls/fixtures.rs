@@ -288,6 +288,29 @@ impl Ads {
         );
     }
 
+    /// Kai's session starts enabling campaign 11 of the active plan MP-2's `search-launch`, which
+    /// Google holds as the plan has it (500.00 in all, 2026-09-22 to 2026-10-22), on a task of
+    /// its own: what an agent's call in flight is.
+    pub(crate) fn enabling(&self) -> tokio::task::JoinHandle<Result<Value, String>> {
+        self.google.script(|script| {
+            script.rows = vec![spend_row(
+                ("1234567890", 11),
+                0,
+                Some(("2026-09-22", "2026-10-22", "500000000")),
+            )];
+        });
+        let (state, ticket) = (Arc::clone(self.state()), self.ticket.clone());
+        tokio::spawn(async move {
+            ads_call(
+                &state,
+                &ticket,
+                "set_campaign_status",
+                json!({ "campaign": campaign_name("1234567890", 11), "status": "enabled" }),
+            )
+            .await
+        })
+    }
+
     pub(crate) fn made(&self) -> Vec<farik_protocol::event::FarikEvent> {
         self.harness
             .project

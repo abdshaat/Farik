@@ -1276,18 +1276,21 @@ async fn connector_disconnect(
         params["agent"].as_str().unwrap_or_default(),
         params["server"].as_str().unwrap_or_default(),
     );
-    if server == super::ads_calls::GOOGLE_ADS
+    // Without this connection Farik could no longer stop the ads at their budget, so it pauses
+    // them first, once the command's own checks pass: a refused removal pauses nothing. A refusal
+    // by Google is no reason to keep the connection: it is removed all the same, and Today says
+    // the ads keep running (the owner's answer of 2026-10-07). The writes' lock is held until the
+    // keys are deleted, so no agent's enable runs in between.
+    let _ads = if server == super::ads_calls::GOOGLE_ADS
         && deps
             .files
             .read_team()
             .is_ok_and(|team| crate::orchestrator::without_connector(&team, agent, server).is_ok())
     {
-        // Without this connection Farik could no longer stop the ads at their budget, so it pauses
-        // them first, once the command's own checks pass: a refused removal pauses nothing. A
-        // refusal by Google is no reason to keep the connection: it is removed all the same, and
-        // Today says the ads keep running (the owner's answer of 2026-10-07).
-        let _ = super::ads_calls::pause_before_removing(state, deps, agent).await;
-    }
+        super::ads_calls::pause_and_hold(state, deps, &[agent.to_string()]).await
+    } else {
+        None
+    };
     handled(
         state,
         Command::ConnectorDisconnect {
@@ -1842,7 +1845,7 @@ pub(super) async fn call(
         .await
         .map(|()| json!({})),
         "team.save" => {
-            pause_before_dropping_google_ads(state, &deps, &params["team"], false).await;
+            let _ads = pause_before_dropping_google_ads(state, &deps, &params["team"], false).await;
             let holder = Arc::clone(state);
             off_the_worker(move || {
                 let _writing = holder.team_writes();
@@ -1857,11 +1860,12 @@ pub(super) async fn call(
         "agent.replace" => {
             // Retiring deletes the agent's keys (ADR 0030): Google Ads' campaigns are paused first.
             let (held, asked) = (Arc::clone(&deps), params.clone());
-            if let Ok((agent_id, newcomer)) =
-                off_the_worker(move || replacement(&held, &asked)).await
-            {
-                super::ads_calls::pause_before_retiring(state, &deps, &agent_id, newcomer).await;
-            }
+            let _ads = match off_the_worker(move || replacement(&held, &asked)).await {
+                Ok((agent_id, newcomer)) => {
+                    super::ads_calls::pause_before_retiring(state, &deps, &agent_id, newcomer).await
+                }
+                Err(_) => None,
+            };
             let holder = Arc::clone(state);
             off_the_worker(move || replace(&deps, &holder, &params)).await?;
             // A newcomer can take ready work at once.
@@ -1875,7 +1879,7 @@ pub(super) async fn call(
         }
         _ => {
             let setup = deps.files.root().join(SETUP_PENDING).exists();
-            pause_before_dropping_google_ads(state, &deps, &params["team"], setup).await;
+            let ads = pause_before_dropping_google_ads(state, &deps, &params["team"], setup).await;
             let (held, holder) = (Arc::clone(&deps), Arc::clone(state));
             // Only setup's start resumes the team: without the marker, a team paused by a
             // budget's stop or by a person stays paused.
@@ -1895,6 +1899,7 @@ pub(super) async fn call(
                 }
             })
             .await?;
+            drop(ads);
             if setup && paused(&deps.log).map_err(|e| internal(&e))? {
                 handled(state, Command::TeamResume).await?;
             }
@@ -1909,12 +1914,12 @@ pub(super) async fn call(
 /// campaigns for each as removing the connection does, whatever Google answers. A team that would
 /// be refused pauses nothing. Worked out once more under the lock that writes the team, but the
 /// pause cannot be made there, where nothing may wait for Google.
-async fn pause_before_dropping_google_ads(
-    state: &Arc<DaemonState>,
+async fn pause_before_dropping_google_ads<'a>(
+    state: &'a Arc<DaemonState>,
     deps: &Arc<ToolDeps>,
     wire: &Value,
     setup: bool,
-) {
+) -> Option<tokio::sync::MutexGuard<'a, ()>> {
     let (held, wire) = (Arc::clone(deps), wire.clone());
     let taken = off_the_worker(move || {
         Ok(checked(&held, &wire, setup)
@@ -1923,7 +1928,7 @@ async fn pause_before_dropping_google_ads(
     })
     .await
     .unwrap_or_default();
-    super::ads_calls::pause_before_dropping(state, deps, &taken).await;
+    super::ads_calls::pause_and_hold(state, deps, &taken).await
 }
 
 /// `command`, handled by the orchestrator, or its refusal.
@@ -3097,6 +3102,131 @@ pub(super) mod tests {
         );
         assert!(ads.harness.daemon.spend_reads().is_empty());
         assert_eq!(after_the_fixture(&ads), [] as [String; 0]);
+    }
+
+    /// Whether any `mutate` Google was sent enabled a campaign.
+    pub(in crate::daemon) fn enabled_at_google(ads: &Ads) -> bool {
+        ads.google.requests_of("mutate").iter().any(|seen| {
+            seen.body["mutateOperations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|operation| operation["campaignOperation"]["update"]["status"] == "ENABLED")
+        })
+    }
+
+    /// The Google Ads writes' lock holds from the pause through the write of the team: `method`
+    /// with `params` is sent while the test holds the team's lock, so that its write waits on it
+    /// once its `pauses` have reached Google; an enable by Kai's session sent then waits too, and
+    /// is refused once the write is done and his keys are gone, without reaching Google. With the
+    /// lock let go after the pause, the enable would run in between and turn a paused campaign
+    /// on after Farik stopped it.
+    #[allow(
+        clippy::await_holding_lock,
+        reason = "the team's lock is held across the removal so that its write waits on it"
+    )]
+    pub(in crate::daemon) async fn no_enable_between_the_pause_and_the_write(
+        ads: &Ads,
+        method: &str,
+        params: Value,
+        pauses: usize,
+    ) {
+        let writing = ads.state().team_writes();
+        let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
+        let removal = {
+            let state = Arc::clone(ads.state());
+            tokio::spawn(async move {
+                crate::daemon::web::answer(&state, &frame.to_string(), &mut None).await
+            })
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while paused_at_google(ads).len() < pauses {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the pause reached Google");
+        assert!(!removal.is_finished(), "the write waits on the team's lock");
+
+        let enable = ads.enabling();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(!enabled_at_google(ads), "nothing was enabled in between");
+        assert!(
+            !enable.is_finished(),
+            "the enable waits for the removal to be done"
+        );
+
+        drop(writing);
+        let reply = removal.await.expect("the removal ran");
+        assert!(reply["error"].is_null(), "{reply}");
+        let refused = enable.await.expect("the enable ran");
+        assert!(refused.is_err(), "Kai's sign-in is gone: {refused:?}");
+        assert!(!enabled_at_google(ads), "nothing was enabled afterwards");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn removing_google_ads_holds_the_ads_lock_through_the_removal() {
+        let ads = google_ads_with_two_campaigns_running("team-lock-disconnect").await;
+        no_enable_between_the_pause_and_the_write(
+            &ads,
+            "connector.disconnect",
+            json!({ "agent": "kai", "server": "google-ads" }),
+            2,
+        )
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn saving_a_team_holds_the_ads_lock_through_the_write() {
+        let ads = google_ads_with_two_campaigns_running("team-lock-save").await;
+        let team = team_as_sent(&ads, |team| without_google_ads(team, "kai"));
+        no_enable_between_the_pause_and_the_write(&ads, "team.save", json!({ "team": team }), 2)
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starting_a_team_holds_the_ads_lock_through_the_write() {
+        let ads = google_ads_with_two_campaigns_running("team-lock-start").await;
+        let team = team_as_sent(&ads, |team| without_google_ads(team, "kai"));
+        let criteria = serde_json::to_value(
+            ads.harness
+                .project
+                .deps
+                .files
+                .read_criteria()
+                .expect("reads"),
+        )
+        .expect("JSON");
+        no_enable_between_the_pause_and_the_write(
+            &ads,
+            "team.start",
+            json!({ "team": team, "criteria": criteria }),
+            2,
+        )
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retiring_holds_the_ads_lock_through_the_write() {
+        let ads = google_ads_with_two_campaigns_running("team-lock-retire").await;
+        no_enable_between_the_pause_and_the_write(&ads, "command", retiring("kai"), 2).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn replacing_holds_the_ads_lock_through_the_write() {
+        let ads = google_ads_with_two_campaigns_running("team-lock-replace").await;
+        no_enable_between_the_pause_and_the_write(
+            &ads,
+            "agent.replace",
+            json!({ "agent_id": "kai", "newcomer": noor() }),
+            2,
+        )
+        .await;
     }
 
     /// Noor, a Marketing Specialist to take Kai's place.

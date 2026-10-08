@@ -113,16 +113,19 @@ pub(super) async fn handle(
         Command::TaskIntegrate { task_id } => integrate(orchestrator, &task_id).await,
         Command::AgentUpdate { agent_id, status } => {
             // Retiring deletes the agent's keys (ADR 0030), so Farik could no longer stop its
-            // campaigns at their budget: it pauses them first, as removing Google Ads does.
-            if status == AgentStatus::Retired {
+            // campaigns at their budget: it pauses them first, as removing Google Ads does, and
+            // no Google Ads write runs until the team is written.
+            let _ads = if status == AgentStatus::Retired {
                 crate::daemon::ads_calls::pause_before_retiring(
                     &orchestrator.deps.daemon,
                     tools,
                     &agent_id,
                     None,
                 )
-                .await;
-            }
+                .await
+            } else {
+                None
+            };
             update_agent(orchestrator, &agent_id, status)
         }
         Command::SessionStop { session_id } => stop_session(orchestrator, &session_id),

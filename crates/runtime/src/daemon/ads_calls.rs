@@ -498,8 +498,9 @@ pub(crate) async fn pause_campaigns(
         .collect()
 }
 
-/// Before the owner removes `agent_id`'s Google Ads connection (step 08g): under the writes' lock
-/// and with this agent's grant, pauses every campaign Farik made that is not recorded paused for
+/// Before the owner removes `agent_id`'s Google Ads connection (step 08g): with this agent's grant,
+/// and under the writes' lock, which `_writing` proves the caller holds, pauses every campaign
+/// Farik made that is not recorded paused for
 /// its plan's end, as every pause is made (`pause_campaigns`), and records each as paused: for
 /// `plan_ended` when no active plan carries it, else `connection_removed`, since without the
 /// connection Farik could no longer stop it at its budget. A campaign Google would not pause, or
@@ -510,12 +511,12 @@ pub(crate) async fn pause_campaigns(
 /// # Errors
 ///
 /// The first reason a campaign was not paused, or that the log could not be read or written.
-pub(crate) async fn pause_before_removing(
+async fn pause_under_lock(
     state: &Arc<DaemonState>,
     deps: &ToolDeps,
     agent_id: &str,
+    _writing: &tokio::sync::MutexGuard<'_, ()>,
 ) -> Result<(), String> {
-    let _writing = state.ads_writes().lock().await;
     let now = deps.clock.now();
     let plans = marketing_plans(&deps.log).map_err(|error| error.to_string())?;
     let made: Vec<CreatedCampaign> = created_campaigns_on(&deps.log)
@@ -616,40 +617,48 @@ pub(crate) fn google_ads_taken_out(before: &Team, after: &Team) -> Vec<String> {
         .collect()
 }
 
-/// Before a write of the team file that takes Google Ads from `agents` (`google_ads_taken_out`):
-/// pauses the plan's campaigns for the first of them whose pause leaves nothing running, as
-/// removing the connection does (`pause_before_removing`), whatever Google answers, since the
-/// write goes ahead all the same. A later agent's pause would find everything paused already.
-/// Every path that takes a `google-ads` sign-in away but `connector.disconnect` asks it first.
-pub(crate) async fn pause_before_dropping(
-    state: &Arc<DaemonState>,
+/// Before a write that takes Google Ads' sign-in from `agents` (`google_ads_taken_out`): takes the
+/// writes' lock, pauses the plan's campaigns for the first of them whose pause leaves nothing
+/// running, as removing the connection does (`pause_under_lock`), whatever Google answers, since
+/// the write goes ahead all the same, and hands the lock back to hold until the write is done, so
+/// that no agent's enable runs between the pause and the write and turns on what Farik stopped.
+/// `None` when there is no sign-in to lose. A later agent's pause would find everything paused
+/// already. Every path that takes a `google-ads` sign-in away asks it first: `connector.disconnect`,
+/// a save, a start, a template and a retirement.
+///
+/// The lock order is the writes' lock, then the team's (`DaemonState::team_writes`) and a
+/// connector entry's: the team's lock is never held while waiting for the writes'.
+pub(crate) async fn pause_and_hold<'a>(
+    state: &'a Arc<DaemonState>,
     deps: &ToolDeps,
     agents: &[String],
-) {
+) -> Option<tokio::sync::MutexGuard<'a, ()>> {
+    if agents.is_empty() {
+        return None;
+    }
+    let writing = state.ads_writes().lock().await;
     for agent in agents {
-        if pause_before_removing(state, deps, agent).await.is_ok() {
+        if pause_under_lock(state, deps, agent, &writing).await.is_ok() {
             break;
         }
     }
+    Some(writing)
 }
 
 /// Before `agent_id` is retired (with `newcomer` joining in its place, when there is one): pauses
-/// the plan's campaigns for it, as removing its Google Ads does, when it has a sign-in to lose
-/// and the retirement would be made; a refused one pauses nothing. Retiring deletes its keys
-/// (ADR 0030), and with them Farik's means to stop its campaigns at their budget.
-pub(crate) async fn pause_before_retiring(
-    state: &Arc<DaemonState>,
+/// the plan's campaigns for it (`pause_and_hold`, whose lock the caller holds until the retirement
+/// is written) when it has a sign-in to lose and the retirement would be made; a refused one
+/// pauses nothing and holds nothing. Retiring deletes its keys (ADR 0030), and with them Farik's
+/// means to stop its campaigns at their budget.
+pub(crate) async fn pause_before_retiring<'a>(
+    state: &'a Arc<DaemonState>,
     deps: &ToolDeps,
     agent_id: &str,
     newcomer: Option<Agent>,
-) {
-    let Ok(before) = deps.files.read_team() else {
-        return;
-    };
-    let Ok(after) = with_status(&before, agent_id, AgentStatus::Retired, newcomer) else {
-        return;
-    };
-    pause_before_dropping(state, deps, &google_ads_taken_out(&before, &after)).await;
+) -> Option<tokio::sync::MutexGuard<'a, ()>> {
+    let before = deps.files.read_team().ok()?;
+    let after = with_status(&before, agent_id, AgentStatus::Retired, newcomer).ok()?;
+    pause_and_hold(state, deps, &google_ads_taken_out(&before, &after)).await
 }
 
 /// The agent's access token, its sign-in refreshed first when it will not last the call.

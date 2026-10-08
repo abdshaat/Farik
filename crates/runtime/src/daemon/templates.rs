@@ -218,11 +218,11 @@ fn apply(
 /// (a removed agent that has it) and would be applied, pauses the plan's campaigns for each as
 /// removing the connection does, whatever Google answers. A template that cannot be applied (it
 /// changed since the preview, or the team it makes is refused) pauses nothing.
-async fn pause_before_dropping_google_ads(
-    state: &Arc<DaemonState>,
+async fn pause_before_dropping_google_ads<'a>(
+    state: &'a Arc<DaemonState>,
     deps: &Arc<ToolDeps>,
     params: &Value,
-) {
+) -> Option<tokio::sync::MutexGuard<'a, ()>> {
     let (held, holder, params) = (Arc::clone(deps), Arc::clone(state), params.clone());
     let taken = off_the_worker(move || {
         let templates = templates_of(&holder)?;
@@ -236,7 +236,7 @@ async fn pause_before_dropping_google_ads(
     })
     .await
     .unwrap_or_default();
-    crate::daemon::ads_calls::pause_before_dropping(state, deps, &taken).await;
+    crate::daemon::ads_calls::pause_and_hold(state, deps, &taken).await
 }
 
 /// The methods of this module, whose params the schema already passed.
@@ -250,9 +250,12 @@ pub(super) async fn call(
     };
     templates_of(state)?;
     let applies = method == "template.apply";
-    if applies {
-        pause_before_dropping_google_ads(state, &deps, params).await;
-    }
+    // Held until the team is written, so no agent's enable runs between the pause and the write.
+    let _ads = if applies {
+        pause_before_dropping_google_ads(state, &deps, params).await
+    } else {
+        None
+    };
     let waker = Arc::clone(state);
     let (state, method, params) = (Arc::clone(state), method.to_string(), params.clone());
     let answered = off_the_worker(move || {
@@ -741,6 +744,36 @@ mod tests {
             ]
         );
         assert!(ads.store.load(&ads.at).expect("reads").is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn applying_a_template_holds_the_ads_lock_through_the_write() {
+        use crate::daemon::team::tests::{
+            kai_and_lia_with_google_ads, no_enable_between_the_pause_and_the_write,
+        };
+
+        let (ads, _lia) = kai_and_lia_with_google_ads("templates-lock").await;
+        let folder = std::env::temp_dir()
+            .join(format!(
+                "farik-daemon-templates-{}-templates-lock",
+                std::process::id()
+            ))
+            .join("templates");
+        let _ = std::fs::remove_dir_all(&folder);
+        served(&ads.harness, Some(folder.clone()));
+        saved(&folder, &pair());
+        let (_, digest) = Templates::new(folder)
+            .read_digested("pair")
+            .expect("the template reads");
+
+        no_enable_between_the_pause_and_the_write(
+            &ads,
+            "template.apply",
+            json!({ "slug": "pair", "digest": digest }),
+            2,
+        )
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
