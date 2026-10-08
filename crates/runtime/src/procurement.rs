@@ -744,6 +744,37 @@ mod tests {
         assert!(retired.events(&[EventKind::RenewalChecked]).is_empty());
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_tick_does_not_read_a_register_that_is_a_link() {
+        let harness = Harness::with_procurement("procurement-renewals-link");
+        write_register(
+            &harness,
+            vec![
+                text_row(&["vendor", "renews_on", "notice_days", "status"]),
+                vendor_row("Vercel", "2026-10-20", "7", "active"),
+            ],
+        );
+        // The register is the folder's own file no longer: its name is a link to another.
+        let folder = harness.procurement_folder();
+        std::fs::rename(folder.join("vendors.xlsx"), folder.join("elsewhere.xlsx"))
+            .expect("the workbook is moved");
+        std::os::unix::fs::symlink(folder.join("elsewhere.xlsx"), folder.join("vendors.xlsx"))
+            .expect("a link is made");
+        let clock = Arc::new(MovableClock::new(utc("2026-10-05T08:00:00Z")));
+        let orchestrator = harness.orchestrator_on(harness.recorded(Vec::new()), clock);
+
+        orchestrator.tick().await.expect("a tick");
+
+        assert!(
+            harness
+                .events(&[EventKind::RenewalChecked, EventKind::RenewalFlagged])
+                .is_empty(),
+            "a link is not followed to a file outside the folder's rules"
+        );
+    }
+
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_columns_by_their_header() {
