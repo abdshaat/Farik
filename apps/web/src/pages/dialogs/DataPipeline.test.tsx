@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expectNoAxeViolations } from "@farik/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +19,66 @@ async function opened(button: "Approve" | "Decline", dialogName: string) {
 	);
 	const dialog = await screen.findByRole("dialog", { name: dialogName });
 	return { container, s, dialog };
+}
+
+type BodySchema = {
+	additionalProperties: boolean;
+	required: string[];
+	properties: Record<
+		string,
+		{ type: string; enum?: string[]; maxLength?: number; minimum?: number }
+	>;
+};
+
+/** The schema the daemon checks a command's body against (`docs/schemas/command.schema.json`). */
+function decideBodySchema(): BodySchema {
+	const file = join(
+		import.meta.dirname,
+		"../../../../../docs/schemas/command.schema.json",
+	);
+	const schema = JSON.parse(readFileSync(file, "utf8")) as {
+		$defs: Record<string, BodySchema>;
+	};
+	return schema.$defs.dataPipelineDecideBody as BodySchema;
+}
+
+/** Why the daemon would refuse `body` as `data_pipeline_decide`'s, or nothing when it takes it. */
+function refusedBy(body: Record<string, unknown>): string[] {
+	const schema = decideBodySchema();
+	const why: string[] = [];
+	for (const key of schema.required) {
+		if (!(key in body)) why.push(`missing ${key}`);
+	}
+	for (const [key, value] of Object.entries(body)) {
+		const rule = schema.properties[key];
+		if (!rule) {
+			why.push(`unknown ${key}`);
+			continue;
+		}
+		if (rule.type === "integer" && !Number.isInteger(value)) {
+			why.push(`${key} is not an integer`);
+		}
+		if (rule.type === "string" && typeof value !== "string") {
+			why.push(`${key} is not a string`);
+		}
+		if (rule.enum && !rule.enum.includes(value as string)) {
+			why.push(`${key} is ${String(value)}`);
+		}
+		if (
+			rule.maxLength !== undefined &&
+			typeof value === "string" &&
+			value.length > rule.maxLength
+		) {
+			why.push(`${key} is too long`);
+		}
+	}
+	return why;
+}
+
+/** The body of the `data_pipeline_decide` a request carries. */
+function bodyOf(sent: { params: unknown }): Record<string, unknown> {
+	const params = sent.params as { command: { body: Record<string, unknown> } };
+	return params.command.body;
 }
 
 describe("a data pipeline's dialog", () => {
@@ -61,9 +123,10 @@ describe("a data pipeline's dialog", () => {
 		expect(plain.params).toEqual({
 			command: {
 				command: "data_pipeline_decide",
-				body: { pipeline: 7, approve: true },
+				body: { pipeline: 7, decision: "approve" },
 			},
 		});
+		expect(refusedBy(bodyOf(plain))).toEqual([]);
 		await s.reply(plain, {
 			error: {
 				kind: "refused",
@@ -84,11 +147,12 @@ describe("a data pipeline's dialog", () => {
 				command: "data_pipeline_decide",
 				body: {
 					pipeline: 7,
-					approve: true,
+					decision: "approve",
 					note: "Use it for those two sellers this month.",
 				},
 			},
 		});
+		expect(refusedBy(bodyOf(withNote))).toEqual([]);
 		await s.reply(withNote, { said: "approved Firecrawl", events: [80] });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
@@ -117,11 +181,12 @@ describe("a data pipeline's dialog", () => {
 				command: "data_pipeline_decide",
 				body: {
 					pipeline: 7,
-					approve: false,
+					decision: "decline",
 					note: "Keep to the three sellers you can read.",
 				},
 			},
 		});
+		expect(refusedBy(bodyOf(declined))).toEqual([]);
 		await s.reply(declined, { said: "declined Firecrawl", events: [81] });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});

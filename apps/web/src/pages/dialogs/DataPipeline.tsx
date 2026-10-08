@@ -51,7 +51,7 @@ export function DataPipeline({
 			command: "data_pipeline_decide",
 			body: {
 				pipeline: ask.pipeline,
-				approve,
+				decision: approve ? "approve" : "decline",
 				...(said ? { note: said } : {}),
 			},
 		});
