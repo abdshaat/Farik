@@ -888,6 +888,24 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_campaign_missing_from_the_status_rows_is_paused() {
+        let watching = Watching::new("spend-missing-status").await;
+        watching.ads.plan("MP-1", None);
+        watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
+        watching.costs(CUSTOMER, &[(11, 500)]);
+        // Google's status read has no row for it at all.
+        watching.status((CUSTOMER, 11), "MISSING");
+
+        watching.wakes().await;
+
+        // No row is not "paused": the pause is sent, and the cap says Google took it.
+        let campaign = campaign_name(CUSTOMER, 11);
+        assert_eq!(watching.pauses(), std::slice::from_ref(&campaign));
+        assert_eq!(watching.reached(0)["paused"], json!([campaign]));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn reads_while_the_team_is_paused() {
         let watching = Watching::new("spend-team-paused").await;
         watching.ads.plan("MP-1", None);
