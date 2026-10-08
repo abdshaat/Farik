@@ -258,14 +258,21 @@ impl Orchestrator {
         }
         let names: Vec<String> = campaigns.iter().map(|each| each.campaign.clone()).collect();
         let results = pause_campaigns(&self.deps.daemon, agents, &names).await;
-        let listed: Vec<String> = budgets_reached(log)?
+        let caps: Vec<_> = budgets_reached(log)?
             .into_iter()
             .filter(|reached| reached.plan == plan.record.id)
+            .collect();
+        // Only the pauses recorded since this plan's first cap are its own: a raised version
+        // reaches its caps again for a campaign the plan it replaced had paused.
+        let first_cap = caps.iter().map(|reached| reached.seq).min();
+        let listed: Vec<String> = caps
+            .into_iter()
             .flat_map(|reached| reached.paused)
             .collect();
         let noted: Vec<String> = campaigns_paused(log)?
             .into_iter()
             .filter(|pause| pause.why == PausedWhy::BudgetReached)
+            .filter(|pause| first_cap.is_some_and(|first| pause.seq > first))
             .map(|pause| pause.campaign)
             .collect();
         for ((name, result), each) in results.iter().zip(&campaigns) {
@@ -941,6 +948,75 @@ mod tests {
         // other account, is paused for its plan's end.
         assert_eq!(reached["paused"], json!([second]));
         assert_eq!(watching.pauses(), [second, first]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "a refused pause tried again under one plan and then under its raised version"
+    )]
+    async fn a_repause_under_a_raised_version_is_recorded() {
+        let watching = Watching::new("spend-repause-raised").await;
+        watching.ads.plan("MP-1", None);
+        watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
+        let campaign = campaign_name(CUSTOMER, 11);
+        let refuse = |words: Option<&str>| {
+            watching.ads.google.script(|script| match words {
+                Some(words) => {
+                    script
+                        .refuse_pause
+                        .insert(campaign.clone(), words.to_string());
+                }
+                None => script.refuse_pause.clear(),
+            });
+        };
+
+        // MP-1: the campaign reaches its 500.00, Google refuses the pause, and fifteen minutes
+        // later takes it: that pause is recorded.
+        watching.costs(CUSTOMER, &[(11, 500)]);
+        refuse(Some("nope"));
+        watching.wakes().await;
+        refuse(None);
+        watching.at(15);
+        watching.wakes().await;
+        assert_eq!(watching.paused_for("budget_reached").len(), 1);
+
+        // The owner raises it: MP-2 replaces MP-1 with the key's budget at 800.00, and the agent
+        // enables the campaign again at Google.
+        watching.ads.plan_with("MP-2", Some("MP-1"), |body| {
+            body["campaigns"][0]["budget"] = json!("800.00");
+            body["budget"] = json!({ "total": "1500.00", "google_ads": "1300.00" });
+        });
+        watching.ads.harness.project.record(
+            "",
+            "marketing_plan.ended",
+            &json!({ "plan": "MP-1", "why": "replaced", "replaced_by": "MP-2" }),
+        );
+        watching.status((CUSTOMER, 11), "ENABLED");
+
+        // MP-2: it reaches its 800.00, Google refuses the pause again, and later takes it. That is
+        // MP-2's own pause to record, though MP-1's was recorded for the same campaign.
+        watching.costs(CUSTOMER, &[(11, 800)]);
+        refuse(Some("nope"));
+        watching.at(30);
+        watching.wakes().await;
+        assert_eq!(watching.events(EventKind::MarketingBudgetReached).len(), 2);
+        refuse(None);
+        watching.at(45);
+        watching.wakes().await;
+        assert_eq!(
+            watching.paused_for("budget_reached"),
+            [
+                (
+                    "MP-1".to_string(),
+                    "search-launch".to_string(),
+                    campaign.clone()
+                ),
+                ("MP-1".to_string(), "search-launch".to_string(), campaign),
+            ],
+            "recorded once for each of the two caps"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
