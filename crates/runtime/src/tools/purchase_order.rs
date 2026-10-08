@@ -450,7 +450,7 @@ pub(super) fn draft_purchase_order(
             "too_many_purchase_orders",
             format!(
                 "{MOST_WAITING} orders wait for the owner already; read them with \
-                 farik_read_sheet in orders/, and go on without another"
+                 farik_read_purchase_orders, and go on without another"
             ),
         ));
     }
@@ -1520,6 +1520,10 @@ mod tests {
 
         let reason = refusal_of(draft(&project, &an_order("Seller 21")));
         assert!(reason.starts_with("too_many_purchase_orders:"), "{reason}");
+        assert!(
+            reason.contains("farik_read_purchase_orders"),
+            "it names the tool that reads the orders: {reason}"
+        );
         assert_eq!(project.event_count(), before);
         assert!(!folder(&project).join("orders/PO-21.xlsx").exists());
 
