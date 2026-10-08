@@ -21,12 +21,23 @@ import {
 	UNREAD_ROW,
 } from "../test/ads.ts";
 import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
+import { sentCommand } from "../test/gate.ts";
 import {
 	TEAM as MARKETING_TEAM,
 	PLAN,
 	SUMMARY,
 	TITLE,
 } from "../test/marketing.ts";
+import {
+	COMPARISON,
+	LONG_ORDER_ROW,
+	ORDER_ROW,
+	RENEWALS,
+	renewal,
+	SCRIPT_ORDER_ROW,
+	todayWithOrders,
+	WRITTEN_ROW,
+} from "../test/orders.ts";
 import { GOING_OUT, MARKUP, POST_ROW, todayWith } from "../test/posts.ts";
 import {
 	answerQuery,
@@ -1252,5 +1263,723 @@ describe("a marketing plan's ads and their budget", () => {
 			within(row).getByRole("link", { name: "Open Google Ads" }),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
+	});
+});
+
+describe("a purchase order the Procurement Specialist suggests", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	/** Today with the rows waiting; the rows of the waiting list. */
+	async function rowsOf(...waiting: unknown[]) {
+		const { container, s } = await todayWithOrders({ waiting });
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		return {
+			container,
+			s,
+			rows: within(list).getAllByRole("listitem") as HTMLElement[],
+		};
+	}
+
+	/** The cells of each row of an order's table, header first. */
+	const cells = (table: HTMLElement) =>
+		within(table)
+			.getAllByRole("row")
+			.map((row) =>
+				Array.from(row.querySelectorAll("th, td"), (cell) => cell.textContent),
+			);
+
+	it("shows_an_order_with_its_lines_total_and_host", async () => {
+		const { container, rows } = await rowsOf(ORDER_ROW);
+		const [row] = rows as [HTMLElement];
+		expect(
+			screen.getByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+
+		// Its words, and the task it comes from.
+		expect(
+			within(row).getByText("Ivo set up an order from Pie Box Pros", {
+				selector: "strong",
+			}),
+		).toBeTruthy();
+		expect(row.textContent).toContain(
+			"For FRK-31 Find a supplier for 500 pie boxes.",
+		);
+		expect(
+			within(row)
+				.getByRole("link", { name: "FRK-31 Find a supplier for 500 pie boxes" })
+				.getAttribute("href"),
+		).toBe("/tasks/FRK-31");
+		expect(within(row).getByRole("img", { name: "Ivo" })).toBeTruthy();
+
+		// Every line, with its amounts and their currency.
+		expect(cells(within(row).getByRole("table"))).toEqual([
+			["Item", "Quantity", "Price each", "Line total"],
+			[
+				"Printed pie box, 10 × 10 × 2.5 in, white, your logo in one colour",
+				"500 boxes",
+				"2.40 USD",
+				"1,200.00 USD",
+			],
+			["Printing plate for your logo", "1", "85.00 USD", "85.00 USD"],
+			["Delivery to Corner Bakery", "1", "165.00 USD", "165.00 USD"],
+		]);
+		expect(
+			within(row).getByText("1,450.00 USD").closest("p")?.textContent,
+		).toBe("Total 1,450.00 USD once");
+		expect(
+			within(row)
+				.getAllByRole("term")
+				.map((term) => term.textContent),
+		).toEqual(["Contact", "Delivery", "Terms"]);
+		expect(within(row).getByText("Dana Ruiz, sales, +1 555 0142")).toBeTruthy();
+		expect(within(row).getByText(ORDER_ROW.delivery)).toBeTruthy();
+		expect(within(row).getByText(ORDER_ROW.terms)).toBeTruthy();
+		expect(
+			within(row).getByText(
+				"Ivo wrote these from the seller’s pages. Check them with the seller before you pay.",
+			),
+		).toBeTruthy();
+
+		// The seller's page: the site in bold, the address as text, and a link that cannot reach this page.
+		expect(
+			within(row).getByText("pieboxpros.com", { selector: "strong code" }),
+		).toBeTruthy();
+		expect(within(row).getByText(ORDER_ROW.url).closest("a")).toBeNull();
+		const open = within(row).getByRole("link", { name: "Open" });
+		expect(open.getAttribute("href")).toBe(ORDER_ROW.url);
+		expect(open.getAttribute("target")).toBe("_blank");
+		expect(open.getAttribute("rel")).toContain("noopener");
+		expect(open.getAttribute("rel")).toContain("noreferrer");
+		expect(
+			within(row).getByText("Check it is Pie Box Pros’s page before you pay."),
+		).toBeTruthy();
+		expect(within(row).queryByText(en.siteRequestScriptWhat)).toBeNull();
+
+		// Why is the agent's own words, in a frame that says so; the day it closes by itself is plain.
+		const why = within(row).getByRole("group", { name: "Why, in Ivo’s words" });
+		expect(why.getAttribute("data-trust")).toBe("untrusted");
+		expect(why.textContent).toBe(ORDER_ROW.why);
+		expect(
+			within(row).getByText(
+				"If you don’t decide by 25 November, the order closes by itself.",
+			),
+		).toBeTruthy();
+		expect(
+			within(within(row).getByRole("group", { name: /^Ivo set up an order/ }))
+				.getAllByRole("button")
+				.map((button) => button.textContent),
+		).toEqual(["Approve, I’ll place it myself", "Reject"]);
+		expect(
+			within(row).getByRole("button", { name: "Download PO-12.xlsx" }),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("says_what_it_holds_when_there_are_many_lines_or_no_page", async () => {
+		const six = {
+			...LONG_ORDER_ROW,
+			order: 16,
+			lines: LONG_ORDER_ROW.lines.slice(0, 6),
+		};
+		const { rows } = await rowsOf(LONG_ORDER_ROW, six);
+		const [seven, sixLines] = rows as [HTMLElement, HTMLElement];
+
+		// Five lines and how many more there are; a monthly order says so.
+		expect(
+			within(within(seven).getByRole("table")).getAllByRole("row"),
+		).toHaveLength(1 + 5);
+		expect(
+			within(seven).getByText("and 2 more lines in the order"),
+		).toBeTruthy();
+		expect(
+			within(sixLines).getByText("and 1 more line in the order"),
+		).toBeTruthy();
+		expect(
+			within(seven).getByText("140.00 USD", { exact: false }).closest("p")
+				?.textContent,
+		).toBe("Total 140.00 USD a month");
+
+		// An order with no page for the seller says so, and has nothing to open or to check.
+		expect(within(seven).getByText(en.orderNoPage)).toBeTruthy();
+		// A fact the agent left empty has no line.
+		expect(within(seven).queryAllByRole("term")).toHaveLength(0);
+		expect(within(seven).queryByRole("link", { name: "Open" })).toBeNull();
+		expect(within(seven).queryByText(/Check it is/)).toBeNull();
+		expect(within(seven).queryByText("pieboxpros.com")).toBeNull();
+	});
+
+	it("shows_what_the_agent_wrote_as_text", async () => {
+		const plain = { ...ORDER_ROW, order: 17, seller: "Plain Seller" };
+		const http = {
+			...ORDER_ROW,
+			order: 18,
+			seller: "Http Seller",
+			url: "http://pieboxpros.com/x",
+		};
+		const script = { ...SCRIPT_ORDER_ROW };
+		const { container, rows } = await rowsOf(WRITTEN_ROW, plain, http, script);
+		const [written, , insecure, scripted] = rows as [
+			HTMLElement,
+			HTMLElement,
+			HTMLElement,
+			HTMLElement,
+		];
+		const markup = "<b>not bold</b>";
+
+		// Markup stays text, and a character that reorders text is written out.
+		expect(container.querySelector("b")).toBeNull();
+		expect(
+			within(written).getByText(
+				`Ivo set up an order from Pie Box ${markup} Pros\\u{202e}`,
+				{ selector: "strong" },
+			),
+		).toBeTruthy();
+		expect(cells(within(written).getByRole("table"))[1]).toEqual([
+			`Box ${markup}\\u{202e}`,
+			"5 bo\\u{202e}xes",
+			"1.00 USD",
+			"5.00 USD",
+		]);
+		for (const text of [
+			`Dana ${markup}\\u{202e}`,
+			`Soon ${markup}\\u{202e}`,
+			`Net 30 ${markup}\\u{202e}`,
+			"https://pieboxpros.com/a\\u{202e}b",
+		])
+			expect(within(written).getByText(text)).toBeTruthy();
+		const why = within(written).getByRole("group", {
+			name: "Why, in Ivo’s words",
+		});
+		expect(why.textContent).toBe(`Cheapest ${markup} and \\u{202e}this`);
+		expect(why.getAttribute("data-trust")).toBe("untrusted");
+		expect(written.textContent).toContain(
+			`Check it is Pie Box ${markup} Pros\\u{202e}’s page`,
+		);
+
+		// Only a plain https address is a link.
+		expect(within(insecure).queryByRole("link", { name: "Open" })).toBeNull();
+		expect(within(insecure).queryByText("Open")).toBeNull();
+		expect(within(insecure).getByText("http://pieboxpros.com/x")).toBeTruthy();
+
+		// A name written in another alphabet is warned of, in its plain form, where the other is not.
+		expect(within(written).queryByText(en.siteRequestScriptWhat)).toBeNull();
+		expect(within(scripted).getByText(en.siteRequestScriptWhat)).toBeTruthy();
+		expect(
+			within(scripted).getByText("xn--ulne-m9d.com", {
+				selector: "strong code",
+			}),
+		).toBeTruthy();
+		expect(within(scripted).getByText(SCRIPT_ORDER_ROW.url)).toBeTruthy();
+	});
+
+	it("the_comparison_opens_in_an_untrusted_frame", async () => {
+		const { container, s, rows } = await rowsOf(ORDER_ROW);
+		const [row] = rows as [HTMLElement];
+		const asked = () =>
+			s
+				.calls("query")
+				.filter((q) => q.params.name === "purchase_order.evaluation");
+
+		// Nothing is read until the owner opens it.
+		expect(asked()).toHaveLength(0);
+		fireEvent.click(within(row).getByText("Read the comparison"));
+		await answerQuery(s, "purchase_order.evaluation", { text: COMPARISON });
+		expect(asked().map((q) => q.params.params)).toEqual([{ order: 12 }]);
+
+		// The note is the agent's: its markup is text in a frame that says whose words they are.
+		const frame = await within(row).findByRole("group", {
+			name: "Read the comparison",
+		});
+		expect(frame.getAttribute("data-trust")).toBe("untrusted");
+		expect(frame.textContent).toBe(COMPARISON.replace("\u202e", "\\u{202e}"));
+		expect(container.querySelector("b")).toBeNull();
+	});
+
+	it("says_so_when_the_comparison_cannot_be_read", async () => {
+		const { s, rows } = await rowsOf(ORDER_ROW);
+		const [row] = rows as [HTMLElement];
+		fireEvent.click(within(row).getByText("Read the comparison"));
+		const [frame] = await waitFor(() => {
+			const asked = s
+				.calls("query")
+				.filter((q) => q.params.name === "purchase_order.evaluation");
+			if (asked.length === 0) throw new Error("not asked yet");
+			return asked;
+		});
+		await s.fail(frame as never, -32002, "there is no such file");
+		expect(await within(row).findByText(en.orderComparisonGone)).toBeTruthy();
+		expect(
+			within(row).queryByRole("group", { name: "Read the comparison" }),
+		).toBeNull();
+	});
+
+	it("downloads_the_order", async () => {
+		const made: Blob[] = [];
+		const gone: string[] = [];
+		const clicked: { download: string; href: string }[] = [];
+		URL.createObjectURL = (blob: Blob | MediaSource) => {
+			made.push(blob as Blob);
+			return "blob:order-12";
+		};
+		URL.revokeObjectURL = (url: string) => {
+			gone.push(url);
+		};
+		const click = vi
+			.spyOn(HTMLAnchorElement.prototype, "click")
+			.mockImplementation(function (this: HTMLAnchorElement) {
+				clicked.push({ download: this.download, href: this.href });
+			});
+		try {
+			const { s, rows } = await rowsOf(ORDER_ROW);
+			const [row] = rows as [HTMLElement];
+			fireEvent.click(
+				within(row).getByRole("button", { name: "Download PO-12.xlsx" }),
+			);
+
+			// The daemon gives the file it wrote, and the browser keeps it under the order's name.
+			const [frame] = await waitFor(() => {
+				const asked = s.calls("purchase_order.file");
+				if (asked.length === 0) throw new Error("no file was asked for");
+				return asked;
+			});
+			expect((frame as { params: object }).params).toEqual({ order: 12 });
+			await s.reply(frame as never, {
+				media_type:
+					"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+				base64: btoa("PK order bytes"),
+				name: "PO-12.xlsx",
+			});
+			await waitFor(() => expect(clicked).toHaveLength(1));
+			expect(clicked).toEqual([
+				{ download: "PO-12.xlsx", href: "blob:order-12" },
+			]);
+			expect(made).toHaveLength(1);
+			expect((made[0] as Blob).type).toBe(
+				"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			);
+			expect(
+				await new Promise((done) => {
+					const reader = new FileReader();
+					reader.onload = () => done(reader.result);
+					reader.readAsText(made[0] as Blob);
+				}),
+			).toBe("PK order bytes");
+			await waitFor(() => expect(gone).toEqual(["blob:order-12"]));
+			expect(within(row).queryByRole("alert")).toBeNull();
+
+			// A file that is gone is said, and nothing is kept.
+			fireEvent.click(
+				within(row).getByRole("button", { name: "Download PO-12.xlsx" }),
+			);
+			const second = await waitFor(() => {
+				const asked = s.calls("purchase_order.file");
+				if (asked.length < 2) throw new Error("not asked again");
+				return asked[1];
+			});
+			await s.fail(second as never, -32002, "there is no such file");
+			expect((await within(row).findByRole("alert")).textContent).toBe(
+				en.orderFileGone,
+			);
+			expect(clicked).toHaveLength(1);
+		} finally {
+			click.mockRestore();
+		}
+	});
+});
+
+describe("the renewals coming up", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
+
+	/** The rows of the renewals' list. */
+	const renewalRows = async () =>
+		within(
+			await screen.findByRole("list", { name: en.renewalsTitleNone }),
+		).getAllByRole("listitem") as HTMLElement[];
+
+	it("lists_the_renewals_after_what_waits", async () => {
+		const question = {
+			task_id: "FRK-2",
+			kind: "question",
+			agent_id: "mira",
+			title: "Pie week",
+			line: "Should pie pre-orders close on 22 or 23 November?",
+		};
+		const { container } = await todayWithOrders({
+			waiting: [question],
+			renewals: RENEWALS,
+		});
+		const heading = await screen.findByRole("heading", {
+			name: "Renewals coming up (2)",
+		});
+		// They come after "Waiting on you", in a list of their own.
+		const waiting = screen.getByRole("heading", { name: "Waiting on you (1)" });
+		expect(
+			waiting.compareDocumentPosition(heading) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		const [vercel, mailchimp] = await renewalRows();
+		expect(
+			within(vercel as HTMLElement).getByText("Vercel renews on 15 November", {
+				selector: "strong",
+			}),
+		).toBeTruthy();
+		expect((vercel as HTMLElement).textContent).toContain(
+			"Decide by 16 October if you want to change or cancel it. It is in the register Ivo keeps.",
+		);
+		// The day to decide by is "today" or "tomorrow" when it is, but the day it renews is always a date.
+		expect(
+			within(mailchimp as HTMLElement).getByText(
+				"Mailchimp renews on 27 October",
+			),
+		).toBeTruthy();
+		expect((mailchimp as HTMLElement).textContent).toContain(
+			"Decide by today if you want to change or cancel it.",
+		);
+		for (const row of [vercel, mailchimp])
+			expect(
+				within(
+					within(row as HTMLElement).getByRole("group", {
+						name: /renews on/,
+					}),
+				)
+					.getAllByRole("button")
+					.map((button) => button.textContent),
+			).toEqual(["Ask for a review", "Dismiss"]);
+		await expectNoAxeViolations(container);
+	});
+
+	it("says_how_many_dates_cannot_be_read", async () => {
+		// With renewals open: the line follows them.
+		await todayWithOrders({ renewals: RENEWALS });
+		expect(
+			await screen.findByText(
+				"2 rows in the register have a renewal date Farik can’t read, so Farik can’t remind you of them.",
+			),
+		).toBeTruthy();
+	});
+
+	it("says_how_many_dates_cannot_be_read_with_no_renewal_open", async () => {
+		await todayWithOrders({ renewals: { open: [], unreadable: 3 } });
+		// The line stands alone under a heading with no count.
+		expect(
+			await screen.findByRole("heading", { name: "Renewals coming up" }),
+		).toBeTruthy();
+		expect(
+			screen.getByText(
+				"3 rows in the register have a renewal date Farik can’t read, so Farik can’t remind you of them.",
+			),
+		).toBeTruthy();
+		expect(
+			screen.queryByRole("list", { name: en.renewalsTitleNone }),
+		).toBeNull();
+	});
+
+	it("says_one_date_cannot_be_read_in_the_singular", async () => {
+		await todayWithOrders({ renewals: { open: [], unreadable: 1 } });
+		expect(
+			await screen.findByText(
+				"1 row in the register has a renewal date Farik can’t read, so Farik can’t remind you of it.",
+			),
+		).toBeTruthy();
+	});
+
+	it("says_nothing_when_nothing_is_due_and_every_date_reads", async () => {
+		await todayWithOrders({ renewals: { open: [], unreadable: 0 } });
+		await screen.findByRole("heading", { name: "Waiting on you (0)" });
+		expect(screen.queryByText(/Renewals coming up/)).toBeNull();
+	});
+
+	it("says_nothing_about_dates_when_every_date_reads", async () => {
+		await todayWithOrders({ renewals: { ...RENEWALS, unreadable: 0 } });
+		await screen.findByRole("heading", { name: "Renewals coming up (2)" });
+		expect(
+			screen.queryByText(/in the register have|in the register has/),
+		).toBeNull();
+	});
+
+	it("shows_a_vendor_as_text", async () => {
+		const vendor = "Ver\u202ecel <b>not bold</b>";
+		await todayWithOrders({
+			renewals: {
+				open: [renewal(3, vendor, "2026-11-15", "2026-10-16")],
+				unreadable: 0,
+			},
+		});
+		const [row] = await renewalRows();
+		const shown = "Ver\\u{202e}cel <b>not bold</b>";
+		expect(
+			within(row as HTMLElement).getByText(`${shown} renews on 15 November`, {
+				selector: "strong",
+			}),
+		).toBeTruthy();
+		expect((row as HTMLElement).querySelector("b")).toBeNull();
+
+		// The request the owner reads says it the same way, so that what is sent is what was read.
+		fireEvent.click(
+			within(row as HTMLElement).getByRole("button", {
+				name: "Ask for a review",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: `Ask the team to review ${shown}?`,
+		});
+		expect(
+			(
+				within(dialog).getByRole("textbox", {
+					name: "Your request",
+				}) as HTMLTextAreaElement
+			).value,
+		).toBe(
+			`Review ${shown} before it renews on 15 November; decide by 16 October.`,
+		);
+	});
+
+	it("dismiss_acts_at_once", async () => {
+		const { s } = await todayWithOrders({ renewals: RENEWALS });
+		const [vercel] = await renewalRows();
+		fireEvent.click(
+			within(vercel as HTMLElement).getByRole("button", { name: "Dismiss" }),
+		);
+
+		// No dialog: the command goes at once, and the list is read again when it went through.
+		const sent = await sentCommand(s);
+		expect(sent.params).toEqual({
+			command: { command: "renewal_dismiss", body: { renewal: 7 } },
+		});
+		expect(screen.queryByRole("dialog")).toBeNull();
+		const asked = () =>
+			s.calls("query").filter((q) => q.params.name === "renewals.list").length;
+		expect(asked()).toBe(1);
+		await s.reply(sent, { said: "dismissed", events: [80] });
+		await waitFor(() => expect(asked()).toBe(2));
+	});
+
+	it("dismissing_twice_is_said_in_words", async () => {
+		const { s } = await todayWithOrders({ renewals: RENEWALS });
+		const [vercel] = await renewalRows();
+		fireEvent.click(
+			within(vercel as HTMLElement).getByRole("button", { name: "Dismiss" }),
+		);
+		const sent = await sentCommand(s);
+		await s.reply(sent, {
+			error: {
+				kind: "refused",
+				detail: "renewal_dismissed: renewal 7 was dismissed already",
+			},
+		});
+		expect(
+			(await within(vercel as HTMLElement).findByRole("alert")).textContent,
+		).toBe(en.refuseRenewalDismissed);
+	});
+
+	it("ask_for_a_review_files_the_edited_request_then_dismisses", async () => {
+		const { container, s } = await todayWithOrders({ renewals: RENEWALS });
+		const [vercel] = await renewalRows();
+		fireEvent.click(
+			within(vercel as HTMLElement).getByRole("button", {
+				name: "Ask for a review",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Ask the team to review Vercel?",
+		});
+		expect(
+			within(dialog).getByText(
+				"It goes to the team as your request, in your words. Change them if you like.",
+			),
+		).toBeTruthy();
+		const text = within(dialog).getByRole("textbox", {
+			name: "Your request",
+		}) as HTMLTextAreaElement;
+		expect(text.value).toBe(
+			"Review Vercel before it renews on 15 November; decide by 16 October.",
+		);
+		expect(
+			within(dialog).getByText(
+				"Mira reads every request and asks you if anything is unclear.",
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		// Closing sends nothing.
+		fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(s.calls("request.file")).toHaveLength(0);
+		expect(s.calls("command")).toHaveLength(0);
+
+		// The owner's own words are what is filed, and the renewal is dismissed only after.
+		fireEvent.click(
+			within(vercel as HTMLElement).getByRole("button", {
+				name: "Ask for a review",
+			}),
+		);
+		const again = await screen.findByRole("dialog", {
+			name: "Ask the team to review Vercel?",
+		});
+		// A request with no words cannot be sent.
+		fireEvent.change(
+			within(again).getByRole("textbox", { name: "Your request" }),
+			{ target: { value: "   " } },
+		);
+		expect(
+			(
+				within(again).getByRole("button", {
+					name: en.requestSend,
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true);
+		fireEvent.change(
+			within(again).getByRole("textbox", { name: "Your request" }),
+			{
+				target: {
+					value: "  Is Vercel still worth $20 a month? Cancel it if not.  ",
+				},
+			},
+		);
+		fireEvent.click(
+			within(again).getByRole("button", { name: en.requestSend }),
+		);
+		const filed = await waitFor(() => {
+			const asked = s.calls("request.file");
+			if (asked.length === 0) throw new Error("no request was filed");
+			return asked[0];
+		});
+		expect((filed as { params: object }).params).toEqual({
+			text: "Is Vercel still worth $20 a month? Cancel it if not.",
+		});
+		expect(s.calls("command")).toHaveLength(0);
+		await s.reply(filed as never, { task_id: "FRK-40" });
+		const dismissed = await sentCommand(s);
+		expect(dismissed.params).toEqual({
+			command: { command: "renewal_dismiss", body: { renewal: 7 } },
+		});
+		const before = s
+			.calls("query")
+			.filter((q) => q.params.name === "renewals.list").length;
+		await s.reply(dismissed, { said: "dismissed", events: [81] });
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		await waitFor(() =>
+			expect(
+				s.calls("query").filter((q) => q.params.name === "renewals.list")
+					.length,
+			).toBe(before + 1),
+		);
+	});
+
+	it("the_review_request_names_days_not_today", async () => {
+		await todayWithOrders({ renewals: RENEWALS });
+		const [, mailchimp] = await renewalRows();
+		// The row says "today"; the request is read later, so it says the day.
+		expect((mailchimp as HTMLElement).textContent).toContain("Decide by today");
+		fireEvent.click(
+			within(mailchimp as HTMLElement).getByRole("button", {
+				name: "Ask for a review",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Ask the team to review Mailchimp?",
+		});
+		expect(
+			(
+				within(dialog).getByRole("textbox", {
+					name: "Your request",
+				}) as HTMLTextAreaElement
+			).value,
+		).toBe(
+			"Review Mailchimp before it renews on 27 October; decide by 26 October.",
+		);
+	});
+
+	it("a_refused_request_dismisses_nothing", async () => {
+		const { s } = await todayWithOrders({ renewals: RENEWALS });
+		const [vercel] = await renewalRows();
+		fireEvent.click(
+			within(vercel as HTMLElement).getByRole("button", {
+				name: "Ask for a review",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Ask the team to review Vercel?",
+		});
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.requestSend }),
+		);
+		const filed = await waitFor(() => {
+			const asked = s.calls("request.file");
+			if (asked.length === 0) throw new Error("no request was filed");
+			return asked[0];
+		});
+		await s.fail(filed as never, -32002, "refused", {
+			errors: [{ path: "", message: "too short", code: "too_short" }],
+		});
+
+		// The refusal is said, the dialog stays, and no renewal was dismissed.
+		expect((await within(dialog).findByRole("alert")).textContent).toBe(
+			en.requestTooShort,
+		);
+		expect(s.calls("command")).toHaveLength(0);
+
+		// Sent again with better words, it goes through and the renewal is dismissed once.
+		fireEvent.change(
+			within(dialog).getByRole("textbox", { name: "Your request" }),
+			{
+				target: { value: "Please review Vercel before it renews." },
+			},
+		);
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.requestSend }),
+		);
+		const second = await waitFor(() => {
+			const asked = s.calls("request.file");
+			if (asked.length < 2) throw new Error("not filed again");
+			return asked[1];
+		});
+		await s.reply(second as never, { task_id: "FRK-41" });
+		const dismissed = await sentCommand(s);
+		await s.reply(dismissed, { said: "dismissed", events: [82] });
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(s.calls("command")).toHaveLength(1);
+	});
+
+	it("a_dismissal_that_is_refused_after_the_request_is_asked_again_alone", async () => {
+		const { s } = await todayWithOrders({ renewals: RENEWALS });
+		const [vercel] = await renewalRows();
+		fireEvent.click(
+			within(vercel as HTMLElement).getByRole("button", {
+				name: "Ask for a review",
+			}),
+		);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Ask the team to review Vercel?",
+		});
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.requestSend }),
+		);
+		const filed = await waitFor(() => {
+			const asked = s.calls("request.file");
+			if (asked.length === 0) throw new Error("no request was filed");
+			return asked[0];
+		});
+		await s.reply(filed as never, { task_id: "FRK-42" });
+		const first = await sentCommand(s);
+		await s.reply(first, {
+			error: { kind: "failed", detail: "the log could not be written" },
+		});
+		expect(await within(dialog).findByRole("alert")).toBeTruthy();
+
+		// The request went through already: only the dismissal is sent again.
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.requestSend }),
+		);
+		const second = await sentCommand(s, 2);
+		expect(s.calls("request.file")).toHaveLength(1);
+		await s.reply(second, { said: "dismissed", events: [83] });
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 });

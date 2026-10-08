@@ -18,6 +18,7 @@ import { SkillRead } from "./dialogs/SkillRead.tsx";
 import { SkillReview } from "./dialogs/SkillReview.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
 import { KitConnect } from "./KitConnect.tsx";
+import { OrdersSection } from "./Orders.tsx";
 import styles from "./pages.module.css";
 import { useAdvanced } from "./Settings.tsx";
 import { SitesSection } from "./Sites.tsx";
@@ -422,6 +423,17 @@ function Editor({
 					))}
 				</select>
 			</div>
+			{/* The Procurement Specialist's orders come before the sites it reads, and both before what it may do. */}
+			{saved.role === "procurement_specialist" && (
+				<OrdersSection
+					name={name}
+					pm={
+						team.agents.find(
+							(a) => a.role === "product_manager" && a.status !== "retired",
+						)?.displayName ?? roleName("product_manager")
+					}
+				/>
+			)}
 			{/* The Procurement Specialist reads only the sites it is given: they come before what it may do. */}
 			{saved.role === "procurement_specialist" && <SitesSection name={name} />}
 			<section className={styles.section} aria-labelledby="may-heading">

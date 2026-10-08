@@ -24,12 +24,15 @@ import {
 	visibly,
 } from "./dialogs/ToolApproval.tsx";
 import { channelName, longRange, money } from "./marketing.ts";
+import { type OrderWaiting, PurchaseOrderRow } from "./OrderRow.tsx";
+import type { OrderAsk } from "./orders.ts";
 import {
 	GoingOut,
 	type GoingOutPost,
 	PostCard,
 	type PostMedia,
 } from "./PostGoingOut.tsx";
+import { RenewalsSection } from "./Renewals.tsx";
 import { type Agent, roleName, type Team } from "./setup/TeamSetup.tsx";
 import type { RoleKit } from "./Team.tsx";
 import styles from "./Today.module.css";
@@ -69,6 +72,7 @@ type Waiting = {
 		| "marketing_plan"
 		| "social_post"
 		| "site_request"
+		| "purchase_order"
 		| AdsAsk["kind"];
 	agentId: string | null;
 	title: string;
@@ -77,7 +81,8 @@ type Waiting = {
 	Partial<Omit<AdsAsk, "kind" | "taskId" | "agentId" | "plan">> &
 	Partial<PlanAsk> &
 	Partial<PostAsk> &
-	Partial<SiteAsk>;
+	Partial<SiteAsk> &
+	Partial<OrderAsk>;
 type Moved = { at: string; line: string };
 type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
@@ -160,6 +165,7 @@ export function Today() {
 				item.kind === "marketing_plan" ||
 				item.kind === "social_post" ||
 				item.kind === "site_request" ||
+				item.kind === "purchase_order" ||
 				isAds(item.kind) ||
 				item.kind in KINDS,
 		),
@@ -273,6 +279,13 @@ export function Today() {
 										item={item}
 										agent={agent(item.agentId)}
 									/>
+								) : item.kind === "purchase_order" ? (
+									<PurchaseOrderRow
+										key={`${item.kind}-${item.order}`}
+										item={item as OrderWaiting}
+										agent={agent(item.agentId)}
+										now={new Date()}
+									/>
 								) : (
 									<WaitingRow
 										key={`${item.kind}-${item.taskId}`}
@@ -292,6 +305,16 @@ export function Today() {
 					)}
 				</section>
 			)}
+			<RenewalsSection
+				agent={
+					agents.find(
+						(a) =>
+							a.role === "procurement_specialist" && a.status !== "retired",
+					)?.displayName ?? uiStrings.roleName.procurement_specialist
+				}
+				pm={pm?.displayName ?? uiStrings.roleName.product_manager}
+				now={new Date()}
+			/>
 			{posts && (
 				<GoingOut
 					posts={posts.posts}

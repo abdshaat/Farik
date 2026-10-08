@@ -766,3 +766,150 @@
 .siteAdded {
 	font-weight: var(--farik-type-heading-weight);
 }
+
+/* The owner's steps on a purchase order, in dialogs (spec 6.10). */
+.orderForm {
+	display: grid;
+	gap: var(--farik-space-3);
+}
+
+.orderForm p {
+	margin: 0;
+}
+
+.orderHint {
+	color: var(--farik-color-ink-muted);
+}
+
+.dayField {
+	display: flex;
+	flex-direction: column;
+	gap: var(--farik-space-1);
+}
+
+.dayField input {
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+	background: var(--farik-color-surface);
+	color: var(--farik-color-ink);
+}
+
+.dayField input:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+/* What was paid and in which currency: side by side where there is room. */
+.money {
+	display: grid;
+	grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+	gap: var(--farik-space-3);
+}
+
+.tick {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--farik-space-2);
+	min-height: 44px;
+}
+
+/* "Orders" on the Procurement Specialist's page. */
+.orders,
+.ordersRecent {
+	display: grid;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-top: 1px solid var(--farik-color-rule);
+}
+
+.orders > li {
+	display: grid;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-3) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.orders p {
+	margin: 0;
+}
+
+.orderHead {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--farik-space-1) var(--farik-space-3);
+}
+
+.orderNumber {
+	font-family: var(--farik-type-code-family);
+}
+
+.orderSeller {
+	font-weight: var(--farik-type-heading-weight);
+	overflow-wrap: anywhere;
+}
+
+.orderAmount {
+	font-family: var(--farik-type-code-family);
+	font-variant-numeric: tabular-nums;
+}
+
+.orderActions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-2) var(--farik-space-3);
+}
+
+.orderStatus {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-1) var(--farik-space-3);
+}
+
+/* A status word in a pill; the ones that ask for attention are told apart by their rule and colour. */
+.orderTag {
+	padding: 0 var(--farik-space-2);
+	font-weight: var(--farik-type-heading-weight);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: 999px;
+}
+
+.orderTag[data-status="delayed"],
+.orderTag[data-status="problem"],
+.orderTag[data-status="overdue"] {
+	border-width: 2px;
+	border-color: var(--farik-color-status-waiting);
+	color: var(--farik-color-status-waiting);
+}
+
+.orderNote {
+	overflow-wrap: anywhere;
+}
+
+/* What the agent wrote, framed so that it is never taken for Farik's or the owner's own words. */
+.orderUntrusted {
+	margin: 0;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	font-family: var(--farik-type-code-family);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-left: 3px solid var(--farik-color-ink);
+	border-radius: var(--farik-radius-control);
+}
+
+.ordersRecent > li {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-1) var(--farik-space-3);
+	padding: var(--farik-space-2) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+}

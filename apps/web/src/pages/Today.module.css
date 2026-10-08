@@ -286,3 +286,146 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 	padding: var(--farik-space-2) var(--farik-space-3);
 	border-left: 3px solid var(--farik-color-status-waiting);
 }
+
+/* A purchase order on its row: the lines as a table, which stacks each line under its item on a
+phone, then the total, the order's facts and the file. */
+.lines {
+	width: 100%;
+	border-collapse: collapse;
+	font-variant-numeric: tabular-nums;
+}
+
+.lines th,
+.lines td {
+	padding: var(--farik-space-1) var(--farik-space-2);
+	text-align: start;
+	vertical-align: top;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.lines th {
+	color: var(--farik-color-ink-muted);
+	font-weight: var(--farik-type-body-weight);
+}
+
+.lines td:nth-child(n + 2),
+.lines th:nth-child(n + 2) {
+	text-align: end;
+	white-space: nowrap;
+}
+
+@media not (min-width: 640px) {
+	.lines thead {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+	}
+
+	.lines,
+	.lines tbody,
+	.lines tr,
+	.lines td {
+		display: block;
+	}
+
+	.lines tr {
+		padding: var(--farik-space-2) 0;
+		border-bottom: 1px solid var(--farik-color-rule);
+	}
+
+	.lines td,
+	.lines td:nth-child(n + 2) {
+		display: flex;
+		justify-content: space-between;
+		gap: var(--farik-space-3);
+		padding: var(--farik-space-1) 0;
+		border: 0;
+		text-align: end;
+		white-space: normal;
+	}
+
+	.lines td::before {
+		content: attr(data-label);
+		color: var(--farik-color-ink-muted);
+		text-align: start;
+	}
+}
+
+.total {
+	margin: 0;
+}
+
+.about {
+	display: grid;
+	gap: var(--farik-space-1);
+	margin: 0;
+}
+
+.about > div {
+	display: grid;
+	grid-template-columns: 6rem minmax(0, 1fr);
+	gap: var(--farik-space-3);
+}
+
+.about dt {
+	color: var(--farik-color-ink-muted);
+}
+
+.about dd {
+	margin: 0;
+}
+
+.comparison summary {
+	min-height: 44px;
+	display: flex;
+	align-items: center;
+	cursor: pointer;
+}
+
+.comparisonText {
+	max-height: 18rem;
+	overflow: auto;
+}
+
+.comparisonText:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.download {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-2) var(--farik-space-3);
+}
+
+.downloadLink {
+	min-height: 44px;
+	padding: 0;
+	border: 0;
+	background: none;
+	font: inherit;
+	color: var(--farik-color-link);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+	cursor: pointer;
+}
+
+.downloadLink:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+/* A renewal's calendar mark, where an agent's picture would be. */
+.mark {
+	flex-shrink: 0;
+	align-self: flex-start;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	color: var(--farik-color-ink);
+}

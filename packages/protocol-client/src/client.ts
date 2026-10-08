@@ -53,6 +53,7 @@ export type MethodName =
 	| "connector.sign_in_status"
 	| "connector.sign_in_cancel"
 	| "social_post.media"
+	| "purchase_order.file"
 	| "marketing_budget.raise";
 export type Status = "connecting" | "open" | "closed";
 
