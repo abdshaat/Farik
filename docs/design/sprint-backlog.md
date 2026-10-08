@@ -64,7 +64,7 @@ The core rule, one function both the gate and the orchestrator read:
 
 **A task filed under an epic the open sprint holds** joins that sprint, as today (spec 3). It is the planned epic's own work, not new work.
 
-**Incident fixes** (ADR 0027) skip planning and run even outside a sprint. Phase 9 step 06 builds the incident's fix contract and adds its exception to `waits_for_a_sprint`, and to the open sprint's membership rule with the policy off. This step adds nothing for it, because nothing exists to mark a contract as an incident fix yet.
+**Incident fixes** (ADR 0027) skip planning and run even outside a sprint. Phase 9 step 06 (now phase 7 step 11e) builds the incident's fix contract and adds its exception to `waits_for_a_sprint`, and to the open sprint's membership rule with the policy off. This step adds nothing for it, because nothing exists to mark a contract as an incident fix yet.
 
 **A sprint ended early** under the policy: its unfinished tasks leave it, as today, and now wait in the Backlog for the next sprint, where today they carry on (the founder kept this, 2026-10-01; answer 4). The end-early dialog says so. What tells them from work that was under way at the switch is the **Backlog mark**:
 - `sprint.ended` gains an optional `backlog: boolean`, true when the team planned in sprints as the sprint ended, absent otherwise;

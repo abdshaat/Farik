@@ -1,6 +1,6 @@
 # The Procurement Specialist
 
-Status: approved by the founder on 2026-10-05, in conversation. The founder asked for the role that day ("Add and plan a procurement agent and plan all its tools and connectors as well as skills"), set its research focus and the data pipeline request, and answered O1 to O6 (below, "Decided"). ADR 0039 records the decision; spec 0.49 (section 6.10) carries the rules. It is the design input to phase 7 steps 10b to 10g and to the eighth task of step 13. ADR 0040 (accepted the same day) makes Farik for every business, software or not, from phase 12, and this role is built for it already; ADR 0041 lets the user run the team on auto, which sends its messages without asking, never its purchase orders.
+Status: approved by the founder on 2026-10-05, in conversation. The founder asked for the role that day ("Add and plan a procurement agent and plan all its tools and connectors as well as skills"), set its research focus and the data pipeline request, and answered O1 to O6 (below, "Decided"). ADR 0039 records the decision; spec 0.49 (section 6.10) carries the rules. It is the design input to phase 7 steps 10b to 10g and to the eighth task of step 13. ADR 0040 (accepted the same day) makes Farik for every business, software or not, from phase 13, and this role is built for it already; ADR 0041 lets the user run the team on auto, which sends its messages without asking, never its purchase orders.
 
 ## Why
 
