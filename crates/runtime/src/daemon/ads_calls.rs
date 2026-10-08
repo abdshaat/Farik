@@ -592,6 +592,41 @@ pub(crate) async fn pause_before_removing(
     first.map_or(Ok(()), Err)
 }
 
+/// The agents whose `google-ads` entry `before` has and `after` does not: the entry taken out, or
+/// the agent gone. Retiring an agent keeps its entry, and so is not one.
+pub(crate) fn google_ads_taken_out(before: &Team, after: &Team) -> Vec<String> {
+    let has = |team: &Team, id: &str| {
+        team.agents.iter().any(|agent| {
+            agent.id.as_str() == id
+                && agent
+                    .mcp_servers
+                    .iter()
+                    .flatten()
+                    .any(|entry| entry.name.as_str() == GOOGLE_ADS)
+        })
+    };
+    before
+        .agents
+        .iter()
+        .map(|agent| agent.id.to_string())
+        .filter(|id| has(before, id) && !has(after, id))
+        .collect()
+}
+
+/// Before a write of the team file that takes Google Ads from `agents` (`google_ads_taken_out`):
+/// pauses the plan's campaigns for each as removing the connection does (`pause_before_removing`),
+/// whatever Google answers, since the write goes ahead all the same. Every path that takes a
+/// `google-ads` entry out of the team file but `connector.disconnect` asks it first.
+pub(crate) async fn pause_before_dropping(
+    state: &Arc<DaemonState>,
+    deps: &ToolDeps,
+    agents: &[String],
+) {
+    for agent in agents {
+        let _ = pause_before_removing(state, deps, agent).await;
+    }
+}
+
 /// The agent's access token, its sign-in refreshed first when it will not last the call.
 async fn grant_of(state: &Arc<DaemonState>, access: &Access) -> Result<Secret, Refusal> {
     let entry = refreshed_entry(
@@ -1143,6 +1178,76 @@ mod tests {
     use crate::daemon::own_calls::fixtures::keep_a_sign_in;
     use crate::daemon::plan_tools_of;
     use crate::google_ads::WRITE_TOOLS;
+
+    #[test]
+    fn google_ads_is_taken_out_by_a_dropped_entry_or_a_gone_agent_only() {
+        use super::google_ads_taken_out;
+        use farik_core::team::Team;
+
+        let team = |change: &dyn Fn(&mut Value)| -> Team {
+            crate::tools::fixtures::a_team_of_three(|wire| {
+                crate::tools::fixtures::with_the_marketing_specialist(wire);
+                let server = |name: &str| {
+                    json!({
+                        "name": name, "source": "custom", "transport": "stdio",
+                        "command": "server", "tools": { "search": "network" }
+                    })
+                };
+                wire["agents"][3]["mcp_servers"] = json!([server("google-ads"), server("github")]);
+                let mut lia =
+                    farik_core::team::fixtures::an_agent_wire("lia", "marketing_specialist");
+                lia["mcp_servers"] = json!([server("google-ads")]);
+                wire["agents"].as_array_mut().expect("agents").push(lia);
+                change(wire);
+            })
+        };
+        let before = team(&|_| {});
+
+        // Another service taken from Kai, a retirement, and Google Ads given: none takes it out.
+        assert!(
+            google_ads_taken_out(
+                &before,
+                &team(&|wire| {
+                    wire["agents"][3]["mcp_servers"] =
+                        json!([wire["agents"][3]["mcp_servers"][0].clone()]);
+                })
+            )
+            .is_empty()
+        );
+        assert!(
+            google_ads_taken_out(
+                &before,
+                &team(&|wire| {
+                    wire["agents"][3]["status"] = json!("retired");
+                })
+            )
+            .is_empty()
+        );
+        assert!(
+            google_ads_taken_out(
+                &team(&|wire| {
+                    wire["agents"][4]["mcp_servers"] = json!([]);
+                }),
+                &before
+            )
+            .is_empty()
+        );
+
+        // Kai's entry dropped, Lia gone, or both.
+        let dropped = team(&|wire| {
+            wire["agents"][3]["mcp_servers"] = json!([wire["agents"][3]["mcp_servers"][1].clone()]);
+        });
+        assert_eq!(google_ads_taken_out(&before, &dropped), ["kai"]);
+        let gone = team(&|wire| {
+            wire["agents"].as_array_mut().expect("agents").pop();
+        });
+        assert_eq!(google_ads_taken_out(&before, &gone), ["lia"]);
+        let both = team(&|wire| {
+            wire["agents"][3]["mcp_servers"] = json!([wire["agents"][3]["mcp_servers"][1].clone()]);
+            wire["agents"].as_array_mut().expect("agents").pop();
+        });
+        assert_eq!(google_ads_taken_out(&before, &both), ["kai", "lia"]);
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]

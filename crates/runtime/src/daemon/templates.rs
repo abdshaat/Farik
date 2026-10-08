@@ -214,6 +214,31 @@ fn apply(
     Ok(answered)
 }
 
+/// Before `template.apply` writes the team: when the template would take Google Ads from an agent
+/// (a removed agent that has it) and would be applied, pauses the plan's campaigns for each as
+/// removing the connection does, whatever Google answers. A template that cannot be applied (it
+/// changed since the preview, or the team it makes is refused) pauses nothing.
+async fn pause_before_dropping_google_ads(
+    state: &Arc<DaemonState>,
+    deps: &Arc<ToolDeps>,
+    params: &Value,
+) {
+    let (held, holder, params) = (Arc::clone(deps), Arc::clone(state), params.clone());
+    let taken = off_the_worker(move || {
+        let templates = templates_of(&holder)?;
+        let digest = params["digest"].as_str().unwrap_or_default();
+        let (before, applied, ..) = applying(&held, templates, slug_of(&params), Some(digest))?;
+        Ok(if applied.errors.is_empty() {
+            crate::daemon::ads_calls::google_ads_taken_out(&before, &applied.team)
+        } else {
+            Vec::new()
+        })
+    })
+    .await
+    .unwrap_or_default();
+    crate::daemon::ads_calls::pause_before_dropping(state, deps, &taken).await;
+}
+
 /// The methods of this module, whose params the schema already passed.
 pub(super) async fn call(
     state: &Arc<DaemonState>,
@@ -225,6 +250,9 @@ pub(super) async fn call(
     };
     templates_of(state)?;
     let applies = method == "template.apply";
+    if applies {
+        pause_before_dropping_google_ads(state, &deps, params).await;
+    }
     let waker = Arc::clone(state);
     let (state, method, params) = (Arc::clone(state), method.to_string(), params.clone());
     let answered = off_the_worker(move || {
@@ -659,6 +687,89 @@ mod tests {
         );
         // Kai never worked, so the template removes Kai, and Kai's keys with Kai.
         assert_eq!(store.load(&at), Ok(None));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn applying_a_template_that_removes_an_agent_with_google_ads_pauses_first() {
+        use crate::daemon::team::tests::{
+            after_the_fixture, kai_and_lia_with_google_ads, paused_at_google,
+        };
+
+        // Kai made the campaigns and so only retires; Lia never worked, so "Pair", which names
+        // neither, removes her, with her Google Ads.
+        let (ads, lia) = kai_and_lia_with_google_ads("templates-remove-ads").await;
+        let folder = std::env::temp_dir()
+            .join(format!(
+                "farik-daemon-templates-{}-templates-remove-ads",
+                std::process::id()
+            ))
+            .join("templates");
+        let _ = std::fs::remove_dir_all(&folder);
+        served(&ads.harness, Some(folder.clone()));
+        saved(&folder, &pair());
+        let (_, digest) = Templates::new(folder)
+            .read_digested("pair")
+            .expect("the template reads");
+
+        super::call(
+            &ads.harness.daemon,
+            "template.apply",
+            &json!({ "slug": "pair", "digest": digest }),
+        )
+        .await
+        .expect("applied");
+
+        // Paused with Lia's sign-in, before the team was written.
+        assert_eq!(paused_at_google(&ads).len(), 2);
+        let lia_bearer = format!("Bearer {}", lia.access_token.expose());
+        for seen in ads.google.requests() {
+            assert_eq!(
+                seen.headers.get("authorization").map(String::as_str),
+                Some(lia_bearer.as_str())
+            );
+        }
+        let kinds = after_the_fixture(&ads);
+        assert_eq!(
+            kinds[..3],
+            [
+                "marketing_campaign.paused",
+                "marketing_campaign.paused",
+                "team.updated"
+            ]
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_template_that_cannot_be_applied_pauses_nothing() {
+        use crate::daemon::team::tests::kai_and_lia_with_google_ads;
+
+        let (ads, _) = kai_and_lia_with_google_ads("templates-remove-ads-stale").await;
+        let folder = std::env::temp_dir()
+            .join(format!(
+                "farik-daemon-templates-{}-templates-remove-ads-stale",
+                std::process::id()
+            ))
+            .join("templates");
+        let _ = std::fs::remove_dir_all(&folder);
+        served(&ads.harness, Some(folder.clone()));
+        saved(&folder, &pair());
+
+        // A digest of a file that has changed since the preview: refused.
+        let refused = super::call(
+            &ads.harness.daemon,
+            "template.apply",
+            &json!({ "slug": "pair", "digest": NO_DIGEST }),
+        )
+        .await;
+
+        assert!(refused.is_err(), "{refused:?}");
+        assert!(
+            ads.google.requests().is_empty(),
+            "{:?}",
+            ads.google.requests()
+        );
     }
 
     #[test]

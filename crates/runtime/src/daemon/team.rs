@@ -1832,6 +1832,7 @@ pub(super) async fn call(
         .await
         .map(|()| json!({})),
         "team.save" => {
+            pause_before_dropping_google_ads(state, &deps, &params["team"], false).await;
             let holder = Arc::clone(state);
             off_the_worker(move || {
                 let _writing = holder.team_writes();
@@ -1856,6 +1857,8 @@ pub(super) async fn call(
                 .map(|()| json!({}))
         }
         _ => {
+            let setup = deps.files.root().join(SETUP_PENDING).exists();
+            pause_before_dropping_google_ads(state, &deps, &params["team"], setup).await;
             let (held, holder) = (Arc::clone(&deps), Arc::clone(state));
             // Only setup's start resumes the team: without the marker, a team paused by a
             // budget's stop or by a person stays paused.
@@ -1881,6 +1884,28 @@ pub(super) async fn call(
             Ok(json!({}))
         }
     }
+}
+
+/// Before a save or a start writes the team `wire`: when it would take Google Ads from an agent
+/// (the entry dropped, or the agent gone) and the team would be written, pauses the plan's
+/// campaigns for each as removing the connection does, whatever Google answers. A team that would
+/// be refused pauses nothing. Worked out once more under the lock that writes the team, but the
+/// pause cannot be made there, where nothing may wait for Google.
+async fn pause_before_dropping_google_ads(
+    state: &Arc<DaemonState>,
+    deps: &Arc<ToolDeps>,
+    wire: &Value,
+    setup: bool,
+) {
+    let (held, wire) = (Arc::clone(deps), wire.clone());
+    let taken = off_the_worker(move || {
+        Ok(checked(&held, &wire, setup)
+            .map(|(before, after)| super::ads_calls::google_ads_taken_out(&before, &after))
+            .unwrap_or_default())
+    })
+    .await
+    .unwrap_or_default();
+    super::ads_calls::pause_before_dropping(state, deps, &taken).await;
 }
 
 /// `command`, handled by the orchestrator, or its refusal.
@@ -2702,7 +2727,11 @@ pub(super) mod tests {
     /// Kai with Google Ads and two plans: MP-1, which the owner ended, left campaign 21 running;
     /// MP-2, the active plan, carries campaign 11. Both run at Google.
     async fn google_ads_with_two_campaigns_running(name: &str) -> Ads {
-        let ads = Ads::new(name).await;
+        with_two_campaigns_running(Ads::new(name).await)
+    }
+
+    /// `google_ads_with_two_campaigns_running` for `ads`, which has its own team.
+    fn with_two_campaigns_running(ads: Ads) -> Ads {
         let orchestrator = Arc::new(ads.harness.orchestrator(ads.harness.recorded(Vec::new())));
         assert!(
             ads.harness
@@ -2888,6 +2917,246 @@ pub(super) mod tests {
                 "{plan}"
             );
         }
+    }
+
+    /// The team file as the browser would send it, with `change` made.
+    fn team_as_sent(ads: &Ads, change: impl FnOnce(&mut Value)) -> Value {
+        let mut team = team_file(&ads.harness);
+        change(&mut team);
+        team
+    }
+
+    /// `team` without `agent`'s Google Ads entry.
+    fn without_google_ads(team: &mut Value, agent: &str) {
+        let at = team["agents"]
+            .as_array()
+            .and_then(|agents| agents.iter().position(|each| each["id"] == agent))
+            .expect("the agent");
+        let held = &mut team["agents"][at];
+        let kept: Vec<Value> = held["mcp_servers"]
+            .as_array()
+            .map(|servers| {
+                servers
+                    .iter()
+                    .filter(|server| server["name"] != "google-ads")
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        if kept.is_empty() {
+            held.as_object_mut()
+                .expect("an agent")
+                .remove("mcp_servers");
+        } else {
+            held["mcp_servers"] = json!(kept);
+        }
+    }
+
+    /// The kinds of the events recorded since the fixture, with campaign 22's earlier pause left
+    /// out, in order.
+    pub(in crate::daemon) fn after_the_fixture(ads: &Ads) -> Vec<String> {
+        ads.harness
+            .project
+            .events(&[
+                EventKind::MarketingCampaignPaused,
+                EventKind::TeamUpdated,
+                EventKind::ConnectorDisconnected,
+            ])
+            .into_iter()
+            .filter(|event| {
+                !matches!(&event.body, farik_protocol::event::EventBody::MarketingCampaignPaused(body)
+                    if body.campaign.as_str().ends_with("/22"))
+            })
+            .map(|event| event.body.kind().to_string())
+            .collect()
+    }
+
+    /// The campaigns each `mutate` Google was sent paused, in order.
+    pub(in crate::daemon) fn paused_at_google(ads: &Ads) -> Vec<String> {
+        ads.google
+            .requests_of("mutate")
+            .iter()
+            .flat_map(|seen| {
+                seen.body["mutateOperations"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .map(|operation| {
+                operation["campaignOperation"]["update"]["resourceName"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn saving_a_team_without_google_ads_pauses_first() {
+        let ads = google_ads_with_two_campaigns_running("team-save-ads").await;
+        let team = team_as_sent(&ads, |team| without_google_ads(team, "kai"));
+
+        super::call(&ads.harness.daemon, "team.save", &json!({ "team": team }))
+            .await
+            .expect("saved");
+
+        // Both campaigns were paused at Google, each recorded before the team was written, and
+        // the entry and its keys are gone.
+        assert_eq!(paused_at_google(&ads).len(), 2);
+        assert_eq!(
+            after_the_fixture(&ads),
+            [
+                "marketing_campaign.paused",
+                "marketing_campaign.paused",
+                "team.updated"
+            ]
+        );
+        assert!(ads.store.load(&ads.at).expect("reads").is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn saving_a_team_goes_on_when_google_refuses_to_pause() {
+        let ads = google_ads_with_two_campaigns_running("team-save-ads-refused").await;
+        ads.google.script(|script| {
+            for number in [11, 21] {
+                script.refuse_pause.insert(
+                    format!("customers/1234567890/campaigns/{number}"),
+                    "Mutations are disabled".to_string(),
+                );
+            }
+        });
+        let team = team_as_sent(&ads, |team| without_google_ads(team, "kai"));
+
+        super::call(&ads.harness.daemon, "team.save", &json!({ "team": team }))
+            .await
+            .expect("saved all the same");
+
+        assert_eq!(after_the_fixture(&ads), ["team.updated"]);
+        assert!(ads.store.load(&ads.at).expect("reads").is_none());
+        let reads = ads.harness.daemon.spend_reads();
+        for plan in ["MP-1", "MP-2"] {
+            assert_eq!(
+                reads.get(plan).and_then(|read| read.unstopped.as_deref()),
+                Some("Google answered “Mutations are disabled”"),
+                "{plan}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starting_a_team_without_google_ads_pauses_first() {
+        let ads = google_ads_with_two_campaigns_running("team-start-ads").await;
+        let team = team_as_sent(&ads, |team| without_google_ads(team, "kai"));
+        let criteria = serde_json::to_value(
+            ads.harness
+                .project
+                .deps
+                .files
+                .read_criteria()
+                .expect("reads"),
+        )
+        .expect("JSON");
+
+        super::call(
+            &ads.harness.daemon,
+            "team.start",
+            &json!({ "team": team, "criteria": criteria }),
+        )
+        .await
+        .expect("started");
+
+        assert_eq!(paused_at_google(&ads).len(), 2);
+        let kinds = after_the_fixture(&ads);
+        assert_eq!(
+            kinds[..3],
+            [
+                "marketing_campaign.paused",
+                "marketing_campaign.paused",
+                "team.updated"
+            ]
+        );
+    }
+
+    /// Kai, who made the campaigns, and Lia, who never worked and has Google Ads too.
+    pub(in crate::daemon) async fn kai_and_lia_with_google_ads(
+        name: &str,
+    ) -> (Ads, crate::sign_in::OAuthGrant) {
+        let ads = Ads::with_team(
+            name,
+            |wire| {
+                crate::tools::fixtures::with_the_marketing_specialist(wire);
+                wire["agents"].as_array_mut().expect("agents").push(
+                    farik_core::team::fixtures::an_agent_wire("lia", "marketing_specialist"),
+                );
+            },
+            |_, _| {},
+        )
+        .await;
+        let lia = ads.connect("lia");
+        (with_two_campaigns_running(ads), lia)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn saving_a_team_without_an_agent_that_has_google_ads_pauses_first() {
+        let (ads, lia) = kai_and_lia_with_google_ads("team-save-ads-agent").await;
+        // Lia has never worked, so the save may remove her, with her Google Ads.
+        let team = team_as_sent(&ads, |team| {
+            team["agents"]
+                .as_array_mut()
+                .expect("agents")
+                .retain(|agent| agent["id"] != "lia");
+        });
+
+        super::call(&ads.harness.daemon, "team.save", &json!({ "team": team }))
+            .await
+            .expect("saved");
+
+        // Paused with Lia's sign-in, the one that goes, before the team was written.
+        assert_eq!(paused_at_google(&ads).len(), 2);
+        let lia_bearer = format!("Bearer {}", lia.access_token.expose());
+        for seen in ads.google.requests() {
+            assert_eq!(
+                seen.headers.get("authorization").map(String::as_str),
+                Some(lia_bearer.as_str())
+            );
+        }
+        assert_eq!(
+            after_the_fixture(&ads),
+            [
+                "marketing_campaign.paused",
+                "marketing_campaign.paused",
+                "team.updated"
+            ]
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_refused_save_pauses_nothing() {
+        let ads = google_ads_with_two_campaigns_running("team-save-ads-refused-save").await;
+        // Kai's Google Ads gone, and the team has no Product Manager: the save is refused.
+        let team = team_as_sent(&ads, |team| {
+            without_google_ads(team, "kai");
+            team["agents"]
+                .as_array_mut()
+                .expect("agents")
+                .retain(|agent| agent["role"] != "product_manager");
+        });
+
+        let refused = super::call(&ads.harness.daemon, "team.save", &json!({ "team": team })).await;
+
+        assert!(refused.is_err(), "{refused:?}");
+        assert!(
+            ads.google.requests().is_empty(),
+            "{:?}",
+            ads.google.requests()
+        );
+        assert_eq!(after_the_fixture(&ads), [] as [String; 0]);
+        assert!(ads.store.load(&ads.at).expect("reads").is_some());
     }
 
     #[tokio::test(flavor = "multi_thread")]
