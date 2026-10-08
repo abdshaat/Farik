@@ -50,6 +50,15 @@ pub use crate::generated::event::{
 };
 /// The channel's vocabularies, named for what they are rather than for the body they sit in.
 pub use crate::generated::event::{MessagePostedBodyKind as MessageKind, Thread};
+/// The bodies of the eight `purchase_order.` kinds, with the vocabularies they repeat: an
+/// approval, a rejection and a closing share one.
+pub use crate::generated::event::{
+    PurchaseOrderDecisionBody, PurchaseOrderDraftedBody, PurchaseOrderDraftedBodyPeriod,
+    PurchaseOrderExpiredBody, PurchaseOrderLine, PurchaseOrderPlacedBody,
+    PurchaseOrderReceivedBody, PurchaseOrderStatus, PurchaseOrderUpdatedBody,
+};
+/// The bodies of the three `renewal.` kinds.
+pub use crate::generated::event::{RenewalCheckedBody, RenewalDismissedBody, RenewalFlaggedBody};
 /// The bodies of the four `site.` kinds: an approval, a decline and a removal share one.
 pub use crate::generated::event::{SiteDecisionBody, SiteRequestedBody};
 /// The bodies of the six `social_post.` kinds, with the vocabularies they repeat.
@@ -193,6 +202,17 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::SiteApproved | EventKind::SiteDeclined | EventKind::SiteRemoved => {
             "siteDecisionBody"
         }
+        EventKind::PurchaseOrderDrafted => "purchaseOrderDraftedBody",
+        EventKind::PurchaseOrderApproved
+        | EventKind::PurchaseOrderRejected
+        | EventKind::PurchaseOrderClosed => "purchaseOrderDecisionBody",
+        EventKind::PurchaseOrderPlaced => "purchaseOrderPlacedBody",
+        EventKind::PurchaseOrderUpdated => "purchaseOrderUpdatedBody",
+        EventKind::PurchaseOrderReceived => "purchaseOrderReceivedBody",
+        EventKind::PurchaseOrderExpired => "purchaseOrderExpiredBody",
+        EventKind::RenewalFlagged => "renewalFlaggedBody",
+        EventKind::RenewalDismissed => "renewalDismissedBody",
+        EventKind::RenewalChecked => "renewalCheckedBody",
     }
 }
 
@@ -240,6 +260,14 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::SocialPostRequested
             | EventKind::SiteRequested
             | EventKind::SiteDeclined
+            | EventKind::PurchaseOrderDrafted
+            | EventKind::PurchaseOrderApproved
+            | EventKind::PurchaseOrderRejected
+            | EventKind::PurchaseOrderPlaced
+            | EventKind::PurchaseOrderUpdated
+            | EventKind::PurchaseOrderReceived
+            | EventKind::PurchaseOrderClosed
+            | EventKind::PurchaseOrderExpired
     )
 }
 
@@ -343,13 +371,24 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::SiteRequested(_)
         | EventBody::SiteApproved(_)
         | EventBody::SiteDeclined(_)
-        | EventBody::SiteRemoved(_) => None,
+        | EventBody::SiteRemoved(_)
+        | EventBody::PurchaseOrderDrafted(_)
+        | EventBody::PurchaseOrderApproved(_)
+        | EventBody::PurchaseOrderRejected(_)
+        | EventBody::PurchaseOrderPlaced(_)
+        | EventBody::PurchaseOrderUpdated(_)
+        | EventBody::PurchaseOrderReceived(_)
+        | EventBody::PurchaseOrderClosed(_)
+        | EventBody::PurchaseOrderExpired(_)
+        | EventBody::RenewalFlagged(_)
+        | EventBody::RenewalDismissed(_)
+        | EventBody::RenewalChecked(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 78] = [
+pub const EVERY_KIND: [EventKind; 89] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -428,6 +467,17 @@ pub const EVERY_KIND: [EventKind; 78] = [
     EventKind::SiteApproved,
     EventKind::SiteDeclined,
     EventKind::SiteRemoved,
+    EventKind::PurchaseOrderDrafted,
+    EventKind::PurchaseOrderApproved,
+    EventKind::PurchaseOrderRejected,
+    EventKind::PurchaseOrderPlaced,
+    EventKind::PurchaseOrderUpdated,
+    EventKind::PurchaseOrderReceived,
+    EventKind::PurchaseOrderClosed,
+    EventKind::PurchaseOrderExpired,
+    EventKind::RenewalFlagged,
+    EventKind::RenewalDismissed,
+    EventKind::RenewalChecked,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -702,6 +752,39 @@ pub enum EventBody {
     /// The owner took a site away: one they allowed, or one of Farik's.
     #[serde(rename = "site.removed")]
     SiteRemoved(SiteDecisionBody),
+    /// The Procurement Specialist set up an order for the owner to approve or reject.
+    #[serde(rename = "purchase_order.drafted")]
+    PurchaseOrderDrafted(PurchaseOrderDraftedBody),
+    /// The owner approved an order: they will place and pay for it themselves.
+    #[serde(rename = "purchase_order.approved")]
+    PurchaseOrderApproved(PurchaseOrderDecisionBody),
+    /// The owner did not approve an order.
+    #[serde(rename = "purchase_order.rejected")]
+    PurchaseOrderRejected(PurchaseOrderDecisionBody),
+    /// The owner placed an approved order and marked it placed.
+    #[serde(rename = "purchase_order.placed")]
+    PurchaseOrderPlaced(PurchaseOrderPlacedBody),
+    /// A placed order's follow-up status, from its agent or the owner's correction.
+    #[serde(rename = "purchase_order.updated")]
+    PurchaseOrderUpdated(PurchaseOrderUpdatedBody),
+    /// The owner marked a placed order received.
+    #[serde(rename = "purchase_order.received")]
+    PurchaseOrderReceived(PurchaseOrderReceivedBody),
+    /// The owner closed a placed order that will not come.
+    #[serde(rename = "purchase_order.closed")]
+    PurchaseOrderClosed(PurchaseOrderDecisionBody),
+    /// Farik closed an order nobody decided or placed within 30 days.
+    #[serde(rename = "purchase_order.expired")]
+    PurchaseOrderExpired(PurchaseOrderExpiredBody),
+    /// Farik found a renewal whose decision date is two weeks off or nearer.
+    #[serde(rename = "renewal.flagged")]
+    RenewalFlagged(RenewalFlaggedBody),
+    /// The owner dismissed a renewal.
+    #[serde(rename = "renewal.dismissed")]
+    RenewalDismissed(RenewalDismissedBody),
+    /// Farik read the vendors register for the day.
+    #[serde(rename = "renewal.checked")]
+    RenewalChecked(RenewalCheckedBody),
 }
 
 impl EventBody {
@@ -787,6 +870,17 @@ impl EventBody {
             Self::SiteApproved(_) => EventKind::SiteApproved,
             Self::SiteDeclined(_) => EventKind::SiteDeclined,
             Self::SiteRemoved(_) => EventKind::SiteRemoved,
+            Self::PurchaseOrderDrafted(_) => EventKind::PurchaseOrderDrafted,
+            Self::PurchaseOrderApproved(_) => EventKind::PurchaseOrderApproved,
+            Self::PurchaseOrderRejected(_) => EventKind::PurchaseOrderRejected,
+            Self::PurchaseOrderPlaced(_) => EventKind::PurchaseOrderPlaced,
+            Self::PurchaseOrderUpdated(_) => EventKind::PurchaseOrderUpdated,
+            Self::PurchaseOrderReceived(_) => EventKind::PurchaseOrderReceived,
+            Self::PurchaseOrderClosed(_) => EventKind::PurchaseOrderClosed,
+            Self::PurchaseOrderExpired(_) => EventKind::PurchaseOrderExpired,
+            Self::RenewalFlagged(_) => EventKind::RenewalFlagged,
+            Self::RenewalDismissed(_) => EventKind::RenewalDismissed,
+            Self::RenewalChecked(_) => EventKind::RenewalChecked,
         }
     }
 }
@@ -1138,7 +1232,7 @@ mod tests {
                 // do design_plan.approved, design_plan.returned and preview.stopped, and
                 // tool_approval.granted and tool_approval.refused; no others do, and a
                 // fixture that made one equal must not hide it.
-                let shared: [&[EventKind]; 5] = [
+                let shared: [&[EventKind]; 6] = [
                     &[
                         EventKind::SkillAdded,
                         EventKind::SkillChanged,
@@ -1160,6 +1254,12 @@ mod tests {
                         EventKind::SiteApproved,
                         EventKind::SiteDeclined,
                         EventKind::SiteRemoved,
+                    ],
+                    // An order's approval, rejection and closing are `{ order, note }`.
+                    &[
+                        EventKind::PurchaseOrderApproved,
+                        EventKind::PurchaseOrderRejected,
+                        EventKind::PurchaseOrderClosed,
                     ],
                 ];
                 if other == kind
@@ -1790,7 +1890,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 78);
+        assert_eq!(EVERY_KIND.len(), 89);
     }
 
     #[test]
@@ -1824,6 +1924,224 @@ mod tests {
         event_from_value(&failed).expect("a refused pause");
         failed["body"]["failed"] = json!("x".repeat(301));
         assert_eq!(refusal(&failed).len(), 1, "words are cut at 300");
+    }
+
+    #[test]
+    fn round_trips_every_order_and_renewal_event() {
+        let orders = [
+            EventKind::PurchaseOrderDrafted,
+            EventKind::PurchaseOrderApproved,
+            EventKind::PurchaseOrderRejected,
+            EventKind::PurchaseOrderPlaced,
+            EventKind::PurchaseOrderUpdated,
+            EventKind::PurchaseOrderReceived,
+            EventKind::PurchaseOrderClosed,
+            EventKind::PurchaseOrderExpired,
+        ];
+        let renewals = [
+            EventKind::RenewalFlagged,
+            EventKind::RenewalDismissed,
+            EventKind::RenewalChecked,
+        ];
+        for kind in orders.into_iter().chain(renewals) {
+            assert!(EVERY_KIND.contains(&kind), "{kind} is counted");
+            let wire = an_event_wire(kind);
+            let event = event_from_value(&wire).expect("a valid order or renewal event");
+            assert_eq!(event.body.kind(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+            // An order's step is about its task; a renewal is about none.
+            assert_eq!(
+                is_about_one_contract(kind),
+                orders.contains(&kind),
+                "{kind}"
+            );
+        }
+        assert_eq!(EVERY_KIND.len(), 89);
+
+        // A decision always carries its note, empty when the owner said nothing, which leaves a
+        // body of the order alone to an expiry: the schema's choice of bodies must match one.
+        for kind in [
+            EventKind::PurchaseOrderApproved,
+            EventKind::PurchaseOrderRejected,
+            EventKind::PurchaseOrderClosed,
+        ] {
+            let mut wire = an_event_wire(kind);
+            wire["body"]
+                .as_object_mut()
+                .expect("an object")
+                .remove("note");
+            let errors = refusal(&wire);
+            assert!(!errors.is_empty(), "{kind} without its note");
+            assert!(errors.iter().all(|error| error.path.starts_with("/body")));
+        }
+        let mut expired = an_event_wire(EventKind::PurchaseOrderExpired);
+        expired["body"]["note"] = json!("");
+        assert!(!refusal(&expired).is_empty(), "an expiry with a note");
+        // The agent's follow-up is one of four statuses, never a step only the owner takes.
+        for status in [
+            "placed",
+            "received",
+            "paid",
+            "confirmed",
+            "delivered",
+            "cancelled",
+        ] {
+            let mut updated = an_event_wire(EventKind::PurchaseOrderUpdated);
+            updated["body"]["status"] = json!(status);
+            let errors = refusal(&updated);
+            assert!(!errors.is_empty(), "a status {status}");
+            assert!(errors.iter().all(|error| error.path.starts_with("/body")));
+        }
+        for status in ["preparing", "shipped", "delayed", "problem"] {
+            let mut updated = an_event_wire(EventKind::PurchaseOrderUpdated);
+            updated["body"]["status"] = json!(status);
+            event_from_value(&updated).expect("a follow-up status");
+        }
+    }
+
+    /// The body of an order event with `changes` applied, each a JSON pointer into the body and
+    /// the value to put there.
+    fn changed(kind: EventKind, changes: &[(&str, serde_json::Value)]) -> serde_json::Value {
+        let mut wire = an_event_wire(kind);
+        for (pointer, value) in changes {
+            if let Some(field) = wire["body"].pointer_mut(pointer) {
+                *field = value.clone();
+            } else {
+                // A field the fixture leaves out: its parent is an object and its name the last part.
+                let (parent, name) = pointer.rsplit_once('/').expect("a pointer into the body");
+                wire["body"]
+                    .pointer_mut(parent)
+                    .and_then(serde_json::Value::as_object_mut)
+                    .expect("an object")
+                    .insert(name.to_string(), value.clone());
+            }
+        }
+        wire
+    }
+
+    #[test]
+    fn holds_a_drafted_order_to_its_own_shape() {
+        let line = json!({
+            "item": "Baby car mirror", "quantity": 3, "unit": "piece",
+            "unit_price": "19.99", "line_total": "59.97"
+        });
+        let drafted = |changes: &[(&str, serde_json::Value)]| {
+            changed(EventKind::PurchaseOrderDrafted, changes)
+        };
+        event_from_value(&drafted(&[])).expect("the fixture is an order");
+        for (what, pointer, value) in [
+            ("no lines", "/lines", json!([])),
+            ("51 lines", "/lines", json!(vec![line.clone(); 51])),
+            ("a zero quantity", "/lines/0/quantity", json!(0)),
+            ("too many of them", "/lines/0/quantity", json!(1_000_001)),
+            (
+                "a price with three decimals",
+                "/lines/0/unit_price",
+                json!("19.999"),
+            ),
+            (
+                "a total with a separator",
+                "/lines/0/line_total",
+                json!("1,059.97"),
+            ),
+            ("a seller over a line break", "/seller", json!("A\nB")),
+            ("no seller", "/seller", json!("")),
+            ("a lower-case currency", "/currency", json!("usd")),
+            ("a weekly period", "/period", json!("week")),
+            ("a total past the limit", "/total", json!("10000000.01")),
+            ("a short reason", "/why", json!("too short")),
+            ("a long reason", "/why", json!("w".repeat(601))),
+            ("an unknown field", "/paid", json!("1.00")),
+        ] {
+            let errors = refusal(&drafted(&[(pointer, value)]));
+            assert!(!errors.is_empty(), "{what}");
+            assert!(
+                errors.iter().all(|error| error.path.starts_with("/body")),
+                "{what}: {errors:?}"
+            );
+        }
+        // The edges of the limits the schema holds an order to: 19 and 20 characters of why, 100
+        // and 101 of seller.
+        for (field, length, allowed) in [
+            ("why", 19, false),
+            ("why", 20, true),
+            ("why", 600, true),
+            ("seller", 100, true),
+            ("seller", 101, false),
+        ] {
+            let wire = drafted(&[(&format!("/{field}"), json!("w".repeat(length)))]);
+            assert_eq!(
+                event_from_value(&wire).is_ok(),
+                allowed,
+                "{field} of {length} characters"
+            );
+        }
+        let mut free = line;
+        free["unit"] = json!("");
+        event_from_value(&drafted(&[("/lines", json!([free]))])).expect("a line may have no unit");
+    }
+
+    #[test]
+    fn holds_each_step_of_an_order_and_a_renewal_to_its_own_shape() {
+        // What was paid and when are an owner's, and the currency is three capitals.
+        for (kind, pointer, value) in [
+            (EventKind::PurchaseOrderPlaced, "/paid", json!("1,450.00")),
+            (EventKind::PurchaseOrderPlaced, "/paid", json!("1450")),
+            (EventKind::PurchaseOrderPlaced, "/currency", json!("usd")),
+            (
+                EventKind::PurchaseOrderPlaced,
+                "/placed_on",
+                json!("tomorrow"),
+            ),
+            (
+                EventKind::PurchaseOrderReceived,
+                "/renews_on",
+                json!("next year"),
+            ),
+            (EventKind::PurchaseOrderUpdated, "/note", json!("a\nb")),
+            (
+                EventKind::PurchaseOrderUpdated,
+                "/note",
+                json!("n".repeat(301)),
+            ),
+            (
+                EventKind::PurchaseOrderApproved,
+                "/note",
+                json!("n".repeat(601)),
+            ),
+            (EventKind::RenewalFlagged, "/vendor", json!("")),
+            (EventKind::RenewalDismissed, "/renewal", json!(0)),
+            (EventKind::RenewalChecked, "/unreadable", json!(-1)),
+        ] {
+            let wire = changed(kind, &[(pointer, value.clone())]);
+            assert!(!refusal(&wire).is_empty(), "{kind} {pointer} {value}");
+        }
+        for (kind, changes) in [
+            (
+                EventKind::PurchaseOrderPlaced,
+                vec![("/paid", json!("1450.00")), ("/currency", json!("EUR"))],
+            ),
+            (
+                EventKind::PurchaseOrderReceived,
+                vec![
+                    ("/paid", json!("0.00")),
+                    ("/currency", json!("EUR")),
+                    ("/renews_on", json!("2027-10-08")),
+                ],
+            ),
+            (
+                EventKind::PurchaseOrderUpdated,
+                vec![("/note", json!("")), ("/expected_on", json!("2026-10-20"))],
+            ),
+            (
+                EventKind::PurchaseOrderApproved,
+                vec![("/note", json!("Go ahead."))],
+            ),
+        ] {
+            let wire = changed(kind, &changes);
+            let event = event_from_value(&wire).expect("a valid step");
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+        }
     }
 
     #[test]
@@ -1953,7 +2271,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 78);
+        assert_eq!(EVERY_KIND.len(), 89);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

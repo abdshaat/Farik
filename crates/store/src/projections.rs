@@ -739,7 +739,20 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::MarketingBudgetReached(_)
         | EventBody::MarketingCampaignPaused(_)
         // A removal is about no task, and a site is folded from the log when it is asked for.
-        | EventBody::SiteRemoved(_) => Ok(()),
+        | EventBody::SiteRemoved(_)
+        // An order and a renewal are folded from the log when they are asked for, as a post is,
+        // and hold no task: an order waits on the owner while its task goes on.
+        | EventBody::PurchaseOrderDrafted(_)
+        | EventBody::PurchaseOrderApproved(_)
+        | EventBody::PurchaseOrderRejected(_)
+        | EventBody::PurchaseOrderPlaced(_)
+        | EventBody::PurchaseOrderUpdated(_)
+        | EventBody::PurchaseOrderReceived(_)
+        | EventBody::PurchaseOrderClosed(_)
+        | EventBody::PurchaseOrderExpired(_)
+        | EventBody::RenewalFlagged(_)
+        | EventBody::RenewalDismissed(_)
+        | EventBody::RenewalChecked(_) => Ok(()),
     }
 }
 

@@ -183,6 +183,44 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "note": "We do not buy from them."
         }),
         EventKind::SiteRemoved => json!({ "host": "shop.example" }),
+        EventKind::PurchaseOrderDrafted => json!({
+            "order": 1,
+            "seller": "Acme Auto Parts",
+            "seller_contact": "sales@acme.example",
+            "lines": [{
+                "item": "Baby car mirror",
+                "quantity": 3,
+                "unit": "piece",
+                "unit_price": "19.99",
+                "line_total": "59.97"
+            }],
+            "currency": "USD",
+            "period": "once",
+            "total": "59.97",
+            "delivery": "Ships in 3 days",
+            "terms": "Net 30",
+            "url": "https://www.acme.example/mirrors",
+            "evaluation": "evaluations/baby-car-mirrors.md",
+            "why": "It is the cheapest seller that ships to us with a safety mark."
+        }),
+        EventKind::PurchaseOrderApproved
+        | EventKind::PurchaseOrderRejected
+        | EventKind::PurchaseOrderClosed => json!({ "order": 1, "note": "" }),
+        EventKind::PurchaseOrderPlaced => json!({ "order": 1, "placed_on": "2026-10-08" }),
+        EventKind::PurchaseOrderUpdated => json!({
+            "order": 1,
+            "status": "shipped",
+            "note": "Left the seller's depot."
+        }),
+        EventKind::PurchaseOrderReceived => json!({ "order": 1, "received_on": "2026-10-15" }),
+        EventKind::PurchaseOrderExpired => json!({ "order": 1 }),
+        EventKind::RenewalFlagged => json!({
+            "vendor": "Vercel",
+            "renews_on": "2026-11-30",
+            "decide_by": "2026-10-31"
+        }),
+        EventKind::RenewalDismissed => json!({ "renewal": 7 }),
+        EventKind::RenewalChecked => json!({ "due": 1, "unreadable": 0 }),
         EventKind::MarketingCampaignCreated => json!({
             "plan": "MP-1",
             "key": "search-launch",

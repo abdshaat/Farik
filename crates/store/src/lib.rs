@@ -23,8 +23,12 @@ pub mod metrics;
 pub mod migrations;
 /// The board, derived from the log.
 pub mod projections;
+/// The purchase orders the log holds.
+pub mod purchase_orders;
 /// Where the files and the log disagree.
 pub mod reconcile;
+/// The renewals Farik flagged for the owner.
+pub mod renewals;
 /// Filing a request, for every caller.
 pub mod requests;
 /// What the repository says it is.

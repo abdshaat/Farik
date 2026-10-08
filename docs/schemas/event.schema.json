@@ -134,7 +134,18 @@
         "site.requested",
         "site.approved",
         "site.declined",
-        "site.removed"
+        "site.removed",
+        "purchase_order.drafted",
+        "purchase_order.approved",
+        "purchase_order.rejected",
+        "purchase_order.placed",
+        "purchase_order.updated",
+        "purchase_order.received",
+        "purchase_order.closed",
+        "purchase_order.expired",
+        "renewal.flagged",
+        "renewal.dismissed",
+        "renewal.checked"
       ]
     },
     "eventBodyWire": {
@@ -210,7 +221,16 @@
         { "$ref": "#/$defs/marketingBudgetReachedBody" },
         { "$ref": "#/$defs/marketingCampaignPausedBody" },
         { "$ref": "#/$defs/siteRequestedBody" },
-        { "$ref": "#/$defs/siteDecisionBody" }
+        { "$ref": "#/$defs/siteDecisionBody" },
+        { "$ref": "#/$defs/purchaseOrderDraftedBody" },
+        { "$ref": "#/$defs/purchaseOrderDecisionBody" },
+        { "$ref": "#/$defs/purchaseOrderPlacedBody" },
+        { "$ref": "#/$defs/purchaseOrderUpdatedBody" },
+        { "$ref": "#/$defs/purchaseOrderReceivedBody" },
+        { "$ref": "#/$defs/purchaseOrderExpiredBody" },
+        { "$ref": "#/$defs/renewalFlaggedBody" },
+        { "$ref": "#/$defs/renewalDismissedBody" },
+        { "$ref": "#/$defs/renewalCheckedBody" }
       ]
     },
     "contractSummary": {
@@ -1281,6 +1301,157 @@
         "host": { "type": "string", "minLength": 1, "maxLength": 253 },
         "request": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "purchaseOrderNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615,
+      "description": "A purchase order's number, the n of PO-n: one more than the highest the log and the orders folder hold."
+    },
+    "purchaseOrderAmount": {
+      "type": "string",
+      "pattern": "^(([0-9]|[1-9][0-9]{1,6})\\.[0-9]{2}|10000000\\.00)$",
+      "description": "An amount of money in the order's currency as a decimal string with exactly two decimals, from 0.00 to 10000000.00, which is the most an order totals. Compared in hundredths, never as a float."
+    },
+    "purchaseOrderCurrency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "A currency, three capital letters."
+    },
+    "purchaseOrderLine": {
+      "title": "Purchase Order Line",
+      "description": "One line of a purchase order, as the agent wrote it, with the line's total Farik computed from the quantity and the unit price in hundredths. Untrusted text: item and unit are shown as text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item", "quantity", "unit", "unit_price", "line_total"],
+      "properties": {
+        "item": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
+        "quantity": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "unit": { "type": "string", "maxLength": 20, "pattern": "^[^\\r\\n]*$" },
+        "unit_price": { "$ref": "#/$defs/purchaseOrderAmount" },
+        "line_total": { "$ref": "#/$defs/purchaseOrderAmount" }
+      }
+    },
+    "purchaseOrderStatus": {
+      "title": "Purchase Order Status",
+      "description": "What the agent learned from a follow-up about a placed order: the seller is making or packing it (preparing), it is on its way (shipped), it will be late (delayed, with the reason and the day it is expected) or something is wrong (problem: out of stock, a payment refused, cancelled by the seller). Never placed, received, paid, confirmed, delivered or cancelled: only the owner takes those steps.",
+      "type": "string",
+      "enum": ["preparing", "shipped", "delayed", "problem"]
+    },
+    "purchaseOrderDraftedBody": {
+      "title": "Purchase Order Drafted Body",
+      "description": "The Procurement Specialist set up an order for the owner to approve or reject, and wrote its workbook, orders/PO-<order>.xlsx, in its private folder (docs/SPEC.md 6.10; ADR 0039). The agent suggests an order and never places, pays for, confirms or cancels one. order is its number; seller, seller_contact, each line's item and unit, delivery, terms, url, evaluation and why are the agent's own words (untrusted, shown as text); url is the seller's page, on an approved site, or empty for a seller with no page; evaluation is the comparison it rests on, evaluations/<name>.md; total is the exact sum of the lines. The envelope names the task, agent and session. The order waits for the owner alone and holds no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "seller", "seller_contact", "lines", "currency", "period", "total", "delivery", "terms", "url", "evaluation", "why"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "seller": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[^\\r\\n]+$" },
+        "seller_contact": { "type": "string", "maxLength": 200, "pattern": "^[^\\r\\n]*$" },
+        "lines": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/purchaseOrderLine" } },
+        "currency": { "$ref": "#/$defs/purchaseOrderCurrency" },
+        "period": { "type": "string", "enum": ["once", "month", "year"] },
+        "total": { "$ref": "#/$defs/purchaseOrderAmount" },
+        "delivery": { "type": "string", "maxLength": 600 },
+        "terms": { "type": "string", "maxLength": 600 },
+        "url": { "type": "string", "maxLength": 2000 },
+        "evaluation": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "why": { "type": "string", "minLength": 20, "maxLength": 600 }
+      }
+    },
+    "purchaseOrderDecisionBody": {
+      "title": "Purchase Order Decision Body",
+      "description": "The owner approved an order (purchase_order.approved: they will place it themselves), did not (purchase_order.rejected), or closed a placed one that will not come (purchase_order.closed: the seller cancelled or refunded it, or it was lost) (docs/SPEC.md 6.10; ADR 0039). note is the owner's own words, empty when they said nothing; it is always present, so that this body is never also an expiry's, which has the order alone. The three kinds share one shape; the envelope names the order's task and no agent and no session: only the owner decides.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "note"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "purchaseOrderPlacedBody": {
+      "title": "Purchase Order Placed Body",
+      "description": "The owner placed an approved order and paid for it themselves, on placed_on, and marked it placed (docs/SPEC.md 6.10; ADR 0039). paid is what they paid, if they knew, and currency its currency, the order's when paid is given alone. The envelope names the order's task and no agent and no session: no Farik tool records a placing or a payment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "placed_on"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "placed_on": { "type": "string", "format": "date" },
+        "paid": { "$ref": "#/$defs/purchaseOrderAmount" },
+        "currency": { "$ref": "#/$defs/purchaseOrderCurrency" }
+      }
+    },
+    "purchaseOrderUpdatedBody": {
+      "title": "Purchase Order Updated Body",
+      "description": "What a placed order's follow-up learned, or the owner's correction of it (docs/SPEC.md 6.10; ADR 0039): the agent's, when the envelope names the order's own agent, and the owner's, when it names none. status is one of four; note is the reason or what is known, on one line, required for delayed and problem, and expected_on the day the seller expects the order, required for delayed. The latest counts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "status", "note"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "status": { "$ref": "#/$defs/purchaseOrderStatus" },
+        "note": { "type": "string", "maxLength": 300, "pattern": "^[^\\r\\n]*$" },
+        "expected_on": { "type": "string", "format": "date" }
+      }
+    },
+    "purchaseOrderReceivedBody": {
+      "title": "Purchase Order Received Body",
+      "description": "The owner marked a placed order received, on received_on (docs/SPEC.md 6.10; ADR 0039). paid and currency are what they paid, if given here (the latest paid given, at placing or receiving, is what was paid), and renews_on the day a subscription or anything paid for again renews. The envelope names the order's task and no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "received_on"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "received_on": { "type": "string", "format": "date" },
+        "paid": { "$ref": "#/$defs/purchaseOrderAmount" },
+        "currency": { "$ref": "#/$defs/purchaseOrderCurrency" },
+        "renews_on": { "type": "string", "format": "date" }
+      }
+    },
+    "purchaseOrderExpiredBody": {
+      "title": "Purchase Order Expired Body",
+      "description": "Farik closed an order by itself (docs/SPEC.md 6.10; ADR 0039): one not decided within 30 days of its drafting, or approved and not marked placed within 30 days of its approval. A placed order never expires. The envelope names the order's task and no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" }
+      }
+    },
+    "renewalFlaggedBody": {
+      "title": "Renewal Flagged Body",
+      "description": "Farik read the vendors register and found a renewal whose decision date is two weeks off or nearer (docs/SPEC.md 6.10; ADR 0039). The event's sequence number is the renewal's number. vendor is the register's own text (untrusted, on one line, 1 to 100 characters), renews_on the day it renews and decide_by the last day to change or cancel it. About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vendor", "renews_on", "decide_by"],
+      "properties": {
+        "vendor": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[^\\r\\n]+$" },
+        "renews_on": { "type": "string", "format": "date" },
+        "decide_by": { "type": "string", "format": "date" }
+      }
+    },
+    "renewalDismissedBody": {
+      "title": "Renewal Dismissed Body",
+      "description": "The owner dismissed a renewal, or asked the team to review it and so dismissed it (docs/SPEC.md 6.10; ADR 0039): renewal is the sequence number of its renewal.flagged. The envelope names no task, no agent and no session: only the owner dismisses.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["renewal"],
+      "properties": {
+        "renewal": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "renewalCheckedBody": {
+      "title": "Renewal Checked Body",
+      "description": "Farik's daily check of the vendors register ran (docs/SPEC.md 6.10; ADR 0039): due is how many renewals it flagged, unreadable how many rows held a date or a notice or a vendor it could not read. Recorded once per UTC day, which is how the check knows it ran. About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["due", "unreadable"],
+      "properties": {
+        "due": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "unreadable": { "type": "integer", "minimum": 0, "maximum": 1000000 }
       }
     },
     "connectorTag": {

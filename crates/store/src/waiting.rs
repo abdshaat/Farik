@@ -15,6 +15,7 @@ use farik_protocol::event::{EventBody, EventKind, FarikEvent, TaskStatusWire};
 
 use crate::files::ProjectFiles;
 use crate::marketing::{PostMedia, PostState, marketing_plans, social_posts};
+use crate::purchase_orders::{OrderState, expires_at, purchase_orders};
 use crate::sites::site_requests;
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
@@ -40,6 +41,9 @@ pub enum WaitingKind {
     /// A site the Procurement Specialist asked to read, which the owner allows or does not
     /// (ADR 0039).
     SiteRequest,
+    /// A purchase order the Procurement Specialist set up, which the owner approves or rejects
+    /// and places themselves (ADR 0039). It holds no task.
+    PurchaseOrder,
 }
 
 impl WaitingKind {
@@ -56,6 +60,7 @@ impl WaitingKind {
             Self::MarketingPlan => "marketing_plan",
             Self::SocialPost => "social_post",
             Self::SiteRequest => "site_request",
+            Self::PurchaseOrder => "purchase_order",
         }
     }
 }
@@ -85,6 +90,57 @@ pub struct Waiting {
     pub post: Option<PostAsk>,
     /// A site's ask.
     pub site: Option<SiteAsk>,
+    /// A purchase order's ask.
+    pub order: Option<OrderAsk>,
+}
+
+/// One line of a purchase order that waits, as the agent wrote it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderAskLine {
+    /// What is bought. The agent's words.
+    pub item: String,
+    /// How many.
+    pub quantity: u32,
+    /// What one is counted in, possibly empty. The agent's words.
+    pub unit: String,
+    /// The price of one, with two decimals.
+    pub unit_price: String,
+    /// Quantity times price, with two decimals.
+    pub line_total: String,
+}
+
+/// A purchase order that waits for the owner, as its `purchase_order.drafted` recorded it. Every
+/// text field is the agent's own words, which are untrusted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderAsk {
+    /// The order's number, the n of PO-n.
+    pub order: u64,
+    /// The seller.
+    pub seller: String,
+    /// How to reach the seller.
+    pub seller_contact: String,
+    /// The lines, in the order the agent wrote them.
+    pub lines: Vec<OrderAskLine>,
+    /// The currency of every amount.
+    pub currency: String,
+    /// `once`, `month` or `year`.
+    pub period: String,
+    /// The lines' exact sum, with two decimals.
+    pub total: String,
+    /// Delivery, as the agent wrote it.
+    pub delivery: String,
+    /// Terms, as the agent wrote them.
+    pub terms: String,
+    /// The seller's page, exactly as the agent wrote it, or empty.
+    pub url: String,
+    /// The comparison the order rests on, `evaluations/<name>.md`.
+    pub evaluation: String,
+    /// Why this seller, in the agent's words.
+    pub why: String,
+    /// When it was drafted.
+    pub at: DateTime<chrono::Utc>,
+    /// When Farik closes it by itself if nobody decides.
+    pub expires_at: DateTime<chrono::Utc>,
 }
 
 /// A site an agent asked to read, as its `site.requested` recorded it. Its host is in ASCII; its
@@ -270,12 +326,14 @@ pub fn waiting(
         plan: None,
         post: None,
         site: None,
+        order: None,
     };
     let mut waiting = unanswered(&board, &history, &item);
     waiting.extend(undecided(&board, &history, team, &item));
     waiting.extend(plans_waiting(&board, log, team, &item)?);
     waiting.extend(posts_waiting(&board, log, team, &item)?);
     waiting.extend(sites_waiting(&board, log, team, &item)?);
+    waiting.extend(orders_waiting(&board, log, team, &item)?);
     let product_manager = team
         .active_agents()
         .find(|agent| Role::from(agent.role) == Role::ProductManager)
@@ -536,6 +594,71 @@ fn sites_waiting(
                 why: asked.why.clone(),
             }),
             ..item(row, WaitingKind::SiteRequest, Some(&asked.agent_id), line)
+        });
+    }
+    Ok(waiting)
+}
+
+/// Every purchase order nobody decided yet, oldest first (ADR 0039). Its row is about the task it
+/// was drafted in, which it does not hold, and its line says who set up an order from whom.
+fn orders_waiting(
+    board: &[TaskProjection],
+    log: &EventLog,
+    team: &Team,
+    item: &impl Fn(&TaskProjection, WaitingKind, Option<&str>, String) -> Waiting,
+) -> Result<Vec<Waiting>, StoreError> {
+    let mut waiting = Vec::new();
+    for record in purchase_orders(log)?
+        .into_iter()
+        .filter(|record| record.state == OrderState::Drafted)
+    {
+        let Some(row) = board.iter().find(|row| row.task_id == record.task_id) else {
+            continue;
+        };
+        let Some(expires) = expires_at(&record) else {
+            continue;
+        };
+        let body = &record.drafted;
+        let line = format!(
+            "{} set up an order from {}: {} {}",
+            name_of(team, &record.agent_id),
+            body.seller.as_str(),
+            body.total.as_str(),
+            body.currency.as_str()
+        );
+        waiting.push(Waiting {
+            order: Some(OrderAsk {
+                order: record.order,
+                seller: body.seller.to_string(),
+                seller_contact: body.seller_contact.to_string(),
+                lines: body
+                    .lines
+                    .iter()
+                    .map(|line| OrderAskLine {
+                        item: line.item.to_string(),
+                        quantity: u32::try_from(line.quantity.get()).unwrap_or(u32::MAX),
+                        unit: line.unit.to_string(),
+                        unit_price: line.unit_price.as_str().to_string(),
+                        line_total: line.line_total.as_str().to_string(),
+                    })
+                    .collect(),
+                currency: body.currency.as_str().to_string(),
+                period: body.period.to_string(),
+                total: body.total.as_str().to_string(),
+                delivery: body.delivery.to_string(),
+                terms: body.terms.to_string(),
+                url: body.url.to_string(),
+                evaluation: body.evaluation.to_string(),
+                why: body.why.to_string(),
+                at: record.drafted_at,
+                expires_at: expires,
+            }),
+            ..item(
+                row,
+                WaitingKind::PurchaseOrder,
+                Some(&record.agent_id),
+                line,
+            )
         });
     }
     Ok(waiting)
@@ -1055,6 +1178,139 @@ mod tests {
         assert!(rows(&board).is_empty());
     }
 
+    /// Ada, Linus and Ivo, the Procurement Specialist.
+    fn with_ivo_buying() -> farik_core::team::Team {
+        let mut wire = farik_core::team::fixtures::a_team_wire();
+        wire["agents"] = json!([
+            { "id": "ada", "display_name": "Ada", "role": "product_manager", "status": "active" },
+            { "id": "linus", "display_name": "Linus", "role": "software_developer", "status": "active" },
+            { "id": "ivo", "display_name": "Ivo", "role": "procurement_specialist", "status": "active" },
+        ]);
+        farik_core::team::validate_team(&wire).expect("the fixture is a team")
+    }
+
+    #[test]
+    fn waiting_lists_each_drafted_order() {
+        let board = Board::new("waiting-order");
+        let team = with_ivo_buying();
+        board.file("FRK-1", "Price 500 boxes", |_| {});
+        board.session(
+            at(9, 5),
+            Some("FRK-1"),
+            "ivo",
+            "session-1",
+            "purchase_order.drafted",
+            json!({
+                "order": 1, "seller": "Acme", "seller_contact": "sales@acme.example",
+                "lines": [
+                    { "item": "Box", "quantity": 3, "unit": "piece", "unit_price": "19.99", "line_total": "59.97" },
+                    { "item": "Tape", "quantity": 1, "unit": "", "unit_price": "0.01", "line_total": "0.01" }
+                ],
+                "currency": "USD", "period": "month", "total": "59.98", "delivery": "3 days",
+                "terms": "Net 30", "url": "https://www.acme.example/shop",
+                "evaluation": "evaluations/boxes.md", "why": "It is the cheapest seller that ships here."
+            }),
+        );
+        let rows = |board: &Board| {
+            waiting(&board.projections, &board.log, &board.files, &team)
+                .expect("the store reads")
+                .into_iter()
+                .filter(|item| item.kind == WaitingKind::PurchaseOrder)
+                .collect::<Vec<_>>()
+        };
+        let listed = rows(&board);
+        assert_eq!(listed.len(), 1);
+        let row = &listed[0];
+        assert_eq!(row.line, "Ivo set up an order from Acme: 59.98 USD");
+        assert_eq!(row.agent_id.as_deref(), Some("ivo"));
+        assert_eq!(row.task_id.as_str(), "FRK-1");
+        assert_eq!(row.title, "Price 500 boxes");
+        assert_eq!(WaitingKind::PurchaseOrder.as_str(), "purchase_order");
+        let ask = row.order.as_ref().expect("the order's ask");
+        assert_eq!(ask.order, 1);
+        assert_eq!(ask.seller, "Acme");
+        assert_eq!(ask.seller_contact, "sales@acme.example");
+        assert_eq!(ask.lines.len(), 2);
+        assert_eq!(ask.lines[0].item, "Box");
+        assert_eq!(ask.lines[0].line_total, "59.97");
+        assert_eq!(ask.currency, "USD");
+        assert_eq!(ask.period, "month");
+        assert_eq!(ask.total, "59.98");
+        assert_eq!(ask.delivery, "3 days");
+        assert_eq!(ask.terms, "Net 30");
+        assert_eq!(ask.url, "https://www.acme.example/shop");
+        assert_eq!(ask.evaluation, "evaluations/boxes.md");
+        assert_eq!(ask.why, "It is the cheapest seller that ships here.");
+        assert_eq!(ask.at, at(9, 5));
+
+        // The agent is waiting on the owner, and the task is not held.
+        let all = crate::activity::activity(
+            &board.log,
+            &board.projections,
+            &board.files,
+            &team,
+            at(12, 0),
+        )
+        .expect("the store reads");
+        let ivo = all.iter().find(|one| one.agent_id == "ivo").expect("Ivo");
+        assert_eq!(
+            ivo.line,
+            "Waiting on you: Ivo set up an order from Acme: 59.98 USD"
+        );
+        assert!(
+            !board
+                .projections
+                .task(&"FRK-1".parse().expect("a task id"))
+                .expect("reads")
+                .expect("the task")
+                .waiting_on_human,
+            "an order holds no task"
+        );
+    }
+
+    #[test]
+    fn an_order_waits_no_more_once_decided_or_expired() {
+        let board = Board::new("waiting-order-ends");
+        let team = with_ivo_buying();
+        board.file("FRK-1", "Price 500 boxes", |_| {});
+        let rows = |board: &Board| {
+            waiting(&board.projections, &board.log, &board.files, &team)
+                .expect("the store reads")
+                .into_iter()
+                .filter(|item| item.kind == WaitingKind::PurchaseOrder)
+                .collect::<Vec<_>>()
+        };
+        for (number, kind, body) in [
+            (
+                1,
+                "purchase_order.approved",
+                json!({ "order": 1, "note": "" }),
+            ),
+            (
+                2,
+                "purchase_order.rejected",
+                json!({ "order": 2, "note": "No." }),
+            ),
+            (3, "purchase_order.expired", json!({ "order": 3 })),
+        ] {
+            board.session(
+                at(9, number),
+                Some("FRK-1"),
+                "ivo",
+                "session-1",
+                "purchase_order.drafted",
+                json!({
+                    "order": number, "seller": "Bolt", "seller_contact": "",
+                    "lines": [{ "item": "Box", "quantity": 1, "unit": "", "unit_price": "1.00", "line_total": "1.00" }],
+                    "currency": "USD", "period": "once", "total": "1.00", "delivery": "", "terms": "",
+                    "url": "", "evaluation": "evaluations/boxes.md", "why": "A second seller for boxes."
+                }),
+            );
+            assert_eq!(rows(&board).len(), 1, "{kind} waits");
+            board.put(at(10, number), Some("FRK-1"), None, kind, body);
+            assert!(rows(&board).is_empty(), "{kind} decided");
+        }
+    }
     /// Ada, Linus and Kai, the Procurement Specialist.
     fn with_kai_buying() -> farik_core::team::Team {
         let mut wire = farik_core::team::fixtures::a_team_wire();
