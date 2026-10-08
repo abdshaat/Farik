@@ -1240,6 +1240,69 @@ fn marketing_plan_show_prints_the_list_and_one_plan() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn marketing_plan_show_prices_a_campaign_already_made_by_its_budget() {
+    let repository = a_project("human-plan-show-price");
+    let task = filed(&repository, "Add done.txt");
+    let today = project::at().date_naive();
+    let day = |days: i64| (today + chrono::Duration::days(days)).to_string();
+    let mut body = farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+    body["plan"] = json!("MP-1");
+    body["starts_on"] = json!(day(-1));
+    body["ends_on"] = json!(day(60));
+    body["posts"] = json!([]);
+    body["budget"] = json!({ "total": "2000.50", "google_ads": "1000.00" });
+    body["google_ads_account"] = json!("123-456-7890");
+    body["campaigns"] = json!([{
+        "key": "search-launch", "channel": "google_ads", "name": "Launch", "goal": "Sales",
+        "advertises": "Handmade candles", "budget": "300.00",
+        "starts_on": day(3), "ends_on": day(30)
+    }]);
+    record_as(
+        &repository,
+        &task,
+        Some(("kai", "session-1")),
+        "marketing_plan.proposed",
+        &body,
+    );
+    record(
+        &repository,
+        &task,
+        "marketing_plan.approved",
+        &json!({ "plan": "MP-1", "note": "" }),
+    );
+    let price = |repository: &farik_store::git::fixtures::TempRepo| {
+        let shown = run(
+            &repository.path,
+            &["--json", "marketing", "plan", "show", "MP-1"],
+        );
+        assert_eq!(shown.code, 0, "{}", shown.err);
+        let plan: Value = serde_json::from_str(shown.out.trim()).expect("one JSON document");
+        plan["campaigns"][0]["price"]
+            .as_str()
+            .unwrap_or("?")
+            .to_string()
+    };
+
+    // A run of 28 days is a total budget when the campaign is made.
+    assert_eq!(price(&repository), "fixed");
+
+    // Made as a daily one, it keeps that budget, and the plan says so.
+    record(
+        &repository,
+        "",
+        "marketing_campaign.created",
+        &json!({
+            "plan": "MP-1", "key": "search-launch", "account": "123-456-7890",
+            "campaign": "customers/1234567890/campaigns/11",
+            "budget": "customers/1234567890/campaignBudgets/12",
+            "budget_kind": "daily", "amount": "10.00"
+        }),
+    );
+    assert_eq!(price(&repository), "not_fixed");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn post_stop_sends_the_number() {
     let repository = a_project("human-post-stop-sent");
     let driver = LiveDriver::answering(&repository, Ok(a_plan_answer("stopped post 42")));

@@ -4,8 +4,12 @@
 
 use chrono::{DateTime, Utc};
 use farik_core::marketing::network_name;
-use farik_runtime::marketing::{list_row, post_row, posts_going_out, states_today, whole};
-use farik_store::marketing::{MarketingPlan, PlanState, marketing_plans, social_posts};
+use farik_runtime::marketing::{
+    kinds_made, list_row, post_row, posts_going_out, states_today, whole,
+};
+use farik_store::marketing::{
+    MarketingPlan, PlanState, created_campaigns, marketing_plans, social_posts,
+};
 use serde_json::json;
 
 use crate::Report;
@@ -26,9 +30,16 @@ pub fn show(project: &Project, plan: Option<&str>, now: DateTime<Utc>) -> Result
             .ok_or_else(|| format!("{id} is not a marketing plan of this project"))?;
         let (found, state) = (&plans[at], states[at]);
         let posts = social_posts(&project.log).map_err(|error| error.to_string())?;
+        let made = created_campaigns(&project.log).map_err(|error| error.to_string())?;
         return Ok(Report {
             lines: one_lines(found, state),
-            json: whole(found, state, &posts, now.date_naive()),
+            json: whole(
+                found,
+                state,
+                &posts,
+                now.date_naive(),
+                &kinds_made(&plans, &made, found),
+            ),
             json_lines: None,
         });
     }

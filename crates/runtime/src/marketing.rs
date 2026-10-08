@@ -4,13 +4,14 @@
 //! lock `PLANS` is held by a decision, by the owner's end and by the dated ends alike, so that two
 //! of them never act on one reading of the plans.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use farik_core::marketing::{
-    Amount, CapScope, EndReason, PlanRecord, PlanSpend, PostDetails, plans_to_end, price_kind,
+    Amount, BudgetKind, CapScope, CreatedCampaign, EndReason, Lineage, PlanRecord, PlanSpend,
+    PostDetails, PriceKind, is_carried, plans_to_end, price_kind,
 };
 use farik_protocol::event::{EventBody, EventIds, FarikEvent, new_event};
 use farik_store::marketing::{
@@ -653,16 +654,41 @@ fn written_posts(plan: &str, posts: &[SocialPost]) -> Vec<Value> {
         .collect()
 }
 
+/// The budget kind of the campaign Farik already made for each key `plan` carries (`is_carried`:
+/// made under a plan of its lineage, in its ad account), from `made`, every campaign Farik made,
+/// oldest first. A campaign keeps the kind of budget it was made with, so `whole` prices it by
+/// that, not by the dates a raised version gives it.
+#[must_use]
+pub fn kinds_made(
+    plans: &[MarketingPlan],
+    made: &[CreatedCampaign],
+    plan: &MarketingPlan,
+) -> BTreeMap<String, BudgetKind> {
+    let lineage = crate::daemon::ads_calls::lineage_of(plans, &plan.record.id);
+    let view = Lineage {
+        id: plan.record.id.as_str(),
+        plan: &plan.proposal,
+        lineage: &lineage,
+    };
+    made.iter()
+        .filter(|each| is_carried(&view, each))
+        .map(|each| (each.key.clone(), each.kind))
+        .collect()
+}
+
 /// One marketing plan whole, as `marketing_plan.get` words it: the proposal, its state, the owner's
 /// decision with their words, its end with the owner's note and the plan that replaced it, and the
 /// posts written for it. `posts` in it are the plan's slots, `written_posts` what was written for
-/// them, taken from `written`, every post of the project.
+/// them, taken from `written`, every post of the project. `made` is `kinds_made`: a campaign
+/// already made is priced by the budget it has, and any other as it would be made on the day the
+/// owner approved the plan, or today until then.
 #[must_use]
 pub fn whole(
     plan: &MarketingPlan,
     state: PlanState,
     written: &[SocialPost],
     today: chrono::NaiveDate,
+    made: &BTreeMap<String, BudgetKind>,
 ) -> Value {
     let proposal = &plan.proposal;
     // The price the owner saw: as of the day they approved the plan, and as of today until then.
@@ -714,7 +740,10 @@ pub fn whole(
             "name": campaign.name,
             "goal": campaign.goal,
             "advertises": campaign.advertises,
-            "price": price_kind(campaign, &proposal.currency, priced_on).as_str(),
+            "price": made.get(&campaign.key).map_or_else(
+                || price_kind(campaign, &proposal.currency, priced_on),
+                |kind| PriceKind::of(*kind),
+            ).as_str(),
             "budget": campaign.budget.to_string(),
             "starts_on": campaign.starts_on.to_string(),
             "ends_on": campaign.ends_on.to_string(),

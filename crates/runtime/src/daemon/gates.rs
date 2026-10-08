@@ -25,7 +25,7 @@ use farik_store::EventQuery;
 use farik_store::activity::{ActivityState, activity, moved_since};
 use farik_store::diff::diff_of;
 use farik_store::marketing::{
-    BudgetReached, MarketingPlan, budgets_reached, marketing_plans, social_posts,
+    BudgetReached, MarketingPlan, budgets_reached, created_campaigns, marketing_plans, social_posts,
 };
 use farik_store::requests::{
     RequestError, TOO_SHORT, contract_write, file_raise_request, file_request,
@@ -38,7 +38,7 @@ use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
 use crate::cost::extra_tries;
 use crate::marketing::ads::{ads_rows, open_raise, spend_and_pauses};
-use crate::marketing::{going_out, known_spend, list_row, states_today, whole};
+use crate::marketing::{going_out, kinds_made, known_spend, list_row, states_today, whole};
 use crate::tools::ToolDeps;
 use crate::tools::contracts::changed_fields;
 use crate::tools::design::ReviewState;
@@ -310,7 +310,14 @@ fn marketing_plan_get(state: &DaemonState, deps: &ToolDeps, id: &str) -> Result<
         .zip(states)
         .find(|(plan, _)| plan.record.id == id)
         .ok_or_else(|| Failure::new(NOT_FOUND, format!("there is no marketing plan {id}")))?;
-    let mut whole = whole(plan, state_of, &posts, deps.clock.now().date_naive());
+    let made = created_campaigns(&deps.log).map_err(|e| internal(&e))?;
+    let mut whole = whole(
+        plan,
+        state_of,
+        &posts,
+        deps.clock.now().date_naive(),
+        &kinds_made(&plans, &made, plan),
+    );
     if let (Some(whole), more) = (
         whole.as_object_mut(),
         spend_and_pauses(state, deps, plan).map_err(|e| internal(&e))?,
@@ -1357,6 +1364,99 @@ pub(super) mod tests {
             shown(&get("MP-2")),
             [("shrinks".into(), "Candle gifts".into(), "fixed".into())],
             "as of the day it was approved"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_raised_version_prices_a_campaign_already_made_by_the_budget_it_has() {
+        // The fixture clock reads 2026-09-22.
+        let harness = Harness::new(
+            "gates-plan-price-made",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.in_progress("FRK-1", "kai", "pm");
+        let propose = |plan: &str, replaces: Option<&str>, ends_on: &str| {
+            let mut body =
+                farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+            body["plan"] = json!(plan);
+            body["starts_on"] = json!("2026-09-20");
+            body["ends_on"] = json!("2027-01-31");
+            body["budget"] = json!({ "total": "2000.00", "google_ads": "1000.00" });
+            body["posts"] = json!([]);
+            body["google_ads_account"] = json!("123-456-7890");
+            if let Some(replaces) = replaces {
+                body["replaces"] = json!(replaces);
+            }
+            let campaign = |key: &str| {
+                json!({
+                    "key": key, "channel": "google_ads", "name": key, "goal": "Sales",
+                    "advertises": "Handmade candles", "budget": "300.00",
+                    "starts_on": "2026-09-24", "ends_on": ends_on
+                })
+            };
+            body["campaigns"] = json!([campaign("long-run"), campaign("short-run")]);
+            harness
+                .project
+                .record_by(Some("kai"), at(), "FRK-1", "marketing_plan.proposed", &body);
+        };
+        let prices = |plan: &str| -> Vec<(String, String)> {
+            query(
+                &harness.daemon,
+                "marketing_plan.get",
+                &json!({ "plan": plan }),
+                "marketingPlanGetResult",
+            )["campaigns"]
+                .as_array()
+                .expect("campaigns")
+                .iter()
+                .map(|campaign| {
+                    (
+                        campaign["key"].as_str().unwrap_or("").to_string(),
+                        campaign["price"].as_str().unwrap_or("?").to_string(),
+                    )
+                })
+                .collect()
+        };
+        let made = |plan: &str, key: &str, number: u64, kind: &str| {
+            harness.project.record_by(
+                Some("kai"),
+                at(),
+                "FRK-1",
+                "marketing_campaign.created",
+                &json!({
+                    "plan": plan, "key": key, "account": "123-456-7890",
+                    "campaign": format!("customers/1234567890/campaigns/{number}"),
+                    "budget": format!("customers/1234567890/campaignBudgets/{}", number + 100),
+                    "budget_kind": kind, "amount": "300.00",
+                }),
+            );
+        };
+
+        // MP-1 runs 98 days (daily budgets) and Farik made `long-run` under it as a daily one;
+        // `short-run` was never made.
+        propose("MP-1", None, "2026-12-31");
+        harness.project.plan_approved("FRK-1", "MP-1", "");
+        made("MP-1", "long-run", 11, "daily");
+        assert_eq!(
+            prices("MP-1"),
+            [
+                ("long-run".into(), "not_fixed".into()),
+                ("short-run".into(), "not_fixed".into())
+            ],
+            "98 days is a daily budget"
+        );
+
+        // MP-2 replaces it with the same keys over 30 days, a run that a new campaign would have
+        // a total budget for. `long-run` is made already, and keeps the daily budget it has.
+        propose("MP-2", Some("MP-1"), "2026-10-23");
+        assert_eq!(
+            prices("MP-2"),
+            [
+                ("long-run".into(), "not_fixed".into()),
+                ("short-run".into(), "fixed".into())
+            ],
+            "the campaign that exists keeps the kind it was made with"
         );
     }
 

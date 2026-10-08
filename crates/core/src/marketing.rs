@@ -847,6 +847,16 @@ pub enum PriceKind {
 }
 
 impl PriceKind {
+    /// The price of a campaign whose budget is of `kind`: `Fixed` for a total budget, `NotFixed`
+    /// for a daily one.
+    #[must_use]
+    pub const fn of(kind: BudgetKind) -> Self {
+        match kind {
+            BudgetKind::Total => Self::Fixed,
+            BudgetKind::Daily => Self::NotFixed,
+        }
+    }
+
     /// The wire's word for it.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -861,10 +871,7 @@ impl PriceKind {
 /// budget and `NotFixed` for a daily one.
 #[must_use]
 pub fn price_kind(campaign: &PlanCampaign, currency: &str, day: NaiveDate) -> PriceKind {
-    match campaign_budget(campaign, currency, Amount(0), day).0 {
-        BudgetKind::Total => PriceKind::Fixed,
-        BudgetKind::Daily => PriceKind::NotFixed,
-    }
+    PriceKind::of(campaign_budget(campaign, currency, Amount(0), day).0)
 }
 
 /// What Google holds for a campaign when it is enabled, read from Google for the call: its
