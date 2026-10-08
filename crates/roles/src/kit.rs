@@ -197,6 +197,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "prioritising-the-backlog",
             "scoping-a-release",
             "using-product-sources",
+            "deciding-data-pipelines",
         ),
         Role::ScrumMaster => embedded!("scrum_master":
             "planning-a-sprint",
@@ -256,6 +257,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "reviewing-renewals",
             "writing-purchase-orders",
             "using-procurement-sources",
+            "requesting-a-data-pipeline",
         ),
         _ => Vec::new(),
     }
@@ -1093,7 +1095,7 @@ mod tests {
             .map(|skill| (skill.name.as_str(), skill.description.as_str()))
             .collect();
         assert_eq!(
-            skills,
+            skills[..12],
             [
                 (
                     "defining-the-need",
@@ -1153,6 +1155,37 @@ mod tests {
             );
             assert_ne!(skill.name, "sourcing-a-product");
         }
+    }
+
+    /// Step 10e: after step 10d's twelve the Procurement Specialist's kit carries the skill of
+    /// asking for a data pipeline, which says how the three answers decide who decides, that going
+    /// on does not wait, and that an approval approves no site.
+    #[test]
+    fn procurement_kit_carries_requesting_a_data_pipeline() {
+        let kit = load_kit(Role::ProcurementSpecialist).expect("the Procurement Specialist's kit");
+        assert_eq!(kit.skills.len(), 13);
+        assert_eq!(kit.skills[12].name, "requesting-a-data-pipeline");
+        assert_eq!(
+            kit.skills[11].name, "using-procurement-sources",
+            "step 10d's twelve come first"
+        );
+        let (description, text) =
+            kit_skill(Role::ProcurementSpecialist, "requesting-a-data-pipeline");
+        assert!(description.starts_with("Use when"), "{description}");
+        for phrase in [
+            "`farik_request_data_pipeline`",
+            "`farik_read_data_pipelines`",
+            "`farik_request_sites`",
+            "`free` only when the source's own page says",
+            "sends_project_data",
+            "needs_account",
+        ] {
+            assert!(text.contains(phrase), "lacks \"{phrase}\":\n{text}");
+        }
+        // Said twice: of asking, and of an approval.
+        assert_eq!(text.matches("approves no site").count(), 2, "{text}");
+        assert!(text.len() < 6 * 1024, "{} bytes", text.len());
+        assert!(!text.contains(" @"), "no @ after a space");
     }
 
     /// Step 10d: the skills whose rules protect the user each say them, and the role's own loop and
@@ -1808,7 +1841,7 @@ mod tests {
         let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
         let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
         assert_eq!(
-            names,
+            names[..5],
             [
                 "asking-the-right-questions",
                 "writing-requirements",
@@ -1824,6 +1857,30 @@ mod tests {
                 skill.name
             );
         }
+    }
+
+    /// Step 10e: after its five the Product Manager's kit carries the skill of deciding a data
+    /// pipeline request, which says what Farik refuses, what to do then, and that an approval
+    /// only files a request.
+    #[test]
+    fn product_manager_kit_carries_deciding_data_pipelines() {
+        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        assert_eq!(kit.skills.len(), 6);
+        assert_eq!(kit.skills[5].name, "deciding-data-pipelines");
+        assert_eq!(kit.skills[4].name, "using-product-sources");
+        let (description, text) = kit_skill(Role::ProductManager, "deciding-data-pipelines");
+        assert!(description.starts_with("Use when"), "{description}");
+        for phrase in [
+            "`farik_decide_data_pipeline`",
+            "`pipeline_needs_owner`",
+            "decline or escalate",
+            "a decline names what to use instead",
+            "approves no site",
+        ] {
+            assert!(text.contains(phrase), "lacks \"{phrase}\":\n{text}");
+        }
+        assert!(text.len() < 6 * 1024, "{} bytes", text.len());
+        assert!(!text.contains(" @"), "no @ after a space");
     }
 
     #[test]

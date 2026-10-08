@@ -1,18 +1,18 @@
-# The Procurement Specialist's kit (ADR 0039; phase 7 step 10d): the twelve skills of its work,
-# loaded on demand, and five services, none of which can buy: the role recommends and the founder
-# decides (ADR 0039). `fx` is Farik's own server over Frankfurter, started by `farik connector fx`
-# (ADR 0038). Exa is searched and never asked for a page: its `web_fetch_exa` fetches on Exa's own
-# servers and follows a redirect to another site, out of the approved-sites check's sight (spec
-# 8.6), so it is `denied`; its search results carry text from any site, which the copy says. SerpApi
-# takes a key, and its `search` spends the user's searches, so it has an allowance; its two
-# on-screen versions are `denied`. Brex is signed in to by route 1 with read scopes only. AWS
-# Pricing is the first third-party `stdio` package in a shipped kit; it needs `uv`, and its three
-# tools that read or write a folder on the user's computer are `denied`. Tool lists were read on
-# 2026-10-07 and 2026-10-08 (the plan's Execution notes); the live pin test lists the four
-# third-party ones, and `fx`'s pin is the offline test `fx_server_lists_the_kits_tools`. Step 10g
-# adds the role's two servers of Farik's own. Its one skill in every prompt, `sourcing-a-product`,
-# is the role's own (ADR 0011); no kit skill repeats its loop or its section on the sites it may
-# read.
+# The Procurement Specialist's kit (ADR 0039; phase 7 steps 10d and 10e): the thirteen skills of its
+# work, loaded on demand (step 10e added the thirteenth, `requesting-a-data-pipeline`), and five
+# services, none of which can buy: the role recommends and the founder decides (ADR 0039). `fx` is
+# Farik's own server over Frankfurter, started by `farik connector fx` (ADR 0038). Exa is searched
+# and never asked for a page: its `web_fetch_exa` fetches on Exa's own servers and follows a
+# redirect to another site, out of the approved-sites check's sight (spec 8.6), so it is `denied`;
+# its search results carry text from any site, which the copy says. SerpApi takes a key, and its
+# `search` spends the user's searches, so it has an allowance; its two on-screen versions are
+# `denied`. Brex is signed in to by route 1 with read scopes only. AWS Pricing is the first
+# third-party `stdio` package in a shipped kit; it needs `uv`, and its three tools that read or
+# write a folder on the user's computer are `denied`. Tool lists were read on 2026-10-07 and
+# 2026-10-08 (the plan's Execution notes); the live pin test lists the four third-party ones, and
+# `fx`'s pin is the offline test `fx_server_lists_the_kits_tools`. Step 10g adds the role's two
+# servers of Farik's own. Its one skill in every prompt, `sourcing-a-product`, is the role's own
+# (ADR 0011); no kit skill repeats its loop or its section on the sites it may read.
 role: procurement_specialist
 skills:
   - defining-the-need
@@ -27,6 +27,7 @@ skills:
   - reviewing-renewals
   - writing-purchase-orders
   - using-procurement-sources
+  - requesting-a-data-pipeline
 connectors:
   - name: fx
     transport: stdio

@@ -1,4 +1,4 @@
-# The Product Manager's kit: five skills and four services. Amplitude, Linear and Notion it only
+# The Product Manager's kit: six skills and four services. Amplitude, Linear and Notion it only
 # reads, each signed in (route 1, ADR 0035). GitHub it reads and, only after the human allows the
 # call, writes an issue or a comment, with a key the user pastes until Farik Cloud signs users in
 # (ADR 0044, step 07c). Tool lists are from each service's documentation on 2026-10-02 (step 06's
@@ -11,6 +11,7 @@ skills:
   - prioritising-the-backlog
   - scoping-a-release
   - using-product-sources
+  - deciding-data-pipelines
 connectors:
   - name: amplitude
     transport: http
