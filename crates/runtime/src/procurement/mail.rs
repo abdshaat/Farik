@@ -1025,7 +1025,12 @@ mod tests {
 
     /// Fifty messages of Ivo's recorded as sent on `when`'s day, without files or a server.
     fn fifty_sent(harness: &Harness, when: chrono::DateTime<chrono::Utc>, first: u64) {
-        for message in first..first + 50 {
+        many_sent(harness, when, first, 50);
+    }
+
+    /// `count` messages of Ivo's recorded as sent on `when`'s day, from number `first`.
+    fn many_sent(harness: &Harness, when: chrono::DateTime<chrono::Utc>, first: u64, count: u64) {
+        for message in first..first + count {
             harness.project.record_in(
                 Some("proc"),
                 Some("session-1"),
@@ -1340,6 +1345,45 @@ mod tests {
             })
             .await
             .expect("rejected");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    async fn a_send_on_its_way_counts_against_the_day_and_holds_its_message() {
+        let story = Story::new("claimed").await;
+        // Forty-nine went today. One more is on its way, so the next is the fifty-first.
+        many_sent(&story.harness, crate::tools::fixtures::at(), 400, 49);
+        let first = story.draft(SUBJECT, BODY);
+        let second = story.draft(SUBJECT, BODY);
+        let mailer = Mailer {
+            secrets: &*story.store,
+            at: story.at.clone(),
+            trust: Trust::Root(story.fixture.ca_der.clone()),
+        };
+        let deps = &story.harness.project.deps;
+        let ask = |message: u64| SendAsk {
+            message,
+            subject: SUBJECT,
+            body: BODY,
+            order: None,
+        };
+        let on_its_way = prepare(deps, &mailer, ask(first)).expect("the fiftieth is claimed");
+        let refused = story
+            .send(second, SUBJECT, BODY)
+            .await
+            .expect_err("the limit");
+        assert!(refused.starts_with("seller_send_limit: "), "{refused}");
+        // The message on its way is not discarded or claimed twice meanwhile.
+        let discarded = discard_message(deps, first).expect_err("on its way");
+        assert_eq!(discarded.code, "seller_message_sent");
+        assert!(prepare(deps, &mailer, ask(first)).is_err());
+        // Let go of the claim, the day has room again and the first can be discarded.
+        drop(on_its_way);
+        story
+            .send(second, SUBJECT, BODY)
+            .await
+            .expect("the fiftieth goes");
+        discard_message(deps, first).expect("discarded");
     }
 
     #[tokio::test]
