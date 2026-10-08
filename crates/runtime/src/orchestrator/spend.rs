@@ -11,6 +11,7 @@ use farik_core::marketing::{
     Amount, Cap, CapScope, CreatedCampaign, Lineage, PlanRecord, PlanSpend, active_plan,
     caps_reached, is_carried, to_pause_for_end,
 };
+use farik_core::team::{Agent, AgentStatus};
 use farik_protocol::event::{EventBody, new_event};
 use farik_store::marketing::{
     MarketingPlan, PausedWhy, budgets_reached, campaigns_paused, created_campaigns_on,
@@ -328,9 +329,11 @@ impl Orchestrator {
         Ok(())
     }
 
-    /// The agents whose Google Ads connection Farik may use for `plan`: the plan's proposer when it
-    /// is an active Marketing Specialist, then every other active Marketing Specialist, in the
-    /// team file's order. The reason, when the team file cannot be read.
+    /// The agents whose Google Ads connection Farik may use for `plan`: every Marketing Specialist
+    /// in the team file, whatever its status, since pausing or retiring an agent never revokes its
+    /// sign-in and stopping spend is never paused (ADR 0042). The plan's proposer comes first, then
+    /// the active ones, then the paused, then the retired, each in the team file's order. The
+    /// reason, when the team file cannot be read.
     fn agents_for(&self, plan: Option<&MarketingPlan>) -> Result<Vec<String>, String> {
         let team = self
             .deps
@@ -338,23 +341,23 @@ impl Orchestrator {
             .files
             .read_team()
             .map_err(|error| format!("the team file could not be read: {error}"))?;
-        let marketing: Vec<String> = team
-            .active_agents()
-            .filter(|agent| Role::from(agent.role) == Role::MarketingSpecialist)
-            .map(|agent| agent.id.to_string())
-            .collect();
         let proposer = plan.map(|plan| plan.agent_id.as_str());
-        let mut agents: Vec<String> = marketing
+        let mut marketing: Vec<&Agent> = team
+            .agents
             .iter()
-            .filter(|id| Some(id.as_str()) == proposer)
-            .cloned()
+            .filter(|agent| Role::from(agent.role) == Role::MarketingSpecialist)
             .collect();
-        agents.extend(
-            marketing
-                .into_iter()
-                .filter(|id| Some(id.as_str()) != proposer),
-        );
-        Ok(agents)
+        // Stable, so that each group keeps the team file's order.
+        marketing.sort_by_key(|agent| match agent.status {
+            _ if Some(agent.id.as_str()) == proposer => 0,
+            AgentStatus::Active => 1,
+            AgentStatus::Paused => 2,
+            AgentStatus::Retired => 3,
+        });
+        Ok(marketing
+            .into_iter()
+            .map(|agent| agent.id.to_string())
+            .collect())
     }
 
     /// Records that Farik paused `made`, for `why`.
@@ -424,6 +427,7 @@ mod tests {
     use farik_protocol::clock::MovableClock;
     use farik_protocol::event::{EventBody, EventKind, FarikEvent};
     use farik_store::event_log::fixtures::refuse_appends_of;
+    use farik_store::marketing::marketing_plans;
     use serde_json::{Value, json};
 
     use super::super::{Orchestrator, OrchestratorError};
@@ -1088,6 +1092,106 @@ mod tests {
         );
     }
 
+    /// Kai, the plan's proposer, with `status` in the team file, watching.
+    async fn watching_with_kai(name: &str, status: &'static str) -> Watching {
+        let ads = Ads::with_team(
+            name,
+            move |wire| {
+                with_the_marketing_specialist(wire);
+                wire["agents"][3]["status"] = json!(status);
+            },
+            |_, _| {},
+        )
+        .await;
+        Watching::over(ads, Arc::new(Counting::default()))
+    }
+
+    /// Kai, `status` in the team file, has a campaign at its cap: Farik still reads, pauses and
+    /// records it, since a sign-in is not revoked by pausing or retiring its agent.
+    async fn stops_spend_with_kai(name: &str, status: &'static str) {
+        let watching = watching_with_kai(name, status).await;
+        watching.ads.plan("MP-1", None);
+        watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
+        // 500.00 spent of the campaign's 500.00.
+        watching.costs(CUSTOMER, &[(11, 500)]);
+
+        watching.wakes().await;
+
+        let campaign = campaign_name(CUSTOMER, 11);
+        assert_eq!(watching.spend_reads().len(), 1);
+        assert_eq!(
+            watching.status_reads(),
+            [status_query(std::slice::from_ref(&campaign)).expect("a query")]
+        );
+        assert_eq!(watching.pauses(), std::slice::from_ref(&campaign));
+        let reached = watching.reached(0);
+        assert_eq!(reached["scope"], "campaign");
+        assert_eq!(reached["paused"], json!([campaign]));
+        assert_eq!(watching.events(EventKind::MarketingBudgetReached).len(), 1);
+        let reads = watching.ads.state().spend_reads();
+        let read = reads.get("MP-1").expect("the plan was read");
+        assert!(read.failed.is_none(), "{read:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_paused_marketing_specialist_still_stops_spend() {
+        stops_spend_with_kai("spend-kai-paused", "paused").await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_retired_marketing_specialist_still_stops_spend() {
+        stops_spend_with_kai("spend-kai-retired", "retired").await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn tries_the_proposer_then_active_then_paused_then_retired() {
+        let ads = Ads::with_team(
+            "spend-agents-order",
+            |wire| {
+                with_the_marketing_specialist(wire);
+                wire["agents"][3]["status"] = json!("retired");
+                let agents = wire["agents"].as_array_mut().expect("agents");
+                for (id, status) in [
+                    ("lia", "paused"),
+                    ("mo", "active"),
+                    ("ned", "paused"),
+                    ("oz", "retired"),
+                    ("pat", "active"),
+                ] {
+                    let mut agent = an_agent_wire(id, "marketing_specialist");
+                    agent["status"] = json!(status);
+                    agents.push(agent);
+                }
+            },
+            |_, _| {},
+        )
+        .await;
+        let watching = Watching::over(ads, Arc::new(Counting::default()));
+        watching.ads.plan("MP-1", None);
+        let plans = marketing_plans(&watching.ads.harness.project.deps.log).expect("the plans");
+        let plan = plans.first().expect("a plan");
+        assert_eq!(plan.agent_id, "kai");
+
+        // Kai proposed it: first, though retired. Then the active ones in the team file's order,
+        // then the paused, then the retired.
+        assert_eq!(
+            watching.orchestrator.agents_for(Some(plan)),
+            Ok(["kai", "mo", "pat", "lia", "ned", "oz"]
+                .map(String::from)
+                .to_vec())
+        );
+        // With no plan: the same order, with none first.
+        assert_eq!(
+            watching.orchestrator.agents_for(None),
+            Ok(["mo", "pat", "lia", "ned", "kai", "oz"]
+                .map(String::from)
+                .to_vec())
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn a_store_error_stops_the_watch() {
@@ -1320,6 +1424,32 @@ mod tests {
         drop(held);
         wake.await.expect("joined").expect("the wake runs");
         assert_eq!(watching.paused_for("plan_ended").len(), 4);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_ended_plan_s_ads_pause_with_its_agent_paused() {
+        let watching = watching_with_kai("end-kai-paused", "paused").await;
+        an_ended_plan(&watching);
+        watching.at(1);
+
+        watching.wakes().await;
+
+        let campaigns = [
+            campaign_name(CUSTOMER, 11),
+            campaign_name(CUSTOMER, 12),
+            campaign_name(CUSTOMER, 13),
+            campaign_name(OTHER, 21),
+        ];
+        assert_eq!(watching.pauses(), campaigns);
+        assert_eq!(watching.paused_for("plan_ended").len(), 4);
+        let unstopped = watching
+            .ads
+            .state()
+            .spend_reads()
+            .get("MP-1")
+            .and_then(|read| read.unstopped.clone());
+        assert_eq!(unstopped, None);
     }
 
     #[tokio::test(flavor = "multi_thread")]
