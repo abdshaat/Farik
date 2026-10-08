@@ -208,7 +208,7 @@ fn is_open(record: &PipelineRecord) -> bool {
 ///
 /// `pipeline_refused` outside the implement session of a task the Procurement Specialist holds,
 /// `pipeline_field_invalid` naming the field, `pipeline_url_invalid`, `pipeline_already_requested`
-/// for a name an open request has, without regard to case, `pipeline_limit_reached` when three are
+/// for a name an open, escalated or approved request has, without regard to case, `pipeline_limit_reached` when three are
 /// open; `Failed` when the log cannot be read or written.
 pub(super) fn request_data_pipeline(
     call: &Call<'_>,
@@ -232,14 +232,18 @@ pub(super) fn request_data_pipeline(
     let records = data_pipelines(&call.deps().log).map_err(failed)?;
     let open: Vec<&PipelineRecord> = records.iter().filter(|record| is_open(record)).collect();
     let lowered = name.to_lowercase();
-    if open
+    // A name is asked for once while its request is open, escalated or approved (the founder's
+    // decision of 2026-10-08); a declined one may be asked again.
+    if records
         .iter()
+        .filter(|record| is_open(record) || record.state == PipelineState::Approved)
         .any(|record| record.requested.name.as_str().to_lowercase() == lowered)
     {
         return Err(refused(
             "pipeline_already_requested",
             format!(
-                "{name} is asked for already and waits for a decision; read farik_read_data_pipelines"
+                "{name} is asked for already, and waits for a decision or is approved; read \
+                 farik_read_data_pipelines"
             ),
         ));
     }
@@ -778,7 +782,6 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn asks_for_a_kit_connector_to_be_connected() {
-        let project = a_project("pipeline-kit-connector");
         let kit = farik_roles::load_kit(farik_core::contract::Role::ProcurementSpecialist)
             .expect("the shipped kit");
         let farik_roles::KitConnector::Server { entry, copy, .. } = &kit.connectors[0] else {
@@ -790,6 +793,8 @@ mod tests {
             .into_iter()
             .enumerate()
         {
+            // A project for each: an approved name is not asked for again.
+            let project = a_project(&format!("pipeline-kit-connector-{index}"));
             let pipeline = number_of(ask(&project, &with(azure(), "name", json!(named))));
             let context = deciding(&project, "pm", &format!("s-{index}"), Some(pipeline));
             let answer = decide(&context, pipeline, "approve", REASON).expect("an approval");
@@ -813,6 +818,7 @@ mod tests {
             assert_eq!(filed.intent.lines().count(), 5);
         }
         // A source that is none of the kit's has no such line.
+        let project = a_project("pipeline-kit-connector-other");
         let other = number_of(ask(&project, &with(azure(), "name", json!("Open prices"))));
         let context = deciding(&project, "pm", "s-other", Some(other));
         let answer = decide(&context, other, "approve", REASON).expect("an approval");
@@ -1385,6 +1391,15 @@ mod tests {
             &json!({ "pipeline": second, "by": "human", "reason": "", "request": "FRK-9" }),
         );
         ask(&project, &named("Open Meteo")).expect("room after an approval");
+        // An approved source is not asked for again, whatever its case: the founder's decision of
+        // 2026-10-08. The same refusal as for an open one.
+        for repeat in ["Édition", "éDITION", " édition "] {
+            assert!(
+                refusal_of(ask(&project, &named(repeat)))
+                    .starts_with("pipeline_already_requested: "),
+                "an approved name, asked again as {repeat}"
+            );
+        }
     }
 
     #[test]
