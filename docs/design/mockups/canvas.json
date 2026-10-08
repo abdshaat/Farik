@@ -1069,6 +1069,42 @@
       "title": "Connect Kubernetes to Lena: a key that is a whole file (step 12d)",
       "page": "devops",
       "is_interactive": true
+    },
+    "DoneOnItsOwnDeploy.dc.html": {
+      "x": 4140,
+      "y": 0,
+      "w": 1280,
+      "h": 900,
+      "title": "Done on its own: Lena put a1b2c3d live for FRK-40, a deploy made on auto (step 11b)",
+      "page": "auto",
+      "is_interactive": true
+    },
+    "PhoneDoneOnItsOwnDeploy.dc.html": {
+      "x": 5620,
+      "y": 0,
+      "w": 390,
+      "h": 1039,
+      "title": "Phone: Done on its own, with a deploy made on auto (step 11b)",
+      "page": "auto",
+      "is_interactive": true
+    },
+    "PhoneDeployApproval.dc.html": {
+      "x": 15140,
+      "y": 0,
+      "w": 390,
+      "h": 2599,
+      "title": "Phone: Lena wants to put a new version live, and why it asks (step 11b)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "PhoneSprintStartDeploys.dc.html": {
+      "x": 15730,
+      "y": 0,
+      "w": 390,
+      "h": 1045,
+      "title": "Phone: start a sprint, which approves the deploys planned into it (step 11b)",
+      "page": "devops",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -1200,7 +1236,7 @@
     },
     "t_auto": {
       "kind": "title1",
-      "maxW": 3940,
+      "maxW": 6010,
       "page": "auto",
       "text": "Ask or auto: Today when the team acts on its own, and what it did on its own",
       "w": 240,
@@ -1209,7 +1245,7 @@
     },
     "t_devops": {
       "kind": "title1",
-      "maxW": 14940,
+      "maxW": 16120,
       "page": "devops",
       "text": "DevOps Engineer: Lena on the team, production, deploys and incidents",
       "w": 240,
@@ -1336,7 +1372,11 @@
     "DeployPanel.dc.html",
     "TodayDeployApproval.dc.html",
     "SprintStartDeploys.dc.html",
-    "ConnectorFileKey.dc.html"
+    "ConnectorFileKey.dc.html",
+    "DoneOnItsOwnDeploy.dc.html",
+    "PhoneDoneOnItsOwnDeploy.dc.html",
+    "PhoneDeployApproval.dc.html",
+    "PhoneSprintStartDeploys.dc.html"
   ],
   "pages": [
     {
