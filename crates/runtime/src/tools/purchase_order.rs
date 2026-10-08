@@ -945,6 +945,75 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn leaves_no_workbook_when_the_log_refuses_the_order() {
+        let project = a_project("po-log-refuses");
+        farik_store::event_log::fixtures::refuse_appends_of(
+            &project.deps.log,
+            EventKind::PurchaseOrderDrafted,
+        );
+        let before = project.event_count();
+
+        let result = draft(&project, &an_order("Acme"));
+
+        assert!(
+            matches!(result, Err(ToolError::Failed { .. })),
+            "{result:?}"
+        );
+        assert_eq!(project.event_count(), before, "nothing was recorded");
+        assert!(
+            !folder(&project).join("orders/PO-1.xlsx").exists(),
+            "an order the log refused leaves no workbook behind, which would take its number"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_comparison_reached_through_a_link() {
+        let project = a_project("po-evaluation-link");
+        let before = project.event_count();
+        let procurement = folder(&project);
+
+        // The note is there to read, but through a link: its folder is one.
+        fs::rename(
+            procurement.join("evaluations"),
+            procurement.join("elsewhere"),
+        )
+        .expect("the folder is moved");
+        std::os::unix::fs::symlink(
+            procurement.join("elsewhere"),
+            procurement.join("evaluations"),
+        )
+        .expect("a link is made");
+        let reason = refusal_of(draft(&project, &an_order("Acme")));
+        assert!(reason.starts_with("private_path_refused:"), "{reason}");
+
+        // Or the note itself is one.
+        fs::remove_file(procurement.join("evaluations")).expect("the link goes");
+        fs::rename(
+            procurement.join("elsewhere"),
+            procurement.join("evaluations"),
+        )
+        .expect("the folder is back");
+        fs::rename(
+            procurement.join("evaluations/mirrors.md"),
+            procurement.join("evaluations/original.md"),
+        )
+        .expect("the note is moved");
+        std::os::unix::fs::symlink(
+            procurement.join("evaluations/original.md"),
+            procurement.join("evaluations/mirrors.md"),
+        )
+        .expect("a link is made");
+        let reason = refusal_of(draft(&project, &an_order("Acme")));
+        assert!(reason.starts_with("private_path_refused:"), "{reason}");
+
+        assert_eq!(project.event_count(), before, "nothing was recorded");
+        assert!(!procurement.join("orders").exists(), "nothing was written");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_another_role_and_another_session() {
         let project = a_project("po-role");
         let before = project.event_count();
@@ -1167,6 +1236,12 @@ mod tests {
                     vec![("currency", json!("USDT"))],
                 ),
                 (
+                    "a two-letter currency",
+                    "purchase_order_currency_invalid",
+                    "currency",
+                    vec![("currency", json!("US"))],
+                ),
+                (
                     "delivery past 600",
                     "purchase_order_delivery_invalid",
                     "delivery",
@@ -1300,6 +1375,12 @@ mod tests {
         let mut long_page = an_order("Long page");
         long_page["url"] = json!(format!("{head}{}", "x".repeat(2_000 - head.len())));
         draft(&project, &long_page).expect("an address of 2,000 characters");
+        // Fifty lines are the most an order has, and a reason of 20 characters the shortest.
+        let mut fifty = an_order("Fifty lines");
+        fifty["lines"] = json!(vec![line("Box", 1, "1.00", ""); 50]);
+        fifty["why"] = json!("w".repeat(20));
+        let answer = draft(&project, &fifty).expect("50 lines and a reason of 20 characters");
+        assert_eq!(answer["total"], "50.00");
     }
 
     #[test]
@@ -1405,6 +1486,27 @@ mod tests {
             &json!({ "order": 1, "received_on": "2026-09-23" }),
         );
         draft(&project, &an_order("Acme")).expect("a new order once the first was received");
+
+        // A placed order the owner closed (it did not come) is over too.
+        let drafted = draft(&project, &an_order("Dot")).expect("a new seller");
+        let number = drafted["order"].as_u64().expect("a number");
+        project.record(
+            "FRK-1",
+            "purchase_order.approved",
+            &json!({ "order": number, "note": "" }),
+        );
+        project.record(
+            "FRK-1",
+            "purchase_order.placed",
+            &json!({ "order": number, "placed_on": "2026-09-22" }),
+        );
+        assert!(refusal_of(draft(&project, &an_order("Dot"))).starts_with("purchase_order_open:"));
+        project.record(
+            "FRK-1",
+            "purchase_order.closed",
+            &json!({ "order": number, "note": "It did not come." }),
+        );
+        draft(&project, &an_order("Dot")).expect("a new order once the first was closed");
     }
 
     #[test]
