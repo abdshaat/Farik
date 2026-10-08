@@ -743,6 +743,10 @@ mod tests {
             ),
             (
                 "rate_on",
+                json!({ "base": "USD", "quote": "EUR", "date": "2026-10-3" }),
+            ),
+            (
+                "rate_on",
                 json!({ "base": "USD", "quote": "EUR", "date": "20261003" }),
             ),
             (
