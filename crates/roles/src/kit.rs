@@ -1065,10 +1065,10 @@ mod tests {
             assert_eq!(
                 kit.connectors.len(),
                 match role {
-                    Role::UiUxDesigner | Role::SoftwareDeveloper | Role::ProcurementSpecialist => 1,
+                    Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
                     Role::FinanceSpecialist => 3,
                     Role::ProductManager | Role::Architect => 4,
-                    Role::MarketingSpecialist => 5,
+                    Role::MarketingSpecialist | Role::ProcurementSpecialist => 5,
                     _ => 0,
                 },
                 "{role}"
@@ -1271,6 +1271,357 @@ mod tests {
         };
         assert!(is_farik_connector("farik", &pair(&[])));
         assert!(!is_farik_connector("farik", &pair(&["x"])));
+    }
+
+    /// Step 10d: Exa's keyless server is searched and never asked for a page. Its page reader is
+    /// `denied`: Exa fetches on its own servers and follows a redirect to another site, which the
+    /// approved-sites check cannot see (spec 8.6).
+    #[test]
+    fn exa_searches_without_a_key_and_opens_no_page() {
+        let (server, copy) = service(Role::ProcurementSpecialist, "exa");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("exa is http");
+        };
+        assert_eq!(url, "https://mcp.exa.ai/mcp");
+        assert!(headers.is_empty());
+        assert!(oauth.is_none(), "no sign-in");
+        assert!(server.credential_keys.is_empty(), "no key");
+        assert!(copy.key_page.is_none());
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Network),
+            ["web_search_exa"]
+        );
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Denied),
+            ["web_fetch_exa"]
+        );
+        assert_eq!(server.tools.len(), 2);
+        assert_eq!(
+            copy.labels,
+            BTreeMap::from([("web_search_exa".to_string(), "search the web".to_string())])
+        );
+        assert!(allowances_of(Role::ProcurementSpecialist, "exa").is_empty());
+        assert_eq!(copy.title, "Exa web search");
+        assert_eq!(
+            copy.about,
+            "Exa searches the web for assistants that research, and answers with text from the pages it finds."
+        );
+        assert_eq!(
+            copy.why,
+            "So the Procurement Specialist can find makers, sellers and their price pages for anything you need to buy. It only reads."
+        );
+        assert_eq!(
+            copy.setup,
+            "Nothing to set up: Exa answers a limited number of searches free, with no account. What your agent searches for goes to Exa as written. Exa's results carry text from the pages it finds on any site, so your agent may read text from sites you have not approved; it still opens pages only on the sites you approved, and sends those other sites nothing."
+        );
+    }
+
+    /// Step 10d: `SerpApi`'s official server with a pasted key sent as a bearer; its one search
+    /// spends the user's searches, so it is counted against an allowance of 50, and the two
+    /// on-screen versions of it are `denied`.
+    #[test]
+    fn serpapi_counts_each_search() {
+        let (server, copy) = service(Role::ProcurementSpecialist, "serpapi");
+        let CustomTransport::Http {
+            url,
+            headers,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("serpapi is http");
+        };
+        assert_eq!(url, "https://mcp.serpapi.com/mcp");
+        assert!(oauth.is_none(), "a pasted key, not a sign-in");
+        assert_eq!(
+            headers,
+            &BTreeMap::from([(
+                "Authorization".to_string(),
+                "Bearer {SERPAPI_KEY}".to_string()
+            )])
+        );
+        assert_eq!(server.credential_keys, ["SERPAPI_KEY"]);
+        assert_eq!(
+            copy.key_page.as_deref(),
+            Some("https://serpapi.com/manage-api-key")
+        );
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::ExternalEffect),
+            ["search"]
+        );
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Denied),
+            ["search_dashboard", "search_table"]
+        );
+        assert_eq!(tagged(&server, ConnectorTag::Network), 0);
+        assert_eq!(server.tools.len(), 3);
+        assert_eq!(
+            copy.labels,
+            BTreeMap::from([("search".to_string(), "search shops".to_string())])
+        );
+        assert_eq!(
+            allowances_of(Role::ProcurementSpecialist, "serpapi"),
+            BTreeMap::from([(
+                "search".to_string(),
+                KitAllowance {
+                    calls: 50,
+                    what: "shopping searches".to_string()
+                }
+            )])
+        );
+        assert_eq!(copy.title, "Shopping prices");
+        assert_eq!(
+            copy.about,
+            "SerpApi reads shopping results from Google Shopping, Amazon, eBay and Walmart."
+        );
+        assert_eq!(
+            copy.why,
+            "So the Procurement Specialist can compare what a product costs across the big shops in one search. Each search uses one of your SerpApi searches, so Farik counts them."
+        );
+        assert_eq!(
+            copy.setup,
+            "Make a free SerpApi account, which includes 250 searches a month and at most 50 in an hour, then copy your private key from its \u{2018}Api Key\u{2019} page and paste it here. What your agent searches for goes to SerpApi as written."
+        );
+    }
+
+    /// Step 10d: Brex's official server, signed in to by route 1 asking for four read scopes, so a
+    /// write is refused at Brex as well as here: eleven tools run, each with a label, and the
+    /// thirty-two that write, name a colleague or reach cards, limits, banks, travel or the books
+    /// are `denied`.
+    #[test]
+    fn brex_reads_spend_and_never_writes() {
+        let (server, copy) = service(Role::ProcurementSpecialist, "brex");
+        let (url, scopes) = signed_in(&server);
+        assert_eq!(url, "https://api.brex.com/mcp");
+        assert_eq!(
+            scopes,
+            Some(
+                [
+                    "offline_access".to_string(),
+                    "vendors.readonly".to_string(),
+                    "expenses.card.readonly".to_string(),
+                    "departments.readonly".to_string(),
+                ]
+                .as_slice()
+            )
+        );
+        assert!(server.credential_keys.is_empty());
+        assert!(copy.key_page.is_none());
+        let CustomTransport::Http { headers, .. } = &server.transport else {
+            panic!("brex is http");
+        };
+        assert!(headers.is_empty());
+        let labelled = [
+            ("list_vendors", "list vendors"),
+            ("get_vendor_by_id", "read a vendor"),
+            ("list_bills", "list bills"),
+            ("get_bill_by_id", "read a bill"),
+            ("list_merchants", "list merchants"),
+            ("list_merchant_categories", "list merchant types"),
+            ("list_expense_categories", "list spending categories"),
+            ("query_expense_analytics", "ask about spending"),
+            ("list_expenses", "list card charges"),
+            ("get_expense_by_id", "read a card charge"),
+            ("list_departments", "list departments"),
+        ];
+        let names: Vec<&str> = labelled.iter().map(|(tool, _)| *tool).collect();
+        assert_eq!(names_tagged(&server, ConnectorTag::Network), sorted(&names));
+        for (tool, label) in labelled {
+            assert_eq!(
+                copy.labels.get(tool).map(String::as_str),
+                Some(label),
+                "{tool}"
+            );
+        }
+        assert_eq!(copy.labels.len(), 11, "a denied tool has no label");
+        let denied = names_tagged(&server, ConnectorTag::Denied);
+        assert_eq!(denied.len(), 32);
+        for tool in [
+            "update_expense_memo",
+            "list_users",
+            "get_card_by_id",
+            "list_banking_transactions",
+        ] {
+            assert!(denied.contains(&tool), "{tool} is denied");
+        }
+        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 0);
+        assert_eq!(server.tools.len(), 43);
+        assert!(allowances_of(Role::ProcurementSpecialist, "brex").is_empty());
+        assert_eq!(copy.title, "Brex");
+        assert_eq!(
+            copy.about,
+            "Brex holds your company's cards, bills and the vendors you pay."
+        );
+        assert_eq!(
+            copy.why,
+            "So the Procurement Specialist can see what you already pay a vendor, and charges that repeat every month that nobody listed. It only reads."
+        );
+        assert_eq!(
+            copy.setup,
+            "First, an account admin or card admin in Brex accepts the Developer API agreement under \u{2018}Settings\u{2019}, then \u{2018}Developer\u{2019}. Then sign in with your Brex account and allow Farik to read your vendors, card spending and departments; Farik asks for reading only."
+        );
+    }
+
+    /// Step 10d: AWS Labs' pricing server, started at an exact version with a key that may only
+    /// read prices: six tools run, and the three that read a folder on the user's computer or
+    /// write a report there are `denied`.
+    #[test]
+    fn aws_pricing_reads_prices_and_never_the_disk() {
+        let (server, copy) = service(Role::ProcurementSpecialist, "aws-pricing");
+        let CustomTransport::Stdio {
+            command,
+            args,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("aws-pricing is stdio");
+        };
+        assert_eq!(command, "uvx");
+        assert_eq!(args, &["awslabs.aws-pricing-mcp-server==1.1.1".to_string()]);
+        assert!(oauth.is_none());
+        assert_eq!(
+            server.credential_keys,
+            ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+        );
+        assert_eq!(
+            copy.key_page.as_deref(),
+            Some("https://console.aws.amazon.com/iam/home#/users")
+        );
+        let labelled = [
+            ("get_pricing", "read a service's prices"),
+            ("get_pricing_service_codes", "list AWS services"),
+            (
+                "get_pricing_service_attributes",
+                "list what a price depends on",
+            ),
+            (
+                "get_pricing_attribute_values",
+                "list the options for a price",
+            ),
+            ("get_price_list_urls", "find a full price list"),
+            ("get_bedrock_patterns", "read AI service pricing patterns"),
+        ];
+        let names: Vec<&str> = labelled.iter().map(|(tool, _)| *tool).collect();
+        assert_eq!(names_tagged(&server, ConnectorTag::Network), sorted(&names));
+        for (tool, label) in labelled {
+            assert_eq!(
+                copy.labels.get(tool).map(String::as_str),
+                Some(label),
+                "{tool}"
+            );
+        }
+        assert_eq!(copy.labels.len(), 6, "a denied tool has no label");
+        assert_eq!(
+            names_tagged(&server, ConnectorTag::Denied),
+            [
+                "analyze_cdk_project",
+                "analyze_terraform_project",
+                "generate_cost_report"
+            ]
+        );
+        assert_eq!(tagged(&server, ConnectorTag::ExternalEffect), 0);
+        assert_eq!(server.tools.len(), 9);
+        assert!(allowances_of(Role::ProcurementSpecialist, "aws-pricing").is_empty());
+        assert_eq!(copy.title, "AWS prices");
+        assert_eq!(
+            copy.about,
+            "AWS publishes the price of every one of its services, by region and by plan."
+        );
+        assert_eq!(
+            copy.why,
+            "So the Procurement Specialist can price an AWS option exactly before anyone buys it. It only reads public prices."
+        );
+        assert_eq!(
+            copy.setup,
+            "This needs the free program uv on your computer (docs.astral.sh/uv). In your AWS account, make a user that may only read prices: give it a policy allowing pricing:GetProducts, pricing:DescribeServices, pricing:GetAttributeValues, pricing:ListPriceLists and pricing:GetPriceListFileUrl, and nothing else. Make a key for it, then paste the \u{2018}Access key\u{2019} and the \u{2018}Secret access key\u{2019} here. Reading prices costs nothing."
+        );
+    }
+
+    /// A guard over the Procurement Specialist's five services, in the order the page lists them:
+    /// nothing in the kit can buy, check out, sign or send, so the only tool that is not read-only
+    /// is `SerpApi`'s `search`, which spends the user's searches, and every tool that runs is
+    /// labelled.
+    #[test]
+    fn the_procurement_kit_never_buys() {
+        let kit = load_kit(Role::ProcurementSpecialist).expect("the Procurement Specialist's kit");
+        let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
+        assert_eq!(names, ["fx", "exa", "serpapi", "brex", "aws-pricing"]);
+        let mut external: Vec<(String, String)> = Vec::new();
+        for connector in &kit.connectors {
+            let KitConnector::Server {
+                entry,
+                copy,
+                plan_approved,
+                ..
+            } = connector
+            else {
+                panic!("{} is a server", connector.name());
+            };
+            let server = custom_server(entry).expect("a custom server");
+            assert!(plan_approved.is_empty(), "{}", server.name);
+            external.extend(
+                names_tagged(&server, ConnectorTag::ExternalEffect)
+                    .into_iter()
+                    .map(|tool| (server.name.clone(), tool.to_string())),
+            );
+            let mut expected = names_tagged(&server, ConnectorTag::Network);
+            expected.extend(names_tagged(&server, ConnectorTag::ExternalEffect));
+            expected.sort_unstable();
+            assert!(!expected.is_empty(), "{} runs something", server.name);
+            let labelled: Vec<&str> = copy.labels.keys().map(String::as_str).collect();
+            assert_eq!(labelled, expected, "{}", server.name);
+        }
+        assert_eq!(external, [("serpapi".to_string(), "search".to_string())]);
+    }
+
+    /// A guard over the twelve procurement skills: a skill that names a tool its kit `denied` tells
+    /// the agent to call what the harness will always refuse. The tools a skill does name must be
+    /// found, or the check would pass by never matching.
+    #[test]
+    fn no_procurement_skill_names_a_denied_tool() {
+        let kit = load_kit(Role::ProcurementSpecialist).expect("the Procurement Specialist's kit");
+        assert!(!kit.skills.is_empty());
+        let texts: Vec<(&str, &str)> = kit
+            .skills
+            .iter()
+            .flat_map(|skill| {
+                skill
+                    .session_files
+                    .values()
+                    .map(|text| (skill.name.as_str(), text.as_str()))
+            })
+            .collect();
+        let (mut denied, mut named) = (0, 0);
+        for connector in &kit.connectors {
+            let KitConnector::Server { entry, .. } = connector else {
+                panic!("{} is a server", connector.name());
+            };
+            let server = custom_server(entry).expect("a custom server");
+            for (tool, tag) in &server.tools {
+                let quoted = format!("`{tool}`");
+                if *tag == ConnectorTag::Denied {
+                    denied += 1;
+                    for (skill, text) in &texts {
+                        assert!(
+                            !text.contains(&quoted),
+                            "{skill} names {quoted}, which {} denies",
+                            server.name
+                        );
+                    }
+                } else {
+                    named += texts
+                        .iter()
+                        .filter(|(_, text)| text.contains(&quoted))
+                        .count();
+                }
+            }
+        }
+        assert!(denied > 0, "the kit denies a tool");
+        assert!(named > 0, "the skills name the tools they use in backticks");
     }
 
     /// Step 10: the Finance Specialist's kit carries six skills, in this order, each with the

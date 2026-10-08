@@ -3605,6 +3605,47 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn serpapis_image_addresses_are_held() {
+        // A guard (step 10d): SerpApi fetches `image_url` and a lens `url` itself, so an address it
+        // is given off the approved sites is refused before the connector is looked up.
+        let daemon = with_buyers("hook-sites-serpapi");
+        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        for params in [
+            json!({ "engine": "google_reverse_image", "image_url": "https://unapproved.example/a.jpg" }),
+            json!({ "engine": "google_lens", "url": "https://unapproved.example/a.jpg" }),
+        ] {
+            let refused = decide_pre_tool_use(
+                &daemon.call(
+                    "session-proc",
+                    "mcp__serpapi__search",
+                    &json!({ "params": params }),
+                ),
+                &daemon.state,
+            );
+            denied_for(&refused, "site_not_approved");
+            assert!(
+                refused.reason.contains("unapproved.example"),
+                "{params}: {refused:?}"
+            );
+        }
+        // A search that names no address is not held by the sites.
+        let search = decide_pre_tool_use(
+            &daemon.call(
+                "session-proc",
+                "mcp__serpapi__search",
+                &json!({ "params": { "engine": "google_shopping", "q": "rear-facing baby car mirror" } }),
+            ),
+            &daemon.state,
+        );
+        assert_ne!(
+            search.reason.split(": ").next(),
+            Some("site_not_approved"),
+            "{search:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn an_external_call_to_an_unapproved_address_asks_for_nothing() {
         let daemon = with_buyers("hook-sites-external");
         let farik = a_farik_host();
