@@ -44,6 +44,7 @@ pub mod marketing;
 /// The harness metrics.
 pub mod metrics;
 pub mod order;
+pub mod pipeline;
 /// Text as a terminal may be given it.
 pub mod printable;
 /// The project a command runs against.
@@ -538,6 +539,12 @@ enum Commands {
         #[command(subcommand)]
         command: OrderCommands,
     },
+    /// List the data sources the Procurement Specialist asked for that wait for you, and approve
+    /// or decline one (6.10).
+    Pipeline {
+        #[command(subcommand)]
+        command: PipelineCommands,
+    },
     /// List the renewals coming up, and dismiss one (6.10).
     Renewal {
         #[command(subcommand)]
@@ -857,6 +864,29 @@ enum OrderCommands {
 }
 
 #[derive(Subcommand)]
+enum PipelineCommands {
+    /// The data sources that wait for you, oldest first, with why each comes to you.
+    List,
+    /// Approve a data source: the team gets a request, in your name, to set it up. Nothing is
+    /// connected or paid for.
+    Approve {
+        /// The request's number, as `farik pipeline list` prints it.
+        pipeline: u64,
+        /// A note for the Procurement Specialist's next piece of work.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Do not set a data source up.
+    Decline {
+        /// The request's number, as `farik pipeline list` prints it.
+        pipeline: u64,
+        /// A note for the Procurement Specialist's next piece of work.
+        #[arg(long)]
+        note: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum RenewalCommands {
     /// The renewals coming up that nobody dismissed.
     List,
@@ -1149,7 +1179,10 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Renewal {
             command: RenewalCommands::List,
         } => open_project(&io.cwd, now).and_then(|project| renewal::list(&project)),
-        Commands::Order { .. } | Commands::Renewal { .. } => {
+        Commands::Pipeline {
+            command: PipelineCommands::List,
+        } => open_project(&io.cwd, now).and_then(|project| pipeline::list(&project)),
+        Commands::Order { .. } | Commands::Pipeline { .. } | Commands::Renewal { .. } => {
             open_project(&io.cwd, now).and_then(|project| {
                 let (name, command) = humans(&parsed.command)?;
                 human_command(&project, command, name, io)
@@ -1516,6 +1549,25 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 ("site remove", Command::SiteRemove { host: host.clone() })
             }
             SiteCommands::List => return Err("farik site list only reads".to_string()),
+        },
+        Commands::Pipeline { command } => match command {
+            PipelineCommands::Approve { pipeline, note } => (
+                "pipeline approve",
+                Command::DataPipelineDecide {
+                    pipeline: *pipeline,
+                    approve: true,
+                    note: note.clone(),
+                },
+            ),
+            PipelineCommands::Decline { pipeline, note } => (
+                "pipeline decline",
+                Command::DataPipelineDecide {
+                    pipeline: *pipeline,
+                    approve: false,
+                    note: note.clone(),
+                },
+            ),
+            PipelineCommands::List => return Err("farik pipeline list only reads".to_string()),
         },
         Commands::Order { command } => match command {
             OrderCommands::Approve { order, note } => (

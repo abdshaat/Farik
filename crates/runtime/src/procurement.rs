@@ -10,6 +10,7 @@ use std::sync::Mutex;
 use calamine::{Data, Range, Reader as _, Xlsx, open_workbook_from_rs};
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use farik_core::contract::{Role, TaskId};
+use farik_core::pipeline::PipelineCost;
 use farik_core::renewals::{RegisterRow, due_renewals};
 use farik_core::team::{Team, private_folder};
 use farik_protocol::event::{
@@ -17,12 +18,13 @@ use farik_protocol::event::{
     RenewalFlaggedBody, new_event,
 };
 use farik_roles::{Kit, KitConnector};
-use farik_store::pipelines::PipelineRecord;
+use farik_store::pipelines::{PipelineRecord, data_pipelines};
 use farik_store::purchase_orders::{PurchaseOrderRecord, expires_at, overdue, purchase_orders};
 use farik_store::renewals::{last_check, renewals};
 use farik_store::requests::{
     RequestError, file_request, placeholder_budget_usd, request_from_text,
 };
+use farik_store::waiting::PipelineAsk;
 use farik_store::{EventLog, StoreError};
 use serde_json::{Value, json};
 
@@ -85,6 +87,56 @@ pub(crate) fn pipeline_request_text(
         ));
     }
     lines.join("\n")
+}
+
+/// The text of the request an approval of data pipeline request `pipeline` files, which the owner
+/// reads before they approve, made as the approval makes it: from the log's record and the
+/// Procurement Specialist's `kit`. `None` when the log has no such request.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn pipeline_text(
+    log: &EventLog,
+    kit: Option<&Kit>,
+    pipeline: u64,
+) -> Result<Option<String>, StoreError> {
+    Ok(data_pipelines(log)?
+        .into_iter()
+        .find(|record| record.pipeline == pipeline)
+        .map(|record| {
+            let connector =
+                kit.and_then(|kit| kit_connector_title(kit, record.requested.name.as_str()));
+            pipeline_request_text(&record, connector.as_deref())
+        }))
+}
+
+/// Adds to `row`, a `waiting.list` row of kind `data_pipeline`, the fields of the request that
+/// waits: its number, name, what it gives, the source's page as written and its site, why, the
+/// agent's three answers, the Product Manager's reason when it passed the request on, when the
+/// agent asked and, when given, the text an approval would file. The same row is `farik pipeline
+/// list --json`'s.
+pub fn add_pipeline_fields(row: &mut Value, ask: &PipelineAsk, request_text: Option<&str>) {
+    row["pipeline"] = json!(ask.pipeline);
+    row["name"] = json!(ask.name);
+    row["what"] = json!(ask.what);
+    row["url"] = json!(ask.url);
+    row["host"] = json!(ask.host);
+    row["why"] = json!(ask.why);
+    row["cost"] = json!(match ask.cost {
+        PipelineCost::Free => "free",
+        PipelineCost::Paid => "paid",
+        PipelineCost::Unknown => "unknown",
+    });
+    row["needs_account"] = json!(ask.needs_account);
+    row["sends_project_data"] = json!(ask.sends_project_data);
+    if let Some(reason) = &ask.reason {
+        row["reason"] = json!(reason);
+    }
+    row["at"] = json!(time(ask.at));
+    if let Some(text) = request_text {
+        row["request_text"] = json!(text);
+    }
 }
 
 /// Files the request an approval of `record` asks for, as `created_by`, past the filing lock, and

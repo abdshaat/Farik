@@ -1,8 +1,8 @@
 //! What waits on the human when a process driving the project ends (`docs/SPEC.md` 5.7): the
 //! questions nobody answered, the contracts awaiting approval, the escalations, the results that
 //! may need the human's acceptance, the tasks waiting to be integrated by hand, the posts outside
-//! the plan that wait for the owner, the sites the Procurement Specialist asked to read, and the
-//! purchase orders it set up.
+//! the plan that wait for the owner, the sites the Procurement Specialist asked to read, the
+//! purchase orders it set up and the data sources it asked for.
 
 use farik_core::team::Team;
 use farik_store::files::ProjectFiles;
@@ -30,6 +30,8 @@ pub(crate) struct Waiting {
     request: Option<u64>,
     /// The number of the purchase order that waits, for a script to act on.
     order: Option<u64>,
+    /// The number of the data pipeline request that waits, for a script to act on.
+    pipeline: Option<u64>,
 }
 
 impl Waiting {
@@ -62,6 +64,9 @@ impl Waiting {
         }
         if let Some(order) = self.order {
             item["order"] = json!(order);
+        }
+        if let Some(pipeline) = self.pipeline {
+            item["pipeline"] = json!(pipeline);
         }
         item
     }
@@ -175,6 +180,7 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
         post: item.post.as_ref().map(|ask| ask.post),
         request: item.site.as_ref().map(|ask| ask.request),
         order: item.order.as_ref().map(|ask| ask.order),
+        pipeline: item.pipeline.as_ref().map(|ask| ask.pipeline),
     }
 }
 

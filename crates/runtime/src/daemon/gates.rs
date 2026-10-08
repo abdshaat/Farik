@@ -17,7 +17,6 @@ use farik_core::governor::transition_table::TransitionActor;
 use farik_core::marketing::{
     CapScope, PlanSpend, RaiseAsk, Raised, active_plan, check_raise, parse_amount,
 };
-use farik_core::pipeline::PipelineCost;
 use farik_core::team::Team;
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{
@@ -29,7 +28,6 @@ use farik_store::diff::diff_of;
 use farik_store::marketing::{
     BudgetReached, MarketingPlan, budgets_reached, created_campaigns, marketing_plans, social_posts,
 };
-use farik_store::pipelines::data_pipelines;
 use farik_store::purchase_orders::purchase_orders;
 use farik_store::requests::{
     RequestError, TOO_SHORT, contract_write, file_raise_request, file_request,
@@ -43,7 +41,7 @@ use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
 use crate::cost::extra_tries;
 use crate::marketing::ads::{ads_rows, open_raise, spend_and_pauses};
 use crate::marketing::{going_out, kinds_made, known_spend, list_row, states_today, whole};
-use crate::procurement::{kit_connector_title, pipeline_request_text};
+use crate::procurement::{add_pipeline_fields, pipeline_text};
 use crate::tools::ToolDeps;
 use crate::tools::contracts::changed_fields;
 use crate::tools::design::ReviewState;
@@ -192,28 +190,13 @@ fn waiting_row(deps: &ToolDeps, item: &farik_store::waiting::Waiting) -> Value {
         row["expires_at"] = json!(time(ask.expires_at));
     }
     if let Some(ask) = &item.pipeline {
-        row["pipeline"] = json!(ask.pipeline);
-        row["name"] = json!(ask.name);
-        row["what"] = json!(ask.what);
-        row["url"] = json!(ask.url);
-        row["host"] = json!(ask.host);
-        row["why"] = json!(ask.why);
-        row["cost"] = json!(match ask.cost {
-            PipelineCost::Free => "free",
-            PipelineCost::Paid => "paid",
-            PipelineCost::Unknown => "unknown",
-        });
-        row["needs_account"] = json!(ask.needs_account);
-        row["sends_project_data"] = json!(ask.sends_project_data);
-        if let Some(reason) = &ask.reason {
-            row["reason"] = json!(reason);
-        }
-        row["at"] = json!(ask.at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true));
-        // What the team would be asked, so that the owner reads it before they approve: the
-        // same text approving files.
-        if let Some(text) = pipeline_text(deps, ask.pipeline) {
-            row["request_text"] = json!(text);
-        }
+        // What the team would be asked, so that the owner reads it before they approve: the same
+        // text approving files.
+        let kit = (deps.kits)(Role::ProcurementSpecialist).ok();
+        let text = pipeline_text(&deps.log, kit.as_ref(), ask.pipeline)
+            .ok()
+            .flatten();
+        add_pipeline_fields(&mut row, ask, text.as_deref());
     }
     if let Some(ask) = &item.post {
         row["post"] = json!(ask.post);
@@ -231,19 +214,6 @@ fn waiting_row(deps: &ToolDeps, item: &farik_store::waiting::Waiting) -> Value {
         row["at"] = json!(ask.at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true));
     }
     row
-}
-
-/// The text of the request an approval of data pipeline request `pipeline` files, which the owner
-/// reads on Today first: `None` when the log has no such request.
-fn pipeline_text(deps: &ToolDeps, pipeline: u64) -> Option<String> {
-    let record = data_pipelines(&deps.log)
-        .ok()?
-        .into_iter()
-        .find(|record| record.pipeline == pipeline)?;
-    let connector = (deps.kits)(Role::ProcurementSpecialist)
-        .ok()
-        .and_then(|kit| kit_connector_title(&kit, record.requested.name.as_str()));
-    Some(pipeline_request_text(&record, connector.as_deref()))
 }
 
 /// The gates' queries, whose params the schema already passed.

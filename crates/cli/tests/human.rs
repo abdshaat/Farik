@@ -1677,6 +1677,238 @@ fn order_drafted(
     clippy::too_many_lines,
     reason = "one project, from the waiting line to the list after every command"
 )]
+fn farik_pipeline_lists_and_decides() {
+    let repository = a_project("human-pipeline");
+    let task = filed(&repository, "Add done.txt");
+    let ask = |name: &str, cost: &str, sends: bool| {
+        record_as(
+            &repository,
+            &task,
+            Some(("theo", "session-1")),
+            "data_pipeline.requested",
+            &json!({
+                "name": name,
+                "what": "Reads a seller's page as text, even where prices need a browser.",
+                "source_url": "https://www.firecrawl.dev/pricing",
+                "why": "Two of the five sellers show their prices only in a full browser.",
+                "cost": cost, "needs_account": true, "sends_project_data": sends
+            }),
+        )
+        .envelope
+        .seq
+    };
+    let first = ask("Firecrawl\u{1b}[31m", "paid", false);
+    let second = ask("Shippo", "free", true);
+    // The manager passes the first on in its decision session, with a reason; Farik the second.
+    record_as(
+        &repository,
+        "",
+        Some(("pm", "session-pm")),
+        "session.started",
+        &json!({ "purpose": "verify", "model": "claude-opus-5-5", "effort": "high",
+                 "pipeline": first }),
+    );
+    record_as(
+        &repository,
+        "",
+        Some(("pm", "session-pm")),
+        "data_pipeline.escalated",
+        &json!({ "pipeline": first, "reason": "A paid plan.\u{1b}[2J Your call." }),
+    );
+    record(
+        &repository,
+        "",
+        "data_pipeline.escalated",
+        &json!({ "pipeline": second, "reason": "The Product Manager did not decide" }),
+    );
+    // A request holds no task: the task ends, and the requests still wait for the owner.
+    let ended = run(&repository.path, &["cancel", &task, "Not", "needed"]);
+    assert_eq!(ended.code, 0, "{}", ended.err);
+
+    // A process driving the project says what waits, with both commands.
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let line = ran
+        .out
+        .lines()
+        .find(|line| line.contains("asks for a data source: Shippo"))
+        .unwrap_or_else(|| panic!("a waiting line: {}", ran.out));
+    assert!(line.starts_with(&format!("{task} waits: ")), "{line}");
+    assert!(
+        line.ends_with(&format!(
+            "asks for a data source: Shippo: farik pipeline approve {second}, or farik pipeline decline {second}"
+        )),
+        "{line}"
+    );
+    let json = run_with(&repository.path, &["--json", "run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    let last: Value = serde_json::from_str(json.out.lines().last().expect("a line")).expect("JSON");
+    let waiting: Vec<&Value> = last["waiting_on_you"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter(|item| item.get("pipeline").is_some())
+        .collect();
+    assert_eq!(
+        waiting
+            .iter()
+            .map(|item| item["pipeline"].as_u64())
+            .collect::<Vec<_>>(),
+        [Some(first), Some(second)],
+        "{last}"
+    );
+
+    // A request nobody decided waits on the manager and not on the owner. It is asked for after
+    // the runs above, which would start the manager's session for it.
+    let open = ask("Tavily", "free", false);
+
+    // The list shows each request, the agent's and the manager's words with their control
+    // characters escaped.
+    let listed = run(&repository.path, &["pipeline", "list"]);
+    assert_eq!(listed.code, 0, "{}", listed.err);
+    let row = listed
+        .out
+        .lines()
+        .find(|line| line.contains("Firecrawl"))
+        .unwrap_or_else(|| panic!("a line for Firecrawl: {}", listed.out));
+    for part in [
+        first.to_string().as_str(),
+        "Firecrawl\\u001b[31m",
+        "  firecrawl.dev  ",
+        "  costs money  ",
+        "needs an account",
+        "sends no data",
+        "A paid plan.\\u001b[2J Your call.",
+    ] {
+        assert!(row.contains(part), "{part}: {row}");
+    }
+    assert!(
+        !row.contains("https://"),
+        "the site, not the address: {row}"
+    );
+    let shippo = listed
+        .out
+        .lines()
+        .find(|line| line.contains("Shippo"))
+        .unwrap_or_else(|| panic!("a line for Shippo: {}", listed.out));
+    assert!(shippo.contains("sends your data"), "{shippo}");
+    assert!(shippo.contains("  free  "), "{shippo}");
+    assert!(
+        !shippo.contains("The Product Manager did not decide"),
+        "Farik's passing on is no reason of the manager's: {shippo}"
+    );
+    assert!(
+        !listed.out.contains('\u{1b}'),
+        "no escape reaches the terminal"
+    );
+    assert!(!listed.out.contains("Tavily"), "{}", listed.out);
+    let machine = run(&repository.path, &["--json", "pipeline", "list"]);
+    assert_eq!(machine.code, 0, "{}", machine.err);
+    let rows: Value = serde_json::from_str(machine.out.trim()).expect("one JSON array alone");
+    let rows = rows.as_array().expect("an array");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["kind"], "data_pipeline");
+    assert_eq!(rows[0]["pipeline"], first);
+    assert_eq!(rows[0]["cost"], "paid");
+    assert_eq!(rows[0]["host"], "firecrawl.dev");
+    assert_eq!(rows[1]["pipeline"], second);
+    assert_eq!(rows[1]["sends_project_data"], true);
+    assert!(rows[1].get("reason").is_none());
+    assert!(
+        rows[0]["request_text"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("Set up Firecrawl")),
+        "{}",
+        rows[0]
+    );
+
+    // Deciding: with a note, and without, and once.
+    let approved = run(
+        &repository.path,
+        &["pipeline", "approve", &first.to_string(), "--note", "Go"],
+    );
+    assert_eq!(approved.code, 0, "{}", approved.err);
+    let declined = run(
+        &repository.path,
+        &["pipeline", "decline", &second.to_string()],
+    );
+    assert_eq!(declined.code, 0, "{}", declined.err);
+    let approvals = events(&repository, &[EventKind::DataPipelineApproved]);
+    let EventBody::DataPipelineApproved(body) = &approvals[0].body else {
+        panic!("an approval");
+    };
+    assert_eq!(
+        (
+            body.pipeline.get(),
+            body.by.to_string(),
+            body.reason.to_string()
+        ),
+        (first, "human".to_string(), "Go".to_string())
+    );
+    assert_eq!(
+        (
+            &approvals[0].envelope.ids.agent_id,
+            &approvals[0].envelope.ids.session_id
+        ),
+        (&None, &None),
+        "the owner's"
+    );
+    let refusals = events(&repository, &[EventKind::DataPipelineDeclined]);
+    let EventBody::DataPipelineDeclined(body) = &refusals[0].body else {
+        panic!("a decline");
+    };
+    assert_eq!(
+        (body.pipeline.get(), body.reason.to_string()),
+        (second, String::new())
+    );
+    let created = events(&repository, &[EventKind::TaskCreated]);
+    let EventBody::TaskCreated(filed) = &created.last().expect("the request").body else {
+        panic!("a request");
+    };
+    assert_eq!(filed.created_by, "human", "filed in the owner's name");
+
+    // The open one is the manager's, a decided one is decided, and a word is no number.
+    let not_yet = run(
+        &repository.path,
+        &["pipeline", "approve", &open.to_string()],
+    );
+    assert_eq!(not_yet.code, 1, "{}", not_yet.out);
+    assert!(
+        not_yet.err.starts_with("farik: pipeline_not_escalated"),
+        "{}",
+        not_yet.err
+    );
+    let again = run(
+        &repository.path,
+        &["pipeline", "decline", &first.to_string()],
+    );
+    assert_eq!(again.code, 1, "{}", again.out);
+    assert!(
+        again.err.starts_with("farik: pipeline_decided"),
+        "{}",
+        again.err
+    );
+    let junk = run(&repository.path, &["pipeline", "approve", "firecrawl"]);
+    assert_eq!(junk.code, 2, "{}", junk.out);
+    let after = run(&repository.path, &["pipeline", "list"]);
+    assert_eq!(after.code, 0, "{}", after.err);
+    assert_eq!(
+        after.out.trim(),
+        "no data pipeline request waits for you",
+        "{}",
+        after.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one project, from the waiting line to the list after every command"
+)]
 fn farik_order_lists_and_decides() {
     let repository = a_project("human-order");
     let task = filed(&repository, "Add done.txt");
