@@ -906,6 +906,47 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_plan_s_cost_is_the_sum_over_every_ad_account() {
+        let watching = Watching::new("spend-two-accounts").await;
+        watching.ads.plan("MP-1", None);
+        watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
+        // MP-2 replaces it in another ad account, with 600.00 for Google Ads.
+        watching.ads.plan_with("MP-2", Some("MP-1"), |body| {
+            body["google_ads_account"] = json!("234-567-8901");
+            body["budget"] = json!({ "total": "1000.00", "google_ads": "600.00" });
+        });
+        watching.ends("MP-1");
+        watching.made(("MP-2", "search-long"), (OTHER, 21));
+        // 250.00 of search-launch's 500.00 in the first account, 350.00 of search-long's 400.00
+        // in the second: neither campaign is at its cap, and together they are at the plan's.
+        watching.costs(CUSTOMER, &[(11, 250)]);
+        watching.costs(OTHER, &[(21, 350)]);
+
+        watching.wakes().await;
+
+        let (first, second) = (campaign_name(CUSTOMER, 11), campaign_name(OTHER, 21));
+        assert_eq!(
+            watching.spend_reads(),
+            [
+                spend_query_of(std::slice::from_ref(&first)),
+                spend_query_of(std::slice::from_ref(&second)),
+            ],
+            "one read for each ad account"
+        );
+        let reached = watching.reached(0);
+        assert_eq!(reached["plan"], "MP-2");
+        assert_eq!(reached["scope"], "plan");
+        assert_eq!(reached["spent"], "600.00");
+        assert_eq!(reached["budget"], "600.00");
+        assert_eq!(watching.events(EventKind::MarketingBudgetReached).len(), 1);
+        // MP-2 carries only the campaign in its own account, which the cap pauses; MP-1's, in the
+        // other account, is paused for its plan's end.
+        assert_eq!(reached["paused"], json!([second]));
+        assert_eq!(watching.pauses(), [second, first]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn reads_while_the_team_is_paused() {
         let watching = Watching::new("spend-team-paused").await;
         watching.ads.plan("MP-1", None);
