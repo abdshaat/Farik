@@ -1,11 +1,11 @@
 # Phase 7, step 11b: Deploy tasks and `farik_deploy`
 
-Status: ready once its new mockups are approved (executes after the commits of steps 10c to 10f, 10h and 11 exist)
+Status: ready (executes after the commits of steps 10c to 10f, 10h and 11 exist)
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 5.2, 5.3, 5.6, 5.7, 5.11, 5.14, 6.9, 8.4, 8.5, 8.6; F9
 Depends on: the commits of steps 10c to 10f, 10h and 11, each ready and not yet executed: execution starts only after they exist. Step 11 (`Role::DevopsEngineer`, ADR 0045, the approved boards `TodayDeployApproval` and `SprintStartDeploys`); step 10h (`ApprovedBy` on `tool.called`, `approval_mode` in `farik_store::approvals`, the mode kept in this computer's log, `auto_acts`, `pages/DoneOnItsOwn.tsx`, the act table); step 09c (`TransitionEffect::NothingToIntegrate`, `WorkState.folder`, the branch-less sites keyed by `task_private_folder`); step 02 (`tool_approval.requested`, `open_grants`, the ask that stops a session, `ToolApproval.tsx`); phase 6 step 15 (sprints, `StartSprint.tsx`); phase 6 (merged in #19). File:line citations are at 8fd2751; the names are what count.
 Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-07 (one round, ADR 0032): not ready, 6 Blocking and the Should items, all folded below with the founder's answers; no second round
-Mockups approved by: step 11's boards (2026-10-07) and this step's new ones, pending
+Mockups approved by: step 11's boards (2026-10-07) and this step's new ones, by the founder on 2026-10-08 as drawn ("Approve as drawn"): `DoneOnItsOwnDeploy`, `PhoneDoneOnItsOwnDeploy`, `PhoneDeployApproval`, `PhoneSprintStartDeploys` (`.dc.html`), with the choice shown on them (a sprint approves a task's first deploy in it; a retry, or a deploy again after a review sent it back, asks)
 Decided by the founder, 2026-10-07, in conversation: (1) whether starting a sprint approves a deploy task that joins it after it started, under an epic the sprint holds, "Yes, the sprint covers it": the sprint's start approves every deploy task in the running sprint, however it got there (its first deploy there: a retry asks, as the approved `TodayDeployApproval` says), against the reviewer's recommendation (only those the assigner planned); the gate below, ADR 0045's item 1 (step 11's Task 1) and spec 5.6 say so; (2) how a deploy made on auto reads under "Done on its own", `"Lena put <version> live for <task>"`: a `deploy` kind of its own, "{name} put {sha} live for {task}", drawn on new boards for the founder's approval with the phone versions of the deploy question and of the sprint-start line (Task 0).
 Amended 2026-10-07 by step 11's readiness review and the founder's answer to it ("On this computer only"; ADR 0045, 3): the production settings live in this computer's log, never in `team.yaml` or a template; "The production settings" below carries it, and steps 11c to 12e read them with `farik_store::production::production(log)` wherever they name `Team::production`.
 
@@ -114,7 +114,7 @@ Each test is watched to fail for the reason given, before the code that satisfie
 
 An Opus session (ADR 0032) draws four boards in the approved boards' tokens, components and words. On `canvas.json`'s page "Ask or auto": `DoneOnItsOwnDeploy` and `PhoneDoneOnItsOwnDeploy`, the "Done on its own" page with Lena's deploy new and opened above two of step 10h's acts, drawn as new boards rather than a revision of step 10h's approved `DoneOnItsOwn`, so that approval stands as given. On "DevOps Engineer": `PhoneDeployApproval` (Today's row and band; the dialog filling the screen, its two buttons pinned; the three other reasons, `sent_back`'s among them) and `PhoneSprintStartDeploys` (the sprint-start dialog filling the screen, with Lena's line). Gate: the founder approves them; the approval and its date go into this header in the same commit. Task 8 waits for it.
 
-- [ ] `docs(design): mock up deploys on auto and on the phone`
+- [x] `docs(design): mock up deploys on auto and on the phone`
 
 ### Task 1: The deploy task's shape
 
