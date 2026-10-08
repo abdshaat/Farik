@@ -18,6 +18,7 @@ use farik_protocol::event::{
 };
 use farik_store::purchase_orders::{PurchaseOrderRecord, expires_at, overdue, purchase_orders};
 use farik_store::renewals::{last_check, renewals};
+use farik_store::{EventLog, StoreError};
 use serde_json::{Value, json};
 
 use crate::tools::{ToolDeps, ToolError};
@@ -208,6 +209,43 @@ pub fn order_row(record: &PurchaseOrderRecord, today: NaiveDate, detail: bool) -
         row["why"] = json!(body.why.to_string());
     }
     row
+}
+
+/// `purchase_orders.list`: every order the log holds, oldest first, as the Orders section and the
+/// command line word it, with `overdue` as of `today`.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn purchase_orders_list(log: &EventLog, today: NaiveDate) -> Result<Value, StoreError> {
+    Ok(json!({
+        "orders": purchase_orders(log)?
+            .iter()
+            .map(|order| order_row(order, today, false))
+            .collect::<Vec<_>>()
+    }))
+}
+
+/// `renewals.list`: the renewals Farik flagged that the owner has not dismissed, oldest first, and
+/// how many rows the last daily check could not read.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn renewals_list(log: &EventLog) -> Result<Value, StoreError> {
+    let open: Vec<Value> = renewals(log)?
+        .into_iter()
+        .filter(|one| !one.dismissed)
+        .map(|one| {
+            json!({
+                "renewal": one.renewal, "vendor": one.vendor,
+                "renews_on": one.renews_on.to_string(), "decide_by": one.decide_by.to_string(),
+                "flagged_at": time(one.flagged_at),
+            })
+        })
+        .collect();
+    let unreadable = last_check(log)?.map_or(0, |check| check.unreadable);
+    Ok(json!({ "open": open, "unreadable": unreadable }))
 }
 
 /// An event of Farik's own, recorded at `now`: about `task` when it is about one, and with no

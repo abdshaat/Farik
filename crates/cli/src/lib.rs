@@ -43,12 +43,14 @@ pub mod log;
 pub mod marketing;
 /// The harness metrics.
 pub mod metrics;
+pub mod order;
 /// Text as a terminal may be given it.
 pub mod printable;
 /// The project a command runs against.
 pub mod project;
 /// The governor's refusals in words.
 pub mod refusal;
+pub mod renewal;
 /// `farik run` and `farik plan`.
 #[cfg(unix)]
 mod run;
@@ -530,6 +532,17 @@ enum Commands {
         #[command(subcommand)]
         command: SiteCommands,
     },
+    /// List the Procurement Specialist's purchase orders, decide one, and say that you placed it,
+    /// that it came, or that it will not (6.10).
+    Order {
+        #[command(subcommand)]
+        command: OrderCommands,
+    },
+    /// List the renewals coming up, and dismiss one (6.10).
+    Renewal {
+        #[command(subcommand)]
+        command: RenewalCommands,
+    },
     /// Start, end, or show a sprint (5.5).
     Sprint {
         #[command(subcommand)]
@@ -763,6 +776,92 @@ enum SiteCommands {
     Remove {
         /// A name like shop.com, or the address of any page on it.
         host: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum OrderCommands {
+    /// Every purchase order, oldest first, with where it stands.
+    List,
+    /// Approve an order the Procurement Specialist suggested. Farik places nothing: you place it
+    /// yourself, then say so with `farik order placed`.
+    Approve {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// A note for the Procurement Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Do not approve an order the Procurement Specialist suggested.
+    Reject {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// A note for the Procurement Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Say that you placed an approved order.
+    Placed {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// The day you placed it, as 2026-10-08; today when absent.
+        #[arg(long = "on")]
+        on: Option<String>,
+        /// What you paid, as 1450 or 1450.50, when you know.
+        #[arg(long)]
+        paid: Option<String>,
+        /// The currency of what you paid, as EUR; the order's when absent.
+        #[arg(long)]
+        currency: Option<String>,
+    },
+    /// Say that a placed order came.
+    Received {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// The day it came, as 2026-10-08; today when absent.
+        #[arg(long = "on")]
+        on: Option<String>,
+        /// What you paid, as 1450 or 1450.50, when you say so here.
+        #[arg(long)]
+        paid: Option<String>,
+        /// The currency of what you paid, as EUR.
+        #[arg(long)]
+        currency: Option<String>,
+        /// The day it renews, as 2027-10-08, when it is paid for again.
+        #[arg(long)]
+        renews_on: Option<String>,
+    },
+    /// Correct where a placed order stands.
+    Status {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// One of preparing, shipped, delayed and problem.
+        status: String,
+        /// What you know.
+        #[arg(long)]
+        note: Option<String>,
+        /// The day the seller expects it, as 2026-10-20.
+        #[arg(long)]
+        expected_on: Option<String>,
+    },
+    /// Close a placed order that will not come: cancelled, refunded or lost.
+    Close {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// A note for the Procurement Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RenewalCommands {
+    /// The renewals coming up that nobody dismissed.
+    List,
+    /// Dismiss a renewal coming up.
+    Dismiss {
+        /// The renewal's number, as `farik renewal list` prints it.
+        renewal: u64,
     },
 }
 
@@ -1041,6 +1140,18 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             let (name, command) = humans(&parsed.command)?;
             human_command(&project, command, name, io)
         }),
+        Commands::Order {
+            command: OrderCommands::List,
+        } => open_project(&io.cwd, now).and_then(|project| order::list(&project, now)),
+        Commands::Renewal {
+            command: RenewalCommands::List,
+        } => open_project(&io.cwd, now).and_then(|project| renewal::list(&project)),
+        Commands::Order { .. } | Commands::Renewal { .. } => {
+            open_project(&io.cwd, now).and_then(|project| {
+                let (name, command) = humans(&parsed.command)?;
+                human_command(&project, command, name, io)
+            })
+        }
         Commands::Stop { target } => {
             open_project(&io.cwd, now).and_then(|project| stop(&project, target.as_deref()))
         }
@@ -1191,6 +1302,15 @@ fn phase_two_write(
         ),
         _ => Err("this is not one of phase 2's writes".to_string()),
     }
+}
+
+/// A day a person typed after `flag`, as `2026-10-08`, or none when they typed nothing.
+fn day(flag: &str, text: Option<&str>) -> Result<Option<chrono::NaiveDate>, String> {
+    text.map(|text| {
+        text.parse()
+            .map_err(|_| format!("{flag} {text} is not a day: write it as 2026-10-08"))
+    })
+    .transpose()
 }
 
 /// A task id a person typed.
@@ -1393,6 +1513,83 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 ("site remove", Command::SiteRemove { host: host.clone() })
             }
             SiteCommands::List => return Err("farik site list only reads".to_string()),
+        },
+        Commands::Order { command } => match command {
+            OrderCommands::Approve { order, note } => (
+                "order approve",
+                Command::PurchaseOrderDecide {
+                    order: order::number(order)?,
+                    approve: true,
+                    note: note.clone(),
+                },
+            ),
+            OrderCommands::Reject { order, note } => (
+                "order reject",
+                Command::PurchaseOrderDecide {
+                    order: order::number(order)?,
+                    approve: false,
+                    note: note.clone(),
+                },
+            ),
+            OrderCommands::Placed {
+                order,
+                on,
+                paid,
+                currency,
+            } => (
+                "order placed",
+                Command::PurchaseOrderPlace {
+                    order: order::number(order)?,
+                    placed_on: day("--on", on.as_deref())?,
+                    paid: paid.clone(),
+                    currency: currency.clone(),
+                },
+            ),
+            OrderCommands::Received {
+                order,
+                on,
+                paid,
+                currency,
+                renews_on,
+            } => (
+                "order received",
+                Command::PurchaseOrderReceive {
+                    order: order::number(order)?,
+                    received_on: day("--on", on.as_deref())?,
+                    paid: paid.clone(),
+                    currency: currency.clone(),
+                    renews_on: day("--renews-on", renews_on.as_deref())?,
+                },
+            ),
+            OrderCommands::Status {
+                order,
+                status,
+                note,
+                expected_on,
+            } => (
+                "order status",
+                Command::PurchaseOrderUpdate {
+                    order: order::number(order)?,
+                    status: status.clone(),
+                    note: note.clone(),
+                    expected_on: day("--expected-on", expected_on.as_deref())?,
+                },
+            ),
+            OrderCommands::Close { order, note } => (
+                "order close",
+                Command::PurchaseOrderClose {
+                    order: order::number(order)?,
+                    note: note.clone(),
+                },
+            ),
+            OrderCommands::List => return Err("farik order list only reads".to_string()),
+        },
+        Commands::Renewal { command } => match command {
+            RenewalCommands::Dismiss { renewal } => (
+                "renewal dismiss",
+                Command::RenewalDismiss { renewal: *renewal },
+            ),
+            RenewalCommands::List => return Err("farik renewal list only reads".to_string()),
         },
         _ => return Err("this is not one of the human's commands".to_string()),
     })

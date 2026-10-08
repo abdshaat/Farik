@@ -1,7 +1,8 @@
 //! What waits on the human when a process driving the project ends (`docs/SPEC.md` 5.7): the
 //! questions nobody answered, the contracts awaiting approval, the escalations, the results that
 //! may need the human's acceptance, the tasks waiting to be integrated by hand, the posts outside
-//! the plan that wait for the owner, and the sites the Procurement Specialist asked to read.
+//! the plan that wait for the owner, the sites the Procurement Specialist asked to read, and the
+//! purchase orders it set up.
 
 use farik_core::team::Team;
 use farik_store::files::ProjectFiles;
@@ -27,6 +28,8 @@ pub(crate) struct Waiting {
     post: Option<u64>,
     /// The number of the site request that waits, for a script to act on.
     request: Option<u64>,
+    /// The number of the purchase order that waits, for a script to act on.
+    order: Option<u64>,
 }
 
 impl Waiting {
@@ -56,6 +59,9 @@ impl Waiting {
         }
         if let Some(request) = self.request {
             item["request"] = json!(request);
+        }
+        if let Some(order) = self.order {
+            item["order"] = json!(order);
         }
         item
     }
@@ -161,6 +167,7 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
         plan: item.plan.as_ref().map(|ask| ask.plan.clone()),
         post: item.post.as_ref().map(|ask| ask.post),
         request: item.site.as_ref().map(|ask| ask.request),
+        order: item.order.as_ref().map(|ask| ask.order),
     }
 }
 
@@ -168,7 +175,9 @@ fn describe(item: &farik_store::waiting::Waiting) -> Waiting {
 mod tests {
     use chrono::NaiveDate;
     use farik_core::contract::TaskId;
-    use farik_store::waiting::{PlanAsk, PostAsk, SiteAsk, Waiting as Listed, WaitingKind};
+    use farik_store::waiting::{
+        OrderAsk, PlanAsk, PostAsk, SiteAsk, Waiting as Listed, WaitingKind,
+    };
 
     use super::describe;
 
@@ -226,6 +235,58 @@ mod tests {
             }),
             ..a_plan_waiting()
         }
+    }
+
+    fn an_order_waiting() -> Listed {
+        let at = chrono::DateTime::parse_from_rfc3339("2026-11-04T10:00:00Z")
+            .expect("a time")
+            .to_utc();
+        Listed {
+            kind: WaitingKind::PurchaseOrder,
+            line: "Theo set up an order from Acme: 59.98 USD".to_string(),
+            plan: None,
+            order: Some(OrderAsk {
+                order: 23,
+                seller: "Acme".to_string(),
+                seller_contact: "sales@acme.example".to_string(),
+                lines: Vec::new(),
+                currency: "USD".to_string(),
+                period: "once".to_string(),
+                total: "59.98".to_string(),
+                delivery: String::new(),
+                terms: String::new(),
+                url: String::new(),
+                evaluation: "evaluations/mirrors.md".to_string(),
+                why: "It is the cheapest.".to_string(),
+                at,
+                expires_at: at + chrono::Duration::days(30),
+            }),
+            ..a_plan_waiting()
+        }
+    }
+
+    #[test]
+    fn a_run_says_which_order_waits() {
+        let waiting = describe(&an_order_waiting());
+
+        assert_eq!(
+            waiting.lines(),
+            [
+                "FRK-1 waits: Theo set up an order from Acme: 59.98 USD: farik order approve 23, or farik order reject 23"
+            ]
+        );
+        let json = waiting.json();
+        assert_eq!(json["order"], 23);
+        assert_eq!(json["task_id"], "FRK-1");
+        assert_eq!(
+            json["command"],
+            "farik order approve 23, or farik order reject 23"
+        );
+        assert!(json.get("request").is_none(), "an order names no request");
+        assert!(
+            describe(&a_site_waiting()).json().get("order").is_none(),
+            "a request names no order"
+        );
     }
 
     #[test]

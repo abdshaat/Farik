@@ -1642,3 +1642,482 @@ fn farik_site_lists_and_decides() {
     assert_eq!(wire["waiting"][0]["request"], third, "{wire}");
     assert_eq!(wire["farik"][0]["on"], false, "{wire}");
 }
+
+/// Order `number` that `theo` drafted in his session on `task`: 59.98 USD from `seller`.
+fn order_drafted(
+    repository: &farik_store::git::fixtures::TempRepo,
+    task: &str,
+    number: u64,
+    seller: &str,
+) {
+    record_as(
+        repository,
+        task,
+        Some(("theo", "session-1")),
+        "purchase_order.drafted",
+        &json!({
+            "order": number, "seller": seller, "seller_contact": "sales@acme.example",
+            "lines": [
+                { "item": "Baby car mirror", "quantity": 3, "unit": "piece",
+                  "unit_price": "19.99", "line_total": "59.97" },
+                { "item": "Mounting kit", "quantity": 1, "unit": "",
+                  "unit_price": "0.01", "line_total": "0.01" }
+            ],
+            "currency": "USD", "period": "once", "total": "59.98",
+            "delivery": "3 days", "terms": "Net 30", "url": "",
+            "evaluation": "evaluations/mirrors.md",
+            "why": "It is the cheapest seller that ships to us."
+        }),
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one project, from the waiting line to the list after every command"
+)]
+fn farik_order_lists_and_decides() {
+    let repository = a_project("human-order");
+    let task = filed(&repository, "Add done.txt");
+    order_drafted(&repository, &task, 1, "Acme\u{1b}[31m");
+    order_drafted(&repository, &task, 2, "Bolt");
+    order_drafted(&repository, &task, 3, "Cog");
+    // An order holds no task: the task ends, and the orders still wait for the owner.
+    let ended = run(&repository.path, &["cancel", &task, "Not", "needed"]);
+    assert_eq!(ended.code, 0, "{}", ended.err);
+
+    // A process driving the project says what waits, with both commands.
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let line = ran
+        .out
+        .lines()
+        .find(|line| line.contains("set up an order from Bolt"))
+        .unwrap_or_else(|| panic!("a waiting line: {}", ran.out));
+    assert!(line.starts_with(&format!("{task} waits: ")), "{line}");
+    assert!(
+        line.ends_with(
+            "set up an order from Bolt: 59.98 USD: farik order approve 2, or farik order reject 2"
+        ),
+        "{line}"
+    );
+    let json = run_with(&repository.path, &["--json", "run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    let last: Value = serde_json::from_str(json.out.lines().last().expect("a line")).expect("JSON");
+    let orders: Vec<&Value> = last["waiting_on_you"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter(|item| item.get("order").is_some())
+        .collect();
+    assert_eq!(
+        orders
+            .iter()
+            .map(|item| item["order"].as_u64())
+            .collect::<Vec<_>>(),
+        [Some(1), Some(2), Some(3)],
+        "{last}"
+    );
+
+    // The list shows each order, the agent's words with their control characters escaped.
+    let listed = run(&repository.path, &["order", "list"]);
+    assert_eq!(listed.code, 0, "{}", listed.err);
+    let first = listed
+        .out
+        .lines()
+        .find(|line| line.contains("PO-1"))
+        .unwrap_or_else(|| panic!("a line for PO-1: {}", listed.out));
+    for part in [
+        "drafted",
+        "Acme\\u001b[31m",
+        "59.98 USD once",
+        task.as_str(),
+        "theo",
+    ] {
+        assert!(first.contains(part), "{part}: {first}");
+    }
+    assert!(
+        !listed.out.contains('\u{1b}'),
+        "no escape reaches the terminal"
+    );
+    let machine = run(&repository.path, &["--json", "order", "list"]);
+    assert_eq!(machine.code, 0, "{}", machine.err);
+    let all: Value = serde_json::from_str(machine.out.trim()).expect("one JSON object alone");
+    assert_eq!(all["orders"].as_array().map(Vec::len), Some(3));
+    assert_eq!(all["orders"][0]["order"], 1);
+    assert_eq!(all["orders"][0]["state"], "drafted");
+    assert_eq!(all["orders"][0]["total"], "59.98");
+
+    // Deciding: with a note, by `PO-2`, and once.
+    let approved = run(&repository.path, &["order", "approve", "1", "--note", "Go"]);
+    assert_eq!(approved.code, 0, "{}", approved.err);
+    let rejected = run(&repository.path, &["order", "reject", "PO-2"]);
+    assert_eq!(rejected.code, 0, "{}", rejected.err);
+    let approvals = events(&repository, &[EventKind::PurchaseOrderApproved]);
+    let EventBody::PurchaseOrderApproved(body) = &approvals[0].body else {
+        panic!("an approval");
+    };
+    assert_eq!(
+        (body.order.get(), body.note.to_string()),
+        (1, "Go".to_string())
+    );
+    assert_eq!(
+        (
+            &approvals[0].envelope.ids.agent_id,
+            &approvals[0].envelope.ids.session_id
+        ),
+        (&None, &None),
+        "the owner's"
+    );
+    let rejections = events(&repository, &[EventKind::PurchaseOrderRejected]);
+    let EventBody::PurchaseOrderRejected(body) = &rejections[0].body else {
+        panic!("a rejection");
+    };
+    assert_eq!(
+        (body.order.get(), body.note.to_string()),
+        (2, String::new())
+    );
+    let with_a_note = run(
+        &repository.path,
+        &["order", "reject", "3", "--note", "Too dear"],
+    );
+    assert_eq!(with_a_note.code, 0, "{}", with_a_note.err);
+    let EventBody::PurchaseOrderRejected(body) =
+        &events(&repository, &[EventKind::PurchaseOrderRejected])[1].body
+    else {
+        panic!("a second rejection");
+    };
+    assert_eq!(
+        (body.order.get(), body.note.to_string()),
+        (3, "Too dear".to_string())
+    );
+    let again = run(&repository.path, &["order", "approve", "1"]);
+    assert_eq!(again.code, 1, "{}", again.out);
+    assert!(
+        again.err.starts_with("farik: purchase_order_decided"),
+        "{}",
+        again.err
+    );
+    let junk = run(&repository.path, &["order", "approve", "PO-x"]);
+    assert_eq!(junk.code, 1, "{}", junk.out);
+    let after = run(&repository.path, &["order", "list"]);
+    assert!(
+        after
+            .out
+            .lines()
+            .any(|line| line.contains("PO-1") && line.contains("approved")),
+        "{}",
+        after.out
+    );
+    assert!(
+        after
+            .out
+            .lines()
+            .any(|line| line.contains("PO-2") && line.contains("rejected")),
+        "{}",
+        after.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one order's life, from placing to closing, and what each command sent"
+)]
+fn farik_order_placed_and_received_send_what_was_paid() {
+    let repository = a_project("human-order-steps");
+    let task = filed(&repository, "Add done.txt");
+    for number in [1, 2] {
+        order_drafted(&repository, &task, number, &format!("Seller {number}"));
+        record(
+            &repository,
+            &task,
+            "purchase_order.approved",
+            &json!({ "order": number, "note": "" }),
+        );
+    }
+    let day = |days: i64| (project::at().date_naive() + chrono::Duration::days(days)).to_string();
+
+    let placed = run(
+        &repository.path,
+        &[
+            "order",
+            "placed",
+            "1",
+            "--paid",
+            "1450",
+            "--currency",
+            "EUR",
+            "--on",
+            "2026-10-08",
+        ],
+    );
+    assert_eq!(placed.code, 0, "{}", placed.err);
+    let events_of = |kind: EventKind| events(&repository, &[kind]);
+    let EventBody::PurchaseOrderPlaced(body) = &events_of(EventKind::PurchaseOrderPlaced)[0].body
+    else {
+        panic!("a placing");
+    };
+    assert_eq!(body.placed_on.to_string(), "2026-10-08");
+    assert_eq!(
+        body.paid.as_ref().map(|paid| paid.as_str()),
+        Some("1450.00")
+    );
+    assert_eq!(
+        body.currency.as_ref().map(|code| code.as_str()),
+        Some("EUR")
+    );
+
+    let received = run(
+        &repository.path,
+        &["order", "received", "1", "--renews-on", "2027-10-08"],
+    );
+    assert_eq!(received.code, 0, "{}", received.err);
+    let EventBody::PurchaseOrderReceived(body) =
+        &events_of(EventKind::PurchaseOrderReceived)[0].body
+    else {
+        panic!("a receipt");
+    };
+    assert!(body.paid.is_none(), "no amount was sent");
+    assert_eq!(
+        body.renews_on.map(|renews| renews.to_string()),
+        Some("2027-10-08".to_string())
+    );
+    assert_eq!(
+        body.received_on,
+        project::at().date_naive(),
+        "today when no day is given"
+    );
+
+    // An order received on a day the owner names, with what they paid and in which currency.
+    order_drafted(&repository, &task, 4, "Seller 4");
+    record(
+        &repository,
+        &task,
+        "purchase_order.approved",
+        &json!({ "order": 4, "note": "" }),
+    );
+    let placed = run(&repository.path, &["order", "placed", "4"]);
+    assert_eq!(placed.code, 0, "{}", placed.err);
+    let received = run(
+        &repository.path,
+        &[
+            "order",
+            "received",
+            "PO-4",
+            "--on",
+            "2026-10-10",
+            "--paid",
+            "12.5",
+            "--currency",
+            "GBP",
+        ],
+    );
+    assert_eq!(received.code, 0, "{}", received.err);
+    let EventBody::PurchaseOrderReceived(body) =
+        &events_of(EventKind::PurchaseOrderReceived)[1].body
+    else {
+        panic!("a second receipt");
+    };
+    assert_eq!(
+        (
+            body.order.get(),
+            body.received_on.to_string(),
+            body.paid.as_ref().map(|paid| paid.as_str()),
+            body.currency.as_ref().map(|code| code.as_str()),
+            body.renews_on
+        ),
+        (
+            4,
+            "2026-10-10".to_string(),
+            Some("12.50"),
+            Some("GBP"),
+            None
+        )
+    );
+
+    // A second order: placed, its status corrected, and closed.
+    let placed = run(&repository.path, &["order", "placed", "2"]);
+    assert_eq!(placed.code, 0, "{}", placed.err);
+    let status = run(
+        &repository.path,
+        &[
+            "order",
+            "status",
+            "2",
+            "delayed",
+            "--note",
+            "Short of flour",
+            "--expected-on",
+            &day(12),
+        ],
+    );
+    assert_eq!(status.code, 0, "{}", status.err);
+    let EventBody::PurchaseOrderUpdated(body) = &events_of(EventKind::PurchaseOrderUpdated)[0].body
+    else {
+        panic!("a status");
+    };
+    assert_eq!(
+        (body.order.get(), body.status.to_string()),
+        (2, "delayed".to_string())
+    );
+    assert_eq!(body.note.to_string(), "Short of flour");
+    assert_eq!(body.expected_on.map(|day| day.to_string()), Some(day(12)));
+    let listed = run(&repository.path, &["order", "list"]);
+    assert!(
+        listed.out.lines().any(|line| line.contains("PO-2")
+            && line.contains("delayed")
+            && line.contains("Short of flour")),
+        "{}",
+        listed.out
+    );
+    let refused = run(&repository.path, &["order", "status", "2", "placed"]);
+    assert_eq!(refused.code, 1, "{}", refused.out);
+    assert!(
+        refused
+            .err
+            .starts_with("farik: purchase_order_status_invalid"),
+        "{}",
+        refused.err
+    );
+    let closed = run(
+        &repository.path,
+        &["order", "close", "2", "--note", "It was lost."],
+    );
+    assert_eq!(closed.code, 0, "{}", closed.err);
+    let EventBody::PurchaseOrderClosed(body) = &events_of(EventKind::PurchaseOrderClosed)[0].body
+    else {
+        panic!("a closing");
+    };
+    assert_eq!(
+        (body.order.get(), body.note.to_string()),
+        (2, "It was lost.".to_string())
+    );
+    // An order whose seller's day has passed is said to be overdue, as of today.
+    order_drafted(&repository, &task, 3, "Seller 3");
+    record(
+        &repository,
+        &task,
+        "purchase_order.approved",
+        &json!({ "order": 3, "note": "" }),
+    );
+    record(
+        &repository,
+        &task,
+        "purchase_order.placed",
+        &json!({ "order": 3, "placed_on": "2020-01-01" }),
+    );
+    record_as(
+        &repository,
+        &task,
+        Some(("theo", "session-1")),
+        "purchase_order.updated",
+        &json!({ "order": 3, "status": "shipped", "note": "", "expected_on": "2020-02-01" }),
+    );
+    let late = run(&repository.path, &["order", "list"]);
+    let late_line = |out: &str, order: &str| {
+        out.lines()
+            .find(|line| line.starts_with(order))
+            .map_or_else(|| panic!("a line for {order}: {out}"), str::to_string)
+    };
+    assert!(
+        late_line(&late.out, "PO-3").contains("  overdue"),
+        "{}",
+        late.out
+    );
+    assert!(
+        !late_line(&late.out, "PO-1").contains("overdue"),
+        "{}",
+        late.out
+    );
+    let bad_day = run(
+        &repository.path,
+        &["order", "placed", "1", "--on", "tomorrow"],
+    );
+    assert_eq!(bad_day.code, 1, "{}", bad_day.out);
+    assert!(bad_day.err.contains("--on"), "{}", bad_day.err);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_renewal_lists_and_dismisses() {
+    let repository = a_project("human-renewal");
+    let none = run(&repository.path, &["renewal", "list"]);
+    assert_eq!(none.code, 0, "{}", none.err);
+    assert!(none.out.contains("no renewal is coming up"), "{}", none.out);
+    let flagged = |vendor: &str| {
+        record(
+            &repository,
+            "",
+            "renewal.flagged",
+            &json!({ "vendor": vendor, "renews_on": "2026-11-30", "decide_by": "2026-10-31" }),
+        )
+        .envelope
+        .seq
+    };
+    let (first, second) = (flagged("Vercel\u{1b}[2J"), flagged("Notion"));
+    record(
+        &repository,
+        "",
+        "renewal.checked",
+        &json!({ "due": 2, "unreadable": 3 }),
+    );
+
+    let listed = run(&repository.path, &["renewal", "list"]);
+    assert_eq!(listed.code, 0, "{}", listed.err);
+    let line = listed
+        .out
+        .lines()
+        .find(|line| line.contains(&first.to_string()) && line.contains("Vercel"))
+        .unwrap_or_else(|| panic!("a line for the first: {}", listed.out));
+    assert!(
+        line.contains("2026-11-30") && line.contains("2026-10-31"),
+        "{line}"
+    );
+    assert!(line.contains("\\u001b[2J"), "escaped: {line}");
+    assert!(
+        !listed.out.contains('\u{1b}'),
+        "no escape reaches the terminal"
+    );
+    assert!(
+        listed
+            .out
+            .contains("3 rows in the register have a renewal date Farik can't read"),
+        "{}",
+        listed.out
+    );
+    let machine = run(&repository.path, &["--json", "renewal", "list"]);
+    let all: Value = serde_json::from_str(machine.out.trim()).expect("one JSON object alone");
+    assert_eq!(all["unreadable"], 3);
+    assert_eq!(all["open"].as_array().map(Vec::len), Some(2));
+
+    let dismissed = run(
+        &repository.path,
+        &["renewal", "dismiss", &first.to_string()],
+    );
+    assert_eq!(dismissed.code, 0, "{}", dismissed.err);
+    let events_now = events(&repository, &[EventKind::RenewalDismissed]);
+    let EventBody::RenewalDismissed(body) = &events_now[0].body else {
+        panic!("a dismissal");
+    };
+    assert_eq!(body.renewal.get(), first);
+    let after = run(&repository.path, &["--json", "renewal", "list"]);
+    let all: Value = serde_json::from_str(after.out.trim()).expect("JSON");
+    assert_eq!(all["open"].as_array().map(Vec::len), Some(1));
+    assert_eq!(all["open"][0]["renewal"], second);
+    let again = run(
+        &repository.path,
+        &["renewal", "dismiss", &first.to_string()],
+    );
+    assert_eq!(again.code, 1, "{}", again.out);
+    assert!(
+        again.err.starts_with("farik: renewal_dismissed"),
+        "{}",
+        again.err
+    );
+}

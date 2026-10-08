@@ -276,8 +276,11 @@ pub(super) fn query(
             marketing_plan_get(state, deps, params["plan"].as_str().unwrap_or(""))
         }
         "sites.list" => crate::tools::sites::site_list(&deps.log).map_err(|e| internal(&e)),
-        "purchase_orders.list" => purchase_orders_list(deps),
-        "renewals.list" => renewals_list(deps),
+        "purchase_orders.list" => {
+            crate::procurement::purchase_orders_list(&deps.log, deps.clock.now().date_naive())
+                .map_err(|e| internal(&e))
+        }
+        "renewals.list" => crate::procurement::renewals_list(&deps.log).map_err(|e| internal(&e)),
         "purchase_order.evaluation" => order_evaluation(deps, params),
         "social_posts.list" => Ok(json!({
             "posts": going_out(&social_posts(&deps.log).map_err(|e| internal(&e))?, deps.clock.now())
@@ -660,40 +663,6 @@ pub(super) async fn call(
         return Ok(filed);
     }
     save(state, &deps, params).await
-}
-
-/// `renewals.list`: the renewals Farik flagged that the owner has not dismissed, oldest first, and
-/// how many rows the last daily check could not read.
-fn renewals_list(deps: &ToolDeps) -> Result<Value, Failure> {
-    let time = |at: DateTime<Utc>| at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
-    let open: Vec<Value> = farik_store::renewals::renewals(&deps.log)
-        .map_err(|e| internal(&e))?
-        .into_iter()
-        .filter(|one| !one.dismissed)
-        .map(|one| {
-            json!({
-                "renewal": one.renewal, "vendor": one.vendor,
-                "renews_on": one.renews_on.to_string(), "decide_by": one.decide_by.to_string(),
-                "flagged_at": time(one.flagged_at),
-            })
-        })
-        .collect();
-    let unreadable = farik_store::renewals::last_check(&deps.log)
-        .map_err(|e| internal(&e))?
-        .map_or(0, |check| check.unreadable);
-    Ok(json!({ "open": open, "unreadable": unreadable }))
-}
-
-/// `purchase_orders.list`: every order the log holds, oldest first, as the Orders section words it.
-fn purchase_orders_list(deps: &ToolDeps) -> Result<Value, Failure> {
-    let today = deps.clock.now().date_naive();
-    let orders = purchase_orders(&deps.log).map_err(|e| internal(&e))?;
-    Ok(json!({
-        "orders": orders
-            .iter()
-            .map(|order| crate::procurement::order_row(order, today, false))
-            .collect::<Vec<_>>()
-    }))
 }
 
 /// The file `path` of the Procurement Specialist's private folder, read up to `most` bytes, when
