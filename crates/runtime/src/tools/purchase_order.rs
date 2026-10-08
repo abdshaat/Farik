@@ -468,13 +468,16 @@ pub(super) fn draft_purchase_order(
         &lines,
         total,
     );
-    write_new_workbook(&folder_at, &path, &sheets)?;
-
+    // The record is built before the file is written, so that no body that cannot be built leaves
+    // a workbook behind. Only a log that refused the event takes the workbook away: once the log
+    // has the order, the order is recorded, whatever the projections do, and the owner downloads it.
     let body = drafted_body(number, input, &lines, total)?;
-    kept_if_recorded(
+    write_new_workbook(&folder_at, &path, &sheets)?;
+    let recorded = kept_if_recorded(
         &path,
-        call.append(Some(&task), EventBody::PurchaseOrderDrafted(body)),
+        call.record(Some(&task), EventBody::PurchaseOrderDrafted(body)),
     )?;
+    call.project(&recorded)?;
     Ok(json!({
         "order": number,
         "file": file,
@@ -964,6 +967,30 @@ mod tests {
             !folder(&project).join("orders/PO-1.xlsx").exists(),
             "an order the log refused leaves no workbook behind, which would take its number"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn keeps_the_workbook_of_an_order_the_log_took() {
+        let project = a_project("po-projection-refused");
+        farik_store::event_log::fixtures::refuse_projecting(&project.deps.log);
+
+        let result = draft(&project, &an_order("Acme"));
+
+        // The order is in the log, which is the truth: the projections catch up from it, and its
+        // workbook is what the owner downloads, so it stays.
+        assert_eq!(project.events(&[EventKind::PurchaseOrderDrafted]).len(), 1);
+        assert!(
+            folder(&project).join("orders/PO-1.xlsx").is_file(),
+            "the workbook of a recorded order stays"
+        );
+        assert!(
+            matches!(result, Err(ToolError::Failed { .. })),
+            "{result:?}"
+        );
+        // The agent that is told it failed and tries again is told the order is there.
+        let reason = refusal_of(draft(&project, &an_order("Acme")));
+        assert!(reason.starts_with("purchase_order_open:"), "{reason}");
     }
 
     #[cfg(unix)]

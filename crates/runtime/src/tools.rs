@@ -660,15 +660,27 @@ impl Call<'_> {
     /// Appends one event, stamped with the agent, the session, and `task` when it is about one,
     /// and projects it.
     fn append(&self, task: Option<&TaskId>, body: EventBody) -> Result<FarikEvent, ToolError> {
+        let appended = self.record(task, body)?;
+        self.project(&appended)?;
+        Ok(appended)
+    }
+
+    /// Appends one event as `append` does and does not project it, for a call that must tell an
+    /// event the log refused from one the log took and the projections did not: the second is
+    /// recorded, and the projections catch up from the log.
+    fn record(&self, task: Option<&TaskId>, body: EventBody) -> Result<FarikEvent, ToolError> {
         let deps = self.deps();
         let event = new_event(body, deps.clock.now(), self.ids(task)).map_err(|error| {
             ToolError::Failed {
                 detail: format!("the event cannot be stamped: {error:?}"),
             }
         })?;
-        let appended = deps.log.append(&event).map_err(failed)?;
-        deps.projections.apply(&appended).map_err(failed)?;
-        Ok(appended)
+        deps.log.append(&event).map_err(failed)
+    }
+
+    /// Projects an event `record` returned.
+    fn project(&self, event: &FarikEvent) -> Result<(), ToolError> {
+        self.deps().projections.apply(event).map_err(failed)
     }
 }
 
