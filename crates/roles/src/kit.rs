@@ -1578,9 +1578,46 @@ mod tests {
         assert_eq!(external, [("serpapi".to_string(), "search".to_string())]);
     }
 
-    /// A guard over the twelve procurement skills: a skill that names a tool its kit `denied` tells
-    /// the agent to call what the harness will always refuse. The tools a skill does name must be
-    /// found, or the check would pass by never matching.
+    /// Whether `text` holds `tool` as a word of its own: not inside a longer name, whose letters,
+    /// digits, `_` and `-` the characters on either side would be.
+    fn holds_the_word(text: &str, tool: &str) -> bool {
+        let word = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+        text.match_indices(tool).any(|(at, _)| {
+            !text[..at].chars().next_back().is_some_and(word)
+                && !text[at + tool.len()..].chars().next().is_some_and(word)
+        })
+    }
+
+    /// The word-boundary match finds a name however it is written, and not inside a longer one.
+    #[test]
+    fn a_tool_name_is_found_as_a_word_of_its_own() {
+        for text in [
+            "call `web_fetch_exa` now",
+            "call web_fetch_exa now",
+            "(web_fetch_exa)",
+            "web_fetch_exa",
+            "use web_fetch_exa.",
+            "Exa's page reader, web_fetch_exa, is not available",
+        ] {
+            assert!(holds_the_word(text, "web_fetch_exa"), "{text}");
+        }
+        for text in [
+            "web_fetch_exa_2",
+            "my_web_fetch_exa",
+            "re-web_fetch_exa",
+            "web_fetch_exa-old",
+            "web_fetch_exaa",
+            "web_fetch",
+            "",
+        ] {
+            assert!(!holds_the_word(text, "web_fetch_exa"), "{text}");
+        }
+    }
+
+    /// A guard over the twelve procurement skills: a skill that names a tool its kit `denied`, in
+    /// backticks or without, tells the agent to call what the harness will always refuse. The
+    /// tools a skill does name in backticks must be found, or the check would pass by never
+    /// matching.
     #[test]
     fn no_procurement_skill_names_a_denied_tool() {
         let kit = load_kit(Role::ProcurementSpecialist).expect("the Procurement Specialist's kit");
@@ -1607,8 +1644,8 @@ mod tests {
                     denied += 1;
                     for (skill, text) in &texts {
                         assert!(
-                            !text.contains(&quoted),
-                            "{skill} names {quoted}, which {} denies",
+                            !holds_the_word(text, tool),
+                            "{skill} names {tool}, which {} denies",
                             server.name
                         );
                     }
