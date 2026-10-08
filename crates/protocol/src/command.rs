@@ -17,11 +17,13 @@ use crate::generated::command::{
     AgentUpdateBody, ChatMessagePostBody, ConnectorConnectBody, ConnectorDisconnectBody, EmptyBody,
     EscalationResolveBody, FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject,
     HumanSendBackBody, HumanSendBackBodySubject, MarketingPlanDecideBody,
-    MarketingPlanDecideBodyDecision, MarketingPlanEndBody, MessagePostBody, QuestionAnswerBody,
-    RequestTriageBody, RequestTriageBodySize, SessionStopBody, SiteAddBody, SiteDecideBody,
-    SiteRemoveBody, SkillConfirmBody, SkillLevel, SkillRemoveBody, SkillSaveBody,
-    SocialPostDecideBody, SocialPostDecideBodyDecision, SocialPostStopBody, SprintStartBody,
-    TaskCreateBody, TaskIdBody, TaskTransitionBody, ToolDecisionBody,
+    MarketingPlanDecideBodyDecision, MarketingPlanEndBody, MessagePostBody,
+    PurchaseOrderDecideBody, PurchaseOrderDecideBodyDecision, PurchaseOrderStepBody,
+    PurchaseOrderUpdateBody, QuestionAnswerBody, RequestTriageBody, RequestTriageBodySize,
+    SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody, SkillConfirmBody, SkillLevel,
+    SkillRemoveBody, SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision,
+    SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
+    ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -309,6 +311,58 @@ pub enum Command {
         /// The site, as a name or as the address of a page on it.
         host: String,
     },
+    /// Approve a purchase order the Procurement Specialist suggested, or reject it (ADR 0039).
+    PurchaseOrderDecide {
+        /// The order's number, the n of PO-n.
+        order: u64,
+        /// Whether the owner approves it (false: rejects it).
+        approve: bool,
+        /// What the owner says to the agent.
+        note: Option<String>,
+    },
+    /// Mark an approved order placed: the owner placed it and paid for it themselves (ADR 0039).
+    PurchaseOrderPlace {
+        /// The order's number.
+        order: u64,
+        /// The day it was placed; today when absent.
+        placed_on: Option<chrono::NaiveDate>,
+        /// What the owner paid, as a number such as `1450`, when they know.
+        paid: Option<String>,
+        /// The currency of `paid`; the order's when absent.
+        currency: Option<String>,
+    },
+    /// Mark a placed order received (ADR 0039).
+    PurchaseOrderReceive {
+        /// The order's number.
+        order: u64,
+        /// The day it came; today when absent.
+        received_on: Option<chrono::NaiveDate>,
+        /// What the owner paid, when they say so here.
+        paid: Option<String>,
+        /// The currency of `paid`.
+        currency: Option<String>,
+        /// The day a subscription or anything paid for again renews.
+        renews_on: Option<chrono::NaiveDate>,
+    },
+    /// Close a placed order that will not come: the seller cancelled or refunded it, or it was
+    /// lost (ADR 0039).
+    PurchaseOrderClose {
+        /// The order's number.
+        order: u64,
+        /// What the owner says to the agent.
+        note: Option<String>,
+    },
+    /// Correct the follow-up status of a placed order (ADR 0039).
+    PurchaseOrderUpdate {
+        /// The order's number.
+        order: u64,
+        /// One of `preparing`, `shipped`, `delayed` and `problem`.
+        status: String,
+        /// What the owner knows.
+        note: Option<String>,
+        /// The day the seller expects the order.
+        expected_on: Option<chrono::NaiveDate>,
+    },
     /// Allow a post written outside the plan, or not allow it (ADR 0042).
     SocialPostDecide {
         /// The post's number.
@@ -499,6 +553,56 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             let body: SiteRemoveBody = read_body(body, name)?;
             Ok(Command::SiteRemove {
                 host: body.host.to_string(),
+            })
+        }
+        CommandName::PurchaseOrderDecide => {
+            let body: PurchaseOrderDecideBody = read_body(body, name)?;
+            Ok(Command::PurchaseOrderDecide {
+                order: body.order.get(),
+                approve: body.decision == PurchaseOrderDecideBodyDecision::Approve,
+                note: body.note.map(|note| note.as_str().to_string()),
+            })
+        }
+        CommandName::PurchaseOrderPlace => {
+            only(body, name, &["order", "placed_on", "paid", "currency"])?;
+            let body: PurchaseOrderStepBody = read_body(body, name)?;
+            Ok(Command::PurchaseOrderPlace {
+                order: body.order.get(),
+                placed_on: body.placed_on,
+                paid: body.paid.map(|paid| paid.to_string()),
+                currency: body.currency.map(|currency| currency.to_string()),
+            })
+        }
+        CommandName::PurchaseOrderReceive => {
+            only(
+                body,
+                name,
+                &["order", "received_on", "paid", "currency", "renews_on"],
+            )?;
+            let body: PurchaseOrderStepBody = read_body(body, name)?;
+            Ok(Command::PurchaseOrderReceive {
+                order: body.order.get(),
+                received_on: body.received_on,
+                paid: body.paid.map(|paid| paid.to_string()),
+                currency: body.currency.map(|currency| currency.to_string()),
+                renews_on: body.renews_on,
+            })
+        }
+        CommandName::PurchaseOrderClose => {
+            only(body, name, &["order", "note"])?;
+            let body: PurchaseOrderStepBody = read_body(body, name)?;
+            Ok(Command::PurchaseOrderClose {
+                order: body.order.get(),
+                note: body.note.map(|note| note.as_str().to_string()),
+            })
+        }
+        CommandName::PurchaseOrderUpdate => {
+            let body: PurchaseOrderUpdateBody = read_body(body, name)?;
+            Ok(Command::PurchaseOrderUpdate {
+                order: body.order.get(),
+                status: body.status.to_string(),
+                note: body.note.map(|note| note.as_str().to_string()),
+                expected_on: body.expected_on,
             })
         }
         CommandName::SocialPostDecide => {
@@ -764,6 +868,90 @@ pub fn command_to_value(command: &Command) -> Value {
             ),
         ),
         Command::SocialPostStop { post } => (CommandName::SocialPostStop, json!({ "post": post })),
+        Command::PurchaseOrderDecide {
+            order,
+            approve,
+            note,
+        } => (
+            CommandName::PurchaseOrderDecide,
+            with_optional(
+                json!({ "order": order, "decision": if *approve { "approve" } else { "reject" } }),
+                "note",
+                note.as_ref().map(|note| json!(note)),
+            ),
+        ),
+        Command::PurchaseOrderPlace {
+            order,
+            placed_on,
+            paid,
+            currency,
+        } => (
+            CommandName::PurchaseOrderPlace,
+            with_optional(
+                with_optional(
+                    with_optional(
+                        json!({ "order": order }),
+                        "placed_on",
+                        placed_on.map(|day| json!(day.to_string())),
+                    ),
+                    "paid",
+                    paid.as_ref().map(|paid| json!(paid)),
+                ),
+                "currency",
+                currency.as_ref().map(|currency| json!(currency)),
+            ),
+        ),
+        Command::PurchaseOrderReceive {
+            order,
+            received_on,
+            paid,
+            currency,
+            renews_on,
+        } => (
+            CommandName::PurchaseOrderReceive,
+            with_optional(
+                with_optional(
+                    with_optional(
+                        with_optional(
+                            json!({ "order": order }),
+                            "received_on",
+                            received_on.map(|day| json!(day.to_string())),
+                        ),
+                        "paid",
+                        paid.as_ref().map(|paid| json!(paid)),
+                    ),
+                    "currency",
+                    currency.as_ref().map(|currency| json!(currency)),
+                ),
+                "renews_on",
+                renews_on.map(|day| json!(day.to_string())),
+            ),
+        ),
+        Command::PurchaseOrderClose { order, note } => (
+            CommandName::PurchaseOrderClose,
+            with_optional(
+                json!({ "order": order }),
+                "note",
+                note.as_ref().map(|note| json!(note)),
+            ),
+        ),
+        Command::PurchaseOrderUpdate {
+            order,
+            status,
+            note,
+            expected_on,
+        } => (
+            CommandName::PurchaseOrderUpdate,
+            with_optional(
+                with_optional(
+                    json!({ "order": order, "status": status }),
+                    "note",
+                    note.as_ref().map(|note| json!(note)),
+                ),
+                "expected_on",
+                expected_on.map(|day| json!(day.to_string())),
+            ),
+        ),
         Command::SiteDecide {
             request,
             allow,
@@ -920,6 +1108,22 @@ fn send_back_wire(
 }
 
 /// `body` with `key` set to `value` when there is one: the schema has no null for an optional field.
+/// Refuses a body that holds a field `allowed` does not name, at the field's own path: the
+/// commands that share a body each take some of its fields.
+fn only(body: &Value, command: CommandName, allowed: &[&str]) -> Result<(), Vec<ValidationError>> {
+    let stray: Vec<ValidationError> = body
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(key, _)| !allowed.contains(&key.as_str()))
+        .map(|(key, _)| ValidationError {
+            path: format!("/body/{key}"),
+            message: format!("a {command} command does not take {key}"),
+        })
+        .collect();
+    if stray.is_empty() { Ok(()) } else { Err(stray) }
+}
+
 fn with_optional(mut body: Value, key: &str, value: Option<Value>) -> Value {
     if let Some(value) = value {
         body[key] = value;
@@ -1623,6 +1827,190 @@ mod tests {
         read(
             "site_decide",
             &json!({ "request": 1, "allow": false, "note": "x".repeat(600) }),
+        );
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one row for each command and each body it refuses"
+    )]
+    fn reads_and_writes_the_purchase_order_commands() {
+        let day = |text: &str| chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d").expect("a date");
+        for (name, body, command) in [
+            (
+                "purchase_order_decide",
+                json!({ "order": 3, "decision": "approve" }),
+                Command::PurchaseOrderDecide {
+                    order: 3,
+                    approve: true,
+                    note: None,
+                },
+            ),
+            (
+                "purchase_order_decide",
+                json!({ "order": 4, "decision": "reject", "note": "Too dear." }),
+                Command::PurchaseOrderDecide {
+                    order: 4,
+                    approve: false,
+                    note: Some("Too dear.".to_string()),
+                },
+            ),
+            (
+                "purchase_order_place",
+                json!({ "order": 3 }),
+                Command::PurchaseOrderPlace {
+                    order: 3,
+                    placed_on: None,
+                    paid: None,
+                    currency: None,
+                },
+            ),
+            (
+                "purchase_order_place",
+                json!({ "order": 3, "placed_on": "2026-10-08", "paid": "1450", "currency": "EUR" }),
+                Command::PurchaseOrderPlace {
+                    order: 3,
+                    placed_on: Some(day("2026-10-08")),
+                    paid: Some("1450".to_string()),
+                    currency: Some("EUR".to_string()),
+                },
+            ),
+            (
+                "purchase_order_receive",
+                json!({
+                    "order": 3, "received_on": "2026-10-15", "paid": "1450.00",
+                    "currency": "EUR", "renews_on": "2027-10-15"
+                }),
+                Command::PurchaseOrderReceive {
+                    order: 3,
+                    received_on: Some(day("2026-10-15")),
+                    paid: Some("1450.00".to_string()),
+                    currency: Some("EUR".to_string()),
+                    renews_on: Some(day("2027-10-15")),
+                },
+            ),
+            (
+                "purchase_order_receive",
+                json!({ "order": 3 }),
+                Command::PurchaseOrderReceive {
+                    order: 3,
+                    received_on: None,
+                    paid: None,
+                    currency: None,
+                    renews_on: None,
+                },
+            ),
+            (
+                "purchase_order_close",
+                json!({ "order": 3, "note": "It was lost." }),
+                Command::PurchaseOrderClose {
+                    order: 3,
+                    note: Some("It was lost.".to_string()),
+                },
+            ),
+            (
+                "purchase_order_update",
+                json!({
+                    "order": 3, "status": "delayed", "note": "Short of flour.",
+                    "expected_on": "2026-10-20"
+                }),
+                Command::PurchaseOrderUpdate {
+                    order: 3,
+                    status: "delayed".to_string(),
+                    note: Some("Short of flour.".to_string()),
+                    expected_on: Some(day("2026-10-20")),
+                },
+            ),
+        ] {
+            assert_eq!(read(name, &body), command, "{name}");
+            assert_eq!(
+                command_to_value(&command),
+                json!({ "command": name, "body": body }),
+                "{name}"
+            );
+        }
+        for (name, body) in [
+            ("purchase_order_decide", json!({ "order": 1 })),
+            ("purchase_order_decide", json!({ "decision": "approve" })),
+            (
+                "purchase_order_decide",
+                json!({ "order": 0, "decision": "approve" }),
+            ),
+            (
+                "purchase_order_decide",
+                json!({ "order": 1, "decision": "maybe" }),
+            ),
+            (
+                "purchase_order_decide",
+                json!({ "order": 1, "decision": "approve", "note": "x".repeat(601) }),
+            ),
+            (
+                "purchase_order_decide",
+                json!({ "order": "1", "decision": "approve" }),
+            ),
+            (
+                "purchase_order_place",
+                json!({ "order": 1, "placed_on": "tomorrow" }),
+            ),
+            ("purchase_order_place", json!({ "order": 1, "paid": 5 })),
+            (
+                "purchase_order_place",
+                json!({ "order": 1, "received_on": "2026-10-08" }),
+            ),
+            (
+                "purchase_order_receive",
+                json!({ "order": 1, "renews_on": "next year" }),
+            ),
+            (
+                "purchase_order_receive",
+                json!({ "order": 1, "placed_on": "2026-10-08" }),
+            ),
+            ("purchase_order_close", json!({ "note": "gone" })),
+            ("purchase_order_close", json!({ "order": 1, "paid": "5" })),
+            (
+                "purchase_order_close",
+                json!({ "order": 1, "currency": "EUR" }),
+            ),
+            (
+                "purchase_order_close",
+                json!({ "order": 1, "renews_on": "2027-01-01" }),
+            ),
+            (
+                "purchase_order_place",
+                json!({ "order": 1, "note": "placed" }),
+            ),
+            (
+                "purchase_order_place",
+                json!({ "order": 1, "renews_on": "2027-01-01" }),
+            ),
+            (
+                "purchase_order_receive",
+                json!({ "order": 1, "note": "came" }),
+            ),
+            (
+                "purchase_order_close",
+                json!({ "order": 1, "note": "x".repeat(601) }),
+            ),
+            ("purchase_order_update", json!({ "order": 1 })),
+            (
+                "purchase_order_update",
+                json!({ "order": 1, "status": "shipped", "expected_on": "soon" }),
+            ),
+            ("purchase_order_update", json!({ "status": "shipped" })),
+        ] {
+            let errors = refusal(&json!({ "command": name, "body": body }));
+            assert!(!errors.is_empty(), "{name} {body}");
+        }
+        read(
+            "purchase_order_close",
+            &json!({ "order": 1, "note": "x".repeat(600) }),
+        );
+        // A status is a word the owner's command takes whatever it is: the rules of the four are
+        // the daemon's, and refuse `placed` as `purchase_order_status_invalid`, not here.
+        read(
+            "purchase_order_update",
+            &json!({ "order": 1, "status": "placed" }),
         );
     }
 

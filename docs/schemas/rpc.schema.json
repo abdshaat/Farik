@@ -65,7 +65,9 @@
         "marketing_plan.list",
         "marketing_plan.get",
         "social_posts.list",
-        "sites.list"
+        "sites.list",
+        "purchase_orders.list",
+        "purchase_order.evaluation"
       ]
     },
     "subscribeRequest": {
@@ -292,6 +294,12 @@
             },
             {
               "$ref": "#/$defs/sitesListQuery"
+            },
+            {
+              "$ref": "#/$defs/purchaseOrdersListQuery"
+            },
+            {
+              "$ref": "#/$defs/purchaseOrderEvaluationQuery"
             },
             {
               "$ref": "#/$defs/metricsQuery"
@@ -535,6 +543,9 @@
         },
         {
           "$ref": "#/$defs/marketingBudgetRaiseRequest"
+        },
+        {
+          "$ref": "#/$defs/purchaseOrderFileRequest"
         }
       ]
     },
@@ -2249,6 +2260,31 @@
         }
       }
     },
+    "purchaseOrdersListQuery": {
+      "title": "Purchase Orders List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "purchase_orders.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "purchaseOrderEvaluationQuery": {
+      "title": "Purchase Order Evaluation Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "purchase_order.evaluation" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["order"],
+          "properties": { "order": { "type": "integer", "minimum": 1 } }
+        }
+      }
+    },
     "sitesListQuery": {
       "title": "Sites List Query",
       "type": "object",
@@ -2376,7 +2412,7 @@
       }
     },
     "waitingListResult": {
-      "description": "What waits on the human: first the marketing plans whose ads Farik could not keep within their budget or keep paused, one row each, by precedence (marketing_budget: the active plan whose ads reached a budget, titled \"Ads budget reached: <plan>\", with plan, plan_title, ends_on, currency, google_ads, the plan's Google Ads budget, spent, what Google Ads reported spent, read_at, when it was read, reason, Google's or Farik's words when Farik could not pause the ads, cap, the budget the row's words are about (a pause Google refused can keep it from being the newest), caps, each budget reached, campaigns, each campaign of the plan with its budget and spend, and raising, the task of a request to raise the budget that is open; marketing_ads_running: a plan whose ads Farik could not pause, with reason, titled \"Ads still running: <plan>\"; marketing_spend_unread: the active plan whose spend Farik cannot read, with reason and the last spend and its time, titled \"Can't read the ad spend: <plan>\"; task_id is the task of the plan's proposal and agent_id the agent that proposed it; amounts are decimal strings), then questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), then posts outside the plan waiting for the owner (social_post, whose title is its task's and whose line is \"<agent name> wants to post on <Network>\", each with post, its number, channel, text, media, the pictures and clips as their addresses with kind image or video, and at, when it would go out in the offset it was written in, which only that kind carries; a post that was decided or whose time came is no longer listed), then sites the Procurement Specialist asked to read, waiting for the owner (site_request, whose title is its task's and whose line is \"<agent name> asks to read <host>\", each with request, its number, host, the site in its ASCII form, url, the first page the agent wants exactly as it wrote it, and why, its reason in its own words, which only that kind carries and which are untrusted text; a request that was decided is no longer listed), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
+      "description": "What waits on the human: first the marketing plans whose ads Farik could not keep within their budget or keep paused, one row each, by precedence (marketing_budget: the active plan whose ads reached a budget, titled \"Ads budget reached: <plan>\", with plan, plan_title, ends_on, currency, google_ads, the plan's Google Ads budget, spent, what Google Ads reported spent, read_at, when it was read, reason, Google's or Farik's words when Farik could not pause the ads, cap, the budget the row's words are about (a pause Google refused can keep it from being the newest), caps, each budget reached, campaigns, each campaign of the plan with its budget and spend, and raising, the task of a request to raise the budget that is open; marketing_ads_running: a plan whose ads Farik could not pause, with reason, titled \"Ads still running: <plan>\"; marketing_spend_unread: the active plan whose spend Farik cannot read, with reason and the last spend and its time, titled \"Can't read the ad spend: <plan>\"; task_id is the task of the plan's proposal and agent_id the agent that proposed it; amounts are decimal strings), then questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), then posts outside the plan waiting for the owner (social_post, whose title is its task's and whose line is \"<agent name> wants to post on <Network>\", each with post, its number, channel, text, media, the pictures and clips as their addresses with kind image or video, and at, when it would go out in the offset it was written in, which only that kind carries; a post that was decided or whose time came is no longer listed), then sites the Procurement Specialist asked to read, waiting for the owner (site_request, whose title is its task's and whose line is \"<agent name> asks to read <host>\", each with request, its number, host, the site in its ASCII form, url, the first page the agent wants exactly as it wrote it, and why, its reason in its own words, which only that kind carries and which are untrusted text; a request that was decided is no longer listed), then purchase orders the Procurement Specialist suggested, waiting for the owner (purchase_order, whose title is its task's and whose line is \"<agent name> set up an order from <seller>: <total> <currency>\", each with order, its number, seller, seller_contact, lines (each with item, quantity, unit, unit_price and line_total), currency, period, total, delivery, terms, url, the seller's page exactly as the agent wrote it or empty, host, the site that address names in its ASCII form, absent when url is empty, evaluation, why, at, when it was drafted, and expires_at, when Farik closes it by itself, which only that kind carries and of which every text is the agent's own and untrusted; an order that was decided or expired is no longer listed and an order holds no task), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2402,6 +2438,7 @@
                   "marketing_plan",
                   "social_post",
                   "site_request",
+                  "purchase_order",
                   "marketing_budget",
                   "marketing_ads_running",
                   "marketing_spend_unread",
@@ -2499,6 +2536,29 @@
               "why": {
                 "type": "string"
               },
+              "order": { "type": "integer", "minimum": 1 },
+              "seller": { "type": "string" },
+              "seller_contact": { "type": "string" },
+              "lines": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "item": { "type": "string" },
+                    "quantity": { "type": "integer", "minimum": 1 },
+                    "unit": { "type": "string" },
+                    "unit_price": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+                    "line_total": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }
+                  },
+                  "required": ["item", "quantity", "unit", "unit_price", "line_total"]
+                }
+              },
+              "period": { "type": "string", "enum": ["once", "month", "year"] },
+              "delivery": { "type": "string" },
+              "terms": { "type": "string" },
+              "evaluation": { "type": "string" },
+              "expires_at": { "type": "string", "format": "date-time" },
               "plan_title": { "type": "string" },
               "google_ads": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
               "spent": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
@@ -3494,6 +3554,73 @@
         }
       }
     },
+    "purchaseOrdersListResult": {
+      "description": "Every purchase order the Procurement Specialist suggested, oldest first (docs/SPEC.md 6.10; ADR 0039): order, its number, the n of PO-n; state, one of drafted, approved, rejected, placed, received, closed and expired; seller, total, currency and period (the agent's words, untrusted); task_id and agent_id; drafted_at; decided_at and note, when the owner approved or rejected it and what they said; close_note, what they said closing a placed order; placed_on, the day the owner placed it, with paid, what they paid, and paid_currency; received_on and renews_on; ended_at, when it was rejected, received, closed or expired; status, the latest follow-up status of a placed order, with its note (the agent's words when by is agent, the owner's own when by is owner), expected_on, by, and at; expires_at, when Farik closes a drafted or an approved order by itself; and overdue, whether a placed order's expected day has passed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["orders"],
+      "properties": {
+        "orders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["order", "state", "seller", "total", "currency", "period", "task_id", "agent_id", "drafted_at", "overdue"],
+            "properties": {
+              "order": { "type": "integer", "minimum": 1 },
+              "state": { "type": "string", "enum": ["drafted", "approved", "rejected", "placed", "received", "closed", "expired"] },
+              "seller": { "type": "string" },
+              "total": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+              "period": { "type": "string", "enum": ["once", "month", "year"] },
+              "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+              "agent_id": { "type": "string" },
+              "drafted_at": { "type": "string", "format": "date-time" },
+              "decided_at": { "type": "string", "format": "date-time" },
+              "note": { "type": "string" },
+              "close_note": { "type": "string" },
+              "placed_on": { "type": "string", "format": "date" },
+              "paid": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "paid_currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+              "received_on": { "type": "string", "format": "date" },
+              "renews_on": { "type": "string", "format": "date" },
+              "ended_at": { "type": "string", "format": "date-time" },
+              "status": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["status", "note", "by", "at"],
+                "properties": {
+                  "status": { "type": "string", "enum": ["preparing", "shipped", "delayed", "problem"] },
+                  "note": { "type": "string" },
+                  "expected_on": { "type": "string", "format": "date" },
+                  "by": { "type": "string", "enum": ["agent", "owner"] },
+                  "at": { "type": "string", "format": "date-time" }
+                }
+              },
+              "expires_at": { "type": "string", "format": "date-time" },
+              "overdue": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "purchaseOrderEvaluationResult": {
+      "description": "The comparison an order rests on, evaluations/<name>.md in the agent's private folder, as text: the agent's own words, untrusted, shown as text and never as a page.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": { "text": { "type": "string" } }
+    },
+    "purchaseOrderFileResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["media_type", "base64", "name"],
+      "properties": {
+        "media_type": { "const": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+        "base64": { "type": "string" },
+        "name": { "type": "string", "pattern": "^PO-[0-9]{1,20}\\.xlsx$" }
+      }
+    },
     "sitesListResult": {
       "description": "The sites the Procurement Specialist may read (docs/SPEC.md 6.10; ADR 0039): farik is every entry of Farik's own list in its order, with its shop, its category, on (whether the team may read it now, which it may unless the owner turned it off) and at, when the owner last turned it off or back on, absent when they never did; owner is the sites the owner allowed that are not on Farik's list, by host, each with at, when they allowed it, and request, the number of the request their allowing answered, absent for a site they added unasked; waiting is the requests nobody decided yet, by host, each with the agent's address and reason, which are its own words and untrusted text.",
       "type": "object",
@@ -3625,6 +3752,24 @@
             "post": { "type": "integer", "minimum": 1 },
             "index": { "type": "integer", "minimum": 0, "maximum": 3 }
           }
+        }
+      }
+    },
+    "purchaseOrderFileRequest": {
+      "title": "Purchase Order File Request",
+      "description": "An order's workbook, orders/PO-<n>.xlsx, for the owner to download: answers purchaseOrderFileResult; refused not_found for an order nobody drafted, for a workbook that is gone, and for one that is, or lies behind, a link.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "purchase_order.file" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["order"],
+          "properties": { "order": { "type": "integer", "minimum": 1 } }
         }
       }
     },

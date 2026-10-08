@@ -9,6 +9,7 @@ use farik_core::governor::gates::{Blocker, Rejection};
 use farik_core::governor::sites::site_of;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
+use farik_core::marketing::parse_amount;
 use farik_core::sprint::{Sprint, SprintStatus};
 use farik_core::team::{Agent, AgentStatus, Team, custom_server, plain_role};
 use farik_protocol::command::{AcceptSubject, Command, RequestSize, SkillScope};
@@ -17,6 +18,7 @@ use farik_protocol::event::{
     EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
     HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody, SiteDecisionBody, new_event,
 };
+use farik_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
 use farik_store::requests::{RequestError, hold_contract, triage_by_human};
 use farik_store::sites::{SiteRequest, site_requests};
 use farik_store::{EventQuery, TaskProjection};
@@ -30,6 +32,7 @@ use crate::daemon::DaemonState;
 use crate::daemon::{secret_at, with_server};
 use crate::marketing::{decide_plan, decide_post, end_plan, stop_post};
 use crate::pause::paused;
+use crate::procurement::{ORDERS, check_follow_up};
 use crate::skills::{
     SkillCommandError, SkillLevel, confirm_skill, confirmed_sentence, remove_skill,
     removed_sentence, save_skill, saved_sentence,
@@ -202,6 +205,31 @@ pub(super) async fn handle(
         } => site_decide(tools, request, allow, note),
         Command::SiteAdd { site } => site_add(tools, &site),
         Command::SiteRemove { host } => site_remove(tools, &host),
+        Command::PurchaseOrderDecide {
+            order,
+            approve,
+            note,
+        } => order_decide(tools, order, approve, note),
+        Command::PurchaseOrderPlace {
+            order,
+            placed_on,
+            paid,
+            currency,
+        } => order_place(tools, order, placed_on, paid, currency),
+        Command::PurchaseOrderReceive {
+            order,
+            received_on,
+            paid,
+            currency,
+            renews_on,
+        } => order_receive(tools, order, received_on, paid, currency, renews_on),
+        Command::PurchaseOrderClose { order, note } => order_close(tools, order, note),
+        Command::PurchaseOrderUpdate {
+            order,
+            status,
+            note,
+            expected_on,
+        } => order_update(tools, order, &status, note, expected_on),
         Command::ToolApprove { approval, note } => decide_tool_call(tools, approval, note, true),
         Command::ToolRefuse { approval, note } => decide_tool_call(tools, approval, note, false),
         Command::RunStop => {
@@ -773,6 +801,329 @@ fn site_remove(tools: &ToolDeps, host: &str) -> Result<CommandReport, CommandErr
     )?;
     Ok(CommandReport {
         said: format!("Removed {host}: the Procurement Specialist no longer reads it."),
+        events: vec![seq],
+    })
+}
+
+/// The most characters of a note the owner adds to a purchase order's step.
+const MOST_ORDER_NOTE: usize = 600;
+/// The most an order may total, and so the most the owner may say they paid, in hundredths.
+const MOST_PAID: u64 = 1_000_000_000;
+
+fn order_refusal(code: &str, detail: impl std::fmt::Display) -> CommandError {
+    CommandError::Refused {
+        reason: format!("{code}: {detail}"),
+    }
+}
+
+/// The owner's words on a step: trimmed, empty when they said none, and refused
+/// `purchase_order_note_too_long` past 600 characters.
+fn order_note(note: Option<String>) -> Result<String, CommandError> {
+    let said = note.map(|text| text.trim().to_string()).unwrap_or_default();
+    if said.chars().count() > MOST_ORDER_NOTE {
+        return Err(order_refusal(
+            "purchase_order_note_too_long",
+            format!("a note is at most {MOST_ORDER_NOTE} characters"),
+        ));
+    }
+    Ok(said)
+}
+
+/// What the owner paid, read as the agent's prices are (a number such as `1450` or `1450.00`, at
+/// most 10,000,000.00) and worded with two decimals, and its currency (three capital letters),
+/// each checked when given. A currency with no amount beside it is never recorded.
+fn order_payment(
+    paid: Option<String>,
+    currency: Option<String>,
+) -> Result<(Option<String>, Option<String>), CommandError> {
+    let paid = paid
+        .map(|text| match parse_amount(text.trim()) {
+            Some(amount) if amount.0 <= MOST_PAID => Ok(amount.to_string()),
+            _ => Err(order_refusal(
+                "purchase_order_paid_invalid",
+                format!(
+                    "{} is not an amount: write it like 1450 or 1450.00, at most 10000000.00",
+                    crate::tools::sites::shown(&text)
+                ),
+            )),
+        })
+        .transpose()?;
+    let currency = currency.map(|text| text.trim().to_string());
+    if let Some(code) = &currency
+        && !(code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_uppercase()))
+    {
+        return Err(order_refusal(
+            "purchase_order_currency_invalid",
+            format!(
+                "{} is not a currency: write three capital letters, like USD",
+                crate::tools::sites::shown(code)
+            ),
+        ));
+    }
+    Ok((paid, currency))
+}
+
+/// Order `number` among `records`, when it is one the owner may still take a step on: refused
+/// `unknown_purchase_order` for a number nobody drafted, `purchase_order_expired` for one Farik
+/// closed by itself, and `purchase_order_ended` for one received or closed.
+fn open_order(
+    records: &[PurchaseOrderRecord],
+    number: u64,
+) -> Result<&PurchaseOrderRecord, CommandError> {
+    let record = records
+        .iter()
+        .find(|record| record.order == number)
+        .ok_or_else(|| {
+            order_refusal(
+                "unknown_purchase_order",
+                format!("PO-{number} is no order the Procurement Specialist drafted"),
+            )
+        })?;
+    match record.state {
+        OrderState::Expired => Err(order_refusal(
+            "purchase_order_expired",
+            format!("PO-{number} closed by itself after 30 days, and takes no step"),
+        )),
+        OrderState::Received | OrderState::Closed => Err(order_refusal(
+            "purchase_order_ended",
+            format!("PO-{number} is received or closed, and takes no step"),
+        )),
+        _ => Ok(record),
+    }
+}
+
+/// An order's event, with the order's task on its envelope and no agent and no session, built
+/// from `wire`: only the owner takes these steps.
+fn order_step<Body: serde::de::DeserializeOwned>(
+    tools: &ToolDeps,
+    record: &PurchaseOrderRecord,
+    wire: serde_json::Value,
+    make: impl FnOnce(Body) -> EventBody,
+) -> Result<u64, CommandError> {
+    let body: Body = serde_json::from_value(wire).map_err(failed)?;
+    append(tools, Some(record.task_id.clone()), make(body))
+}
+
+/// The seller of an order, for the sentence the owner reads back.
+fn seller_of(record: &PurchaseOrderRecord) -> String {
+    format!(
+        "PO-{} from {}",
+        record.order,
+        crate::tools::sites::shown(&record.drafted.seller.to_string())
+    )
+}
+
+/// Approves (`approve`) or rejects the drafted order `order`, once: `purchase_order.approved` or
+/// `.rejected` with the order's task and the owner's `note` (empty when they said none) and no
+/// agent or session. Refused `unknown_purchase_order`, `purchase_order_expired`,
+/// `purchase_order_ended`, `purchase_order_decided` for an order decided before, and
+/// `purchase_order_note_too_long`. Under ADR 0041's `auto` nothing else approves an order: this
+/// command, from the daemon's token or the browser's cookie, is the only door.
+fn order_decide(
+    tools: &ToolDeps,
+    order: u64,
+    approve: bool,
+    note: Option<String>,
+) -> Result<CommandReport, CommandError> {
+    let note = order_note(note)?;
+    let _deciding = crate::locked(&ORDERS);
+    let records = purchase_orders(&tools.log).map_err(failed)?;
+    let record = open_order(&records, order)?;
+    if record.state != OrderState::Drafted {
+        return Err(order_refusal(
+            "purchase_order_decided",
+            format!("{} was decided already", seller_of(record)),
+        ));
+    }
+    let wire = serde_json::json!({ "order": order, "note": note });
+    let seq = if approve {
+        order_step(tools, record, wire, EventBody::PurchaseOrderApproved)?
+    } else {
+        order_step(tools, record, wire, EventBody::PurchaseOrderRejected)?
+    };
+    let said = if approve {
+        format!(
+            "Approved {}. You place the order and pay for it yourself, then mark it placed.",
+            seller_of(record)
+        )
+    } else {
+        format!("Rejected {}.", seller_of(record))
+    };
+    Ok(CommandReport {
+        said,
+        events: vec![seq],
+    })
+}
+
+/// Marks the approved order `order` placed: `purchase_order.placed` with the day (today when none
+/// is given), and what the owner paid if they said, in the currency given or the order's. Refused
+/// `unknown_purchase_order`, `purchase_order_expired`, `purchase_order_ended`,
+/// `purchase_order_not_approved`, `purchase_order_placed`, `purchase_order_paid_invalid` and
+/// `purchase_order_currency_invalid`.
+fn order_place(
+    tools: &ToolDeps,
+    order: u64,
+    placed_on: Option<chrono::NaiveDate>,
+    paid: Option<String>,
+    currency: Option<String>,
+) -> Result<CommandReport, CommandError> {
+    let (paid, currency) = order_payment(paid, currency)?;
+    let _placing = crate::locked(&ORDERS);
+    let records = purchase_orders(&tools.log).map_err(failed)?;
+    let record = open_order(&records, order)?;
+    match record.state {
+        OrderState::Approved => {}
+        OrderState::Placed => {
+            return Err(order_refusal(
+                "purchase_order_placed",
+                format!("{} is marked placed already", seller_of(record)),
+            ));
+        }
+        _ => {
+            return Err(order_refusal(
+                "purchase_order_not_approved",
+                format!("approve {} before you mark it placed", seller_of(record)),
+            ));
+        }
+    }
+    let day = placed_on.unwrap_or_else(|| tools.clock.now().date_naive());
+    let wire = with_payment(
+        serde_json::json!({ "order": order, "placed_on": day.to_string() }),
+        paid,
+        currency,
+        record,
+    );
+    let seq = order_step(tools, record, wire, EventBody::PurchaseOrderPlaced)?;
+    Ok(CommandReport {
+        said: format!("Marked {} placed on {day}.", seller_of(record)),
+        events: vec![seq],
+    })
+}
+
+/// Marks the placed order `order` received: `purchase_order.received` with the day (today when
+/// none is given), what the owner paid if they say so here, and the day it renews. Refused
+/// `unknown_purchase_order`, `purchase_order_expired`, `purchase_order_ended`,
+/// `purchase_order_not_placed`, `purchase_order_paid_invalid` and
+/// `purchase_order_currency_invalid`.
+fn order_receive(
+    tools: &ToolDeps,
+    order: u64,
+    received_on: Option<chrono::NaiveDate>,
+    paid: Option<String>,
+    currency: Option<String>,
+    renews_on: Option<chrono::NaiveDate>,
+) -> Result<CommandReport, CommandError> {
+    let (paid, currency) = order_payment(paid, currency)?;
+    let _receiving = crate::locked(&ORDERS);
+    let records = purchase_orders(&tools.log).map_err(failed)?;
+    let record = placed_order(&records, order)?;
+    let day = received_on.unwrap_or_else(|| tools.clock.now().date_naive());
+    let mut wire = with_payment(
+        serde_json::json!({ "order": order, "received_on": day.to_string() }),
+        paid,
+        currency,
+        record,
+    );
+    if let Some(renews_on) = renews_on {
+        wire["renews_on"] = serde_json::json!(renews_on.to_string());
+    }
+    let seq = order_step(tools, record, wire, EventBody::PurchaseOrderReceived)?;
+    Ok(CommandReport {
+        said: format!("Marked {} received on {day}.", seller_of(record)),
+        events: vec![seq],
+    })
+}
+
+/// `wire` with what the owner paid in it, when they said, in the currency they gave or the
+/// order's.
+fn with_payment(
+    mut wire: serde_json::Value,
+    paid: Option<String>,
+    currency: Option<String>,
+    record: &PurchaseOrderRecord,
+) -> serde_json::Value {
+    if let Some(paid) = paid {
+        wire["paid"] = serde_json::json!(paid);
+        wire["currency"] = serde_json::json!(
+            currency.unwrap_or_else(|| record.drafted.currency.as_str().to_string())
+        );
+    }
+    wire
+}
+
+/// The order `number` when it is placed, else refused `purchase_order_not_placed` (or one of
+/// `open_order`'s).
+fn placed_order(
+    records: &[PurchaseOrderRecord],
+    number: u64,
+) -> Result<&PurchaseOrderRecord, CommandError> {
+    let record = open_order(records, number)?;
+    if record.state == OrderState::Placed {
+        Ok(record)
+    } else {
+        Err(order_refusal(
+            "purchase_order_not_placed",
+            format!("mark {} placed first", seller_of(record)),
+        ))
+    }
+}
+
+/// Closes the placed order `order` without receiving it: `purchase_order.closed` with the owner's
+/// `note`, for an order the seller cancelled or refunded or that was lost. Refused
+/// `unknown_purchase_order`, `purchase_order_expired`, `purchase_order_ended`,
+/// `purchase_order_not_placed` and `purchase_order_note_too_long`.
+fn order_close(
+    tools: &ToolDeps,
+    order: u64,
+    note: Option<String>,
+) -> Result<CommandReport, CommandError> {
+    let note = order_note(note)?;
+    let _closing = crate::locked(&ORDERS);
+    let records = purchase_orders(&tools.log).map_err(failed)?;
+    let record = placed_order(&records, order)?;
+    let wire = serde_json::json!({ "order": order, "note": note });
+    let seq = order_step(tools, record, wire, EventBody::PurchaseOrderClosed)?;
+    Ok(CommandReport {
+        said: format!("Closed {}: it did not come.", seller_of(record)),
+        events: vec![seq],
+    })
+}
+
+/// Corrects the status of the placed order `order`: `purchase_order.updated` with no agent or
+/// session, so that it replaces what the agent recorded, under the statuses' rules. Refused
+/// `unknown_purchase_order`, `purchase_order_expired`, `purchase_order_ended`,
+/// `purchase_order_not_placed`, `purchase_order_note_too_long` and
+/// `purchase_order_status_invalid`.
+fn order_update(
+    tools: &ToolDeps,
+    order: u64,
+    status: &str,
+    note: Option<String>,
+    expected_on: Option<chrono::NaiveDate>,
+) -> Result<CommandReport, CommandError> {
+    let note = order_note(note)?;
+    let _correcting = crate::locked(&ORDERS);
+    let records = purchase_orders(&tools.log).map_err(failed)?;
+    let record = placed_order(&records, order)?;
+    let today = tools.clock.now().date_naive();
+    let expected = expected_on.map(|day| day.to_string());
+    let fields = check_follow_up(status, &note, expected.as_deref(), today)
+        .map_err(|why| order_refusal("purchase_order_status_invalid", why))?;
+    let mut wire = serde_json::json!({
+        "order": order,
+        "status": fields.status.to_string(),
+        "note": fields.note,
+    });
+    if let Some(day) = fields.expected_on {
+        wire["expected_on"] = serde_json::json!(day.to_string());
+    }
+    let seq = order_step(tools, record, wire, EventBody::PurchaseOrderUpdated)?;
+    Ok(CommandReport {
+        said: format!(
+            "Corrected the status of {} to {}.",
+            seller_of(record),
+            fields.status
+        ),
         events: vec![seq],
     })
 }
@@ -4724,5 +5075,588 @@ mod tests {
             &json!({ "purpose": "implement", "model": "claude-sonnet-5-5", "effort": "medium" }),
         );
         assert_eq!(site_told(&harness, "FRK-1"), None, "told once");
+    }
+    /// `proc`'s order `number` on `task_id`, drafted in its session: 59.98 USD from `seller`.
+    fn order_drafted(harness: &Harness, task_id: &str, number: u64, seller: &str) {
+        harness.project.record_by(
+            Some("proc"),
+            crate::tools::fixtures::at(),
+            task_id,
+            "purchase_order.drafted",
+            &json!({
+                "order": number, "seller": seller, "seller_contact": "sales@acme.example",
+                "lines": [
+                    { "item": "Baby car mirror", "quantity": 3, "unit": "piece",
+                      "unit_price": "19.99", "line_total": "59.97" },
+                    { "item": "Mounting kit", "quantity": 1, "unit": "",
+                      "unit_price": "0.01", "line_total": "0.01" }
+                ],
+                "currency": "USD", "period": "once", "total": "59.98",
+                "delivery": "3 days", "terms": "Net 30",
+                "url": "https://www.acme.example/shop", "evaluation": "evaluations/mirrors.md",
+                "why": "It is the cheapest seller that ships to us."
+            }),
+        );
+    }
+
+    fn orders_now(harness: &Harness) -> Vec<farik_store::purchase_orders::PurchaseOrderRecord> {
+        farik_store::purchase_orders::purchase_orders(&harness.project.deps.log)
+            .expect("the log reads")
+    }
+
+    fn orders_waiting(harness: &Harness) -> usize {
+        let team = harness.project.deps.files.read_team().expect("the team");
+        farik_store::waiting::waiting(
+            &harness.project.deps.projections,
+            &harness.project.deps.log,
+            &harness.project.deps.files,
+            &team,
+        )
+        .expect("the store reads")
+        .iter()
+        .filter(|item| item.kind == farik_store::waiting::WaitingKind::PurchaseOrder)
+        .count()
+    }
+
+    fn decide_order(order: u64, approve: bool, note: Option<&str>) -> Command {
+        Command::PurchaseOrderDecide {
+            order,
+            approve,
+            note: note.map(ToString::to_string),
+        }
+    }
+
+    fn place_order(order: u64) -> Command {
+        Command::PurchaseOrderPlace {
+            order,
+            placed_on: None,
+            paid: None,
+            currency: None,
+        }
+    }
+
+    fn receive_order(order: u64) -> Command {
+        Command::PurchaseOrderReceive {
+            order,
+            received_on: None,
+            paid: None,
+            currency: None,
+            renews_on: None,
+        }
+    }
+
+    fn close_order(order: u64, note: Option<&str>) -> Command {
+        Command::PurchaseOrderClose {
+            order,
+            note: note.map(ToString::to_string),
+        }
+    }
+
+    fn day(text: &str) -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d").expect("a date")
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_approved_order_leaves_today() {
+        let harness = Harness::with_procurement("human-order-approve");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let orchestrator = an_orchestrator(&harness);
+        order_drafted(&harness, "FRK-1", 1, "Acme");
+        order_drafted(&harness, "FRK-1", 2, "Bolt");
+        assert_eq!(orders_waiting(&harness), 2);
+
+        let report = handled(&orchestrator, decide_order(1, true, None)).await;
+
+        let approved = last(&harness, EventKind::PurchaseOrderApproved).expect("recorded");
+        assert_eq!(report.events, vec![approved.envelope.seq]);
+        assert_eq!(approved.envelope.ids.task_id, Some(task("FRK-1")));
+        assert_eq!(approved.envelope.ids.agent_id, None, "never an agent's");
+        assert_eq!(approved.envelope.ids.session_id, None, "never a session's");
+        let EventBody::PurchaseOrderApproved(body) = &approved.body else {
+            panic!("an approval");
+        };
+        assert_eq!(body.order.get(), 1);
+        assert_eq!(
+            body.note.to_string(),
+            "",
+            "empty when the owner said nothing"
+        );
+        assert_eq!(orders_waiting(&harness), 1, "the other still waits");
+        let record = &orders_now(&harness)[0];
+        assert_eq!(
+            record.state,
+            farik_store::purchase_orders::OrderState::Approved
+        );
+        assert_eq!(
+            farik_store::purchase_orders::expires_at(record),
+            Some(approved.envelope.recorded_at + chrono::Duration::days(30))
+        );
+        assert!(
+            !harness.row("FRK-1").waiting_on_human,
+            "an order never held the task"
+        );
+
+        // A rejection carries the owner's words, trimmed; blank words are none.
+        handled(&orchestrator, decide_order(2, false, Some("  Too dear.  "))).await;
+        let rejected = last(&harness, EventKind::PurchaseOrderRejected).expect("recorded");
+        let EventBody::PurchaseOrderRejected(body) = &rejected.body else {
+            panic!("a rejection");
+        };
+        assert_eq!(body.note.to_string(), "Too dear.");
+        assert_eq!(orders_waiting(&harness), 0);
+        order_drafted(&harness, "FRK-1", 3, "Cog");
+        handled(&orchestrator, decide_order(3, false, Some("   "))).await;
+        let blank = last(&harness, EventKind::PurchaseOrderRejected).expect("recorded");
+        let EventBody::PurchaseOrderRejected(body) = &blank.body else {
+            panic!("a rejection");
+        };
+        assert_eq!(body.note.to_string(), "");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one step of the order's life after another"
+    )]
+    async fn the_owner_places_receives_and_closes() {
+        use farik_store::purchase_orders::OrderState;
+        let harness = Harness::with_procurement("human-order-steps");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let orchestrator = an_orchestrator(&harness);
+        for (number, seller) in [(1, "Acme"), (2, "Bolt"), (3, "Cog")] {
+            order_drafted(&harness, "FRK-1", number, seller);
+        }
+        let state = |harness: &Harness, number: usize| orders_now(harness)[number - 1].state;
+
+        // Placing: a drafted order is not approved; an approved one is placed, with today as the
+        // day and what was paid in the order's currency.
+        let reason = refused(&orchestrator, place_order(1)).await;
+        assert!(
+            reason.starts_with("purchase_order_not_approved: "),
+            "{reason}"
+        );
+        handled(&orchestrator, decide_order(1, true, None)).await;
+        let reason = refused(&orchestrator, receive_order(1)).await;
+        assert!(
+            reason.starts_with("purchase_order_not_placed: "),
+            "{reason}"
+        );
+        let reason = refused(&orchestrator, close_order(1, None)).await;
+        assert!(
+            reason.starts_with("purchase_order_not_placed: "),
+            "{reason}"
+        );
+        for (command, code) in [
+            (
+                Command::PurchaseOrderPlace {
+                    order: 1,
+                    placed_on: None,
+                    paid: Some("1,000".to_string()),
+                    currency: None,
+                },
+                "purchase_order_paid_invalid",
+            ),
+            (
+                Command::PurchaseOrderPlace {
+                    order: 1,
+                    placed_on: None,
+                    paid: Some("10000000.01".to_string()),
+                    currency: None,
+                },
+                "purchase_order_paid_invalid",
+            ),
+            (
+                Command::PurchaseOrderPlace {
+                    order: 1,
+                    placed_on: None,
+                    paid: Some("5".to_string()),
+                    currency: Some("usd".to_string()),
+                },
+                "purchase_order_currency_invalid",
+            ),
+        ] {
+            let reason = refused(&orchestrator, command).await;
+            assert!(reason.starts_with(&format!("{code}: ")), "{code}: {reason}");
+        }
+        assert_eq!(
+            state(&harness, 1),
+            OrderState::Approved,
+            "none of them was recorded"
+        );
+        let report = handled(
+            &orchestrator,
+            Command::PurchaseOrderPlace {
+                order: 1,
+                placed_on: None,
+                paid: Some("1450".to_string()),
+                currency: None,
+            },
+        )
+        .await;
+        let placed = last(&harness, EventKind::PurchaseOrderPlaced).expect("recorded");
+        assert_eq!(report.events, vec![placed.envelope.seq]);
+        assert_eq!(placed.envelope.ids.task_id, Some(task("FRK-1")));
+        assert_eq!(
+            (
+                &placed.envelope.ids.agent_id,
+                &placed.envelope.ids.session_id
+            ),
+            (&None, &None)
+        );
+        let EventBody::PurchaseOrderPlaced(body) = &placed.body else {
+            panic!("a placing");
+        };
+        assert_eq!(body.placed_on, day("2026-09-22"), "today, in UTC");
+        assert_eq!(
+            body.paid.as_ref().map(|paid| paid.as_str()),
+            Some("1450.00")
+        );
+        assert_eq!(
+            body.currency.as_ref().map(|currency| currency.as_str()),
+            Some("USD")
+        );
+        let reason = refused(&orchestrator, place_order(1)).await;
+        assert!(reason.starts_with("purchase_order_placed: "), "{reason}");
+        assert_eq!(
+            orders_now(&harness)[0].paid,
+            Some(("1450.00".to_string(), "USD".to_string()))
+        );
+
+        // Receiving: with a renewal day, and no amount; what was paid stands.
+        handled(
+            &orchestrator,
+            Command::PurchaseOrderReceive {
+                order: 1,
+                received_on: Some(day("2026-10-01")),
+                paid: None,
+                currency: None,
+                renews_on: Some(day("2027-10-01")),
+            },
+        )
+        .await;
+        let received = last(&harness, EventKind::PurchaseOrderReceived).expect("recorded");
+        let EventBody::PurchaseOrderReceived(body) = &received.body else {
+            panic!("a receipt");
+        };
+        assert_eq!(
+            (body.received_on, body.renews_on),
+            (day("2026-10-01"), Some(day("2027-10-01")))
+        );
+        assert!(body.paid.is_none(), "no amount is sent when none was given");
+        assert_eq!(state(&harness, 1), OrderState::Received);
+        for command in [
+            place_order(1),
+            receive_order(1),
+            close_order(1, None),
+            decide_order(1, false, None),
+        ] {
+            let reason = refused(&orchestrator, command).await;
+            assert!(reason.starts_with("purchase_order_ended: "), "{reason}");
+        }
+
+        // Closing: placed and then closed with the owner's words; a second step is refused.
+        handled(&orchestrator, decide_order(2, true, None)).await;
+        handled(
+            &orchestrator,
+            Command::PurchaseOrderPlace {
+                order: 2,
+                placed_on: Some(day("2026-09-01")),
+                paid: Some("20".to_string()),
+                currency: Some("EUR".to_string()),
+            },
+        )
+        .await;
+        assert_eq!(
+            orders_now(&harness)[1].paid,
+            Some(("20.00".to_string(), "EUR".to_string()))
+        );
+        handled(
+            &orchestrator,
+            close_order(2, Some("  The seller refunded it.  ")),
+        )
+        .await;
+        let closed = last(&harness, EventKind::PurchaseOrderClosed).expect("recorded");
+        let EventBody::PurchaseOrderClosed(body) = &closed.body else {
+            panic!("a closing");
+        };
+        assert_eq!(body.note.to_string(), "The seller refunded it.");
+        assert_eq!(state(&harness, 2), OrderState::Closed);
+        let reason = refused(&orchestrator, receive_order(2)).await;
+        assert!(reason.starts_with("purchase_order_ended: "), "{reason}");
+
+        // The day a receipt is marked is today when none is given.
+        order_drafted(&harness, "FRK-1", 4, "Dot");
+        handled(&orchestrator, decide_order(4, true, None)).await;
+        handled(&orchestrator, place_order(4)).await;
+        handled(&orchestrator, receive_order(4)).await;
+        assert_eq!(orders_now(&harness)[3].received_on, Some(day("2026-09-22")));
+        // A currency with no amount beside it records none.
+        order_drafted(&harness, "FRK-1", 5, "Eve");
+        handled(&orchestrator, decide_order(5, true, None)).await;
+        handled(
+            &orchestrator,
+            Command::PurchaseOrderPlace {
+                order: 5,
+                placed_on: None,
+                paid: None,
+                currency: Some("EUR".to_string()),
+            },
+        )
+        .await;
+        assert_eq!(orders_now(&harness)[4].paid, None);
+
+        // A note past 600 characters is refused, in every step that takes one.
+        for command in [
+            decide_order(3, true, Some(&"n".repeat(601))),
+            close_order(3, Some(&"n".repeat(601))),
+        ] {
+            let reason = refused(&orchestrator, command).await;
+            assert!(
+                reason.starts_with("purchase_order_note_too_long: "),
+                "{reason}"
+            );
+        }
+        // A number nobody drafted, and an order Farik closed by itself.
+        let reason = refused(&orchestrator, place_order(99)).await;
+        assert!(reason.starts_with("unknown_purchase_order: "), "{reason}");
+        harness
+            .project
+            .record("FRK-1", "purchase_order.expired", &json!({ "order": 3 }));
+        for command in [
+            decide_order(3, true, None),
+            place_order(3),
+            receive_order(3),
+            close_order(3, None),
+        ] {
+            let reason = refused(&orchestrator, command).await;
+            assert!(reason.starts_with("purchase_order_expired: "), "{reason}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_owner_corrects_a_status() {
+        let harness = Harness::with_procurement("human-order-correct");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let orchestrator = an_orchestrator(&harness);
+        order_drafted(&harness, "FRK-1", 1, "Acme");
+        let correct = |status: &str, note: Option<&str>, expected_on: Option<&str>| {
+            Command::PurchaseOrderUpdate {
+                order: 1,
+                status: status.to_string(),
+                note: note.map(ToString::to_string),
+                expected_on: expected_on.map(day),
+            }
+        };
+        let reason = refused(&orchestrator, correct("shipped", None, None)).await;
+        assert!(
+            reason.starts_with("purchase_order_not_placed: "),
+            "{reason}"
+        );
+        handled(&orchestrator, decide_order(1, true, None)).await;
+        handled(&orchestrator, place_order(1)).await;
+
+        let report = handled(
+            &orchestrator,
+            correct("delayed", Some("Short of flour."), Some("2026-10-20")),
+        )
+        .await;
+
+        let updated = last(&harness, EventKind::PurchaseOrderUpdated).expect("recorded");
+        assert_eq!(report.events, vec![updated.envelope.seq]);
+        assert_eq!(updated.envelope.ids.task_id, Some(task("FRK-1")));
+        assert_eq!(
+            (
+                &updated.envelope.ids.agent_id,
+                &updated.envelope.ids.session_id
+            ),
+            (&None, &None)
+        );
+        let status = orders_now(&harness)[0].status.clone().expect("a status");
+        assert!(status.by_owner, "the owner's correction says so");
+        assert_eq!(
+            status.status,
+            farik_store::purchase_orders::FollowUp::Delayed
+        );
+        assert_eq!(status.note, "Short of flour.");
+        assert_eq!(status.expected_on, Some(day("2026-10-20")));
+        // Under the statuses' rules: the four words alone, and the notes and days they need.
+        for (command, what) in [
+            (
+                correct("placed", None, None),
+                "a step only the owner takes, as a status",
+            ),
+            (correct("received", None, None), "another"),
+            (
+                correct("delayed", Some("Late."), None),
+                "a delay with no day",
+            ),
+            (
+                correct("delayed", None, Some("2026-10-20")),
+                "a delay with no words",
+            ),
+            (
+                correct("problem", Some("   "), None),
+                "a problem with blank words",
+            ),
+            (
+                correct("shipped", Some(&"n".repeat(301)), None),
+                "a note past 300",
+            ),
+            (
+                correct("shipped", None, Some("2026-09-21")),
+                "a day before today",
+            ),
+        ] {
+            let reason = refused(&orchestrator, command).await;
+            assert!(
+                reason.starts_with("purchase_order_status_invalid: "),
+                "{what}: {reason}"
+            );
+        }
+        handled(&orchestrator, correct("shipped", None, None)).await;
+        assert_eq!(
+            orders_now(&harness)[0]
+                .status
+                .clone()
+                .expect("a status")
+                .status,
+            farik_store::purchase_orders::FollowUp::Shipped,
+            "the latest is the status"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn two_decisions_racing_on_one_order_let_one_through() {
+        let harness = Harness::with_procurement("human-order-race");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        order_drafted(&harness, "FRK-1", 1, "Acme");
+        // A clock that sleeps in every append puts the gap between the check and the write where
+        // both deciders are inside it.
+        let deps = crate::daemon::fixtures::slowed_deps(
+            &harness.project,
+            std::time::Duration::from_millis(50),
+        );
+        let barrier = std::sync::Barrier::new(2);
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let decisions: Vec<_> = [true, false]
+                .into_iter()
+                .map(|approve| {
+                    let (deps, barrier) = (&deps, &barrier);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        super::order_decide(deps, 1, approve, None)
+                    })
+                })
+                .collect();
+            decisions
+                .into_iter()
+                .map(|decision| decision.join().expect("the decision ends"))
+                .collect()
+        });
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        assert!(
+            results.iter().any(|result| matches!(result, Err(CommandError::Refused { reason }) if reason.starts_with("purchase_order_decided: "))),
+            "{results:?}"
+        );
+        let decisions = harness.events(&[
+            EventKind::PurchaseOrderApproved,
+            EventKind::PurchaseOrderRejected,
+        ]);
+        assert_eq!(decisions.len(), 1, "exactly one decision was recorded");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_second_decision_is_refused() {
+        let harness = Harness::with_procurement("human-order-decided");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let orchestrator = an_orchestrator(&harness);
+        order_drafted(&harness, "FRK-1", 1, "Acme");
+        handled(&orchestrator, decide_order(1, true, None)).await;
+        for approve in [true, false] {
+            let reason = refused(&orchestrator, decide_order(1, approve, None)).await;
+            assert!(reason.starts_with("purchase_order_decided: "), "{reason}");
+        }
+        // Rejected is decided too; an unknown number is none.
+        order_drafted(&harness, "FRK-1", 2, "Bolt");
+        handled(&orchestrator, decide_order(2, false, None)).await;
+        let reason = refused(&orchestrator, decide_order(2, true, None)).await;
+        assert!(reason.starts_with("purchase_order_decided: "), "{reason}");
+        let reason = refused(&orchestrator, decide_order(9, true, None)).await;
+        assert!(reason.starts_with("unknown_purchase_order: "), "{reason}");
+        assert_eq!(
+            harness
+                .events(&[
+                    EventKind::PurchaseOrderApproved,
+                    EventKind::PurchaseOrderRejected
+                ])
+                .len(),
+            2
+        );
+    }
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn every_step_waits_for_the_orders_lock() {
+        let harness = Harness::with_procurement("human-order-lock");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let orchestrator_deps = &harness.project.deps;
+        for number in 1..=5 {
+            order_drafted(&harness, "FRK-1", number, &format!("Seller {number}"));
+            harness.project.record(
+                "FRK-1",
+                "purchase_order.approved",
+                &json!({ "order": number, "note": "" }),
+            );
+        }
+        for number in 3..=5 {
+            harness.project.record(
+                "FRK-1",
+                "purchase_order.placed",
+                &json!({ "order": number, "placed_on": "2026-09-22" }),
+            );
+        }
+        order_drafted(&harness, "FRK-1", 6, "Seller 6");
+        let step = |what: &str| match what {
+            "deciding" => super::order_decide(orchestrator_deps, 6, true, None),
+            "placing" => super::order_place(orchestrator_deps, 1, None, None, None),
+            "receiving" => super::order_receive(orchestrator_deps, 3, None, None, None, None),
+            "closing" => super::order_close(orchestrator_deps, 4, None),
+            _ => super::order_update(orchestrator_deps, 5, "shipped", None, None),
+        };
+        for what in ["deciding", "placing", "receiving", "closing", "correcting"] {
+            // While another step holds the lock, this one has not yet recorded anything.
+            let held = crate::locked(&crate::procurement::ORDERS);
+            let before = harness.project.event_count();
+            std::thread::scope(|scope| {
+                let running = scope.spawn(|| step(what));
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                assert!(!running.is_finished(), "{what} waits for the lock");
+                assert_eq!(
+                    harness.project.event_count(),
+                    before,
+                    "{what} records nothing yet"
+                );
+                drop(held);
+                running
+                    .join()
+                    .expect("the step ends")
+                    .unwrap_or_else(|error| {
+                        panic!("{what} goes on once the lock is free: {error:?}")
+                    });
+            });
+            assert_eq!(
+                harness.project.event_count(),
+                before + 1,
+                "{what} recorded one event"
+            );
+        }
     }
 }

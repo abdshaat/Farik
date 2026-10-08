@@ -46,7 +46,12 @@
         "social_post_decide",
         "site_decide",
         "site_add",
-        "site_remove"
+        "site_remove",
+        "purchase_order_decide",
+        "purchase_order_place",
+        "purchase_order_receive",
+        "purchase_order_close",
+        "purchase_order_update"
       ]
     },
     "commandBodyWire": {
@@ -79,6 +84,9 @@
         { "$ref": "#/$defs/siteDecideBody" },
         { "$ref": "#/$defs/siteAddBody" },
         { "$ref": "#/$defs/siteRemoveBody" },
+        { "$ref": "#/$defs/purchaseOrderDecideBody" },
+        { "$ref": "#/$defs/purchaseOrderStepBody" },
+        { "$ref": "#/$defs/purchaseOrderUpdateBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -338,6 +346,47 @@
       "required": ["host"],
       "properties": {
         "host": { "type": "string", "minLength": 1, "maxLength": 2048 }
+      }
+    },
+    "purchaseOrderDecideBody": {
+      "title": "Purchase Order Decide Body",
+      "description": "The owner approves (decision approve: they will place and pay for the order themselves) or rejects (decision reject) the purchase order order, the n of PO-n (docs/SPEC.md 6.10; ADR 0039). note is what the owner says to the agent, whichever they decide, at most 600 characters. purchase_order.approved or purchase_order.rejected is appended with the order's task on its envelope and no agent and no session, its note empty when the owner said nothing. Refused unknown_purchase_order when order names no drafted order, purchase_order_decided when it was decided before, purchase_order_ended when it was received or closed, purchase_order_expired when Farik closed it by itself, and purchase_order_note_too_long past 600 characters. Only the owner decides, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session, and no tool of an agent records an approval.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "decision"],
+      "properties": {
+        "order": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "decision": { "type": "string", "enum": ["approve", "reject"] },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "purchaseOrderStepBody": {
+      "title": "Purchase Order Step Body",
+      "description": "The body of purchase_order_place, purchase_order_receive and purchase_order_close (docs/SPEC.md 6.10; ADR 0039), which share one shape since `{ order }` fits all three and the schema's choice of bodies must match exactly one; the reader holds each command to its own fields. purchase_order_place: order is an approved order the owner placed and paid for themselves, placed_on the day (today, in UTC, when absent), paid what they paid if they know (a number such as 1450 or 1450.00, at most 10000000.00) and currency its currency (three capital letters, the order's when absent beside a paid). purchase_order_receive: the owner marks a placed order received on received_on (today when absent), with paid and currency if given here (the latest paid given, at placing or receiving, is what was paid) and renews_on, the day a subscription or anything paid for again renews. purchase_order_close: the owner closes a placed order that will not come (the seller cancelled or refunded it, or it was lost), with note, at most 600 characters. Refused unknown_purchase_order, purchase_order_expired, purchase_order_not_approved (placing an order not approved), purchase_order_placed (placing one placed), purchase_order_not_placed (receiving or closing one not placed), purchase_order_ended (any step on one received or closed), purchase_order_paid_invalid, purchase_order_currency_invalid and purchase_order_note_too_long. The events are appended with the order's task on the envelope and no agent and no session: no Farik tool records an order placed or received or what was paid.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order"],
+      "properties": {
+        "order": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "placed_on": { "type": "string", "format": "date" },
+        "received_on": { "type": "string", "format": "date" },
+        "paid": { "type": "string", "maxLength": 32 },
+        "currency": { "type": "string", "maxLength": 8 },
+        "renews_on": { "type": "string", "format": "date" },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "purchaseOrderUpdateBody": {
+      "title": "Purchase Order Update Body",
+      "description": "The owner corrects the follow-up status of a placed order (docs/SPEC.md 6.10; ADR 0039): status is one of preparing, shipped, delayed and problem, note what they know (at most 300 characters on one line, required for delayed and problem) and expected_on the day the seller expects the order (today or later, required for delayed). purchase_order.updated is appended with the order's task on the envelope and no agent and no session, so it is the owner's correction and replaces what the agent recorded. Refused unknown_purchase_order, purchase_order_expired, purchase_order_not_placed, purchase_order_ended and purchase_order_status_invalid.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "status"],
+      "properties": {
+        "order": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "status": { "type": "string", "maxLength": 32 },
+        "note": { "type": "string", "maxLength": 600 },
+        "expected_on": { "type": "string", "format": "date" }
       }
     },
     "skillLevel": {

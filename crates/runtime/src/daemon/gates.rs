@@ -12,6 +12,7 @@ use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, val
 use farik_core::governor::gates::{ContractWriteActor, ContractWriteOutcome, check_contract_write};
 use farik_core::governor::plain::plain_readiness;
 use farik_core::governor::readiness::{ReadinessFailure, evaluate_readiness, rules_evaluated};
+use farik_core::governor::sites::site_of;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::marketing::{
     CapScope, PlanSpend, RaiseAsk, Raised, active_plan, check_raise, parse_amount,
@@ -27,6 +28,7 @@ use farik_store::diff::diff_of;
 use farik_store::marketing::{
     BudgetReached, MarketingPlan, budgets_reached, created_campaigns, marketing_plans, social_posts,
 };
+use farik_store::purchase_orders::purchase_orders;
 use farik_store::requests::{
     RequestError, TOO_SHORT, contract_write, file_raise_request, file_request,
     placeholder_budget_usd, request_from_brief, request_from_text, summary_of,
@@ -46,11 +48,12 @@ use crate::tools::media::fetch_picture;
 use crate::transitions::last_move_into;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 4] = [
+pub(super) const METHODS: [&str; 5] = [
     "request.file",
     "contract.save",
     "social_post.media",
     "marketing_budget.raise",
+    "purchase_order.file",
 ];
 
 /// Who the human is in the log.
@@ -155,6 +158,36 @@ fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
         row["url"] = json!(ask.url);
         row["why"] = json!(ask.why);
     }
+    if let Some(ask) = &item.order {
+        let time = |at: DateTime<Utc>| at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
+        row["order"] = json!(ask.order);
+        row["seller"] = json!(ask.seller);
+        row["seller_contact"] = json!(ask.seller_contact);
+        row["lines"] = json!(
+            ask.lines
+                .iter()
+                .map(|line| json!({
+                    "item": line.item, "quantity": line.quantity, "unit": line.unit,
+                    "unit_price": line.unit_price, "line_total": line.line_total,
+                }))
+                .collect::<Vec<_>>()
+        );
+        row["currency"] = json!(ask.currency);
+        row["period"] = json!(ask.period);
+        row["total"] = json!(ask.total);
+        row["delivery"] = json!(ask.delivery);
+        row["terms"] = json!(ask.terms);
+        row["url"] = json!(ask.url);
+        // The site the address names, in the form Farik keeps: the page shows it, so that the
+        // owner can tell a look-alike from the seller's own.
+        if let Ok(host) = site_of(&ask.url) {
+            row["host"] = json!(host);
+        }
+        row["evaluation"] = json!(ask.evaluation);
+        row["why"] = json!(ask.why);
+        row["at"] = json!(time(ask.at));
+        row["expires_at"] = json!(time(ask.expires_at));
+    }
     if let Some(ask) = &item.post {
         row["post"] = json!(ask.post);
         row["channel"] = json!(ask.channel.as_str());
@@ -239,6 +272,8 @@ pub(super) fn query(
             marketing_plan_get(state, deps, params["plan"].as_str().unwrap_or(""))
         }
         "sites.list" => crate::tools::sites::site_list(&deps.log).map_err(|e| internal(&e)),
+        "purchase_orders.list" => purchase_orders_list(deps),
+        "purchase_order.evaluation" => order_evaluation(deps, params),
         "social_posts.list" => Ok(json!({
             "posts": going_out(&social_posts(&deps.log).map_err(|e| internal(&e))?, deps.clock.now())
         })),
@@ -608,6 +643,10 @@ pub(super) async fn call(
         state.wakes().notify_one();
         return Ok(filed);
     }
+    if method == "purchase_order.file" {
+        let order = params["order"].as_u64().unwrap_or_default();
+        return off_the_worker(move || order_file(&deps, order)).await;
+    }
     if method == "request.file" {
         let text = params["text"].as_str().unwrap_or_default().to_string();
         let link = params["from_chat_message"].as_u64();
@@ -616,6 +655,87 @@ pub(super) async fn call(
         return Ok(filed);
     }
     save(state, &deps, params).await
+}
+
+/// `purchase_orders.list`: every order the log holds, oldest first, as the Orders section words it.
+fn purchase_orders_list(deps: &ToolDeps) -> Result<Value, Failure> {
+    let today = deps.clock.now().date_naive();
+    let orders = purchase_orders(&deps.log).map_err(|e| internal(&e))?;
+    Ok(json!({
+        "orders": orders
+            .iter()
+            .map(|order| crate::procurement::order_row(order, today, false))
+            .collect::<Vec<_>>()
+    }))
+}
+
+/// The file `path` of the Procurement Specialist's private folder, read up to `most` bytes, when
+/// it is a file the folder's rules reach: no link on the way, and the resolved path inside the
+/// folder. `not_found` for any other.
+fn procurement_file(deps: &ToolDeps, path: &str, most: u64) -> Result<Vec<u8>, Failure> {
+    use std::io::Read as _;
+
+    let nothing = || Failure::new(NOT_FOUND, format!("there is no file at {path}"));
+    let folder =
+        farik_core::team::private_folder(Role::ProcurementSpecialist).ok_or_else(nothing)?;
+    let at = crate::tools::sheets::private_path(deps.files.root(), folder, path)
+        .map_err(|_| nothing())?;
+    if !at.is_file() {
+        return Err(nothing());
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(&at)
+        .and_then(|file| file.take(most + 1).read_to_end(&mut bytes))
+        .map_err(|_| nothing())?;
+    if bytes.len() as u64 > most {
+        return Err(nothing());
+    }
+    Ok(bytes)
+}
+
+/// `purchase_order.evaluation`: the comparison order `order` rests on, as text. `not_found` for
+/// an order nobody drafted, a path that is not `evaluations/<name>.md`, a note that is gone or
+/// lies behind a link, and one past 64 KiB.
+fn order_evaluation(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
+    let order = params["order"].as_u64().unwrap_or_default();
+    let record = purchase_orders(&deps.log)
+        .map_err(|e| internal(&e))?
+        .into_iter()
+        .find(|record| record.order == order)
+        .ok_or_else(|| Failure::new(NOT_FOUND, format!("there is no order PO-{order}")))?;
+    let path = record.drafted.evaluation.to_string();
+    if !path.starts_with("evaluations/") {
+        return Err(Failure::new(
+            NOT_FOUND,
+            format!("there is no comparison at {path}"),
+        ));
+    }
+    let bytes = procurement_file(deps, &path, 64 * 1024)?;
+    Ok(json!({ "text": String::from_utf8_lossy(&bytes) }))
+}
+
+/// `purchase_order.file`: order `order`'s workbook, `orders/PO-<n>.xlsx`, for the owner to
+/// download. `not_found` for an order nobody drafted, a workbook that is gone, or one that is, or
+/// lies behind, a link.
+fn order_file(deps: &ToolDeps, order: u64) -> Result<Value, Failure> {
+    use base64::Engine as _;
+
+    let known = purchase_orders(&deps.log)
+        .map_err(|e| internal(&e))?
+        .iter()
+        .any(|record| record.order == order);
+    if !known {
+        return Err(Failure::new(
+            NOT_FOUND,
+            format!("there is no order PO-{order}"),
+        ));
+    }
+    let bytes = procurement_file(deps, &format!("orders/PO-{order}.xlsx"), 10 * 1024 * 1024)?;
+    Ok(json!({
+        "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "base64": base64::engine::general_purpose::STANDARD.encode(bytes),
+        "name": format!("PO-{order}.xlsx"),
+    }))
 }
 
 /// `social_post.media`: one picture of a post, fetched here since the browser may not load pictures
@@ -4148,6 +4268,395 @@ pub(super) mod tests {
             .clone();
         assert_eq!(dev_a["line"], "Answering your chat", "{dev_a}");
         assert_eq!(dev_a["purpose"], "chat", "{dev_a}");
+    }
+
+    /// `proc`'s order 1 on FRK-1 from `seller`, drafted in its session as the tool records it, with
+    /// its comparison written and its workbook made; a page on a site Farik ships, or none.
+    fn order_drafted(harness: &Harness, seller: &str, page: bool) -> Value {
+        let project = &harness.project;
+        project
+            .call(
+                "proc",
+                Some("FRK-1"),
+                "farik_write_evaluation",
+                json!({ "name": "mirrors", "text": "# Baby car mirrors\n\nAcme is <b>cheapest</b>." }),
+            )
+            .expect("the comparison is written");
+        let shipped = &farik_roles::sites::farik_sites()[0].host;
+        project
+            .call(
+                "proc",
+                Some("FRK-1"),
+                "farik_draft_purchase_order",
+                json!({
+                    "seller": seller,
+                    "seller_contact": "sales@acme.example",
+                    "lines": [
+                        { "item": "Baby car mirror", "quantity": 3, "unit_price": "19.99", "unit": "piece" },
+                        { "item": "Mounting kit", "quantity": 1, "unit_price": "0.01", "unit": "" }
+                    ],
+                    "currency": "USD", "period": "month", "delivery": "3 days", "terms": "Net 30",
+                    "url": if page { format!("https://www.{shipped}/mirrors?size=big") } else { String::new() },
+                    "evaluation": "evaluations/mirrors.md",
+                    "why": "It is the cheapest seller that ships to us."
+                }),
+            )
+            .expect("the order is drafted")
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn waiting_list_gives_the_host() {
+        let harness = Harness::with_procurement("gates-order-waits");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        order_drafted(&harness, "Acme", true);
+        order_drafted(&harness, "Bolt", false);
+        let name = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team")
+            .agents
+            .iter()
+            .find(|agent| agent.id.as_str() == "proc")
+            .map(|agent| agent.display_name.to_string())
+            .expect("proc");
+        let shipped = farik_roles::sites::farik_sites()[0].host.clone();
+
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        )["waiting"]
+            .clone();
+
+        let lines = json!([
+            { "item": "Baby car mirror", "quantity": 3, "unit": "piece", "unit_price": "19.99", "line_total": "59.97" },
+            { "item": "Mounting kit", "quantity": 1, "unit": "", "unit_price": "0.01", "line_total": "0.01" }
+        ]);
+        let row = |order: u64, seller: &str, url: &str| {
+            let mut row = json!({
+                "task_id": "FRK-1", "kind": "purchase_order", "agent_id": "proc",
+                "title": "Add a login page",
+                "line": format!("{name} set up an order from {seller}: 59.98 USD"),
+                "order": order, "seller": seller, "seller_contact": "sales@acme.example",
+                "lines": lines, "currency": "USD", "period": "month", "total": "59.98",
+                "delivery": "3 days", "terms": "Net 30", "url": url,
+                "evaluation": "evaluations/mirrors.md",
+                "why": "It is the cheapest seller that ships to us.",
+                "at": "2026-09-22T12:00:00Z", "expires_at": "2026-10-22T12:00:00Z"
+            });
+            if !url.is_empty() {
+                // The site the address names, in its ASCII form and without `www.`.
+                row["host"] = json!(shipped);
+            }
+            row
+        };
+        assert_eq!(
+            waiting,
+            json!([
+                row(
+                    1,
+                    "Acme",
+                    &format!("https://www.{shipped}/mirrors?size=big")
+                ),
+                row(2, "Bolt", ""),
+            ])
+        );
+        assert!(waiting[1].get("host").is_none(), "no page, no host");
+
+        // Approved, it is gone from Today.
+        harness.project.record(
+            "FRK-1",
+            "purchase_order.approved",
+            &json!({ "order": 1, "note": "" }),
+        );
+        let after = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(after["waiting"].as_array().map(Vec::len), Some(1));
+        assert_eq!(after["waiting"][0]["order"], 2);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_each_order_with_its_state() {
+        let harness = Harness::with_procurement("gates-orders-list");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        for seller in ["Acme", "Bolt", "Cog"] {
+            order_drafted(&harness, seller, false);
+        }
+        let project = &harness.project;
+        let minute = |n: i64| at() + chrono::Duration::minutes(n);
+        let stamp = |n: i64| minute(n).to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
+        project.record_at(
+            minute(1),
+            "FRK-1",
+            "purchase_order.approved",
+            &json!({ "order": 1, "note": "Go." }),
+        );
+        project.record_at(
+            minute(2),
+            "FRK-1",
+            "purchase_order.placed",
+            &json!({ "order": 1, "placed_on": "2026-09-01", "paid": "100.00", "currency": "EUR" }),
+        );
+        project.record_by(
+            Some("proc"),
+            minute(3),
+            "FRK-1",
+            "purchase_order.updated",
+            &json!({ "order": 1, "status": "shipped", "note": "On its way.", "expected_on": "2026-09-30" }),
+        );
+        project.record_at(
+            minute(4),
+            "FRK-1",
+            "purchase_order.rejected",
+            &json!({ "order": 2, "note": "Too dear." }),
+        );
+
+        let listed = query(
+            &harness.daemon,
+            "purchase_orders.list",
+            &json!({}),
+            "purchaseOrdersListResult",
+        );
+
+        let orders = listed["orders"].as_array().expect("a list");
+        let states: Vec<&str> = orders
+            .iter()
+            .map(|order| order["state"].as_str().expect("a state"))
+            .collect();
+        assert_eq!(states, ["placed", "rejected", "drafted"], "oldest first");
+        assert_eq!(
+            orders[0],
+            json!({
+                "order": 1, "state": "placed", "seller": "Acme", "total": "59.98",
+                "currency": "USD", "period": "month", "task_id": "FRK-1", "agent_id": "proc",
+                "drafted_at": stamp(0), "decided_at": stamp(1), "note": "Go.",
+                "placed_on": "2026-09-01", "paid": "100.00", "paid_currency": "EUR",
+                "status": { "status": "shipped", "note": "On its way.", "expected_on": "2026-09-30",
+                            "by": "agent", "at": stamp(3) },
+                "overdue": false
+            })
+        );
+        assert_eq!(orders[1]["ended_at"], stamp(4));
+        assert_eq!(orders[1]["note"], "Too dear.");
+        assert_eq!(orders[1]["overdue"], false);
+        // A drafted order says when it closes by itself.
+        assert_eq!(
+            orders[2]["expires_at"],
+            (at() + chrono::Duration::days(30))
+                .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+        );
+        assert!(orders[2].get("decided_at").is_none());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "each way a comparison or a workbook can be out of reach, one after another"
+    )]
+    fn the_evaluation_and_the_file_read_only_their_own() {
+        use base64::Engine as _;
+        let harness = Harness::with_procurement("gates-order-reads");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        order_drafted(&harness, "Acme", true);
+        let ask = |name: &str, order: u64| {
+            rpc(
+                &harness.daemon,
+                "query",
+                &json!({ "name": name, "params": { "order": order } }),
+            )
+        };
+
+        let read = query(
+            &harness.daemon,
+            "purchase_order.evaluation",
+            &json!({ "order": 1 }),
+            "purchaseOrderEvaluationResult",
+        );
+        assert_eq!(
+            read,
+            json!({ "text": "# Baby car mirrors\n\nAcme is <b>cheapest</b>." })
+        );
+        let file = call(
+            &harness.daemon,
+            "purchase_order.file",
+            &json!({ "order": 1 }),
+            "purchaseOrderFileResult",
+        );
+        assert_eq!(
+            file["media_type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+        assert_eq!(file["name"], "PO-1.xlsx");
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(file["base64"].as_str().expect("base64"))
+            .expect("base64 decodes");
+        assert_eq!(&bytes[..2], b"PK", "a workbook is a zip");
+        assert_eq!(
+            bytes,
+            std::fs::read(harness.procurement_folder().join("orders/PO-1.xlsx")).expect("the file")
+        );
+
+        // An order nobody drafted has neither.
+        for name in ["purchase_order.evaluation", "purchase_order.file"] {
+            let reply = if name == "purchase_order.file" {
+                rpc(&harness.daemon, name, &json!({ "order": 9 }))
+            } else {
+                ask(name, 9)
+            };
+            assert_eq!(
+                reply["error"]["code"],
+                crate::daemon::web::NOT_FOUND,
+                "{name}: {reply}"
+            );
+        }
+        // A comparison reached through a link is not read, and one that is gone is none.
+        let evaluations = harness.procurement_folder().join("evaluations");
+        let elsewhere = harness.project.repo.path.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).expect("a folder");
+        std::fs::write(elsewhere.join("mirrors.md"), "# Not the folder's").expect("a note");
+        std::fs::remove_dir_all(&evaluations).expect("the notes go");
+        std::os::unix::fs::symlink(&elsewhere, &evaluations).expect("a link");
+        let linked = ask("purchase_order.evaluation", 1);
+        assert_eq!(
+            linked["error"]["code"],
+            crate::daemon::web::NOT_FOUND,
+            "{linked}"
+        );
+        std::fs::remove_file(&evaluations).expect("the link goes");
+        let gone = ask("purchase_order.evaluation", 1);
+        assert_eq!(
+            gone["error"]["code"],
+            crate::daemon::web::NOT_FOUND,
+            "{gone}"
+        );
+        // A comparison past 64 KiB is not read, and one of exactly 64 KiB is.
+        let note = harness.procurement_folder().join("evaluations/mirrors.md");
+        std::fs::create_dir_all(note.parent().expect("a folder")).expect("the folder");
+        std::fs::write(&note, "e".repeat(64 * 1024)).expect("a note");
+        let exact = ask("purchase_order.evaluation", 1);
+        assert_eq!(
+            exact["result"]["text"].as_str().map(str::len),
+            Some(64 * 1024),
+            "{exact}"
+        );
+        std::fs::write(&note, "e".repeat(64 * 1024 + 1)).expect("a note");
+        let big = ask("purchase_order.evaluation", 1);
+        assert_eq!(big["error"]["code"], crate::daemon::web::NOT_FOUND, "{big}");
+        // A workbook that is there for an order nobody drafted is none.
+        std::fs::copy(
+            harness.procurement_folder().join("orders/PO-1.xlsx"),
+            harness.procurement_folder().join("orders/PO-9.xlsx"),
+        )
+        .expect("a workbook");
+        let stray = rpc(
+            &harness.daemon,
+            "purchase_order.file",
+            &json!({ "order": 9 }),
+        );
+        assert_eq!(
+            stray["error"]["code"],
+            crate::daemon::web::NOT_FOUND,
+            "{stray}"
+        );
+        // A workbook past 10 MiB is not sent, and one of exactly 10 MiB is.
+        let workbook = harness.procurement_folder().join("orders/PO-1.xlsx");
+        let big = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&workbook)
+            .expect("the file");
+        big.set_len(10 * 1024 * 1024).expect("10 MiB");
+        let at_the_limit = rpc(
+            &harness.daemon,
+            "purchase_order.file",
+            &json!({ "order": 1 }),
+        );
+        assert!(
+            at_the_limit.get("result").is_some(),
+            "{}",
+            at_the_limit.to_string().len()
+        );
+        big.set_len(10 * 1024 * 1024 + 1)
+            .expect("10 MiB and a byte");
+        let over = rpc(
+            &harness.daemon,
+            "purchase_order.file",
+            &json!({ "order": 1 }),
+        );
+        assert_eq!(
+            over["error"]["code"],
+            crate::daemon::web::NOT_FOUND,
+            "{}",
+            over.to_string().len()
+        );
+        std::fs::write(&workbook, b"PK restored").expect("a file");
+        // A workbook that is gone is none, and so is one that is a link.
+        let workbook = harness.procurement_folder().join("orders/PO-1.xlsx");
+        std::fs::remove_file(&workbook).expect("the workbook goes");
+        let missing = rpc(
+            &harness.daemon,
+            "purchase_order.file",
+            &json!({ "order": 1 }),
+        );
+        assert_eq!(
+            missing["error"]["code"],
+            crate::daemon::web::NOT_FOUND,
+            "{missing}"
+        );
+        std::fs::write(elsewhere.join("secret.xlsx"), b"PKsecret").expect("a file");
+        std::os::unix::fs::symlink(elsewhere.join("secret.xlsx"), &workbook).expect("a link");
+        let linked = rpc(
+            &harness.daemon,
+            "purchase_order.file",
+            &json!({ "order": 1 }),
+        );
+        assert_eq!(
+            linked["error"]["code"],
+            crate::daemon::web::NOT_FOUND,
+            "{linked}"
+        );
+        // An order that names another file as its comparison does not have it read.
+        std::fs::write(
+            harness.procurement_folder().join("vendors.xlsx"),
+            b"PKregister",
+        )
+        .expect("the register");
+        harness.project.record_by(
+            Some("proc"),
+            at(),
+            "FRK-1",
+            "purchase_order.drafted",
+            &json!({
+                "order": 2, "seller": "Bolt", "seller_contact": "",
+                "lines": [{ "item": "x", "quantity": 1, "unit": "", "unit_price": "1.00", "line_total": "1.00" }],
+                "currency": "USD", "period": "once", "total": "1.00", "delivery": "", "terms": "",
+                "url": "", "evaluation": "vendors.xlsx", "why": "An order whose comparison is another file."
+            }),
+        );
+        let register = ask("purchase_order.evaluation", 2);
+        assert_eq!(
+            register["error"]["code"],
+            crate::daemon::web::NOT_FOUND,
+            "{register}"
+        );
+        // The numbers are the schema's.
+        for params in [json!({ "order": 0 }), json!({})] {
+            let reply = rpc(&harness.daemon, "purchase_order.file", &params);
+            assert_eq!(
+                reply["error"]["code"],
+                crate::daemon::web::INVALID_PARAMS,
+                "{params}"
+            );
+        }
     }
 
     /// `proc`'s request, on FRK-1, to read `host`: the request's number.
