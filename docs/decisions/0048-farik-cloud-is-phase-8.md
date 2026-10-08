@@ -38,7 +38,7 @@ ADR 0044's title stays: it records the decision of its day, with a dated line po
 ## Consequences
 
 Easier:
-- Phase 7's live checks that wait on Farik Cloud run in phase 8, months before the launch rather than in it: GitHub through Farik's GitHub App (step 03b's), Google Ads with a small budget (steps 08e to 08g's), and the kit check's Google Ads part (step 13's).
+- Phase 7's live checks that wait on Farik Cloud run in phase 8, before the launch rather than in it: GitHub through Farik's GitHub App (step 03b's), Google Ads with a small budget (steps 08e to 08g's), and the kit check's Google Ads part (step 13's).
 - The website and the privacy policy are live before the proof of concept and the launch, so Google's verification of the `adwords` scope, with its lead time of days to weeks, runs during phases 9 to 11 instead of blocking the launch.
 - Engines and providers (phase 9) and the proof of concept (phase 11) can test with GitHub and Google Ads signed in. ADR 0044's reason for running the benchmark's kits without Google Ads, that no customer signs in to Google before Farik Cloud runs, is gone; the proof of concept's brainstorm decides whether its kits include Google Ads.
 - The launch carries no cloud work of its own: its readiness is the release, the install path and the review of the approved sites.
