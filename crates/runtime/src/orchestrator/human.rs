@@ -1690,16 +1690,14 @@ fn connect_server(
     })
 }
 
-/// `connector_disconnect`: the custom server `server` taken away from `agent` in the team file;
-/// then `connector.disconnected`. Its keys are deleted by whoever sent it.
-fn disconnect_server(
-    tools: &ToolDeps,
-    daemon: &DaemonState,
+/// What `connector_disconnect` checks before it writes: `agent` has the custom server `server`,
+/// and the team without it is a team. The team it leaves, or the refusal. The daemon asks it
+/// before it pauses Google Ads' campaigns for a removal, so that a refused command pauses nothing.
+pub(crate) fn without_connector(
+    team: &Team,
     agent: &str,
     server: &str,
-) -> Result<CommandReport, CommandError> {
-    let _writing = daemon.team_writes();
-    let team = tools.files.read_team().map_err(failed)?;
+) -> Result<Team, CommandError> {
     let custom = team
         .agents
         .iter()
@@ -1711,7 +1709,20 @@ fn disconnect_server(
             what: format!("{agent}'s custom connector {server}"),
         });
     }
-    let after = connector_team(&team, agent, server, None)?;
+    connector_team(team, agent, server, None)
+}
+
+/// `connector_disconnect`: the custom server `server` taken away from `agent` in the team file;
+/// then `connector.disconnected`. Its keys are deleted by whoever sent it.
+fn disconnect_server(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    agent: &str,
+    server: &str,
+) -> Result<CommandReport, CommandError> {
+    let _writing = daemon.team_writes();
+    let team = tools.files.read_team().map_err(failed)?;
+    let after = without_connector(&team, agent, server)?;
     tools.files.write_team(&after).map_err(failed)?;
     let event = append(
         tools,

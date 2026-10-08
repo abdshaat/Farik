@@ -1276,10 +1276,16 @@ async fn connector_disconnect(
         params["agent"].as_str().unwrap_or_default(),
         params["server"].as_str().unwrap_or_default(),
     );
-    if server == super::ads_calls::GOOGLE_ADS {
+    if server == super::ads_calls::GOOGLE_ADS
+        && deps
+            .files
+            .read_team()
+            .is_ok_and(|team| crate::orchestrator::without_connector(&team, agent, server).is_ok())
+    {
         // Without this connection Farik could no longer stop the ads at their budget, so it pauses
-        // them first. A refusal is no reason to keep the connection: it is removed all the same,
-        // and Today says the ads keep running (the owner's answer of 2026-10-07).
+        // them first, once the command's own checks pass: a refused removal pauses nothing. A
+        // refusal by Google is no reason to keep the connection: it is removed all the same, and
+        // Today says the ads keep running (the owner's answer of 2026-10-07).
         let _ = super::ads_calls::pause_before_removing(state, deps, agent).await;
     }
     handled(
@@ -2882,6 +2888,40 @@ pub(super) mod tests {
                 "{plan}"
             );
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_refused_disconnect_of_google_ads_pauses_nothing() {
+        let ads = google_ads_with_two_campaigns_running("team-remove-refused-checks").await;
+
+        // An agent that does not have Google Ads, and one the team does not have: the command
+        // refuses both, and the ads of the plans keep running as they were.
+        for agent in ["dev-a", "nobody"] {
+            let refused = super::call(
+                &ads.harness.daemon,
+                "connector.disconnect",
+                &json!({ "agent": agent, "server": "google-ads" }),
+            )
+            .await;
+            assert!(refused.is_err(), "{agent}: {refused:?}");
+        }
+
+        assert!(
+            ads.google.requests().is_empty(),
+            "{:?}",
+            ads.google.requests()
+        );
+        assert_eq!(
+            ads.harness
+                .project
+                .events(&[EventKind::MarketingCampaignPaused])
+                .len(),
+            1,
+            "only the one recorded before"
+        );
+        assert!(ads.harness.daemon.spend_reads().is_empty());
+        assert!(ads.store.load(&ads.at).expect("reads").is_some());
     }
 
     #[tokio::test(flavor = "multi_thread")]
