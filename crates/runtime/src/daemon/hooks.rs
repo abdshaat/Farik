@@ -3646,6 +3646,51 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_approved_address_goes_to_serpapi_whatever_it_redirects_to() {
+        use farik_core::governor::permissions::{ConnectorTag, SessionConnector};
+
+        // A guard that pins a decision (the founder, 2026-10-08, "Keep it, say so"; spec 8.6): the
+        // hook judges the site the agent named, and SerpApi fetches that address on its own
+        // servers, where a redirect from an approved shop to another site is out of Farik's sight.
+        // The address is allowed, and the spec says what it leaves open.
+        let daemon = with_buyers("hook-sites-serpapi-redirect");
+        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        daemon
+            .state
+            .sessions()
+            .get_mut("session-proc")
+            .expect("registered")
+            .registration
+            .connectors
+            .push(SessionConnector {
+                server: "serpapi".to_string(),
+                origin: None,
+                tools: [("search".to_string(), ConnectorTag::ExternalEffect)].into(),
+                allowances: [("search".to_string(), 50)].into(),
+                plan_tools: std::collections::BTreeSet::new(),
+            });
+        let redirect = format!(
+            "https://www.{}/gp/redirect.html?location=https://unapproved.example/a.jpg",
+            a_farik_host()
+        );
+        for params in [
+            json!({ "engine": "google_reverse_image", "image_url": redirect }),
+            json!({ "engine": "google_lens", "url": redirect }),
+        ] {
+            let allowed = decide_pre_tool_use(
+                &daemon.call(
+                    "session-proc",
+                    "mcp__serpapi__search",
+                    &json!({ "params": params }),
+                ),
+                &daemon.state,
+            );
+            assert!(allowed.allow, "{params}: {allowed:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn an_external_call_to_an_unapproved_address_asks_for_nothing() {
         let daemon = with_buyers("hook-sites-external");
         let farik = a_farik_host();

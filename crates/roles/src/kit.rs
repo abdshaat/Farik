@@ -1431,8 +1431,9 @@ mod tests {
         );
         assert_eq!(
             copy.setup,
-            "Make a free SerpApi account, which includes 250 searches a month and at most 50 in an hour, then copy your private key from its \u{2018}Api Key\u{2019} page and paste it here. What your agent searches for goes to SerpApi as written."
+            "Make a free SerpApi account, which includes 250 searches a month and at most 50 in an hour, then copy your private key from its \u{2018}Api Key\u{2019} page and paste it here. What your agent searches for goes to SerpApi as written. Some of SerpApi's searches open a picture or page address on SerpApi's own servers. Farik only lets your agent give it addresses on sites you approved, but SerpApi may follow a link from there to another site."
         );
+        assert!(copy.setup.chars().count() <= 600, "the schema's limit");
     }
 
     /// Step 10d: Brex's official server, signed in to by route 1 asking for four read scopes, so a
