@@ -15,13 +15,15 @@ use farik_core::team::{Agent, AgentStatus};
 use farik_protocol::event::{EventBody, new_event};
 use farik_store::marketing::{
     MarketingPlan, PausedWhy, budgets_reached, campaigns_paused, created_campaigns_on,
-    marketing_plans,
+    marketing_plans, paused_for_end,
 };
 use serde_json::json;
 
 use super::{Orchestrator, OrchestratorError, RECHECK};
 use crate::daemon::SpendRead;
-use crate::daemon::ads_calls::{cut_reason, lineage_of, pause_campaigns, read_spend, spent_by_key};
+use crate::daemon::ads_calls::{
+    GOOGLE_ADS, cut_reason, lineage_of, pause_campaigns, read_spend, spent_by_key,
+};
 
 /// How long a plan's spend, or a pause that was refused, waits before it is tried again. A failed
 /// try counts: a retry every minute would spend Farik Cloud's shared quota (ADR 0044) on failures
@@ -279,11 +281,7 @@ impl Orchestrator {
     /// fifteen minutes later.
     async fn pause_what_ended(&self, watched: &Watched<'_>) -> Result<(), OrchestratorError> {
         let (state, tools, now) = (&self.deps.daemon, &self.deps.tools, watched.now);
-        let for_end: Vec<String> = campaigns_paused(&tools.log)?
-            .into_iter()
-            .filter(|pause| pause.why == PausedWhy::PlanEnded)
-            .map(|pause| pause.campaign)
-            .collect();
+        let for_end = paused_for_end(&tools.log, GOOGLE_ADS)?;
         let all: Vec<CreatedCampaign> = watched.made.iter().map(|(made, _)| made.clone()).collect();
         let lineage = watched.active.map(|(plan, lineage)| Lineage {
             id: plan.record.id.as_str(),
@@ -1509,6 +1507,72 @@ mod tests {
             .get("MP-1")
             .and_then(|read| read.unstopped.clone());
         assert_eq!(unstopped, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_removal_s_pause_counts_when_the_plan_ends_until_google_ads_is_connected_again() {
+        let watching = Watching::new("end-after-removal").await;
+        watching.ads.plan("MP-1", None);
+        watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
+        let campaign = campaign_name(CUSTOMER, 11);
+
+        // The owner removed Kai's Google Ads: Farik paused the campaign first and recorded it, and
+        // the entry and its sign-in went.
+        let files = &watching.ads.harness.project.deps.files;
+        let team = crate::daemon::with_server(
+            &files.read_team().expect("the team"),
+            "kai",
+            "google-ads",
+            None,
+        )
+        .expect("a team");
+        files.write_team(&team).expect("the team is written");
+        let project = &watching.ads.harness.project;
+        project.record(
+            "",
+            "marketing_campaign.paused",
+            &json!({
+                "plan": "MP-1", "key": "search-launch", "campaign": campaign,
+                "why": "connection_removed"
+            }),
+        );
+        project.record(
+            "",
+            "connector.disconnected",
+            &json!({ "agent": "kai", "server": "google-ads" }),
+        );
+
+        // The plan ends. The campaign is paused already: no pause is sent, none is recorded, and
+        // no "ads still running" is kept for the owner, though no sign-in is left to ask Google.
+        watching.ends("MP-1");
+        watching.at(1);
+        watching.wakes().await;
+        assert!(watching.searches().is_empty(), "{:?}", watching.searches());
+        assert!(watching.paused_for("plan_ended").is_empty());
+        let unstopped = watching
+            .ads
+            .state()
+            .spend_reads()
+            .get("MP-1")
+            .and_then(|read| read.unstopped.clone());
+        assert_eq!(unstopped, None);
+
+        // Google Ads is connected again, and an agent could have enabled the campaign since: it
+        // is paused for the end, as before.
+        watching.ads.connect("kai");
+        let mut connected =
+            farik_protocol::event::fixtures::a_body_wire(EventKind::ConnectorConnected);
+        connected["agent"] = json!("kai");
+        connected["server"] = json!("google-ads");
+        project.record("", "connector.connected", &connected);
+        watching.at(2);
+        watching.wakes().await;
+        assert_eq!(watching.pauses(), std::slice::from_ref(&campaign));
+        assert_eq!(
+            watching.paused_for("plan_ended"),
+            [("MP-1".to_string(), "search-launch".to_string(), campaign)]
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

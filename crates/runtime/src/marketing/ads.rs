@@ -12,11 +12,12 @@ use farik_core::marketing::{
 use farik_store::StoreError;
 use farik_store::marketing::{
     BudgetReached, CampaignPaused, MarketingPlan, PausedWhy, budgets_reached, campaigns_paused,
-    created_campaigns, marketing_plans, raises,
+    created_campaigns, marketing_plans, paused_for_end, raises,
 };
 use serde_json::{Map, Value, json};
 
-use crate::daemon::{DaemonState, SpendRead, ads_calls::lineage_of};
+use crate::daemon::ads_calls::{GOOGLE_ADS, lineage_of};
+use crate::daemon::{DaemonState, SpendRead};
 use crate::marketing::known_spend;
 use crate::tools::ToolDeps;
 
@@ -59,11 +60,7 @@ pub fn ads_left_to_pause(deps: &ToolDeps, plan: &str) -> Result<bool, StoreError
             plan: &each.proposal,
             lineage,
         });
-    let for_end: Vec<String> = campaigns_paused(&deps.log)?
-        .into_iter()
-        .filter(|pause| pause.why == PausedWhy::PlanEnded)
-        .map(|pause| pause.campaign)
-        .collect();
+    let for_end = paused_for_end(&deps.log, GOOGLE_ADS)?;
     let made = created_campaigns(&deps.log)?;
     Ok(to_pause_for_end(view.as_ref(), &made, &for_end)
         .iter()

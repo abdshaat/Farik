@@ -858,6 +858,43 @@ pub fn budgets_reached(log: &EventLog) -> Result<Vec<BudgetReached>, StoreError>
     Ok(reached)
 }
 
+/// The campaigns recorded paused for their plan's end, by resource name, oldest first: each that
+/// Farik paused because its plan ended, and each it paused because Google Ads was removed
+/// (`connection_removed`) while no connection of `server` has been recorded since, since until
+/// then nothing could have started it again. A pause at a budget never counts: a raise may have
+/// started the campaign again. A connection with an agent or a session on its envelope is not read.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn paused_for_end(log: &EventLog, server: &str) -> Result<Vec<String>, StoreError> {
+    let connected_since = log
+        .read(&EventQuery {
+            kinds: vec![EventKind::ConnectorConnected],
+            ..EventQuery::default()
+        })?
+        .iter()
+        .filter(|event| {
+            let ids = &event.envelope.ids;
+            ids.agent_id.is_none() && ids.session_id.is_none()
+        })
+        .filter(|event| {
+            matches!(&event.body, EventBody::ConnectorConnected(body)
+                if body.server.as_str() == server)
+        })
+        .map(|event| event.envelope.seq)
+        .max();
+    Ok(campaigns_paused(log)?
+        .into_iter()
+        .filter(|pause| match pause.why {
+            PausedWhy::PlanEnded => true,
+            PausedWhy::ConnectionRemoved => connected_since.is_none_or(|seq| seq < pause.seq),
+            PausedWhy::BudgetReached => false,
+        })
+        .map(|pause| pause.campaign)
+        .collect())
+}
+
 /// Every pause Farik made on its own, oldest first. An event with an agent or a session on its
 /// envelope is not read.
 ///
@@ -1578,6 +1615,57 @@ mod tests {
             days,
             ["2026-11-01", "2026-11-02"],
             "the UTC day it was made on"
+        );
+    }
+
+    #[test]
+    fn a_pause_for_a_removal_counts_for_the_end_until_a_connection_is_recorded() {
+        use super::paused_for_end;
+
+        let log = a_log();
+        let campaign = |number: u64| format!("customers/1234567890/campaigns/{number}");
+        let pause = |hour: u32, number: u64, why: &str| {
+            append(&log, EventKind::MarketingCampaignPaused, hour, |wire| {
+                wire["body"]["why"] = json!(why);
+                wire["body"]["campaign"] = json!(campaign(number));
+            })
+        };
+        let connect = |hour: u32, server: &str| {
+            append(&log, EventKind::ConnectorConnected, hour, |wire| {
+                wire["body"]["server"] = json!(server);
+            })
+        };
+        assert_eq!(
+            paused_for_end(&log, "google-ads").expect("reads"),
+            [] as [String; 0]
+        );
+
+        // A connection before the pauses is not "since" them.
+        connect(8, "google-ads");
+        // A plan's end counts; a pause at the budget does not, since a raise may start it again.
+        pause(9, 11, "plan_ended");
+        pause(9, 12, "budget_reached");
+        // A pause for the connection's removal counts while no Google Ads connection followed it.
+        pause(10, 13, "connection_removed");
+        assert_eq!(
+            paused_for_end(&log, "google-ads").expect("reads"),
+            [campaign(11), campaign(13)]
+        );
+
+        // Another service's connection is no Google Ads connection.
+        connect(11, "osv");
+        assert_eq!(
+            paused_for_end(&log, "google-ads").expect("reads"),
+            [campaign(11), campaign(13)]
+        );
+        // A connection after it: Farik could read and an agent could enable again, so it no longer
+        // counts, and a plan's end still does.
+        connect(12, "google-ads");
+        pause(13, 14, "connection_removed");
+        assert_eq!(
+            paused_for_end(&log, "google-ads").expect("reads"),
+            [campaign(11), campaign(14)],
+            "only the removal after the last connection counts"
         );
     }
 

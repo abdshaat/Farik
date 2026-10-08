@@ -1043,6 +1043,48 @@ fn ending_with_no_process_says_when_ads_pause() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn ending_with_no_process_counts_a_pause_made_for_a_removal() {
+    // The owner removed Google Ads: Farik paused the plan's ads first and recorded it. Ending the
+    // plan leaves nothing to pause, and the command says nothing of it, until Google Ads is
+    // connected again.
+    let repository = a_project("human-plan-end-removed");
+    let task = filed(&repository, "Add done.txt");
+    a_plan_proposed(&repository, &task, "MP-1", "Spring launch", (-1, 10));
+    record(
+        &repository,
+        &task,
+        "marketing_plan.approved",
+        &json!({ "plan": "MP-1", "note": "" }),
+    );
+    record(
+        &repository,
+        "",
+        "marketing_campaign.created",
+        &json!({
+            "plan": "MP-1", "key": "search-launch", "account": "123-456-7890",
+            "campaign": "customers/1234567890/campaigns/11",
+            "budget": "customers/1234567890/campaignBudgets/12",
+            "budget_kind": "total", "amount": "500.00"
+        }),
+    );
+    record(
+        &repository,
+        "",
+        "marketing_campaign.paused",
+        &json!({
+            "plan": "MP-1", "key": "search-launch",
+            "campaign": "customers/1234567890/campaigns/11", "why": "connection_removed"
+        }),
+    );
+
+    let ran = run(&repository.path, &["marketing", "plan", "end", "MP-1"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(ran.out.trim(), "ended marketing plan MP-1");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn marketing_plan_return_needs_a_reason() {
     let repository = a_project("human-plan-return-sent");
     let driver = LiveDriver::answering(

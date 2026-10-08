@@ -526,6 +526,68 @@ fn farik_disconnect_sends_google_ads_to_the_browser() {
     );
 }
 
+/// `farik disconnect dev-a google-ads` in `repository`, with `store` holding its keys.
+fn disconnect_google_ads(
+    repository: &TempRepo,
+    store: &Arc<MemoryConnectorSecrets>,
+) -> project::Ran {
+    let held = Arc::clone(store);
+    let config = config_of(repository);
+    run_with(
+        &repository.path,
+        &["disconnect", "dev-a", "google-ads"],
+        move |io| {
+            io.connector_secrets = held;
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+        },
+    )
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn farik_disconnect_counts_a_pause_made_for_an_earlier_removal() {
+    // Google Ads was removed before, and Farik paused the campaign for it: nothing runs, and the
+    // command disconnects as it does.
+    let repository = a_team("disconnect-google-ads-removed");
+    let store = google_ads_with_a_campaign(&repository, &fixture("disconnect-google-ads-removed"));
+    project::record(
+        &repository,
+        "",
+        "marketing_campaign.paused",
+        &json!({
+            "plan": "MP-1", "key": "search-launch",
+            "campaign": "customers/1234567890/campaigns/11", "why": "connection_removed"
+        }),
+    );
+    let ran = disconnect_google_ads(&repository, &store);
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "google-ads")).is_none());
+
+    // Google Ads connected again after that pause: an agent could have enabled the campaign since,
+    // so it counts no more, and the browser is the way.
+    let repository = a_team("disconnect-google-ads-reconnected");
+    let store =
+        google_ads_with_a_campaign(&repository, &fixture("disconnect-google-ads-reconnected"));
+    project::record(
+        &repository,
+        "",
+        "marketing_campaign.paused",
+        &json!({
+            "plan": "MP-1", "key": "search-launch",
+            "campaign": "customers/1234567890/campaigns/11", "why": "connection_removed"
+        }),
+    );
+    let mut connected = farik_protocol::event::fixtures::a_body_wire(EventKind::ConnectorConnected);
+    connected["agent"] = json!("dev-a");
+    connected["server"] = json!("google-ads");
+    project::record(&repository, "", "connector.connected", &connected);
+    let ran = disconnect_google_ads(&repository, &store);
+    assert_eq!(ran.code, 1, "{}\n{}", ran.out, ran.err);
+    assert!(ran.err.contains("disconnect_in_the_browser"), "{}", ran.err);
+    assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "google-ads")).is_some());
+}
+
 /// An opener that follows the address as a browser would, on `runtime`.
 fn following(runtime: &tokio::runtime::Runtime) -> farik::Opener {
     let handle = runtime.handle().clone();

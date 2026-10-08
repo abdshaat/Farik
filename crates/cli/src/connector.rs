@@ -17,7 +17,7 @@ use farik_runtime::credential::CredentialError;
 use farik_runtime::daemon::{custom_entry, kit_entry, labelled};
 use farik_runtime::registered_apps::{RegisteredApp, app_for_farik_connector};
 use farik_runtime::sign_in::{SignInError, revoke, start_app_sign_in, start_sign_in};
-use farik_store::marketing::{PausedWhy, campaigns_paused, created_campaigns};
+use farik_store::marketing::{created_campaigns, paused_for_end};
 use serde_json::{Map, Value, json};
 
 use crate::project::Project;
@@ -626,17 +626,13 @@ pub(crate) fn disconnect(
 /// The name of Farik's Google Ads connector.
 const GOOGLE_ADS: &str = "google-ads";
 
-/// Whether a campaign Farik made is not recorded paused for its plan's end: Farik's own pause
-/// before the connection is removed is what the browser's Remove makes, and a campaign recorded
+/// Whether a campaign Farik made is not recorded paused for its plan's end (`paused_for_end`):
+/// Farik's own pause before the connection is removed is what the browser's Remove makes, a pause
+/// for an earlier removal counts until Google Ads is connected again, and a campaign recorded
 /// paused for another reason may have been started again since.
 fn google_ads_still_runs(project: &Project) -> Result<bool, String> {
     let made = created_campaigns(&project.log).map_err(|error| error.to_string())?;
-    let ended: Vec<String> = campaigns_paused(&project.log)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .filter(|pause| pause.why == PausedWhy::PlanEnded)
-        .map(|pause| pause.campaign)
-        .collect();
+    let ended = paused_for_end(&project.log, GOOGLE_ADS).map_err(|error| error.to_string())?;
     Ok(made.iter().any(|each| !ended.contains(&each.campaign)))
 }
 
