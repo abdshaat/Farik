@@ -1,12 +1,13 @@
 # Phase 7, step 08e: Signing in with Google, for Google Ads
 
-Status: executed and landing-reviewed 2026-10-06 (one landing review, one fix report; it lands). Task 6's founder gate is still open: the founder's Google Cloud project, consent screen, client id and Explorer application wait, and no live check is claimed. (Since ADR 0044, 2026-10-06: Task 6 moves to phase 11, and Task 8, added the same day, which removed the build-time secret, was executed 2026-10-07 and landing-reviewed the same day, in step 07c's review: it lands, after one test widened, S3 of step 07c's Execution notes.)
+Status: executed and landing-reviewed 2026-10-06 (one landing review, one fix report; it lands). Task 6's founder gate is still open: the founder's Google Cloud project, consent screen, client id and Explorer application wait, and no live check is claimed. (Since ADR 0044, 2026-10-06: Task 6 moves to phase 11, phase 8 step 04 since ADR 0048, and Task 8, added the same day, which removed the build-time secret, was executed 2026-10-07 and landing-reviewed the same day, in step 07c's review: it lands, after one test widened, S3 of step 07c's Execution notes.)
 Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.7, 8.6; F9
 Depends on: step 03b of this phase, Tasks 1 to 6, each committed and landing-reviewed on this branch (committed as `326d2ee`, landing-reviewed through its fixes at `38f7859`) before this step's Task 1 starts; 03b's Task 7 (the GitHub App) is not needed. This step creates none of `registered_apps.rs`, `OAuthGrant.app`, the `provider` wire or AgentEdit's provider wording; it changes 03b's as Task 2 says. Before Task 1, the executor re-reads every file:line here against the code 03b landed and records corrections in Execution notes (not a second review). Also: step 03 (the loopback sign-in, `OAuthGrant`, `refreshed`, `refreshed_entry`); step 07 (Farik's own connectors, ADR 0038); phase 6 (merged in #19)
 Readiness confirmed by: a fresh Opus session, 2026-10-06 (one round, against docs/standards/workflow.md stage 2): four Blocking, folded below with the Should items; B3 decided by the controller
 Amended 2026-10-06 by ADR 0043 (the founder: until phase 15, every login is the customer's): the Google app is the customer's own, not one in the founder's project. Step 03f replaces Task 6, the build-time secret and the placeholder client id: the customer gives Farik their Desktop client's id and secret, kept on their computer. The founder's actions below become the customer's how-to (03f), and the founder does them as a customer for step 08g's live check. Google's verification of an app of Farik's moves to phase 15, so the launch dependencies below are no longer the launch's. Everything else this step built holds, with the customer's id and secret.
 Amended 2026-10-06 by ADR 0044 (the founder, later the same day: Farik Cloud's free tier signs customers in "At the web launch"; step 03f, "Drop it"): the Google app is Farik's again, held by Farik Cloud from phase 11, never the customer's and never in a build. Task 6 moves to phase 11's Farik Cloud steps: the founder's Google Cloud project, consent screen and Desktop client are registered there and their secret is set in Farik Cloud, not as `FARIK_GOOGLE_CLIENT_SECRET`. Google's verification of the scope and the Google Ads API's access levels are phase 11's dependencies again, with their lead time, and the quota is Farik Cloud's project's, shared by every customer. Task 8 (below, after Task 7) removes the build-time secret and the Google entry built from it, test first; it runs after step 09c. The loopback sign-in, PKCE, the refresh with the table and Farik's own connector's sign-in stay: phase 11's sign-in through Farik Cloud builds on them. Before phase 11 no build has a Google entry, so no customer signs in to Google, and the live sign-in is checked in phase 11.
+Amended 2026-10-08 by ADR 0048 (the founder: "Lets set up the infra repository as well as the cloud hosting, landing page, etc. in phase 8"): Farik Cloud is a new phase 8, after this phase and before the web launch, now phase 12. Where a dated note below says phase 11 for Farik Cloud, read phase 8: phase 11's steps 01, 01b, 01d, 01c, 01e and 01f are phase 8 steps 02 to 07, and the founder's live checks are phase 8 step 07's. Where it says phase 15, read phase 16.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -191,14 +192,14 @@ cargo xtask check --integration
 # expected: xtask check: ok (with pnpm check)
 ```
 
-After Task 6, on the founder's computer, with `FARIK_GOOGLE_CLIENT_SECRET` set in the shell (void since ADR 0044: Task 8 removes the variable, and the live sign-in with Google is phase 11's):
+After Task 6, on the founder's computer, with `FARIK_GOOGLE_CLIENT_SECRET` set in the shell (void since ADR 0044: Task 8 removes the variable, and the live sign-in with Google is phase 11's, phase 8 step 07's since ADR 0048):
 
 ```
 cargo test -p farik-runtime --lib registered_apps
 # expected: test result: ok, the_shipped_table_names_google_for_google_ads_only among the passed
 ```
 
-The live sign-in with Google is checked in step 08g's verification, the founder's live check of steps 08e to 08g on a build with the secret, once `google-ads` exists to sign in for; it also settles whether Google's callback carries `iss`. This step claims no live check. (Since ADR 0044, that live check is phase 11's, through Farik Cloud, and it still settles `iss`.)
+The live sign-in with Google is checked in step 08g's verification, the founder's live check of steps 08e to 08g on a build with the secret, once `google-ads` exists to sign in for; it also settles whether Google's callback carries `iss`. This step claims no live check. (Since ADR 0044, that live check is phase 11's, phase 8 step 07's since ADR 0048, through Farik Cloud, and it still settles `iss`.)
 
 After Task 8, in the executor's container, with and without `FARIK_GOOGLE_CLIENT_SECRET` set:
 
