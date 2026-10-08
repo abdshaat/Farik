@@ -6,14 +6,17 @@ use std::str::FromStr as _;
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::{Role, TaskId, TaskStatus};
-use farik_core::marketing::network_name;
+use farik_core::marketing::{CapScope, network_name};
 use farik_core::team::{AgentStatus, Team};
 use farik_protocol::event::{
     EventBody, EventKind, FarikEvent, MessageKind, SessionStartedBodyPurpose,
 };
 
 use crate::files::ProjectFiles;
-use crate::marketing::{PostMove, PostMoveKind, post_moves};
+use crate::marketing::{
+    PausedWhy, PostMove, PostMoveKind, budgets_reached, campaigns_paused, marketing_plans,
+    post_moves,
+};
 use crate::waiting::name_of;
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
@@ -378,8 +381,73 @@ pub fn moved_since(
                 )
             }),
     );
+    moved.extend(
+        ad_moves(log, &who, since)?
+            .into_iter()
+            .map(|(seq, at, line)| (seq, Moved { at, line })),
+    );
     moved.sort_by_key(|(seq, _)| *seq);
     Ok(moved.into_iter().map(|(_, moved)| moved).collect())
+}
+
+/// What Farik did with a marketing plan's ads on its own since `since`, one line each, with the
+/// event's sequence number and time: a budget it paused the ads at, or could not, and a campaign
+/// it paused for the plan's end, for Google Ads' removal, or for a budget reached.
+fn ad_moves(
+    log: &EventLog,
+    who: &impl Fn(&str) -> String,
+    since: DateTime<Utc>,
+) -> Result<Vec<(u64, DateTime<Utc>, String)>, StoreError> {
+    let farik = who("farik");
+    let plans = marketing_plans(log)?;
+    let plan = |id: &str| {
+        plans
+            .iter()
+            .find(|plan| plan.record.id == id)
+            .map_or_else(|| id.to_string(), |plan| plan.proposal.title.clone())
+    };
+    // A campaign by its name in the plan it was made under, else by its key.
+    let campaign = |plan_id: &str, key: &str| {
+        plans
+            .iter()
+            .find(|plan| plan.record.id == plan_id)
+            .and_then(|plan| plan.proposal.campaigns.iter().find(|each| each.key == key))
+            .map_or_else(|| key.to_string(), |each| each.name.clone())
+    };
+    let mut lines = Vec::new();
+    for reached in budgets_reached(log)?.iter().filter(|each| each.at > since) {
+        let title = plan(&reached.plan);
+        let did = if reached.failed.is_some() {
+            "could not pause"
+        } else {
+            "paused"
+        };
+        let line = match &reached.key {
+            Some(key) if reached.scope == CapScope::Campaign => format!(
+                "{farik} {did} {title}'s campaign {} at its budget.",
+                campaign(&reached.plan, key)
+            ),
+            _ => format!("{farik} {did} {title}'s ads at their budget."),
+        };
+        lines.push((reached.seq, reached.at, line));
+    }
+    for paused in campaigns_paused(log)?.iter().filter(|each| each.at > since) {
+        let why = match paused.why {
+            PausedWhy::PlanEnded => "the plan ended",
+            PausedWhy::ConnectionRemoved => "Google Ads was removed",
+            PausedWhy::BudgetReached => "it reached its budget",
+        };
+        lines.push((
+            paused.seq,
+            paused.at,
+            format!(
+                "{farik} paused {}'s campaign {}: {why}.",
+                plan(&paused.plan),
+                campaign(&paused.plan, &paused.key)
+            ),
+        ));
+    }
+    Ok(lines)
 }
 
 /// What happened to a post, in a sentence: "Kai wrote the Instagram post for 13:00." The time is
@@ -1022,6 +1090,160 @@ mod tests {
                 ),
                 (at(10, 14), "Kai wrote the Facebook post for 19:00."),
                 (at(23, 30), "Kai wrote the Mastodon post for 01:00."),
+            ]
+        );
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "each line of the ads' pauses, side by side"
+    )]
+    fn says_what_moved_with_the_ads() {
+        let board = Board::new("moved-ads");
+        let team = with_kai();
+        board.file("FRK-1", "Autumn push", |_| {});
+        let mut plan = farik_protocol::event::fixtures::a_body_wire(
+            farik_protocol::event::EventKind::MarketingPlanProposed,
+        );
+        plan["plan"] = json!("MP-1");
+        plan["title"] = json!("Autumn at Corner Bakery");
+        plan["campaigns"] = json!([{
+            "key": "bakery", "channel": "google_ads", "name": "Bakery near me", "goal": "Sales",
+            "advertises": "Bread", "budget": "150.00", "starts_on": "2026-09-22",
+            "ends_on": "2026-10-20"
+        }]);
+        board.session(
+            at(8, 0),
+            Some("FRK-1"),
+            "kai",
+            "session-1",
+            "marketing_plan.proposed",
+            plan,
+        );
+        let happens = |minute: u32, kind: &str, body: serde_json::Value| {
+            board.put(at(10, minute), None, None, kind, body);
+        };
+        let reached = |scope: &str, key: Option<&str>, paused: &[&str], failed: Option<&str>| {
+            let mut body = json!({
+                "plan": "MP-1", "scope": scope, "spent": "150.00", "budget": "150.00",
+                "currency": "USD", "paused": paused,
+            });
+            if let Some(key) = key {
+                body["key"] = json!(key);
+            }
+            if let Some(failed) = failed {
+                body["failed"] = json!(failed);
+            }
+            body
+        };
+        let campaign = "customers/1234567890/campaigns/11";
+        // Before `since`, and not shown.
+        board.put(
+            at(9, 0),
+            None,
+            None,
+            "marketing_campaign.paused",
+            json!({ "plan": "MP-1", "key": "bakery", "campaign": campaign, "why": "plan_ended" }),
+        );
+        happens(
+            1,
+            "marketing_budget.reached",
+            reached("plan", None, &[campaign], None),
+        );
+        happens(
+            2,
+            "marketing_budget.reached",
+            reached("campaign", Some("bakery"), &[campaign], None),
+        );
+        // A pause Google refused is not told as one that worked.
+        happens(
+            3,
+            "marketing_budget.reached",
+            reached(
+                "campaign",
+                Some("bakery"),
+                &[],
+                Some("Google answered “No.”"),
+            ),
+        );
+        happens(
+            4,
+            "marketing_budget.reached",
+            reached("plan", None, &[], Some("Google answered “No.”")),
+        );
+        for (minute, why) in [
+            (5, "plan_ended"),
+            (6, "connection_removed"),
+            (7, "budget_reached"),
+        ] {
+            happens(
+                minute,
+                "marketing_campaign.paused",
+                json!({ "plan": "MP-1", "key": "bakery", "campaign": campaign, "why": why }),
+            );
+        }
+        // A campaign whose plan campaign is not in the plan is named by its key.
+        happens(
+            8,
+            "marketing_campaign.paused",
+            json!({ "plan": "MP-1", "key": "gone", "campaign": campaign, "why": "plan_ended" }),
+        );
+        // What an agent's session says it did moved nothing.
+        board.session(
+            at(10, 9),
+            Some("FRK-1"),
+            "kai",
+            "session-1",
+            "marketing_campaign.paused",
+            json!({ "plan": "MP-1", "key": "bakery", "campaign": campaign, "why": "plan_ended" }),
+        );
+
+        let moved =
+            moved_since(&board.log, &board.projections, &team, at(10, 0)).expect("the store reads");
+
+        let lines: Vec<(chrono::DateTime<chrono::Utc>, &str)> = moved
+            .iter()
+            .map(|one| (one.at, one.line.as_str()))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                (
+                    at(10, 1),
+                    "Farik paused Autumn at Corner Bakery's ads at their budget."
+                ),
+                (
+                    at(10, 2),
+                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me at its budget."
+                ),
+                (
+                    at(10, 3),
+                    "Farik could not pause Autumn at Corner Bakery's campaign Bakery near me at its \
+                     budget."
+                ),
+                (
+                    at(10, 4),
+                    "Farik could not pause Autumn at Corner Bakery's ads at their budget."
+                ),
+                (
+                    at(10, 5),
+                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me: the plan ended."
+                ),
+                (
+                    at(10, 6),
+                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me: Google Ads was \
+                     removed."
+                ),
+                (
+                    at(10, 7),
+                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me: it reached its \
+                     budget."
+                ),
+                (
+                    at(10, 8),
+                    "Farik paused Autumn at Corner Bakery's campaign gone: the plan ended."
+                ),
             ]
         );
     }

@@ -994,6 +994,55 @@ fn marketing_plan_end_sends_the_end() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn ending_with_no_process_says_when_ads_pause() {
+    // A plan whose ads Farik made: with no process driving the project nothing pauses them until
+    // one does, and the command says so.
+    let repository = a_project("human-plan-end-ads");
+    let task = filed(&repository, "Add done.txt");
+    a_plan_proposed(&repository, &task, "MP-1", "Spring launch", (-1, 10));
+    record(
+        &repository,
+        &task,
+        "marketing_plan.approved",
+        &json!({ "plan": "MP-1", "note": "" }),
+    );
+    record(
+        &repository,
+        "",
+        "marketing_campaign.created",
+        &json!({
+            "plan": "MP-1", "key": "search-launch", "account": "123-456-7890",
+            "campaign": "customers/1234567890/campaigns/11",
+            "budget": "customers/1234567890/campaignBudgets/12",
+            "budget_kind": "total", "amount": "500.00"
+        }),
+    );
+
+    let ran = run(&repository.path, &["marketing", "plan", "end", "MP-1"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.trim(),
+        "ended marketing plan MP-1. Farik pauses MP-1's ads when it next runs."
+    );
+
+    // A plan with no ads says nothing of them.
+    let repository = a_project("human-plan-end-no-ads");
+    let task = filed(&repository, "Add done.txt");
+    a_plan_proposed(&repository, &task, "MP-1", "Spring launch", (-1, 10));
+    record(
+        &repository,
+        &task,
+        "marketing_plan.approved",
+        &json!({ "plan": "MP-1", "note": "" }),
+    );
+    let ran = run(&repository.path, &["marketing", "plan", "end", "MP-1"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(ran.out.trim(), "ended marketing plan MP-1");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn marketing_plan_return_needs_a_reason() {
     let repository = a_project("human-plan-return-sent");
     let driver = LiveDriver::answering(

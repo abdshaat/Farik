@@ -2376,7 +2376,7 @@
       }
     },
     "waitingListResult": {
-      "description": "What waits on the human, questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), then posts outside the plan waiting for the owner (social_post, whose title is its task's and whose line is \"<agent name> wants to post on <Network>\", each with post, its number, channel, text, media, the pictures and clips as their addresses with kind image or video, and at, when it would go out in the offset it was written in, which only that kind carries; a post that was decided or whose time came is no longer listed), then sites the Procurement Specialist asked to read, waiting for the owner (site_request, whose title is its task's and whose line is \"<agent name> asks to read <host>\", each with request, its number, host, the site in its ASCII form, url, the first page the agent wants exactly as it wrote it, and why, its reason in its own words, which only that kind carries and which are untrusted text; a request that was decided is no longer listed), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
+      "description": "What waits on the human: first the marketing plans whose ads Farik could not keep within their budget or keep paused, one row each, by precedence (marketing_budget: the active plan whose ads reached a budget, titled \"Ads budget reached: <plan>\", with plan, plan_title, ends_on, currency, google_ads, the plan's Google Ads budget, spent, what Google Ads reported spent, read_at, when it was read, reason, Google's or Farik's words when Farik could not pause the ads, cap, the budget the row's words are about (a pause Google refused can keep it from being the newest), caps, each budget reached, campaigns, each campaign of the plan with its budget and spend, and raising, the task of a request to raise the budget that is open; marketing_ads_running: a plan whose ads Farik could not pause, with reason, titled \"Ads still running: <plan>\"; marketing_spend_unread: the active plan whose spend Farik cannot read, with reason and the last spend and its time, titled \"Can't read the ad spend: <plan>\"; task_id is the task of the plan's proposal and agent_id the agent that proposed it; amounts are decimal strings), then questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), then posts outside the plan waiting for the owner (social_post, whose title is its task's and whose line is \"<agent name> wants to post on <Network>\", each with post, its number, channel, text, media, the pictures and clips as their addresses with kind image or video, and at, when it would go out in the offset it was written in, which only that kind carries; a post that was decided or whose time came is no longer listed), then sites the Procurement Specialist asked to read, waiting for the owner (site_request, whose title is its task's and whose line is \"<agent name> asks to read <host>\", each with request, its number, host, the site in its ASCII form, url, the first page the agent wants exactly as it wrote it, and why, its reason in its own words, which only that kind carries and which are untrusted text; a request that was decided is no longer listed), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2402,6 +2402,9 @@
                   "marketing_plan",
                   "social_post",
                   "site_request",
+                  "marketing_budget",
+                  "marketing_ads_running",
+                  "marketing_spend_unread",
                   "preview_missing",
                   "designer_needs_sandbox",
                   "designer_needs_browser"
@@ -2495,7 +2498,54 @@
               },
               "why": {
                 "type": "string"
-              }
+              },
+              "plan_title": { "type": "string" },
+              "google_ads": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "spent": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "read_at": { "type": "string", "format": "date-time" },
+              "reason": { "type": "string" },
+              "cap": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "scope": { "type": "string", "enum": ["campaign", "plan"] },
+                  "key": { "type": "string" },
+                  "name": { "type": "string" },
+                  "spent": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+                  "budget": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }
+                },
+                "required": ["scope", "spent", "budget"]
+              },
+              "caps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "scope": { "type": "string", "enum": ["campaign", "plan"] },
+                    "key": { "type": "string" },
+                    "name": { "type": "string" },
+                    "spent": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+                    "budget": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }
+                  },
+                  "required": ["scope", "spent", "budget"]
+                }
+              },
+              "campaigns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "key": { "type": "string" },
+                    "name": { "type": "string" },
+                    "budget": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+                    "spent": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }
+                  },
+                  "required": ["key", "name", "budget", "spent"]
+                }
+              },
+              "raising": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
             },
             "required": [
               "task_id",
@@ -3286,10 +3336,10 @@
       }
     },
     "marketingPlanGetResult": {
-      "description": "One marketing plan whole (docs/SPEC.md 6.5; ADR 0042): what was proposed, its state as in marketing_plan.list, the owner's decision with their words (note for an approval, empty when they added nothing; reason for a plan sent back) and when, or null while it waits, and its end with why and when, the owner's note when they ended it with one and the plan that replaced it when a newer plan did, or null. text is the plan's text, to be shown as text and never rendered as markup. Refused not_found for a plan nobody proposed.",
+      "description": "One marketing plan whole (docs/SPEC.md 6.5; ADR 0042): what was proposed, its state as in marketing_plan.list, the owner's decision with their words (note for an approval, empty when they added nothing; reason for a plan sent back) and when, or null while it waits, and its end with why and when, the owner's note when they ended it with one and the plan that replaced it when a newer plan did, or null. text is the plan's text, to be shown as text and never rendered as markup. Refused not_found for a plan nobody proposed. Beside them, what Farik's watch last read of the plan's Google Ads spend (spend, when it has tried), the budgets its ads reached (reached) and the campaigns Farik paused on its own (paused), step 08g.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["plan", "title", "summary", "text", "state", "starts_on", "ends_on", "currency", "budget", "campaigns", "posts", "written_posts", "measures", "google_ads_account", "replaces", "agent_id", "task_id", "proposed_at", "decided", "ended"],
+      "required": ["plan", "title", "summary", "text", "state", "starts_on", "ends_on", "currency", "budget", "campaigns", "posts", "written_posts", "measures", "google_ads_account", "replaces", "agent_id", "task_id", "proposed_at", "decided", "ended", "reached", "paused"],
       "properties": {
         "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
         "title": { "type": "string" },
@@ -3397,6 +3447,50 @@
               }
             }
           ]
+        },
+        "spend": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What Farik's watch last read of the plan's Google Ads spend, kept in memory while the process runs (step 08g); left out until the watch has tried. read_at, total and by_key are the last read that worked (decimal strings, by plan campaign key); failed is why the last try did not, with failed_at, when.",
+          "properties": {
+            "read_at": { "type": "string", "format": "date-time" },
+            "total": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+            "by_key": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" } },
+            "failed": { "type": "string" },
+            "failed_at": { "type": "string", "format": "date-time" }
+          }
+        },
+        "reached": {
+          "type": "array",
+          "description": "The budgets of the plan its ads reached, oldest first: a campaign's own or the plan's Google Ads budget, with what was spent and the budget, and failed, the first refusal's words when Google would not take a pause.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["scope", "spent", "budget", "at"],
+            "properties": {
+              "scope": { "type": "string", "enum": ["campaign", "plan"] },
+              "key": { "type": "string" },
+              "spent": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "budget": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "failed": { "type": "string" },
+              "at": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "paused": {
+          "type": "array",
+          "description": "The campaigns Farik paused on its own, oldest first, each with its plan campaign's key and name and why: its budget was reached, the plan ended, or Google Ads was removed.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "name", "why", "at"],
+            "properties": {
+              "key": { "type": "string" },
+              "name": { "type": "string" },
+              "why": { "type": "string", "enum": ["budget_reached", "plan_ended", "connection_removed"] },
+              "at": { "type": "string", "format": "date-time" }
+            }
+          }
         }
       }
     },

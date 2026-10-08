@@ -91,12 +91,39 @@ pub(crate) fn command(
 ) -> Result<CommandReport, CommandError> {
     match try_lock(&project.root).map_err(|detail| CommandError::Failed { detail })? {
         Some(lock) => {
-            let handled = handle_here(project, command, name, io);
+            let ended = match &command {
+                Command::MarketingPlanEnd { plan, .. } => Some(plan.clone()),
+                _ => None,
+            };
+            let handled = handle_here(project, command, name, io).map(|report| match &ended {
+                Some(plan) => saying_when_ads_pause(project, io, plan, report),
+                None => report,
+            });
             drop(lock);
             handled
         }
         None => send(&project.root, &command),
     }
+}
+
+/// `report`, the answer to ending `plan` in a process that drives nothing, with the sentence that
+/// Farik pauses the plan's ads when a process does, when it made some that are still to pause.
+fn saying_when_ads_pause(
+    project: &Project,
+    io: &CliIo<'_>,
+    plan: &str,
+    mut report: CommandReport,
+) -> CommandReport {
+    let left = tool_deps(project, io)
+        .ok()
+        .and_then(|tools| farik_runtime::marketing::ads::ads_left_to_pause(&tools, plan).ok());
+    if left == Some(true) {
+        report.said = format!(
+            "{}. Farik pauses {plan}'s ads when it next runs.",
+            report.said
+        );
+    }
+    report
 }
 
 /// One of phase 2's writes: done here by `here`, holding the run lock while it writes, when nothing

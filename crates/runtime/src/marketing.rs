@@ -18,6 +18,8 @@ use farik_store::marketing::{
 };
 use serde_json::{Map, Value, json};
 
+pub mod ads;
+
 use crate::daemon::own_calls::call_as;
 use crate::orchestrator::hand_over::{hand_over_time, is_too_late};
 use crate::orchestrator::{CommandError, CommandReport, OrchestratorDeps};

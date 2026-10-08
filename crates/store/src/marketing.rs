@@ -786,6 +786,8 @@ pub struct BudgetReached {
     pub failed: Option<String>,
     /// When it was recorded.
     pub at: DateTime<Utc>,
+    /// The sequence number of the event.
+    pub seq: u64,
 }
 
 /// A campaign Farik paused on its own, as `marketing_campaign.paused` says.
@@ -801,6 +803,8 @@ pub struct CampaignPaused {
     pub why: PausedWhy,
     /// When it was recorded.
     pub at: DateTime<Utc>,
+    /// The sequence number of the event.
+    pub seq: u64,
 }
 
 /// Every budget reached, oldest first. Only Farik records one: an event with an agent or a
@@ -848,6 +852,7 @@ pub fn budgets_reached(log: &EventLog) -> Result<Vec<BudgetReached>, StoreError>
                 .collect(),
             failed: body.failed.as_ref().map(|words| words.as_str().to_string()),
             at: event.envelope.recorded_at,
+            seq: event.envelope.seq,
         });
     }
     Ok(reached)
@@ -886,6 +891,7 @@ pub fn campaigns_paused(log: &EventLog) -> Result<Vec<CampaignPaused>, StoreErro
                     }
                 },
                 at: event.envelope.recorded_at,
+                seq: event.envelope.seq,
             })
         })
         .collect())

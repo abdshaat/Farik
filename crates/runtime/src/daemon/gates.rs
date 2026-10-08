@@ -25,8 +25,7 @@ use farik_store::EventQuery;
 use farik_store::activity::{ActivityState, activity, moved_since};
 use farik_store::diff::diff_of;
 use farik_store::marketing::{
-    BudgetReached, MarketingPlan, budgets_reached, marketing_plans, raises as marketing_raises,
-    social_posts,
+    BudgetReached, MarketingPlan, budgets_reached, marketing_plans, social_posts,
 };
 use farik_store::requests::{
     RequestError, TOO_SHORT, contract_write, file_raise_request, file_request,
@@ -38,6 +37,7 @@ use serde_json::{Value, json};
 use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
 use crate::cost::extra_tries;
+use crate::marketing::ads::{ads_rows, open_raise, spend_and_pauses};
 use crate::marketing::{going_out, known_spend, list_row, states_today, whole};
 use crate::tools::ToolDeps;
 use crate::tools::contracts::changed_fields;
@@ -174,7 +174,12 @@ fn waiting_row(item: &farik_store::waiting::Waiting) -> Value {
 }
 
 /// The gates' queries, whose params the schema already passed.
-pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value, Failure> {
+pub(super) fn query(
+    state: &DaemonState,
+    deps: &ToolDeps,
+    name: &str,
+    params: &Value,
+) -> Result<Value, Failure> {
     deps.projections.catch_up().map_err(|e| internal(&e))?;
     let team = || deps.files.read_team().map_err(|e| internal(&e));
     match name {
@@ -182,7 +187,9 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
             let team = team()?;
             let listed = waiting(&deps.projections, &deps.log, &deps.files, &team)
                 .map_err(|e| internal(&e))?;
-            let mut rows: Vec<Value> = listed.iter().map(waiting_row).collect();
+            // What Farik could not keep within a budget or keep paused comes first: it is money.
+            let mut rows = ads_rows(state, deps).map_err(|e| internal(&e))?;
+            rows.extend(listed.iter().map(waiting_row));
             rows.extend(design_reviews_waiting(deps, &team)?);
             Ok(json!({ "waiting": rows }))
         }
@@ -228,7 +235,9 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
             )
         }
         "marketing_plan.list" => marketing_plan_list(deps),
-        "marketing_plan.get" => marketing_plan_get(deps, params["plan"].as_str().unwrap_or("")),
+        "marketing_plan.get" => {
+            marketing_plan_get(state, deps, params["plan"].as_str().unwrap_or(""))
+        }
         "sites.list" => crate::tools::sites::site_list(&deps.log).map_err(|e| internal(&e)),
         "social_posts.list" => Ok(json!({
             "posts": going_out(&social_posts(&deps.log).map_err(|e| internal(&e))?, deps.clock.now())
@@ -290,17 +299,25 @@ fn marketing_plan_list(deps: &ToolDeps) -> Result<Value, Failure> {
     }))
 }
 
-/// `marketing_plan.get`: one marketing plan whole, or `not_found`.
-fn marketing_plan_get(deps: &ToolDeps, id: &str) -> Result<Value, Failure> {
+/// `marketing_plan.get`: one marketing plan whole, or `not_found`, with what Farik's watch knows of
+/// its ads' spend, the budgets they reached and the campaigns Farik paused.
+fn marketing_plan_get(state: &DaemonState, deps: &ToolDeps, id: &str) -> Result<Value, Failure> {
     let plans = marketing_plans(&deps.log).map_err(|e| internal(&e))?;
     let states = states_today(&plans, deps.clock.now().date_naive());
     let posts = social_posts(&deps.log).map_err(|e| internal(&e))?;
-    plans
+    let (plan, state_of) = plans
         .iter()
         .zip(states)
         .find(|(plan, _)| plan.record.id == id)
-        .map(|(plan, state)| whole(plan, state, &posts, deps.clock.now().date_naive()))
-        .ok_or_else(|| Failure::new(NOT_FOUND, format!("there is no marketing plan {id}")))
+        .ok_or_else(|| Failure::new(NOT_FOUND, format!("there is no marketing plan {id}")))?;
+    let mut whole = whole(plan, state_of, &posts, deps.clock.now().date_naive());
+    if let (Some(whole), more) = (
+        whole.as_object_mut(),
+        spend_and_pauses(state, deps, plan).map_err(|e| internal(&e))?,
+    ) {
+        whole.extend(more);
+    }
+    Ok(whole)
 }
 
 /// The task the params name, which the board must hold.
@@ -706,17 +723,9 @@ fn plan_to_raise(
             &format!("{plan_id} has not reached a budget, so there is nothing to raise."),
         ));
     }
-    let board = deps.projections.board().map_err(|e| internal(&e))?;
-    let open = marketing_raises(&deps.log)
+    let open = open_raise(deps, plan_id)
         .map_err(|e| internal(&e))?
-        .into_iter()
-        .filter(|raise| raise.plan == plan_id)
-        .any(|raise| {
-            board.iter().any(|row| {
-                row.task_id == raise.task_id
-                    && !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)
-            })
-        });
+        .is_some();
     if open {
         return Err(raise_refusal(
             "/plan",
@@ -1600,6 +1609,616 @@ pub(super) mod tests {
 
         harness.project.plan_approved("FRK-1", "MP-1", "");
         assert_eq!(waiting(), json!([]), "gone once decided");
+    }
+
+    const LAUNCH: &str = "customers/1234567890/campaigns/11";
+    const LONG: &str = "customers/1234567890/campaigns/12";
+    const UNAVAILABLE: &str = "Google answered “The service is currently unavailable.”";
+
+    /// MP-1, running today: 2000.00 in all, 800.00 for Google Ads, and two campaigns Farik made at
+    /// Google, `search-launch` (500.00) and `search-long` (400.00), on FRK-1 by Kai.
+    fn a_running_ads_plan(harness: &Harness) {
+        harness.in_progress("FRK-1", "kai", "pm");
+        let project = &harness.project;
+        let mut body =
+            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+        body["plan"] = json!("MP-1");
+        body["starts_on"] = json!("2026-09-20");
+        body["ends_on"] = json!("2027-01-31");
+        body["budget"] = json!({ "total": "2000.00", "google_ads": "800.00" });
+        body["posts"] = json!([]);
+        body["google_ads_account"] = json!("123-456-7890");
+        let campaign = |key: &str, budget: &str| {
+            json!({
+                "key": key, "channel": "google_ads", "name": key, "goal": "Sales",
+                "advertises": "Candles", "budget": budget, "starts_on": "2026-09-22",
+                "ends_on": "2026-12-22"
+            })
+        };
+        body["campaigns"] = json!([
+            campaign("search-launch", "500.00"),
+            campaign("search-long", "400.00")
+        ]);
+        project.record_by(Some("kai"), at(), "FRK-1", "marketing_plan.proposed", &body);
+        project.plan_approved("FRK-1", "MP-1", "");
+        for (key, campaign, budget) in [
+            ("search-launch", LAUNCH, "500.00"),
+            ("search-long", LONG, "400.00"),
+        ] {
+            project.record(
+                "",
+                "marketing_campaign.created",
+                &json!({
+                    "plan": "MP-1", "key": key, "account": "123-456-7890",
+                    "campaign": campaign,
+                    "budget": campaign.replace("campaigns", "campaignBudgets"),
+                    "budget_kind": "total", "amount": budget
+                }),
+            );
+        }
+    }
+
+    /// The `waiting.list` rows of `kind`s that are about a plan's ads.
+    fn ads_rows(harness: &Harness) -> Vec<Value> {
+        query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        )["waiting"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .filter(|row| {
+                row["kind"]
+                    .as_str()
+                    .is_some_and(|kind| kind.starts_with("marketing_") && kind != "marketing_plan")
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn reached(scope: &str, key: Option<&str>, (spent, budget): (&str, &str)) -> Value {
+        let mut body = json!({
+            "plan": "MP-1", "scope": scope, "spent": spent, "budget": budget,
+            "currency": "USD", "paused": [],
+        });
+        if let Some(key) = key {
+            body["key"] = json!(key);
+        }
+        body
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the row in each of its forms, one after another, until the plan ends"
+    )]
+    fn waiting_lists_a_reached_budget_until_the_plan_ends() {
+        let harness = Harness::new(
+            "gates-budget-waits",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        a_running_ads_plan(&harness);
+        let project = &harness.project;
+        let kinds = || -> Vec<String> {
+            query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult",
+            )["waiting"]
+                .as_array()
+                .expect("a list")
+                .iter()
+                .map(|row| row["kind"].as_str().unwrap_or_default().to_string())
+                .collect()
+        };
+        // Another plan waits for the owner, and the row about the money comes before it.
+        project.plan_proposed("FRK-1", "MP-2", "2027-02-01", "2027-02-28");
+        assert!(ads_rows(&harness).is_empty(), "nothing reached yet");
+
+        // search-launch reached its own budget, and Farik paused it.
+        let mut cap = reached("campaign", Some("search-launch"), ("500.00", "500.00"));
+        cap["paused"] = json!([LAUNCH]);
+        project.record("", "marketing_budget.reached", &cap);
+        let launch_row = json!({
+            "task_id": "FRK-1", "kind": "marketing_budget", "agent_id": "kai",
+            "title": "Ads budget reached: Spring launch",
+            "line": "Its campaign search-launch reached its budget: 500.00 of 500.00 USD. \
+                     Farik paused it.",
+            "plan": "MP-1", "plan_title": "Spring launch", "ends_on": "2027-01-31",
+            "currency": "USD", "google_ads": "800.00", "spent": "500.00",
+            "cap": {
+                "scope": "campaign", "key": "search-launch", "name": "search-launch",
+                "spent": "500.00", "budget": "500.00"
+            },
+            "caps": [{
+                "scope": "campaign", "key": "search-launch", "name": "search-launch",
+                "spent": "500.00", "budget": "500.00"
+            }],
+            "campaigns": [
+                { "key": "search-launch", "name": "search-launch", "budget": "500.00", "spent": "500.00" },
+                { "key": "search-long", "name": "search-long", "budget": "400.00", "spent": "0.00" }
+            ],
+        });
+        assert_eq!(ads_rows(&harness), [launch_row]);
+        assert_eq!(kinds(), ["marketing_budget", "marketing_plan"]);
+
+        // Then the plan's own, and Google would not take the pause of search-long (search-launch
+        // was already paused, which counts as paused).
+        let mut cap = reached("plan", None, ("800.00", "800.00"));
+        cap["paused"] = json!([LAUNCH]);
+        cap["failed"] = json!(UNAVAILABLE);
+        project.record("", "marketing_budget.reached", &cap);
+        let rows = ads_rows(&harness);
+        assert_eq!(rows.len(), 1, "one row for the plan");
+        assert_eq!(
+            rows[0]["line"],
+            "Its ads reached their budget: 800.00 of 800.00 USD. Farik could not pause them: \
+             Google answered “The service is currently unavailable.” Farik tries again every 15 \
+             minutes; pause them in Google Ads."
+        );
+        assert_eq!(rows[0]["reason"], UNAVAILABLE);
+        assert_eq!(rows[0]["spent"], "800.00");
+        assert_eq!(rows[0]["caps"].as_array().map(Vec::len), Some(2));
+        // The line is about the plan's own cap, and the row says which cap that is.
+        assert_eq!(
+            rows[0]["cap"],
+            json!({ "scope": "plan", "spent": "800.00", "budget": "800.00" })
+        );
+
+        // A later read paused it: back to the form that Farik paused it.
+        project.record(
+            "",
+            "marketing_campaign.paused",
+            &json!({ "plan": "MP-1", "key": "search-long", "campaign": LONG, "why": "budget_reached" }),
+        );
+        let rows = ads_rows(&harness);
+        assert_eq!(
+            rows[0]["line"],
+            "Its ads reached their budget: 800.00 of 800.00 USD. Farik paused them."
+        );
+        assert!(rows[0].get("reason").is_none(), "{}", rows[0]);
+        assert!(rows[0].get("raising").is_none());
+
+        // Google Ads was removed and the pause was refused: the budget row says so, and is the
+        // plan's one row.
+        harness.daemon.spend_reads().insert(
+            "MP-1".to_string(),
+            crate::daemon::SpendRead {
+                attempted_at: at(),
+                spend: None,
+                failed: None,
+                unstopped: Some(UNAVAILABLE.to_string()),
+            },
+        );
+        let rows = ads_rows(&harness);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["kind"], "marketing_budget");
+        assert_eq!(rows[0]["reason"], UNAVAILABLE);
+        assert!(
+            rows[0]["line"]
+                .as_str()
+                .is_some_and(|line| line.contains("Farik could not pause them: Google answered")),
+            "{}",
+            rows[0]
+        );
+        harness.daemon.spend_reads().clear();
+
+        // The owner asked for a new version with a raised budget: it is told, and waits.
+        let reply = rpc(
+            &harness.daemon,
+            "marketing_budget.raise",
+            &json!({
+                "plan": "MP-1", "google_ads": "1200.00",
+                "campaigns": [{ "key": "search-launch", "budget": "700.00" }]
+            }),
+        );
+        let task = reply["result"]["task_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("a task: {reply}"))
+            .to_string();
+        assert_eq!(ads_rows(&harness)[0]["raising"], task);
+
+        // Once the new version is written the request is done, and nothing is left to wait for.
+        project.moved(&task, "draft", "accepted", &json!({ "actor": "human" }));
+        assert!(ads_rows(&harness)[0].get("raising").is_none());
+
+        // The plan ends, and the row goes with it.
+        project.record(
+            "",
+            "marketing_plan.ended",
+            &json!({ "plan": "MP-1", "why": "by_owner" }),
+        );
+        assert!(ads_rows(&harness).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn waiting_says_when_ads_keep_running() {
+        use crate::daemon::SpendRead;
+
+        let harness = Harness::new(
+            "gates-ads-running",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        a_running_ads_plan(&harness);
+        let project = &harness.project;
+        let unread = |failed: Option<&str>, unstopped: Option<&str>| SpendRead {
+            attempted_at: at(),
+            spend: None,
+            failed: failed.map(|why| (why.to_string(), at())),
+            unstopped: unstopped.map(str::to_string),
+        };
+
+        // A plan the owner ended whose ads Google would not pause.
+        project.record(
+            "",
+            "marketing_plan.ended",
+            &json!({ "plan": "MP-1", "why": "by_owner" }),
+        );
+        harness
+            .daemon
+            .spend_reads()
+            .insert("MP-1".to_string(), unread(None, Some(UNAVAILABLE)));
+        assert_eq!(
+            ads_rows(&harness),
+            [json!({
+                "task_id": "FRK-1", "kind": "marketing_ads_running", "agent_id": "kai",
+                "title": "Ads still running: Spring launch",
+                "line": "Farik could not pause its ads: Google answered “The service is currently \
+                         unavailable.” They keep running at Google until 2027-01-31 or their \
+                         budget there. Pause them in Google Ads.",
+                "plan": "MP-1", "plan_title": "Spring launch", "ends_on": "2027-01-31",
+                "currency": "USD", "reason": UNAVAILABLE,
+            })]
+        );
+
+        // Once a later pause worked, nothing is left to say.
+        harness
+            .daemon
+            .spend_reads()
+            .insert("MP-1".to_string(), unread(None, None));
+        assert!(ads_rows(&harness).is_empty());
+
+        // The active plan, whose Google Ads was removed and could not be paused first: the row
+        // that says its ads run is in place of the one about the spend it cannot read.
+        project.plan_proposed("FRK-1", "MP-2", "2026-09-22", "2026-12-31");
+        project.plan_approved("FRK-1", "MP-2", "");
+        harness.daemon.spend_reads().insert(
+            "MP-2".to_string(),
+            unread(
+                Some("no Marketing Specialist on the team has Google Ads connected"),
+                Some(UNAVAILABLE),
+            ),
+        );
+        let rows = ads_rows(&harness);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["kind"], "marketing_ads_running");
+        assert_eq!(rows[0]["plan"], "MP-2");
+
+        // After a restart nothing is remembered, and the first read finds no connection: the
+        // active plan's row still says that its ads keep running.
+        harness.daemon.spend_reads().clear();
+        harness.daemon.spend_reads().insert(
+            "MP-2".to_string(),
+            unread(
+                Some("no Marketing Specialist on the team has Google Ads connected"),
+                None,
+            ),
+        );
+        let rows = ads_rows(&harness);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["kind"], "marketing_spend_unread");
+        assert!(
+            rows[0]["line"]
+                .as_str()
+                .is_some_and(|line| line.contains("keep running at Google until 2026-12-31")),
+            "{}",
+            rows[0]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn waiting_says_when_the_spend_cannot_be_read() {
+        use farik_core::marketing::{Amount, PlanSpend};
+
+        use crate::daemon::SpendRead;
+
+        let harness = Harness::new(
+            "gates-spend-unread",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        a_running_ads_plan(&harness);
+        let sign_in = "Kai's sign-in to Google has ended; sign Kai in again on Kai's page";
+        let earlier = at() - chrono::Duration::minutes(30);
+        let read = |failed: Option<&str>| SpendRead {
+            attempted_at: at(),
+            spend: Some((
+                PlanSpend {
+                    by_key: [
+                        ("search-launch".to_string(), Amount(15_000)),
+                        ("search-long".to_string(), Amount(16_865)),
+                    ]
+                    .into(),
+                    total: Amount(31_865),
+                },
+                earlier,
+            )),
+            failed: failed.map(|why| (why.to_string(), at())),
+            unstopped: None,
+        };
+        harness
+            .daemon
+            .spend_reads()
+            .insert("MP-1".to_string(), read(Some(sign_in)));
+        assert_eq!(
+            ads_rows(&harness),
+            [json!({
+                "task_id": "FRK-1", "kind": "marketing_spend_unread", "agent_id": "kai",
+                "title": "Can't read the ad spend: Spring launch",
+                "line": "Farik can't read its ad spend: Kai's sign-in to Google has ended; sign \
+                         Kai in again on Kai's page. Any of its ads still running keep running at \
+                         Google until 2027-01-31 or their budget there; pause them in Google Ads.",
+                "plan": "MP-1", "plan_title": "Spring launch", "ends_on": "2027-01-31",
+                "currency": "USD", "google_ads": "800.00", "reason": sign_in,
+                "spent": "318.65", "read_at": "2026-09-22T11:30:00Z",
+            })]
+        );
+
+        // A read that worked, and the row goes.
+        harness
+            .daemon
+            .spend_reads()
+            .insert("MP-1".to_string(), read(None));
+        assert!(ads_rows(&harness).is_empty());
+
+        // A plan that ended is not read any more, and a failure kept from before says nothing.
+        harness
+            .daemon
+            .spend_reads()
+            .insert("MP-1".to_string(), read(Some(sign_in)));
+        harness.project.record(
+            "",
+            "marketing_plan.ended",
+            &json!({ "plan": "MP-1", "why": "by_owner" }),
+        );
+        assert!(ads_rows(&harness).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "a raised plan, its caps and the pauses before them, one after another"
+    )]
+    fn waiting_is_not_settled_by_a_pause_before_the_cap() {
+        let harness = Harness::new(
+            "gates-budget-before",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        a_running_ads_plan(&harness);
+        let project = &harness.project;
+        // MP-1 reached its budget and its campaigns were paused: both recorded.
+        let mut cap = reached("plan", None, ("800.00", "800.00"));
+        cap["paused"] = json!([LAUNCH, LONG]);
+        project.record("", "marketing_budget.reached", &cap);
+        for (key, campaign) in [("search-launch", LAUNCH), ("search-long", LONG)] {
+            project.record(
+                "",
+                "marketing_campaign.paused",
+                &json!({ "plan": "MP-1", "key": key, "campaign": campaign, "why": "budget_reached" }),
+            );
+        }
+        // The owner raised it: MP-2 replaces MP-1, keeps both campaigns, and ends MP-1.
+        let mut body =
+            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+        body["plan"] = json!("MP-2");
+        body["replaces"] = json!("MP-1");
+        body["starts_on"] = json!("2026-09-22");
+        body["ends_on"] = json!("2027-01-31");
+        body["budget"] = json!({ "total": "3000.00", "google_ads": "1200.00" });
+        body["posts"] = json!([]);
+        body["google_ads_account"] = json!("123-456-7890");
+        body["campaigns"] = json!(["search-launch", "search-long"].map(|key| json!({
+            "key": key, "channel": "google_ads", "name": key, "goal": "Sales",
+            "advertises": "Candles", "budget": "600.00", "starts_on": "2026-09-22",
+            "ends_on": "2026-12-22"
+        })));
+        project.record_by(Some("kai"), at(), "FRK-1", "marketing_plan.proposed", &body);
+        project.plan_approved("FRK-1", "MP-2", "");
+        project.record(
+            "",
+            "marketing_plan.ended",
+            &json!({ "plan": "MP-1", "why": "replaced", "replaced_by": "MP-2" }),
+        );
+        // MP-1 is ended, with its ads paused: no row. Then MP-2 reached its own, and Google
+        // refused: the pauses before do not count for it.
+        assert!(ads_rows(&harness).is_empty());
+        let two = |scope: &str, failed: Option<&str>| {
+            let mut cap = reached(scope, None, ("1200.00", "1200.00"));
+            cap["plan"] = json!("MP-2");
+            if let Some(failed) = failed {
+                cap["failed"] = json!(failed);
+            }
+            cap
+        };
+        project.record(
+            "",
+            "marketing_budget.reached",
+            &two("plan", Some(UNAVAILABLE)),
+        );
+        let rows = ads_rows(&harness);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["plan"], "MP-2");
+        assert_eq!(rows[0]["reason"], UNAVAILABLE);
+
+        // A cap after it that no refusal came of does not say the first one's campaigns are paused.
+        project.record("", "marketing_budget.reached", &two("plan", None));
+        assert_eq!(ads_rows(&harness)[0]["reason"], UNAVAILABLE);
+
+        // MP-1, which ended first, has ads Farik could not pause: its row follows the active plan's.
+        harness.daemon.spend_reads().insert(
+            "MP-1".to_string(),
+            crate::daemon::SpendRead {
+                attempted_at: at(),
+                spend: None,
+                failed: None,
+                unstopped: Some(UNAVAILABLE.to_string()),
+            },
+        );
+        let rows = ads_rows(&harness);
+        assert_eq!(
+            rows.iter()
+                .map(|row| (row["plan"].as_str(), row["kind"].as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (Some("MP-2"), Some("marketing_budget")),
+                (Some("MP-1"), Some("marketing_ads_running"))
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_row_names_the_cap_its_words_are_about() {
+        let harness = Harness::new(
+            "gates-budget-cap",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        a_running_ads_plan(&harness);
+        let project = &harness.project;
+        // search-launch reached its own budget and Google refused the pause; then the plan's own
+        // was reached and its pause worked for the other campaign only. The refusal still stands,
+        // so the row speaks of search-launch, with Google's words, and says it is that cap.
+        let mut cap = reached("campaign", Some("search-launch"), ("500.00", "500.00"));
+        cap["failed"] = json!(UNAVAILABLE);
+        project.record("", "marketing_budget.reached", &cap);
+        let mut cap = reached("plan", None, ("800.00", "800.00"));
+        cap["paused"] = json!([LONG]);
+        project.record("", "marketing_budget.reached", &cap);
+
+        let rows = ads_rows(&harness);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(
+            rows[0]["cap"],
+            json!({
+                "scope": "campaign", "key": "search-launch", "name": "search-launch",
+                "spent": "500.00", "budget": "500.00"
+            })
+        );
+        assert_eq!(rows[0]["reason"], UNAVAILABLE);
+        assert!(
+            rows[0]["line"]
+                .as_str()
+                .is_some_and(|line| line.starts_with("Its campaign search-launch reached")),
+            "{}",
+            rows[0]
+        );
+        assert_eq!(rows[0]["caps"].as_array().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_plan_carries_its_spend_and_pauses() {
+        use farik_core::marketing::{Amount, PlanSpend};
+
+        use crate::daemon::SpendRead;
+
+        let harness = Harness::new(
+            "gates-plan-spend",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        a_running_ads_plan(&harness);
+        let project = &harness.project;
+        let get = || {
+            query(
+                &harness.daemon,
+                "marketing_plan.get",
+                &json!({ "plan": "MP-1" }),
+                "marketingPlanGetResult",
+            )
+        };
+
+        // Nothing is known of the spend, and nothing was reached or paused.
+        let plan = get();
+        assert!(plan.get("spend").is_none(), "{plan}");
+        assert_eq!(
+            (&plan["reached"], &plan["paused"]),
+            (&json!([]), &json!([]))
+        );
+
+        // A read worked, and a later one did not.
+        let earlier = at() - chrono::Duration::minutes(15);
+        harness.daemon.spend_reads().insert(
+            "MP-1".to_string(),
+            SpendRead {
+                attempted_at: at(),
+                spend: Some((
+                    PlanSpend {
+                        by_key: [
+                            ("search-launch".to_string(), Amount(50_000)),
+                            ("search-long".to_string(), Amount(1_000)),
+                        ]
+                        .into(),
+                        total: Amount(51_000),
+                    },
+                    earlier,
+                )),
+                failed: Some(("Google is down".to_string(), at())),
+                unstopped: None,
+            },
+        );
+        assert_eq!(
+            get()["spend"],
+            json!({
+                "read_at": "2026-09-22T11:45:00Z", "total": "510.00",
+                "by_key": { "search-launch": "500.00", "search-long": "10.00" },
+                "failed": "Google is down", "failed_at": "2026-09-22T12:00:00Z",
+            })
+        );
+
+        // One campaign was paused for the plan's end; later the other reached its budget and was
+        // paused, and the plan's own budget lists it again.
+        let minutes = |minutes: i64| at() + chrono::Duration::minutes(minutes);
+        project.record_at(
+            minutes(5),
+            "",
+            "marketing_campaign.paused",
+            &json!({ "plan": "MP-1", "key": "search-long", "campaign": LONG, "why": "plan_ended" }),
+        );
+        let mut cap = reached("campaign", Some("search-launch"), ("500.00", "500.00"));
+        cap["paused"] = json!([LAUNCH]);
+        cap["failed"] = json!("Google answered “No.”");
+        project.record_at(minutes(20), "", "marketing_budget.reached", &cap);
+        let mut cap = reached("plan", None, ("800.00", "800.00"));
+        cap["paused"] = json!([LAUNCH]);
+        project.record_at(minutes(30), "", "marketing_budget.reached", &cap);
+        let plan = get();
+        assert_eq!(
+            plan["reached"],
+            json!([
+                {
+                    "scope": "campaign", "key": "search-launch", "spent": "500.00",
+                    "budget": "500.00", "failed": "Google answered “No.”",
+                    "at": "2026-09-22T12:20:00Z",
+                },
+                {
+                    "scope": "plan", "spent": "800.00", "budget": "800.00",
+                    "at": "2026-09-22T12:30:00Z",
+                },
+            ])
+        );
+        assert_eq!(
+            plan["paused"],
+            json!([
+                { "key": "search-long", "name": "search-long", "why": "plan_ended", "at": "2026-09-22T12:05:00Z" },
+                { "key": "search-launch", "name": "search-launch", "why": "budget_reached", "at": "2026-09-22T12:20:00Z" },
+            ])
+        );
     }
 
     #[test]

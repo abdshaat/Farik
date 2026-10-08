@@ -860,7 +860,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         "allowances.list" => board::allowances(state, deps),
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
         name if templates::QUERIES.contains(&name) => templates::query(state, deps, name, params),
-        _ => gates::query(deps, name, params),
+        _ => gates::query(state, deps, name, params),
     }
 }
 
