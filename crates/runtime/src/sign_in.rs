@@ -315,7 +315,7 @@ enum Way {
 
 /// What the way back of a redirect sign-in needs.
 struct Redirect {
-    listeners: Vec<TcpListener>,
+    listeners: Vec<Listener>,
     addr: SocketAddr,
     session: AuthorizationSession,
     iss_promised: bool,
@@ -326,7 +326,7 @@ struct Redirect {
 /// What the way back of Farik's own loopback sign-in needs: the listener, the `state` it answers
 /// to, and the verifier that proves the exchange comes from the program that started the sign-in.
 struct Loopback {
-    listeners: Vec<TcpListener>,
+    listeners: Vec<Listener>,
     addr: SocketAddr,
     app: RegisteredApp,
     state: String,
@@ -835,10 +835,40 @@ async fn serve_connection(
     let _ = found.send((stream, params));
 }
 
+/// A listening socket that stops listening when it is dropped, for every copy of it. Closing this
+/// process's descriptor ends a socket only when it is the last one: a program another thread
+/// starts (a `git` of a test, a tool) holds a copy between its `fork` and its `exec`, and until it
+/// has exec'd the old callback address would go on accepting, and a fixed port would stay taken
+/// for the sign-in that replaces this one.
+struct Listener(TcpListener);
+
+impl Listener {
+    async fn bind(addr: (&str, u16)) -> std::io::Result<Self> {
+        TcpListener::bind(addr).await.map(Self)
+    }
+
+    fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.0.local_addr()
+    }
+
+    async fn accept(&self) -> std::io::Result<(TcpStream, SocketAddr)> {
+        self.0.accept().await
+    }
+}
+
+impl Drop for Listener {
+    /// Tells the socket itself to stop listening, before this process's descriptor closes. Where
+    /// a platform will not shut a listening socket down (macOS and Windows answer with an error),
+    /// closing is all there is, as before.
+    fn drop(&mut self) {
+        let _ = socket2::SockRef::from(&self.0).shutdown(std::net::Shutdown::Both);
+    }
+}
+
 /// Accepts connections on the listeners until one is the callback, then closes them. The
 /// listeners belong to this future, so dropping it closes them at once.
 async fn wait_for_callback(
-    mut listeners: Vec<TcpListener>,
+    mut listeners: Vec<Listener>,
     state: &str,
 ) -> Result<(TcpStream, HashMap<String, String>), SignInError> {
     let (found, mut arrived) = tokio::sync::mpsc::unbounded_channel();
@@ -879,15 +909,15 @@ fn fixed_port(settings: &OAuthSettings) -> Option<u16> {
 
 /// Binds the callback listener: this computer's loopback only, never every address. With a
 /// registered client the port is fixed; otherwise any free one, tried again up to five times.
-async fn bind(settings: &OAuthSettings) -> Result<(Vec<TcpListener>, SocketAddr), SignInError> {
+async fn bind(settings: &OAuthSettings) -> Result<(Vec<Listener>, SocketAddr), SignInError> {
     let fixed = fixed_port(settings);
     let taken = |port: u16| SignInError::Failed(format!("port {port} is in use on this computer"));
     for _ in 0..5 {
-        let first = TcpListener::bind(("127.0.0.1", fixed.unwrap_or(0)))
+        let first = Listener::bind(("127.0.0.1", fixed.unwrap_or(0)))
             .await
             .map_err(|_| taken(fixed.unwrap_or(0)))?;
         let addr = first.local_addr().map_err(|_| taken(fixed.unwrap_or(0)))?;
-        match TcpListener::bind(("::1", addr.port())).await {
+        match Listener::bind(("::1", addr.port())).await {
             Ok(second) => return Ok((vec![first, second], addr)),
             Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
                 if fixed.is_some() {
@@ -1537,6 +1567,74 @@ mod tests {
             let at = listener.local_addr().expect("an address");
             assert!(at.ip().is_loopback(), "a listener is on {}", at.ip());
         }
+    }
+
+    /// What a program started by another thread holds between its `fork` and its `exec`: another
+    /// descriptor of the same socket. It keeps the socket listening unless the socket itself is
+    /// told to stop, so ending a sign-in must do that.
+    #[cfg(unix)]
+    fn copy_of(listener: &Listener) -> std::os::fd::OwnedFd {
+        std::os::fd::AsFd::as_fd(&listener.0)
+            .try_clone_to_owned()
+            .expect("a copy of the descriptor")
+    }
+
+    /// A new sign-in ends the old one by dropping its future and waiting for it, and Cancel does the
+    /// same: after that nothing may accept on the old callback address, whoever else still holds a
+    /// copy of its socket (the test `a_new_attempt_ends_the_old` failed once under load for this).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_ended_sign_in_stops_listening_for_every_copy_of_its_socket() {
+        let std_listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+        std_listener.set_nonblocking(true).expect("non-blocking");
+        let addr = std_listener.local_addr().expect("an address");
+        let listener = Listener(TcpListener::from_std(std_listener).expect("registered"));
+        let held_by_a_child = copy_of(&listener);
+        let waiting = tokio::spawn(wait_for_callback(vec![listener], "state"));
+        tokio::task::yield_now().await;
+
+        waiting.abort();
+        let _ = waiting.await;
+
+        let reached = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2));
+        assert_eq!(
+            reached.expect_err("nothing listens on it now").kind(),
+            std::io::ErrorKind::ConnectionRefused
+        );
+        drop(held_by_a_child);
+    }
+
+    /// A registered client's callback port is fixed, so the sign-in that replaces another binds the
+    /// very port the first held: it must be free again while a copy of the old socket lives.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_fixed_callback_port_is_free_for_the_next_sign_in_while_a_copy_lives() {
+        // A port that was free a moment ago; another test's listener may take it, so try again.
+        let mut taken = None;
+        for _ in 0..5 {
+            let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+            let port = probe.local_addr().expect("an address").port();
+            drop(probe);
+            let settings = OAuthSettings {
+                client_id: Some("abc".to_string()),
+                callback_port: Some(port),
+                scopes: Vec::new(),
+            };
+            if let Ok((listeners, _)) = bind(&settings).await {
+                taken = Some((settings, listeners, port));
+                break;
+            }
+        }
+        let (settings, listeners, port) = taken.expect("a free port was found");
+        let copies: Vec<_> = listeners.iter().map(copy_of).collect();
+
+        drop(listeners);
+
+        let (again, addr) = bind(&settings)
+            .await
+            .expect("the same port binds again while copies of the old sockets live");
+        assert_eq!(addr.port(), port);
+        drop((again, copies));
     }
 
     /// A grant made with one of Farik's own apps is told so after a restart: its refresh depends on it.
