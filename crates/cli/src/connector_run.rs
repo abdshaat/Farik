@@ -151,6 +151,27 @@ pub fn osv(io: &mut CliIo<'_>) -> i32 {
     }
 }
 
+/// Serves the exchange-rate server (ADR 0038) on standard input and output, at Frankfurter's one
+/// address, until its client leaves. Answers 1, saying why on standard error, when it cannot.
+pub fn fx(io: &mut CliIo<'_>) -> i32 {
+    let served = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())
+        .and_then(|runtime| {
+            runtime
+                .block_on(farik_runtime::fx::serve_stdio(farik_runtime::fx::FX_API))
+                .map_err(|error| error.to_string())
+        });
+    match served {
+        Ok(()) => 0,
+        Err(why) => {
+            let _ = writeln!(io.stderr, "farik connector fx: {why}");
+            1
+        }
+    }
+}
+
 /// The variables a Farik connector's shim reads: where the daemon is, and the session's ticket.
 pub const CONNECTOR_URL: &str = "FARIK_CONNECTOR_URL";
 /// See [`CONNECTOR_URL`].

@@ -728,6 +728,8 @@ enum ConnectorCommands {
     Osv,
     /// Run Google Ads' tools in the daemon, for a Marketing Specialist's session (used by its kit).
     GoogleAds,
+    /// Look exchange rates up at Frankfurter (used by the Procurement Specialist's kit).
+    Fx,
 }
 
 #[derive(Subcommand)]
@@ -1065,6 +1067,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             }
             ConnectorCommands::Osv => connector_run::osv(io),
             ConnectorCommands::GoogleAds => connector_run::google_ads(io),
+            ConnectorCommands::Fx => connector_run::fx(io),
         };
     }
     if parsed.json && matches!(parsed.command, Commands::Serve { .. }) {

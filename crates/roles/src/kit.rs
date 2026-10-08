@@ -164,7 +164,7 @@ type EmbeddedSkills = Vec<(&'static str, &'static [(&'static str, &'static str)]
 pub const FARIK_COMMAND: &str = "farik";
 
 /// The names of Farik's own connectors, each started as `farik connector <name>`.
-pub const FARIK_CONNECTORS: &[&str] = &["osv", "google-ads"];
+pub const FARIK_CONNECTORS: &[&str] = &["osv", "google-ads", "fx"];
 
 /// Whether `command` and `args` are, exactly, `farik connector <name>` for one of Farik's own
 /// connectors. Nothing else, a user's own `farik` command included, is Farik's.
@@ -1065,7 +1065,7 @@ mod tests {
             assert_eq!(
                 kit.connectors.len(),
                 match role {
-                    Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
+                    Role::UiUxDesigner | Role::SoftwareDeveloper | Role::ProcurementSpecialist => 1,
                     Role::FinanceSpecialist => 3,
                     Role::ProductManager | Role::Architect => 4,
                     Role::MarketingSpecialist => 5,
@@ -1210,6 +1210,67 @@ mod tests {
                 skill.name
             );
         }
+    }
+
+    /// Step 10d: `fx` is Farik's own server over Frankfurter, started by its bare name, with no
+    /// key; its three tools only read, each with a label, and the copy is the plan's.
+    #[test]
+    fn the_kit_starts_fx_by_its_bare_name_with_its_copy_and_labels() {
+        use super::is_farik_connector;
+
+        let (server, copy) = service(Role::ProcurementSpecialist, "fx");
+        let CustomTransport::Stdio {
+            command,
+            args,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("fx is stdio");
+        };
+        assert_eq!(command, "farik");
+        assert_eq!(args, &["connector".to_string(), "fx".to_string()]);
+        assert!(oauth.is_none());
+        assert!(server.credential_keys.is_empty());
+        let labelled = [
+            ("latest_rates", "latest exchange rates"),
+            ("rate_on", "an exchange rate on a day"),
+            ("list_currencies", "list currencies"),
+        ];
+        let names: Vec<&str> = labelled.iter().map(|(tool, _)| *tool).collect();
+        assert_eq!(names_tagged(&server, ConnectorTag::Network), sorted(&names));
+        assert_eq!(server.tools.len(), 3);
+        assert_eq!(copy.labels.len(), 3);
+        for (tool, label) in labelled {
+            assert_eq!(
+                copy.labels.get(tool).map(String::as_str),
+                Some(label),
+                "{tool}"
+            );
+        }
+        assert!(copy.key_page.is_none());
+        assert!(allowances_of(Role::ProcurementSpecialist, "fx").is_empty());
+        assert_eq!(copy.title, "Exchange rates");
+        assert_eq!(
+            copy.about,
+            "Frankfurter publishes the reference exchange rates of central banks, free and with no account."
+        );
+        assert_eq!(
+            copy.why,
+            "So the Procurement Specialist compares prices in one currency, with the rate and its date beside each. It only reads."
+        );
+        assert_eq!(
+            copy.setup,
+            "Nothing to set up: Farik looks rates up in Frankfurter itself, with no account. Farik sends Frankfurter only currency codes and a date."
+        );
+        let pair = |extra: &[&str]| -> Vec<String> {
+            ["connector", "fx"]
+                .iter()
+                .chain(extra)
+                .map(ToString::to_string)
+                .collect()
+        };
+        assert!(is_farik_connector("farik", &pair(&[])));
+        assert!(!is_farik_connector("farik", &pair(&["x"])));
     }
 
     /// Step 10: the Finance Specialist's kit carries six skills, in this order, each with the
@@ -3521,7 +3582,7 @@ mod tests {
     fn google_ads_is_one_of_farik_s_own_connectors() {
         use super::{FARIK_CONNECTORS, is_farik_connector};
 
-        assert_eq!(FARIK_CONNECTORS, ["osv", "google-ads"]);
+        assert_eq!(FARIK_CONNECTORS, ["osv", "google-ads", "fx"]);
         let pair = |name: &str| ["connector".to_string(), name.to_string()];
         assert!(is_farik_connector("farik", &pair("google-ads")));
         for other in ["google-ad", "Google-Ads", "google_ads", "google-ads2"] {

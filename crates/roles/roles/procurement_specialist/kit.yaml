@@ -1,8 +1,9 @@
 # The Procurement Specialist's kit (ADR 0039; phase 7 step 10d): the twelve skills of its work,
-# loaded on demand. Its services follow in the same step (Farik's own `fx`, then Exa, SerpApi, Brex
-# and AWS Pricing), and step 10g adds its two servers of Farik's own. Its one skill in every prompt,
-# `sourcing-a-product`, is the role's own (ADR 0011); no kit skill repeats its loop or its section
-# on the sites it may read.
+# loaded on demand, and its services. `fx` is Farik's own server over Frankfurter, started by
+# `farik connector fx` (ADR 0038). Exa, SerpApi, Brex and AWS Pricing follow in the same step, and
+# step 10g adds its two servers of Farik's own. Its one skill in every prompt, `sourcing-a-product`,
+# is the role's own (ADR 0011); no kit skill repeats its loop or its section on the sites it may
+# read.
 role: procurement_specialist
 skills:
   - defining-the-need
@@ -17,4 +18,20 @@ skills:
   - reviewing-renewals
   - writing-purchase-orders
   - using-procurement-sources
-connectors: []
+connectors:
+  - name: fx
+    transport: stdio
+    command: farik
+    args: [connector, fx]
+    title: Exchange rates
+    about: "Frankfurter publishes the reference exchange rates of central banks, free and with no account."
+    why: "So the Procurement Specialist compares prices in one currency, with the rate and its date beside each. It only reads."
+    setup: "Nothing to set up: Farik looks rates up in Frankfurter itself, with no account. Farik sends Frankfurter only currency codes and a date."
+    labels:
+      latest_rates: "latest exchange rates"
+      rate_on: "an exchange rate on a day"
+      list_currencies: "list currencies"
+    tools:
+      latest_rates: network
+      rate_on: network
+      list_currencies: network

@@ -32,6 +32,8 @@ pub mod daemon;
 pub mod exec;
 /// The forge pull requests live on, driven through the `gh` program.
 pub mod forge;
+/// Farik's own server over the central banks' exchange rates (ADR 0038).
+pub mod fx;
 /// Farik's own Google Ads connector: the client for Google's API and what each tool sends (ADR
 /// 0038, ADR 0042).
 #[cfg(unix)]
