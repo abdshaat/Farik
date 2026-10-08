@@ -1231,6 +1231,23 @@ impl Team {
         self.active_agents()
             .any(|agent| Role::from(agent.role) == role)
     }
+
+    /// Whether an agent that is not retired has the server `name` among its `mcp_servers`: one
+    /// that can still run a session with it. A retired agent runs none, and retiring it in Farik
+    /// deletes its keys (ADR 0030), so its entry in the team file starts nothing.
+    #[must_use]
+    pub fn has_connector(&self, name: &str) -> bool {
+        self.agents
+            .iter()
+            .filter(|agent| agent.status != AgentStatus::Retired)
+            .any(|agent| {
+                agent
+                    .mcp_servers
+                    .iter()
+                    .flatten()
+                    .any(|entry| entry.name.as_str() == name)
+            })
+    }
 }
 
 impl Agent {
@@ -1778,6 +1795,40 @@ mod tests {
         assert!(!team.has_active(Role::ScrumMaster), "retired");
         assert!(!team.has_active(Role::Human), "the human is not an agent");
         assert_eq!(team.agents[2].status, AgentStatus::Paused);
+    }
+
+    #[test]
+    fn a_connector_is_held_by_an_agent_that_is_not_retired() {
+        let server = |name: &str| {
+            json!({
+                "name": name, "source": "custom", "transport": "stdio",
+                "command": "server", "tools": { "search": "network" }
+            })
+        };
+        let mut wire = a_team_wire();
+        wire["agents"] = json!([
+            an_agent_wire("ada", "product_manager"),
+            an_agent_wire("linus", "software_developer"),
+            an_agent_wire("kai", "marketing_specialist"),
+            an_agent_wire("lia", "marketing_specialist"),
+        ]);
+        wire["agents"][2]["mcp_servers"] = json!([server("google-ads"), server("github")]);
+        wire["agents"][3]["mcp_servers"] = json!([server("github")]);
+        assert!(team(&wire).has_connector("google-ads"), "active");
+        assert!(team(&wire).has_connector("github"));
+        assert!(!team(&wire).has_connector("osv"), "nobody has it");
+
+        wire["agents"][2]["status"] = json!("paused");
+        assert!(
+            team(&wire).has_connector("google-ads"),
+            "a paused agent keeps its sign-in and can be resumed"
+        );
+        wire["agents"][2]["status"] = json!("retired");
+        assert!(
+            !team(&wire).has_connector("google-ads"),
+            "a retired agent runs no session, and its keys are deleted"
+        );
+        assert!(team(&wire).has_connector("github"), "Lia is not retired");
     }
 
     #[test]

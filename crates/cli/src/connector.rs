@@ -628,11 +628,14 @@ const GOOGLE_ADS: &str = "google-ads";
 
 /// Whether a campaign Farik made is not recorded paused for its plan's end (`paused_for_end`):
 /// Farik's own pause before the connection is removed is what the browser's Remove makes, a pause
-/// for an earlier removal counts until Google Ads is connected again, and a campaign recorded
-/// paused for another reason may have been started again since.
+/// for an earlier removal counts until Google Ads is connected again and while no agent that is
+/// not retired has it, and a campaign recorded paused for another reason may have been started
+/// again since.
 fn google_ads_still_runs(project: &Project) -> Result<bool, String> {
     let made = created_campaigns(&project.log).map_err(|error| error.to_string())?;
-    let ended = paused_for_end(&project.log, GOOGLE_ADS).map_err(|error| error.to_string())?;
+    let held = project.team.has_connector(GOOGLE_ADS);
+    let ended =
+        paused_for_end(&project.log, GOOGLE_ADS, held).map_err(|error| error.to_string())?;
     Ok(made.iter().any(|each| !ended.contains(&each.campaign)))
 }
 

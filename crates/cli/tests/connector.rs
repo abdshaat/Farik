@@ -22,7 +22,7 @@ use farik_runtime::credential::CredentialError;
 use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
-use project::{LiveDriver, a_team, events, files_of, log_of, run_with, scratch};
+use project::{LiveDriver, a_team, a_team_with, events, files_of, log_of, run_with, scratch};
 
 /// An authorization server and a protected MCP server, as the runtime's tests run them.
 #[path = "../../runtime/tests/support/oauth_fixture.rs"]
@@ -547,37 +547,46 @@ fn disconnect_google_ads(
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn farik_disconnect_counts_a_pause_made_for_an_earlier_removal() {
-    // Google Ads was removed before, and Farik paused the campaign for it: nothing runs, and the
-    // command disconnects as it does.
+    let removed = |repository: &TempRepo| {
+        project::record(
+            repository,
+            "",
+            "marketing_campaign.paused",
+            &json!({
+                "plan": "MP-1", "key": "search-launch",
+                "campaign": "customers/1234567890/campaigns/11", "why": "connection_removed"
+            }),
+        );
+    };
+
+    // Google Ads was removed from another agent before, and Farik paused the campaign for it. But
+    // dev-a still has Google Ads, and its sign-in could have enabled the campaign since, with no
+    // connection recorded: the browser is the way, where Farik pauses first.
     let repository = a_team("disconnect-google-ads-removed");
     let store = google_ads_with_a_campaign(&repository, &fixture("disconnect-google-ads-removed"));
-    project::record(
-        &repository,
-        "",
-        "marketing_campaign.paused",
-        &json!({
-            "plan": "MP-1", "key": "search-launch",
-            "campaign": "customers/1234567890/campaigns/11", "why": "connection_removed"
-        }),
-    );
+    removed(&repository);
+    let ran = disconnect_google_ads(&repository, &store);
+    assert_eq!(ran.code, 1, "{}\n{}", ran.out, ran.err);
+    assert!(ran.err.contains("disconnect_in_the_browser"), "{}", ran.err);
+    assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "google-ads")).is_some());
+
+    // dev-a was retired instead, which paused the campaign first and deleted its keys: no agent
+    // that is not retired has Google Ads, nothing runs, and the command cleans up the entry the
+    // retirement left.
+    let retired = |wire: &mut Value| wire["agents"][1]["status"] = json!("retired");
+    let repository = a_team_with("disconnect-google-ads-retired", retired);
+    let store = google_ads_with_a_campaign(&repository, &fixture("disconnect-google-ads-retired"));
+    removed(&repository);
     let ran = disconnect_google_ads(&repository, &store);
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
     assert!(loaded(store.as_ref(), &kept_at(&repository, "dev-a", "google-ads")).is_none());
 
     // Google Ads connected again after that pause: an agent could have enabled the campaign since,
     // so it counts no more, and the browser is the way.
-    let repository = a_team("disconnect-google-ads-reconnected");
+    let repository = a_team_with("disconnect-google-ads-reconnected", retired);
     let store =
         google_ads_with_a_campaign(&repository, &fixture("disconnect-google-ads-reconnected"));
-    project::record(
-        &repository,
-        "",
-        "marketing_campaign.paused",
-        &json!({
-            "plan": "MP-1", "key": "search-launch",
-            "campaign": "customers/1234567890/campaigns/11", "why": "connection_removed"
-        }),
-    );
+    removed(&repository);
     let mut connected = farik_protocol::event::fixtures::a_body_wire(EventKind::ConnectorConnected);
     connected["agent"] = json!("dev-a");
     connected["server"] = json!("google-ads");

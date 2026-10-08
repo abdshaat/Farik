@@ -1047,7 +1047,47 @@ fn ending_with_no_process_counts_a_pause_made_for_a_removal() {
     // The owner removed Google Ads: Farik paused the plan's ads first and recorded it. Ending the
     // plan leaves nothing to pause, and the command says nothing of it, until Google Ads is
     // connected again.
-    let repository = a_project("human-plan-end-removed");
+    let repository = a_plan_whose_campaign_was_paused_for_a_removal("human-plan-end-removed");
+
+    let ran = run(&repository.path, &["marketing", "plan", "end", "MP-1"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(ran.out.trim(), "ended marketing plan MP-1");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn ending_with_no_process_does_not_count_a_removal_s_pause_while_an_agent_has_google_ads() {
+    // Google Ads was removed from one agent and Farik paused the campaign for it, but another
+    // agent still has it, and its sign-in could have enabled the campaign since, with no
+    // connection recorded: ending the plan still leaves ads to pause.
+    let repository = a_plan_whose_campaign_was_paused_for_a_removal("human-plan-end-held");
+    let files = files_of(&repository);
+    let mut wire =
+        serde_json::to_value(files.read_team().expect("the team reads")).expect("the team is JSON");
+    wire["agents"][1]["mcp_servers"] = json!([{
+        "name": "google-ads", "source": "custom", "transport": "stdio", "command": "sh",
+        "args": ["server"], "tools": { "search": "network" }
+    }]);
+    files
+        .write_team(&farik_core::team::validate_team(&wire).expect("a team"))
+        .expect("the team is written");
+
+    let ran = run(&repository.path, &["marketing", "plan", "end", "MP-1"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.trim(),
+        "ended marketing plan MP-1. Farik pauses MP-1's ads when it next runs."
+    );
+}
+
+/// A project with MP-1 approved and one campaign made for it, which Farik paused because Google
+/// Ads was removed.
+fn a_plan_whose_campaign_was_paused_for_a_removal(
+    name: &str,
+) -> farik_store::git::fixtures::TempRepo {
+    let repository = a_project(name);
     let task = filed(&repository, "Add done.txt");
     a_plan_proposed(&repository, &task, "MP-1", "Spring launch", (-1, 10));
     record(
@@ -1076,11 +1116,7 @@ fn ending_with_no_process_counts_a_pause_made_for_a_removal() {
             "campaign": "customers/1234567890/campaigns/11", "why": "connection_removed"
         }),
     );
-
-    let ran = run(&repository.path, &["marketing", "plan", "end", "MP-1"]);
-
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    assert_eq!(ran.out.trim(), "ended marketing plan MP-1");
+    repository
 }
 
 #[test]

@@ -40,6 +40,16 @@ pub(crate) fn open_raise(deps: &ToolDeps, plan: &str) -> Result<Option<TaskId>, 
         .map(|raise| raise.task_id))
 }
 
+/// Whether an agent that is not retired has a Google Ads entry in the team file, which
+/// `paused_for_end` needs: its sign-in could enable a campaign Farik paused for a removal. `true`
+/// when the team file cannot be read, so that nothing is counted paused on a guess.
+pub(crate) fn google_ads_held(deps: &ToolDeps) -> bool {
+    deps.files
+        .read_team()
+        .ok()
+        .is_none_or(|team| team.has_connector(GOOGLE_ADS))
+}
+
 /// Whether a campaign Farik made under `plan` is left to pause: not carried by the active plan and
 /// not recorded paused for its end. The command that ends a plan, handled in a process that drives
 /// nothing, says so, since the watch pauses it when a process does.
@@ -60,7 +70,7 @@ pub fn ads_left_to_pause(deps: &ToolDeps, plan: &str) -> Result<bool, StoreError
             plan: &each.proposal,
             lineage,
         });
-    let for_end = paused_for_end(&deps.log, GOOGLE_ADS)?;
+    let for_end = paused_for_end(&deps.log, GOOGLE_ADS, google_ads_held(deps))?;
     let made = created_campaigns(&deps.log)?;
     Ok(to_pause_for_end(view.as_ref(), &made, &for_end)
         .iter()

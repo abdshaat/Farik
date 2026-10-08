@@ -860,14 +860,17 @@ pub fn budgets_reached(log: &EventLog) -> Result<Vec<BudgetReached>, StoreError>
 
 /// The campaigns recorded paused for their plan's end, by resource name, oldest first: each that
 /// Farik paused because its plan ended, and each it paused because Google Ads was removed
-/// (`connection_removed`) while no connection of `server` has been recorded since, since until
-/// then nothing could have started it again. A pause at a budget never counts: a raise may have
-/// started the campaign again. A connection with an agent or a session on its envelope is not read.
+/// (`connection_removed`) while no connection of `server` has been recorded since and no other
+/// agent `held` an entry of it, since until then nothing could have started it again. `held` is
+/// whether an agent that is not retired has a `server` entry in the team file
+/// (`Team::has_connector`): its sign-in could enable the campaign again, and no connection is
+/// recorded for that. A pause at a budget never counts: a raise may have started the campaign
+/// again. A connection with an agent or a session on its envelope is not read.
 ///
 /// # Errors
 ///
 /// What the log refused.
-pub fn paused_for_end(log: &EventLog, server: &str) -> Result<Vec<String>, StoreError> {
+pub fn paused_for_end(log: &EventLog, server: &str, held: bool) -> Result<Vec<String>, StoreError> {
     let connected_since = log
         .read(&EventQuery {
             kinds: vec![EventKind::ConnectorConnected],
@@ -888,7 +891,9 @@ pub fn paused_for_end(log: &EventLog, server: &str) -> Result<Vec<String>, Store
         .into_iter()
         .filter(|pause| match pause.why {
             PausedWhy::PlanEnded => true,
-            PausedWhy::ConnectionRemoved => connected_since.is_none_or(|seq| seq < pause.seq),
+            PausedWhy::ConnectionRemoved => {
+                !held && connected_since.is_none_or(|seq| seq < pause.seq)
+            }
             PausedWhy::BudgetReached => false,
         })
         .map(|pause| pause.campaign)
@@ -1636,7 +1641,7 @@ mod tests {
             })
         };
         assert_eq!(
-            paused_for_end(&log, "google-ads").expect("reads"),
+            paused_for_end(&log, "google-ads", false).expect("reads"),
             [] as [String; 0]
         );
 
@@ -1648,14 +1653,14 @@ mod tests {
         // A pause for the connection's removal counts while no Google Ads connection followed it.
         pause(10, 13, "connection_removed");
         assert_eq!(
-            paused_for_end(&log, "google-ads").expect("reads"),
+            paused_for_end(&log, "google-ads", false).expect("reads"),
             [campaign(11), campaign(13)]
         );
 
         // Another service's connection is no Google Ads connection.
         connect(11, "osv");
         assert_eq!(
-            paused_for_end(&log, "google-ads").expect("reads"),
+            paused_for_end(&log, "google-ads", false).expect("reads"),
             [campaign(11), campaign(13)]
         );
         // A connection after it: Farik could read and an agent could enable again, so it no longer
@@ -1663,9 +1668,18 @@ mod tests {
         connect(12, "google-ads");
         pause(13, 14, "connection_removed");
         assert_eq!(
-            paused_for_end(&log, "google-ads").expect("reads"),
+            paused_for_end(&log, "google-ads", false).expect("reads"),
             [campaign(11), campaign(14)],
             "only the removal after the last connection counts"
+        );
+
+        // While an agent that is not retired has a Google Ads entry, its sign-in could enable the
+        // campaign again with no connection recorded: a removal's pause no longer counts, and a
+        // plan's end still does.
+        assert_eq!(
+            paused_for_end(&log, "google-ads", true).expect("reads"),
+            [campaign(11)],
+            "another agent still has Google Ads"
         );
     }
 

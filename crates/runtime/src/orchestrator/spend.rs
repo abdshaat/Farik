@@ -24,6 +24,7 @@ use crate::daemon::SpendRead;
 use crate::daemon::ads_calls::{
     GOOGLE_ADS, cut_reason, lineage_of, pause_campaigns, read_spend, spent_by_key,
 };
+use crate::marketing::ads::google_ads_held;
 
 /// How long a plan's spend, or a pause that was refused, waits before it is tried again. A failed
 /// try counts: a retry every minute would spend Farik Cloud's shared quota (ADR 0044) on failures
@@ -288,7 +289,7 @@ impl Orchestrator {
     /// fifteen minutes later.
     async fn pause_what_ended(&self, watched: &Watched<'_>) -> Result<(), OrchestratorError> {
         let (state, tools, now) = (&self.deps.daemon, &self.deps.tools, watched.now);
-        let for_end = paused_for_end(&tools.log, GOOGLE_ADS)?;
+        let for_end = paused_for_end(&tools.log, GOOGLE_ADS, google_ads_held(tools))?;
         let all: Vec<CreatedCampaign> = watched.made.iter().map(|(made, _)| made.clone()).collect();
         let lineage = watched.active.map(|(plan, lineage)| Lineage {
             id: plan.record.id.as_str(),
@@ -1609,16 +1610,9 @@ mod tests {
         assert_eq!(unstopped, None);
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn a_removal_s_pause_counts_when_the_plan_ends_until_google_ads_is_connected_again() {
-        let watching = Watching::new("end-after-removal").await;
-        watching.ads.plan("MP-1", None);
-        watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
-        let campaign = campaign_name(CUSTOMER, 11);
-
-        // The owner removed Kai's Google Ads: Farik paused the campaign first and recorded it, and
-        // the entry and its sign-in went.
+    /// The owner removed Kai's Google Ads: the entry is out of the team file, Farik paused
+    /// `campaign` of MP-1 first and recorded it for the removal, and `connector.disconnected`.
+    fn kai_loses_google_ads(watching: &Watching, campaign: &str) {
         let files = &watching.ads.harness.project.deps.files;
         let team = crate::daemon::with_server(
             &files.read_team().expect("the team"),
@@ -1642,6 +1636,20 @@ mod tests {
             "connector.disconnected",
             &json!({ "agent": "kai", "server": "google-ads" }),
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_removal_s_pause_counts_when_the_plan_ends_until_google_ads_is_connected_again() {
+        let watching = Watching::new("end-after-removal").await;
+        watching.ads.plan("MP-1", None);
+        watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
+        let campaign = campaign_name(CUSTOMER, 11);
+
+        // The owner removed Kai's Google Ads: Farik paused the campaign first and recorded it, and
+        // the entry and its sign-in went.
+        kai_loses_google_ads(&watching, &campaign);
+        let project = &watching.ads.harness.project;
 
         // The plan ends. The campaign is paused already: no pause is sent, none is recorded, and
         // no "ads still running" is kept for the owner, though no sign-in is left to ask Google.
@@ -1673,6 +1681,134 @@ mod tests {
             watching.paused_for("plan_ended"),
             [("MP-1".to_string(), "search-launch".to_string(), campaign)]
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_removal_s_pause_does_not_count_while_another_agent_has_google_ads() {
+        // Kai and Lia are Marketing Specialists, and both have Google Ads.
+        let ads = Ads::with_team(
+            "end-after-removal-lia",
+            |wire| {
+                with_the_marketing_specialist(wire);
+                wire["agents"]
+                    .as_array_mut()
+                    .expect("agents")
+                    .push(an_agent_wire("lia", "marketing_specialist"));
+            },
+            |_, _| {},
+        )
+        .await;
+        let lia = ads.connect("lia");
+        let watching = Watching::over(ads, Arc::new(Counting::default()));
+        watching.ads.plan("MP-1", None);
+        watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
+        let campaign = campaign_name(CUSTOMER, 11);
+
+        // The owner removed Kai's Google Ads, and Farik paused the campaign first. Lia's sign-in
+        // can still enable it, and no connection is recorded when she does: it is running again.
+        kai_loses_google_ads(&watching, &campaign);
+        watching.status((CUSTOMER, 11), "ENABLED");
+
+        // The plan ends: the removal's pause no longer says it is paused, so the campaign is
+        // paused for the end with Lia's grant, and recorded.
+        watching.ends("MP-1");
+        watching.at(1);
+        watching.wakes().await;
+
+        assert_eq!(watching.pauses(), std::slice::from_ref(&campaign));
+        let bearer = format!("Bearer {}", lia.access_token.expose());
+        for seen in watching.ads.google.requests() {
+            assert_eq!(
+                seen.headers.get("authorization").map(String::as_str),
+                Some(bearer.as_str())
+            );
+        }
+        assert_eq!(
+            watching.paused_for("plan_ended"),
+            [("MP-1".to_string(), "search-launch".to_string(), campaign)]
+        );
+        let unstopped = watching
+            .ads
+            .state()
+            .spend_reads()
+            .get("MP-1")
+            .and_then(|read| read.unstopped.clone());
+        assert_eq!(unstopped, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn google_ads_is_held_by_an_agent_that_is_not_retired_or_when_the_team_cannot_be_read() {
+        use crate::marketing::ads::google_ads_held;
+
+        let ads = Ads::new("held-by").await;
+        let deps = &ads.harness.project.deps;
+        assert!(google_ads_held(deps), "Kai has it");
+
+        // Kai retired: his entry stays in the team file, but he runs no session.
+        let mut team = deps.files.read_team().expect("the team");
+        let kai = team
+            .agents
+            .iter_mut()
+            .find(|agent| agent.id.as_str() == "kai")
+            .expect("Kai");
+        kai.status = farik_core::team::AgentStatus::Retired;
+        deps.files.write_team(&team).expect("the team is written");
+        assert!(!google_ads_held(deps));
+
+        // A team file that cannot be read: nothing is counted paused on a guess.
+        std::fs::write(deps.files.root().join(".farik/team.yaml"), "not: a team")
+            .expect("the file is written");
+        assert!(google_ads_held(deps));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retiring_the_only_marketing_specialist_leaves_no_ads_running_when_the_plan_ends() {
+        use crate::connectors::ConnectorSecrets as _;
+
+        let watching = Watching::new("end-after-retire").await;
+        watching.ads.plan("MP-1", None);
+        watching.made(("MP-1", "search-launch"), (CUSTOMER, 11));
+        let campaign = campaign_name(CUSTOMER, 11);
+
+        // The owner retires Kai, the only Marketing Specialist: Farik pauses the campaign first,
+        // and retiring deletes his keys. His entry stays in the team file.
+        watching
+            .orchestrator
+            .handle(farik_protocol::command::Command::AgentUpdate {
+                agent_id: "kai".to_string(),
+                status: farik_core::team::AgentStatus::Retired,
+            })
+            .await
+            .expect("Kai is retired");
+        assert_eq!(watching.pauses(), std::slice::from_ref(&campaign));
+        assert!(
+            watching
+                .ads
+                .store
+                .load(&watching.ads.at)
+                .expect("reads")
+                .is_none()
+        );
+        let sent = watching.ads.google.requests().len();
+
+        // The plan ends. Nobody can enable the campaign, which is paused: nothing is sent to
+        // Google, none is recorded, and no "ads still running" is kept for the owner.
+        watching.ends("MP-1");
+        watching.at(1);
+        watching.wakes().await;
+
+        assert_eq!(watching.ads.google.requests().len(), sent);
+        assert!(watching.paused_for("plan_ended").is_empty());
+        let unstopped = watching
+            .ads
+            .state()
+            .spend_reads()
+            .get("MP-1")
+            .and_then(|read| read.unstopped.clone());
+        assert_eq!(unstopped, None);
     }
 
     #[tokio::test(flavor = "multi_thread")]
