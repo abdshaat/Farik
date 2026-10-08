@@ -131,6 +131,8 @@ pub(crate) enum Refusal {
     PurchaseOrder { code: &'static str, detail: String },
     /// A refusal of one of the data pipeline tools under the code it names (6.10).
     Pipeline { code: &'static str, detail: String },
+    /// A refusal of one of the tools for the messages to sellers under the code it names (6.10).
+    Seller { code: &'static str, detail: String },
 }
 
 impl Refusal {
@@ -232,7 +234,8 @@ impl Refusal {
             | Self::Finance { code, detail }
             | Self::Sites { code, detail }
             | Self::PurchaseOrder { code, detail }
-            | Self::Pipeline { code, detail } => (*code, detail.clone()),
+            | Self::Pipeline { code, detail }
+            | Self::Seller { code, detail } => (*code, detail.clone()),
             // Each fault on a line of its own, the first one's code leading the reason.
             Self::MarketingPlanFaults { faults } => {
                 return faults

@@ -837,6 +837,9 @@ const REQUEST_DATA_PIPELINE_TOOL: &str = "farik_request_data_pipeline";
 /// The tool that reads the data pipeline requests: the Procurement Specialist's, in the implement
 /// session of a task and in its chat.
 const READ_DATA_PIPELINES_TOOL: &str = "farik_read_data_pipelines";
+/// The tool that drafts a message to a seller, the Procurement Specialist's alone, in the
+/// implement session of a task (step 10f).
+const DRAFT_SELLER_MESSAGE_TOOL: &str = "farik_draft_seller_message";
 
 /// The Farik tools a read-only session is not offered: the command runner, which has no
 /// executor there, and the git writes, which only the assignee may make.
@@ -885,7 +888,8 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
             WRITE_EVALUATION_TOOL
             | DRAFT_PURCHASE_ORDER_TOOL
             | UPDATE_PURCHASE_ORDER_TOOL
-            | REQUEST_DATA_PIPELINE_TOOL => {
+            | REQUEST_DATA_PIPELINE_TOOL
+            | DRAFT_SELLER_MESSAGE_TOOL => {
                 ask.agent.role == RoleWire::ProcurementSpecialist
                     && ask.purpose == SessionPurpose::Implement
                     && ask.contract.is_some()

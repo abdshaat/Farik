@@ -14,6 +14,28 @@ use crate::StoreError;
 /// each task and one file each version of a workbook the tools replaced.
 const HISTORY: &str = ".history";
 
+/// What Farik writes in the Procurement Specialist's folder, and not the task: its messages to
+/// sellers and their replies (step 10f). The copy and the changes leave it out as they leave
+/// `.history` out, so a reply that arrives while a task runs is no change the task made.
+const MAIL: &str = "mail";
+
+/// The names at the top of `folder` the copy and the changes leave out: `.history`, and in the
+/// Procurement Specialist's folder `mail/`.
+fn left_out(folder: &Path) -> Vec<&'static str> {
+    let procurement = folder.file_name().is_some_and(|name| name == "procurement");
+    if procurement {
+        vec![HISTORY, MAIL]
+    } else {
+        vec![HISTORY]
+    }
+}
+
+fn is_left_out(name: &str, left_out: &[&str]) -> bool {
+    left_out
+        .iter()
+        .any(|skipped| name.eq_ignore_ascii_case(skipped))
+}
+
 fn failed(error: &io::Error, path: &Path) -> StoreError {
     StoreError::Io {
         detail: format!("{}: {error}", path.display()),
@@ -107,7 +129,7 @@ pub fn copy_baseline(folder: &Path, task: &TaskId) -> Result<bool, StoreError> {
     }
     make_private_directory(folder)?;
     make_private_directory(&copy)?;
-    if let Err(error) = copy_directory(folder, &copy, true) {
+    if let Err(error) = copy_directory(folder, &copy, &left_out(folder)) {
         let _ = fs::remove_dir_all(&copy);
         return Err(error);
     }
@@ -160,8 +182,8 @@ pub fn changes_since_baseline(
     task: &TaskId,
 ) -> Result<Vec<FolderChange>, StoreError> {
     refuse_links(folder, task)?;
-    let now = files_under(folder, true)?;
-    let before = files_under(&baseline_of(folder, task), false)?;
+    let now = files_under(folder, &left_out(folder))?;
+    let before = files_under(&baseline_of(folder, task), &[])?;
     let mut changes = Vec::new();
     for (path, file) in &now {
         let kind = match before.get(path) {
@@ -202,7 +224,7 @@ fn differ(left: &Path, right: &Path) -> Result<bool, StoreError> {
 /// there. `.history` is left out at the top when `without_history` says so; links are not followed.
 fn files_under(
     root: &Path,
-    without_history: bool,
+    left_out: &[&str],
 ) -> Result<std::collections::BTreeMap<String, PathBuf>, StoreError> {
     let mut found = std::collections::BTreeMap::new();
     let mut pending = vec![(root.to_path_buf(), String::new())];
@@ -215,7 +237,7 @@ fn files_under(
         for entry in entries {
             let entry = entry.map_err(|error| failed(&error, &directory))?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            if without_history && prefix.is_empty() && name == HISTORY {
+            if prefix.is_empty() && is_left_out(&name, left_out) {
                 continue;
             }
             let path = entry.path();
@@ -236,11 +258,11 @@ fn files_under(
 }
 
 /// `from`'s regular files and directories into `to`, which exists.
-fn copy_directory(from: &Path, to: &Path, at_the_top: bool) -> Result<(), StoreError> {
+fn copy_directory(from: &Path, to: &Path, left_out: &[&str]) -> Result<(), StoreError> {
     for entry in fs::read_dir(from).map_err(|error| failed(&error, from))? {
         let entry = entry.map_err(|error| failed(&error, from))?;
         let name = entry.file_name();
-        if at_the_top && name == HISTORY {
+        if is_left_out(&name.to_string_lossy(), left_out) {
             continue;
         }
         let path = entry.path();
@@ -248,7 +270,7 @@ fn copy_directory(from: &Path, to: &Path, at_the_top: bool) -> Result<(), StoreE
         let target = to.join(&name);
         if kind.is_dir() {
             make_private_directory(&target)?;
-            copy_directory(&path, &target, false)?;
+            copy_directory(&path, &target, &[])?;
         } else if kind.is_file() {
             fs::copy(&path, &target).map_err(|error| failed(&error, &path))?;
             restrict(&target)?;
@@ -323,6 +345,73 @@ mod tests {
         assert_eq!(
             read(&folder.join(".history/FRK-2/books.xlsx")).as_deref(),
             Some("edited")
+        );
+    }
+
+    /// A procurement folder: the register, and `mail/` with a draft and a reply in it.
+    fn a_procurement_folder(name: &str) -> PathBuf {
+        let folder = std::env::temp_dir()
+            .join(format!("farik-baseline-{}-{name}", std::process::id()))
+            .join("procurement");
+        let _ = fs::remove_dir_all(&folder);
+        fs::create_dir_all(folder.join("mail/out")).expect("the folder is made");
+        fs::create_dir_all(folder.join("mail/in/2026-10/1")).expect("the folder is made");
+        fs::write(folder.join("vendors.xlsx"), "vendors").expect("written");
+        fs::write(folder.join("mail/out/1.txt"), "draft").expect("written");
+        fs::write(folder.join("mail/in/2026-10/1/text.txt"), "reply").expect("written");
+        folder
+    }
+
+    #[test]
+    fn leaves_the_mail_out_of_a_procurement_folder_s_copy_and_changes() {
+        let folder = a_procurement_folder("mail");
+        assert!(copy_baseline(&folder, &task("FRK-1")).expect("copied"));
+        let copy = folder.join(".history/FRK-1");
+        assert_eq!(read(&copy.join("vendors.xlsx")).as_deref(), Some("vendors"));
+        assert!(
+            !copy.join("mail").exists(),
+            "Farik writes mail/, not the task"
+        );
+        // A reply written after the copy, a draft written and one sent, are no change of the task.
+        fs::write(folder.join("mail/in/2026-10/2.txt"), "later").expect("written");
+        fs::write(folder.join("mail/out/1.sent.txt"), "sent").expect("written");
+        fs::remove_file(folder.join("mail/out/1.txt")).expect("removed");
+        assert_eq!(
+            changes_since_baseline(&folder, &task("FRK-1")),
+            Ok(Vec::new())
+        );
+        // However the folder is spelled on a disk that ignores case.
+        fs::create_dir_all(folder.join("Mail")).expect("made");
+        fs::write(folder.join("Mail/2.txt"), "spelled otherwise").expect("written");
+        assert_eq!(
+            changes_since_baseline(&folder, &task("FRK-1")),
+            Ok(Vec::new())
+        );
+        // The register still counts, and a task with no copy has everything but mail/ new.
+        fs::write(folder.join("vendors.xlsx"), "VENDORS").expect("written");
+        let changes = changes_since_baseline(&folder, &task("FRK-1")).expect("changes");
+        assert_eq!(
+            changes
+                .iter()
+                .map(|change| change.path.as_str())
+                .collect::<Vec<_>>(),
+            ["vendors.xlsx"]
+        );
+        let all = changes_since_baseline(&folder, &task("FRK-2")).expect("changes");
+        assert_eq!(
+            all.iter()
+                .map(|change| change.path.as_str())
+                .collect::<Vec<_>>(),
+            ["vendors.xlsx"]
+        );
+        // Another role's folder may have a `mail/` of its own, which is its task's work.
+        let books = a_folder("mail-finance");
+        fs::create_dir_all(books.join("mail")).expect("made");
+        fs::write(books.join("mail/books.xlsx"), "kept").expect("written");
+        copy_baseline(&books, &task("FRK-1")).expect("copied");
+        assert_eq!(
+            read(&books.join(".history/FRK-1/mail/books.xlsx")).as_deref(),
+            Some("kept")
         );
     }
 

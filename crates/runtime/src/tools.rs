@@ -46,6 +46,7 @@ mod purchase_order;
 mod reading;
 pub(crate) mod refusal;
 mod retro;
+mod seller;
 pub(crate) mod sheets;
 /// The Procurement Specialist's tools for the sites it may read, and what lists them.
 pub mod sites;
@@ -372,6 +373,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "Decide a data pipeline request of the Procurement Specialist, in the session Farik started for it: approve (only when it is free and sends none of the project's data out), decline, or escalate to the owner, with your reason. An approval only asks the team to set the source up.",
         ),
+        tool::<seller::DraftSellerMessageInput>(
+            "farik_draft_seller_message",
+            Read,
+            "Write a message to one seller or maker: who, their address, the subject, the plain-text body, and why (a quote request, a question, or the message that goes with an order you suggested). Farik writes it to your folder and sends nothing: the owner reads it on Today, may edit it, and presses Send. You cannot send a message. Quote the item and its exact specification, the quantity, where and when, the currency and a reply-by date, promise nothing, and tell the seller nothing of the business that the quote does not need.",
+        ),
         tool::<exec::ExecInput>(
             "farik_exec",
             Execute,
@@ -515,6 +521,7 @@ pub async fn call_tool(
             nothing_in(input).and_then(|()| pipeline::read_data_pipelines(&call))
         }
         "farik_decide_data_pipeline" => pipeline::decide_data_pipeline(&call, &parse(input)?),
+        "farik_draft_seller_message" => seller::draft_seller_message(&call, &parse(input)?),
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -756,6 +763,7 @@ mod tests {
             "farik_request_data_pipeline",
             "farik_read_data_pipelines",
             "farik_decide_data_pipeline",
+            "farik_draft_seller_message",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -780,7 +788,7 @@ mod tests {
             tier("farik_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..38] {
+        for tool in &tools[..39] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

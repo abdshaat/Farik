@@ -781,6 +781,25 @@ pub(super) fn write_sheet(call: &Call<'_>, input: &WriteSheetInput) -> Result<Va
             ),
         ));
     }
+    // So is `mail/`: Farik keeps there the messages it sends to sellers and the replies it reads
+    // (spec 6.10), and the agent reads them with the seller tools.
+    if call.role() == Role::ProcurementSpecialist
+        && input
+            .path
+            .split('/')
+            .next()
+            .is_some_and(|first| first.eq_ignore_ascii_case("mail"))
+    {
+        return Err(refused(
+            "mail_is_farik_s",
+            format!(
+                "{:?} is in mail/, where Farik keeps the messages to sellers and their replies; \
+                 draft a message with farik_draft_seller_message, and read them with \
+                 farik_read_seller_messages and farik_read_seller_replies",
+                input.path
+            ),
+        ));
+    }
     let root = call.deps().files.root();
     let target = private_path(root, folder, &input.path)?;
     let written = write_workbook(
@@ -2898,6 +2917,28 @@ mod tests {
         write_register(&project, &one_sheet("vendors.xlsx", &rows)).expect("the register");
         write_register(&project, &one_sheet("quotes/orders.xlsx", &rows)).expect("another folder");
         write(&project, &one_sheet("orders/books.xlsx", &rows))
+            .expect("the books' own folder is the Finance Specialist's");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_agent_cannot_write_mail() {
+        let project = a_procurement_project("sheets-mail");
+        let rows = json!([["Acme", 1]]);
+
+        for path in ["mail/x.xlsx", "Mail/x.xlsx", "MAIL/in/x.xlsx"] {
+            let reason = refusal_of(write_register(&project, &one_sheet(path, &rows)));
+            assert!(reason.starts_with("mail_is_farik_s: "), "{path}: {reason}");
+            assert!(reason.contains(path), "{reason}");
+        }
+        assert!(
+            files_under(&procurement_folder(&project)).is_empty(),
+            "nothing was written: {:?}",
+            files_under(&procurement_folder(&project))
+        );
+        // Only the first part of a path is Farik's, and a Finance Specialist's folder has no mail.
+        write_register(&project, &one_sheet("quotes/mail.xlsx", &rows)).expect("another folder");
+        write(&project, &one_sheet("mail/books.xlsx", &rows))
             .expect("the books' own folder is the Finance Specialist's");
     }
 

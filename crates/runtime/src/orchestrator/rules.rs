@@ -5189,6 +5189,7 @@ mod tests {
                     "farik_request_data_pipeline",
                     "farik_read_data_pipelines",
                     "farik_decide_data_pipeline",
+                    "farik_draft_seller_message",
                     "farik_schedule_post",
                 ]
                 .contains(&tool.name)

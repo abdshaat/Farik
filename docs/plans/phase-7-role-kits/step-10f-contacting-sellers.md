@@ -169,7 +169,7 @@ Files: `tools/seller.rs`, `procurement.rs`, `tools.rs`, `mcp.rs`, `session.rs`, 
 
 The slice and the count go to `[..39]` and 46 here.
 
-- [ ] `feat(runtime): let the Procurement Specialist draft a message to a seller`
+- [x] `feat(runtime): let the Procurement Specialist draft a message to a seller`
 
 ### Task 3: Only the founder sends
 

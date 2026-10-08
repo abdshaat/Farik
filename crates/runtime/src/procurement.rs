@@ -630,7 +630,7 @@ const MAIL_FOLDER: &str = "mail";
 
 /// Whether the mailbox files can be kept: the folder `.farik/local/procurement/mail` of `deps`'s
 /// project, made owner-only, refused if it or any part of its path is a link.
-fn mail_dir(deps: &ToolDeps) -> Result<std::path::PathBuf, MailboxRefusal> {
+pub(crate) fn mail_dir(deps: &ToolDeps) -> Result<std::path::PathBuf, MailboxRefusal> {
     use std::os::unix::fs::DirBuilderExt as _;
     let failed = |why: String| {
         MailboxRefusal::new(
