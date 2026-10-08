@@ -38,7 +38,7 @@ use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 13] = [
+pub(super) const METHODS: [&str; 15] = [
     "team.save",
     "agent.replace",
     "team.start",
@@ -52,6 +52,8 @@ pub(super) const METHODS: [&str; 13] = [
     "connector.sign_in",
     "connector.sign_in_status",
     "connector.sign_in_cancel",
+    "procurement_mailbox.connect",
+    "procurement_mailbox.disconnect",
 ];
 
 /// The marker the setup host leaves in a project it just made one, which "Start the team" removes.
@@ -1798,6 +1800,7 @@ fn write_criteria(
 }
 
 /// The methods of this module, whose params the schema already passed.
+#[allow(clippy::too_many_lines, reason = "one arm per method")]
 pub(super) async fn call(
     state: &Arc<DaemonState>,
     method: &str,
@@ -1834,6 +1837,8 @@ pub(super) async fn call(
                 .await;
             Ok(json!({}))
         }
+        "procurement_mailbox.connect" => Box::pin(mailbox_connect(state, &deps, &params)).await,
+        "procurement_mailbox.disconnect" => mailbox_disconnect(state, &deps).await,
         "project.note" => off_the_worker(move || {
             deps.files
                 .append_project_note(
@@ -1981,6 +1986,76 @@ fn words(error: &CredentialError) -> String {
         CredentialError::NoKeychain => "this computer has no keychain".to_string(),
         CredentialError::Failed(why) => why.clone(),
     }
+}
+
+/// A mailbox command's refusal as the browser is shown it: the code, then Farik's words, with no
+/// data, as `account.connect`'s.
+fn mailbox_failure(refusal: &crate::procurement::MailboxRefusal) -> Failure {
+    Failure::new(REFUSED, refusal.to_string())
+}
+
+/// Where the procurement mailbox's password is kept in the project of `deps`.
+fn mailbox_at(state: &DaemonState, deps: &ToolDeps) -> Result<crate::mailbox::MailboxAt, Failure> {
+    state.mailbox_at(deps.files.root()).map_err(|error| {
+        Failure::new(
+            REFUSED,
+            format!(
+                "secret_store_unavailable: this project\u{2019}s id could not be read: {error}"
+            ),
+        )
+    })
+}
+
+/// `procurement_mailbox.connect`: logs in to both servers (the platform's certificates alone
+/// are trusted), then keeps the password where the connectors\u{2019} keys are kept.
+async fn mailbox_connect(
+    state: &Arc<DaemonState>,
+    deps: &Arc<ToolDeps>,
+    params: &Value,
+) -> Result<Value, Failure> {
+    let at = mailbox_at(state, deps)?;
+    let mut wire = params.clone();
+    let password = Secret::new(wire["password"].as_str().unwrap_or_default().to_string());
+    if let Some(fields) = wire.as_object_mut() {
+        fields.remove("password");
+        fields.entry("folder").or_insert(json!("INBOX"));
+        fields.entry("signature").or_insert(json!(""));
+        fields.entry("disclose_ai").or_insert(json!(true));
+    }
+    let input =
+        serde_json::from_value::<crate::procurement::MailboxConnect>(wire).map_err(|_| {
+            Failure::new(
+                REFUSED,
+                "mailbox_settings_invalid: the mailbox\u{2019}s settings do not fit.",
+            )
+        })?;
+    let secrets = state.connector_secrets();
+    crate::procurement::connect_mailbox(
+        deps,
+        &*secrets,
+        &at,
+        input,
+        &password,
+        &crate::mailbox::Trust::Platform,
+    )
+    .await
+    .map_err(|refusal| mailbox_failure(&refusal))?;
+    Ok(json!({}))
+}
+
+/// `procurement_mailbox.disconnect`.
+async fn mailbox_disconnect(
+    state: &Arc<DaemonState>,
+    deps: &Arc<ToolDeps>,
+) -> Result<Value, Failure> {
+    let at = mailbox_at(state, deps)?;
+    let (secrets, held) = (state.connector_secrets(), Arc::clone(deps));
+    off_the_worker(move || {
+        crate::procurement::disconnect_mailbox(&held, &*secrets, &at)
+            .map_err(|refusal| mailbox_failure(&refusal))
+    })
+    .await?;
+    Ok(json!({}))
 }
 
 /// `work`, which reads and writes the store, run where it cannot hold up the daemon's worker.

@@ -68,7 +68,8 @@
         "sites.list",
         "purchase_orders.list",
         "purchase_order.evaluation",
-        "renewals.list"
+        "renewals.list",
+        "procurement_mailbox.get"
       ]
     },
     "subscribeRequest": {
@@ -304,6 +305,9 @@
             },
             {
               "$ref": "#/$defs/renewalsListQuery"
+            },
+            {
+              "$ref": "#/$defs/procurementMailboxGetQuery"
             },
             {
               "$ref": "#/$defs/metricsQuery"
@@ -550,6 +554,12 @@
         },
         {
           "$ref": "#/$defs/purchaseOrderFileRequest"
+        },
+        {
+          "$ref": "#/$defs/procurementMailboxConnectRequest"
+        },
+        {
+          "$ref": "#/$defs/procurementMailboxDisconnectRequest"
         }
       ]
     },
@@ -3799,6 +3809,69 @@
             "index": { "type": "integer", "minimum": 0, "maximum": 3 }
           }
         }
+      }
+    },
+    "procurementMailboxGetQuery": {
+      "title": "Procurement Mailbox Get Query",
+      "description": "The procurement mailbox (docs/SPEC.md 6.10; ADR 0039): { connected, address?, name?, provider?, folder?, checked_at?, error?, restarted_at?, sent_today, cap }. The password is never in it. checked_at is when Farik last read the mailbox; error is Farik's own sentence about the last check that failed; restarted_at is when the provider renumbered the folder; sent_today counts the messages sent to sellers on the UTC day, of the cap.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "procurement_mailbox.get" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "mailboxServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port", "security"],
+      "properties": {
+        "host": { "type": "string", "minLength": 1, "maxLength": 253 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "security": { "type": "string", "enum": ["tls", "starttls"] }
+      }
+    },
+    "procurementMailboxConnectRequest": {
+      "title": "Procurement Mailbox Connect Request",
+      "description": "Connects the procurement mailbox (docs/SPEC.md 6.6, 6.10; ADR 0039): Farik logs in to both servers over TLS with the certificate checked, sending nothing, then keeps the password in the OS keychain (or, without one, a private file) and records mailbox.connected. provider is gmail, icloud, fastmail (whose servers Farik knows and uses in place of imap and smtp), other (the servers given) or microsoft, which is refused mailbox_provider_unsupported before any connection, as is an address at outlook.com, hotmail.com, live.com or msn.com. folder defaults to INBOX, signature to none and disclose_ai to true. A refusal of these params carries no data, as account.connect's does; a refusal of the mailbox is mailbox_login_failed, mailbox_needs_tls, mailbox_certificate, mailbox_unreachable, mailbox_server or mailbox_settings_invalid, each in Farik's words, never quoting the password. Connecting again replaces all of it. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "procurement_mailbox.connect" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["address", "name", "provider", "imap", "smtp", "username", "password"],
+          "properties": {
+            "address": { "type": "string", "minLength": 3, "maxLength": 254 },
+            "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "provider": { "type": "string", "enum": ["gmail", "icloud", "fastmail", "other", "microsoft"] },
+            "imap": { "$ref": "#/$defs/mailboxServer" },
+            "smtp": { "$ref": "#/$defs/mailboxServer" },
+            "username": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "password": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "folder": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "signature": { "type": "string", "maxLength": 600 },
+            "disclose_ai": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "procurementMailboxDisconnectRequest": {
+      "title": "Procurement Mailbox Disconnect Request",
+      "description": "Disconnects the procurement mailbox: Farik forgets its password and deletes mail/mailbox.json, keeps mail/out/ and mail/in/, and records mailbox.disconnected. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "procurement_mailbox.disconnect" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
       }
     },
     "purchaseOrderFileRequest": {

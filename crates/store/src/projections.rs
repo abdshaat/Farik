@@ -758,7 +758,17 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::DataPipelineRequested(_)
         | EventBody::DataPipelineEscalated(_)
         | EventBody::DataPipelineApproved(_)
-        | EventBody::DataPipelineDeclined(_) => Ok(()),
+        | EventBody::DataPipelineDeclined(_)
+        // The mailbox, the messages to sellers and their replies are folded from the log when
+        // they are shown (`seller_mail`); a draft's task waits on nothing.
+        | EventBody::MailboxConnected(_)
+        | EventBody::MailboxDisconnected(_)
+        | EventBody::SellerMessageDrafted(_)
+        | EventBody::SellerMessageSent(_)
+        | EventBody::SellerMessageFailed(_)
+        | EventBody::SellerMessageDiscarded(_)
+        | EventBody::SellerReplyReceived(_)
+        | EventBody::SellerReplyDismissed(_) => Ok(()),
     }
 }
 

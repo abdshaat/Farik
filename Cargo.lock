@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "adler2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+
+[[package]]
 name = "aes"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -141,10 +147,21 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "435a87a52755b8f27fcf321ac4f04b2802e337c8c4872923137471ec39c37532"
 dependencies = [
- "event-listener",
+ "event-listener 5.4.2",
  "event-listener-strategy",
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "async-channel"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81953c529336010edd6d8e358f886d9581267795c61b19475b71314bffa46d35"
+dependencies = [
+ "concurrent-queue",
+ "event-listener 2.5.3",
+ "futures-core",
 ]
 
 [[package]]
@@ -160,6 +177,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-compression"
+version = "0.4.50"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee19bd99b43e3691acbad4e840420a4881cea6c0b66a208125a824f8fd53f5a1"
+dependencies = [
+ "compression-codecs",
+ "compression-core",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "async-executor"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -171,6 +200,29 @@ dependencies = [
  "futures-lite",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "async-imap"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f97b87216c9f0ccc63c516263169085fa34bba25633f6d96c6a9b9ca1fd5f70a"
+dependencies = [
+ "async-channel 2.5.0",
+ "async-compression",
+ "base64 0.23.1",
+ "bytes",
+ "chrono",
+ "futures-util",
+ "imap-proto",
+ "log",
+ "nom",
+ "pin-project",
+ "pin-utils",
+ "self_cell",
+ "stop-token",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -197,7 +249,7 @@ version = "3.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290f7f2596bd5b78a9fec8088ccd89180d7f9f55b94b0576823bbbdc72ee8311"
 dependencies = [
- "event-listener",
+ "event-listener 5.4.2",
  "event-listener-strategy",
  "pin-project-lite",
 ]
@@ -208,14 +260,14 @@ version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc50921ec0055cdd8a16de48773bfeec5c972598674347252c0399676be7da75"
 dependencies = [
- "async-channel",
+ "async-channel 2.5.0",
  "async-io",
  "async-lock",
  "async-signal",
  "async-task",
  "blocking",
  "cfg-if",
- "event-listener",
+ "event-listener 5.4.2",
  "futures-lite",
  "rustix",
 ]
@@ -428,7 +480,7 @@ version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a70e4329df6cb94385eed412ec92375c3cdd8a6e502493d1229b6414e4036dfa"
 dependencies = [
- "async-channel",
+ "async-channel 2.5.0",
  "async-task",
  "futures-io",
  "futures-lite",
@@ -641,6 +693,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "compression-codecs"
+version = "0.4.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98fc98460ba0ad5317075d3632b8dfc45d0be8c4a49347c2a38272019717614a"
+dependencies = [
+ "compression-core",
+ "flate2",
+]
+
+[[package]]
+name = "compression-core"
+version = "0.4.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e8ccc4ea9f6acc32d102c0f6d471d11d913ad15f20c04de743374861fa1d414"
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -802,6 +870,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
+name = "email-encoding"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "420b9da095f052ea597503e39073b5b3c522f7db933fbac202d91d24492693fd"
+dependencies = [
+ "base64 0.23.1",
+ "memchr",
+]
+
+[[package]]
 name = "email_address"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -879,6 +957,12 @@ dependencies = [
 
 [[package]]
 name = "event-listener"
+version = "2.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
+
+[[package]]
+name = "event-listener"
 version = "5.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
@@ -893,7 +977,7 @@ version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
- "event-listener",
+ "event-listener 5.4.2",
  "pin-project-lite",
 ]
 
@@ -988,6 +1072,7 @@ dependencies = [
 name = "farik-runtime"
 version = "0.0.0"
 dependencies = [
+ "async-imap",
  "axum",
  "base64 0.23.1",
  "calamine",
@@ -1001,18 +1086,22 @@ dependencies = [
  "jsonschema",
  "keyring",
  "keyring-core",
+ "lettre",
+ "mail-parser",
  "oauth2",
  "reqwest",
  "rmcp",
  "rusqlite",
  "rust-embed",
  "rust_xlsxwriter",
+ "rustls-platform-verifier",
  "schemars 1.2.2",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "socket2",
  "tokio",
+ "tokio-rustls",
  "tokio-tungstenite",
  "tokio-util",
  "tower",
@@ -1056,6 +1145,8 @@ version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb"
 dependencies = [
+ "crc32fast",
+ "miniz_oxide",
  "zlib-rs",
 ]
 
@@ -1296,6 +1387,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashify"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd1246c0e5493286aeb2dde35b1f4eb9c4ce00e628641210a5e553fc001a1f26"
+dependencies = [
+ "indexmap",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "hashlink"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1338,6 +1441,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
 dependencies = [
  "digest 0.11.3",
+]
+
+[[package]]
+name = "hostname"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "617aaa3557aef3810a6369d0a99fac8a080891b68bd9f9812a1eeda0c0730cbd"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows-link",
 ]
 
 [[package]]
@@ -1582,6 +1696,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "imap-proto"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ccf963d57074747b455398a1763d174da80bcaba6f51e3671a82252b531a68b"
+dependencies = [
+ "nom",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1766,6 +1889,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "lettre"
+version = "0.11.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2c646bd5cc763b1087b15493e29a64be6147ba8f19342004fa52048ee596eae"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "email-encoding",
+ "email_address",
+ "fastrand",
+ "futures-io",
+ "futures-util",
+ "hostname",
+ "httpdate",
+ "idna",
+ "mime",
+ "nom",
+ "percent-encoding",
+ "quoted_printable",
+ "rustls",
+ "rustls-platform-verifier",
+ "socket2",
+ "tokio",
+ "tokio-rustls",
+ "url",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1816,6 +1967,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
+name = "mail-parser"
+version = "0.11.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ec00bda90c6e645a54506c630c2820cd6b1890cfd2b0a169b50f74b2b8c7c86"
+dependencies = [
+ "hashify",
+]
+
+[[package]]
 name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1856,6 +2016,16 @@ checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
 dependencies = [
  "mime",
  "unicase",
+]
+
+[[package]]
+name = "miniz_oxide"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
+dependencies = [
+ "adler2",
+ "simd-adler32",
 ]
 
 [[package]]
@@ -1913,6 +2083,15 @@ name = "nohash-hasher"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
+
+[[package]]
+name = "nom"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "num"
@@ -2087,10 +2266,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
+name = "pin-project"
+version = "1.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2466b2336ed02bcdca6b294417127b90ec92038d1d5c4fbeac971a922e0e0924"
+dependencies = [
+ "pin-project-internal",
+]
+
+[[package]]
+name = "pin-project-internal"
+version = "1.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c96395f0a926bc13b1c17622aaddda1ecb55d49c8f1bf9777e4d877800a43f8b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pin-utils"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13bee6c73da26345c729282832b60b0363cf3dd9f4bfd81d8551b7a1c889a113"
 
 [[package]]
 name = "piper"
@@ -2248,6 +2453,12 @@ checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "quoted_printable"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "478e0585659a122aa407eb7e3c0e1fa51b1d8a870038bd29f0cf4a8551eea972"
 
 [[package]]
 name = "r-efi"
@@ -2646,6 +2857,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "aws-lc-rs",
+ "log",
  "once_cell",
  "rustls-pki-types",
  "rustls-webpki",
@@ -2841,6 +3053,12 @@ dependencies = [
  "core-foundation-sys",
  "libc",
 ]
+
+[[package]]
+name = "self_cell"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ab42ca02749e120097e328d91d415325bdf43b1c72c4c8badf37375fe40a813"
 
 [[package]]
 name = "semver"
@@ -3099,6 +3317,18 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "stop-token"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af91f480ee899ab2d9f8435bfdfc14d08a5754bd9d3fef1f1a1c23336aad6c8b"
+dependencies = [
+ "async-channel 1.9.0",
+ "cfg-if",
+ "futures-core",
+ "pin-project-lite",
+]
 
 [[package]]
 name = "strsim"
@@ -4025,7 +4255,7 @@ dependencies = [
  "async-trait",
  "blocking",
  "enumflags2",
- "event-listener",
+ "event-listener 5.4.2",
  "futures-core",
  "futures-lite",
  "hex",

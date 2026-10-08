@@ -149,7 +149,15 @@
         "data_pipeline.requested",
         "data_pipeline.escalated",
         "data_pipeline.approved",
-        "data_pipeline.declined"
+        "data_pipeline.declined",
+        "mailbox.connected",
+        "mailbox.disconnected",
+        "seller_message.drafted",
+        "seller_message.sent",
+        "seller_message.failed",
+        "seller_message.discarded",
+        "seller_reply.received",
+        "seller_reply.dismissed"
       ]
     },
     "eventBodyWire": {
@@ -238,7 +246,15 @@
         { "$ref": "#/$defs/dataPipelineRequestedBody" },
         { "$ref": "#/$defs/dataPipelineEscalatedBody" },
         { "$ref": "#/$defs/dataPipelineApprovedBody" },
-        { "$ref": "#/$defs/dataPipelineDeclinedBody" }
+        { "$ref": "#/$defs/dataPipelineDeclinedBody" },
+        { "$ref": "#/$defs/mailboxConnectedBody" },
+        { "$ref": "#/$defs/mailboxDisconnectedBody" },
+        { "$ref": "#/$defs/sellerMessageDraftedBody" },
+        { "$ref": "#/$defs/sellerMessageSentBody" },
+        { "$ref": "#/$defs/sellerMessageFailedBody" },
+        { "$ref": "#/$defs/sellerMessageDiscardedBody" },
+        { "$ref": "#/$defs/sellerReplyReceivedBody" },
+        { "$ref": "#/$defs/sellerReplyDismissedBody" }
       ]
     },
     "contractSummary": {
@@ -1528,6 +1544,131 @@
         "pipeline": { "$ref": "#/$defs/dataPipelineNumber" },
         "by": { "$ref": "#/$defs/dataPipelineDecidedBy" },
         "reason": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "mailboxPurpose": {
+      "type": "string",
+      "enum": ["procurement"],
+      "description": "What a mailbox is for. Only the Procurement Specialist's before phase 14, whose receipts intake adds a second."
+    },
+    "sellerMessageNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615,
+      "description": "A message to a seller: one more than the highest number among the log's and the files' (mail/out/<n>.txt), taken under a lock."
+    },
+    "sellerReplyNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615,
+      "description": "A reply from a seller: one more than the highest number among the log's and the files'."
+    },
+    "mailboxConnectedBody": {
+      "title": "Mailbox Connected Body",
+      "description": "The owner connected a mailbox for a purpose and Farik logged in to both of its servers (docs/SPEC.md 6.6, 6.10; ADR 0039). address is the one mail is sent from and read for. The password is in the OS keychain, never here. The envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "address"],
+      "properties": {
+        "purpose": { "$ref": "#/$defs/mailboxPurpose" },
+        "address": { "type": "string", "minLength": 3, "maxLength": 254, "pattern": "^[^\\s\\u0000-\\u001f]+$" }
+      }
+    },
+    "mailboxDisconnectedBody": {
+      "title": "Mailbox Disconnected Body",
+      "description": "The owner disconnected a mailbox: Farik forgot its password and stopped reading it; the messages and replies kept stay (docs/SPEC.md 6.6, 6.10). The envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose"],
+      "properties": {
+        "purpose": { "$ref": "#/$defs/mailboxPurpose" }
+      }
+    },
+    "sellerMessageDraftedBody": {
+      "title": "Seller Message Drafted Body",
+      "description": "The Procurement Specialist drafted a message to a seller or a maker, written to mail/out/<message>.txt in its private folder (docs/SPEC.md 6.10; ADR 0039). Nothing is sent: only the owner's press sends it. seller, to, subject and the file's body are the agent's own words (untrusted, shown as text); to is one address; purpose is quote_request, question (a follow-up when it names a placed order) or purchase_order, which names its order and is sent only with that order's approval; sha256 is the draft file's. The envelope names the task, agent and session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "seller", "to", "subject", "purpose", "sha256"],
+      "properties": {
+        "message": { "$ref": "#/$defs/sellerMessageNumber" },
+        "seller": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[^\\r\\n]+$" },
+        "to": { "type": "string", "minLength": 3, "maxLength": 254, "pattern": "^[^\\s\\u0000-\\u001f]+$" },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
+        "purpose": { "type": "string", "enum": ["quote_request", "question", "purchase_order"] },
+        "purchase_order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "sellerMessageSentBody": {
+      "title": "Seller Message Sent Body",
+      "description": "Farik sent a message to a seller because the owner pressed Send, or Approve and send for an order's (docs/SPEC.md 6.10; ADR 0039). message_id is the Message-ID it went out with, without angle brackets; sha256 is that of mail/out/<message>.sent.txt, the subject line, a blank line and exactly the text sent; edited is true when the owner changed the subject or the body. The envelope names no agent and no session: no Farik tool records a send.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "message_id", "sha256", "edited"],
+      "properties": {
+        "message": { "$ref": "#/$defs/sellerMessageNumber" },
+        "message_id": { "type": "string", "minLength": 3, "maxLength": 300, "pattern": "^[^\\s<>]+@[^\\s<>]+$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "edited": { "type": "boolean" }
+      }
+    },
+    "sellerMessageFailedBody": {
+      "title": "Seller Message Failed Body",
+      "description": "A mail server refused a message the owner pressed Send on; it waits to be tried again (docs/SPEC.md 6.10). why is Farik's own sentence, never the server's words. The envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "why"],
+      "properties": {
+        "message": { "$ref": "#/$defs/sellerMessageNumber" },
+        "why": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "sellerMessageDiscardedBody": {
+      "title": "Seller Message Discarded Body",
+      "description": "The owner discarded a message to a seller; nothing was sent (docs/SPEC.md 6.10). The envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": {
+        "message": { "$ref": "#/$defs/sellerMessageNumber" }
+      }
+    },
+    "sellerReplyAttachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kept", "bytes"],
+      "description": "One attachment of a reply. name is the seller's file name, only ever text; kept is true for a PDF, PNG or JPEG of 10 MB or less, saved under a name made from its bytes; media_type is set when kept.",
+      "properties": {
+        "name": { "type": "string", "maxLength": 255 },
+        "kept": { "type": "boolean" },
+        "media_type": { "type": "string", "enum": ["application/pdf", "image/png", "image/jpeg"] },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 }
+      }
+    },
+    "sellerReplyReceivedBody": {
+      "title": "Seller Reply Received Body",
+      "description": "Farik read a message in the procurement mailbox that answers a message it sent or comes from an address it wrote to, addressed to the procurement address (docs/SPEC.md 6.10, 8.6). reply is its number; message is the sent message it answers; from and subject are the seller's own words (untrusted); the text and kept attachments are under mail/in/. The envelope names no agent and no session: a check is Farik's, with no model.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reply", "message", "from", "subject", "attachments"],
+      "properties": {
+        "reply": { "$ref": "#/$defs/sellerReplyNumber" },
+        "message": { "$ref": "#/$defs/sellerMessageNumber" },
+        "from": { "type": "string", "minLength": 1, "maxLength": 320 },
+        "subject": { "type": "string", "maxLength": 998 },
+        "date": { "type": "string", "format": "date-time" },
+        "attachments": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/sellerReplyAttachment" } }
+      }
+    },
+    "sellerReplyDismissedBody": {
+      "title": "Seller Reply Dismissed Body",
+      "description": "The owner dismissed a reply on Today (docs/SPEC.md 6.10); it stays kept. The envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reply"],
+      "properties": {
+        "reply": { "$ref": "#/$defs/sellerReplyNumber" }
       }
     },
     "connectorTag": {

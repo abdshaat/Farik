@@ -245,6 +245,40 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "by": "product_manager",
             "reason": "The plain pages answer the question, so use them."
         }),
+        EventKind::MailboxConnected => json!({
+            "purpose": "procurement",
+            "address": "buying@bakery.test"
+        }),
+        EventKind::MailboxDisconnected => json!({ "purpose": "procurement" }),
+        EventKind::SellerMessageDrafted => json!({
+            "message": 3,
+            "seller": "Pie Box Pros",
+            "to": "sales@pieboxpros.test",
+            "subject": "Quote for 500 printed pie boxes",
+            "purpose": "quote_request",
+            "sha256": "9f2b0c1d5e7a4b3c8d6e1f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c"
+        }),
+        EventKind::SellerMessageSent => json!({
+            "message": 3,
+            "message_id": "0b9d6f7e-1c2a-4f3b-8a5d-6e7f8091a2b3@bakery.test",
+            "sha256": "9f2b0c1d5e7a4b3c8d6e1f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c",
+            "edited": false
+        }),
+        EventKind::SellerMessageFailed => json!({
+            "message": 3,
+            "why": "the mailbox did not accept its sign-in; connect it again"
+        }),
+        EventKind::SellerMessageDiscarded => json!({ "message": 3 }),
+        EventKind::SellerReplyReceived => json!({
+            "reply": 1,
+            "message": 3,
+            "from": "Dana Reyes <sales@pieboxpros.test>",
+            "subject": "Re: Quote for 500 printed pie boxes",
+            "attachments": [
+                { "name": "quote.pdf", "kept": true, "media_type": "application/pdf", "bytes": 48213 }
+            ]
+        }),
+        EventKind::SellerReplyDismissed => json!({ "reply": 1 }),
         EventKind::MarketingCampaignCreated => json!({
             "plan": "MP-1",
             "key": "search-launch",

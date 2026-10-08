@@ -53,6 +53,14 @@ pub use crate::generated::event::{
     DataPipelineApprovedBody, DataPipelineCost, DataPipelineDecidedBy, DataPipelineDeclinedBody,
     DataPipelineEscalatedBody, DataPipelineNumber, DataPipelineRequestedBody,
 };
+/// The bodies of the eight mailbox and seller mail kinds (`mailbox.`, `seller_message.`,
+/// `seller_reply.`), with the vocabularies they repeat.
+pub use crate::generated::event::{
+    MailboxConnectedBody, MailboxDisconnectedBody, MailboxPurpose, SellerMessageDiscardedBody,
+    SellerMessageDraftedBody, SellerMessageDraftedBodyPurpose as SellerMessagePurpose,
+    SellerMessageFailedBody, SellerMessageSentBody, SellerReplyAttachment,
+    SellerReplyAttachmentMediaType, SellerReplyDismissedBody, SellerReplyReceivedBody,
+};
 /// The channel's vocabularies, named for what they are rather than for the body they sit in.
 pub use crate::generated::event::{MessagePostedBodyKind as MessageKind, Thread};
 /// The bodies of the eight `purchase_order.` kinds, with the vocabularies they repeat: an
@@ -127,6 +135,7 @@ static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
 });
 
 /// The name `docs/schemas/event.schema.json` gives one kind's body shape.
+#[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
 fn body_def_name(kind: EventKind) -> &'static str {
     match kind {
         EventKind::TaskCreated => "taskCreatedBody",
@@ -222,6 +231,14 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::DataPipelineEscalated => "dataPipelineEscalatedBody",
         EventKind::DataPipelineApproved => "dataPipelineApprovedBody",
         EventKind::DataPipelineDeclined => "dataPipelineDeclinedBody",
+        EventKind::MailboxConnected => "mailboxConnectedBody",
+        EventKind::MailboxDisconnected => "mailboxDisconnectedBody",
+        EventKind::SellerMessageDrafted => "sellerMessageDraftedBody",
+        EventKind::SellerMessageSent => "sellerMessageSentBody",
+        EventKind::SellerMessageFailed => "sellerMessageFailedBody",
+        EventKind::SellerMessageDiscarded => "sellerMessageDiscardedBody",
+        EventKind::SellerReplyReceived => "sellerReplyReceivedBody",
+        EventKind::SellerReplyDismissed => "sellerReplyDismissedBody",
     }
 }
 
@@ -278,6 +295,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::PurchaseOrderClosed
             | EventKind::PurchaseOrderExpired
             | EventKind::DataPipelineRequested
+            | EventKind::SellerMessageDrafted
     )
 }
 
@@ -304,6 +322,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// other three are the owner's. Nor do the four `data_pipeline.` kinds: the agent that asked is on
 /// the envelope of `data_pipeline.requested`, and `by` of an approval or a decline says whether
 /// the Product Manager or the owner decided it.
+#[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -398,13 +417,21 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::DataPipelineRequested(_)
         | EventBody::DataPipelineEscalated(_)
         | EventBody::DataPipelineApproved(_)
-        | EventBody::DataPipelineDeclined(_) => None,
+        | EventBody::DataPipelineDeclined(_)
+        | EventBody::MailboxConnected(_)
+        | EventBody::MailboxDisconnected(_)
+        | EventBody::SellerMessageDrafted(_)
+        | EventBody::SellerMessageSent(_)
+        | EventBody::SellerMessageFailed(_)
+        | EventBody::SellerMessageDiscarded(_)
+        | EventBody::SellerReplyReceived(_)
+        | EventBody::SellerReplyDismissed(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 93] = [
+pub const EVERY_KIND: [EventKind; 101] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -498,6 +525,14 @@ pub const EVERY_KIND: [EventKind; 93] = [
     EventKind::DataPipelineEscalated,
     EventKind::DataPipelineApproved,
     EventKind::DataPipelineDeclined,
+    EventKind::MailboxConnected,
+    EventKind::MailboxDisconnected,
+    EventKind::SellerMessageDrafted,
+    EventKind::SellerMessageSent,
+    EventKind::SellerMessageFailed,
+    EventKind::SellerMessageDiscarded,
+    EventKind::SellerReplyReceived,
+    EventKind::SellerReplyDismissed,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -818,11 +853,36 @@ pub enum EventBody {
     /// A data pipeline request was declined.
     #[serde(rename = "data_pipeline.declined")]
     DataPipelineDeclined(DataPipelineDeclinedBody),
+    /// The owner connected a mailbox, and Farik logged in to both of its servers.
+    #[serde(rename = "mailbox.connected")]
+    MailboxConnected(MailboxConnectedBody),
+    /// The owner disconnected a mailbox.
+    #[serde(rename = "mailbox.disconnected")]
+    MailboxDisconnected(MailboxDisconnectedBody),
+    /// The Procurement Specialist drafted a message to a seller.
+    #[serde(rename = "seller_message.drafted")]
+    SellerMessageDrafted(SellerMessageDraftedBody),
+    /// Farik sent a message to a seller on the owner's press.
+    #[serde(rename = "seller_message.sent")]
+    SellerMessageSent(SellerMessageSentBody),
+    /// A mail server refused a message the owner pressed Send on.
+    #[serde(rename = "seller_message.failed")]
+    SellerMessageFailed(SellerMessageFailedBody),
+    /// The owner discarded a message to a seller.
+    #[serde(rename = "seller_message.discarded")]
+    SellerMessageDiscarded(SellerMessageDiscardedBody),
+    /// Farik read a seller's reply in the procurement mailbox.
+    #[serde(rename = "seller_reply.received")]
+    SellerReplyReceived(SellerReplyReceivedBody),
+    /// The owner dismissed a seller's reply on Today.
+    #[serde(rename = "seller_reply.dismissed")]
+    SellerReplyDismissed(SellerReplyDismissedBody),
 }
 
 impl EventBody {
     /// The kind of event this body belongs to.
     #[must_use]
+    #[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
     pub fn kind(&self) -> EventKind {
         match self {
             Self::TaskCreated(_) => EventKind::TaskCreated,
@@ -918,6 +978,14 @@ impl EventBody {
             Self::DataPipelineEscalated(_) => EventKind::DataPipelineEscalated,
             Self::DataPipelineApproved(_) => EventKind::DataPipelineApproved,
             Self::DataPipelineDeclined(_) => EventKind::DataPipelineDeclined,
+            Self::MailboxConnected(_) => EventKind::MailboxConnected,
+            Self::MailboxDisconnected(_) => EventKind::MailboxDisconnected,
+            Self::SellerMessageDrafted(_) => EventKind::SellerMessageDrafted,
+            Self::SellerMessageSent(_) => EventKind::SellerMessageSent,
+            Self::SellerMessageFailed(_) => EventKind::SellerMessageFailed,
+            Self::SellerMessageDiscarded(_) => EventKind::SellerMessageDiscarded,
+            Self::SellerReplyReceived(_) => EventKind::SellerReplyReceived,
+            Self::SellerReplyDismissed(_) => EventKind::SellerReplyDismissed,
         }
     }
 }
@@ -1084,6 +1152,15 @@ fn site_fault(body: &EventBody) -> Option<&'static str> {
         }
         EventBody::SiteApproved(body) if body.note.is_some() && body.request.is_none() => {
             Some("a note goes with the request it answers")
+        }
+        // The schema cannot say which purpose goes with an order: an order's message names its
+        // order, a quote request names none, and a question names a placed one for a follow-up.
+        EventBody::SellerMessageDrafted(body)
+            if (body.purpose == SellerMessagePurpose::PurchaseOrder)
+                != body.purchase_order.is_some()
+                && body.purpose != SellerMessagePurpose::Question =>
+        {
+            Some("an order's message names its order, and no other purpose but a question does")
         }
         _ => None,
     }
@@ -1927,7 +2004,109 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 93);
+        assert_eq!(EVERY_KIND.len(), 101);
+    }
+
+    #[test]
+    fn round_trips_every_seller_mail_event() {
+        let kinds = [
+            EventKind::MailboxConnected,
+            EventKind::MailboxDisconnected,
+            EventKind::SellerMessageDrafted,
+            EventKind::SellerMessageSent,
+            EventKind::SellerMessageFailed,
+            EventKind::SellerMessageDiscarded,
+            EventKind::SellerReplyReceived,
+            EventKind::SellerReplyDismissed,
+        ];
+        for kind in kinds {
+            assert!(EVERY_KIND.contains(&kind), "{kind} is counted");
+            let wire = a_full_event_wire(kind);
+            let event = event_from_value(&wire).expect("a valid mail event");
+            assert_eq!(event.body.kind(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+            // A draft is about its task; the founder's press, a failure and a reply are not
+            // recorded about one.
+            assert_eq!(
+                is_about_one_contract(kind),
+                kind == EventKind::SellerMessageDrafted,
+                "{kind}"
+            );
+        }
+        assert_eq!(EVERY_KIND.len(), 101);
+
+        let remove = |kind: EventKind, field: &str| {
+            let mut wire = an_event_wire(kind);
+            wire["body"]
+                .as_object_mut()
+                .expect("an object")
+                .remove(field);
+            wire
+        };
+        assert!(
+            !refusal(&remove(EventKind::SellerMessageSent, "sha256")).is_empty(),
+            "a sent message without the file's hash"
+        );
+        // An order's message names its order; the schema holds it to the purpose.
+        let mut order_message = an_event_wire(EventKind::SellerMessageDrafted);
+        order_message["body"]["purpose"] = json!("purchase_order");
+        order_message["body"]
+            .as_object_mut()
+            .expect("an object")
+            .remove("purchase_order");
+        assert!(
+            !refusal(&order_message).is_empty(),
+            "an order's message without its order"
+        );
+        order_message["body"]["purchase_order"] = json!(12);
+        event_from_value(&order_message).expect("an order's message with its order");
+        let mut quote = an_event_wire(EventKind::SellerMessageDrafted);
+        quote["body"]["purchase_order"] = json!(12);
+        assert!(
+            !refusal(&quote).is_empty(),
+            "a quote request naming an order"
+        );
+        // Only the procurement mailbox exists before phase 14's receipts.
+        for kind in [EventKind::MailboxConnected, EventKind::MailboxDisconnected] {
+            let mut wire = an_event_wire(kind);
+            wire["body"]["purpose"] = json!("receipts");
+            assert!(!refusal(&wire).is_empty(), "{kind} of purpose receipts");
+        }
+        for (field, value) in [
+            ("seller", json!("")),
+            ("seller", json!("Pie\nBox")),
+            ("to", json!("")),
+            ("subject", json!("x".repeat(201))),
+            ("subject", json!("Two\nlines")),
+            ("purpose", json!("buy")),
+            ("sha256", json!("abc")),
+            ("message", json!(0)),
+        ] {
+            let mut wire = an_event_wire(EventKind::SellerMessageDrafted);
+            wire["body"][field] = value.clone();
+            assert!(!refusal(&wire).is_empty(), "{field} {value}");
+        }
+        for (kind, field, value) in [
+            (EventKind::SellerMessageSent, "edited", json!("no")),
+            (
+                EventKind::SellerMessageSent,
+                "message_id",
+                json!("has space@x.test"),
+            ),
+            (EventKind::SellerMessageFailed, "why", json!("")),
+            (EventKind::SellerReplyReceived, "message", json!(0)),
+            (EventKind::SellerReplyReceived, "from", json!("")),
+            (
+                EventKind::SellerReplyReceived,
+                "attachments",
+                json!([{ "name": "a.pdf" }]),
+            ),
+            (EventKind::SellerReplyDismissed, "reply", json!(0)),
+        ] {
+            let mut wire = an_event_wire(kind);
+            wire["body"][field] = value.clone();
+            assert!(!refusal(&wire).is_empty(), "{kind} {field} {value}");
+        }
     }
 
     #[test]
@@ -1952,7 +2131,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 93);
+        assert_eq!(EVERY_KIND.len(), 101);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2093,7 +2272,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 93);
+        assert_eq!(EVERY_KIND.len(), 101);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -2408,7 +2587,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 93);
+        assert_eq!(EVERY_KIND.len(), 101);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

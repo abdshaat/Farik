@@ -49,10 +49,25 @@ impl SecretAt {
         })
     }
 
+    /// What a mailbox's password is kept under (step 10f): the account of a connector with no
+    /// agent, `mailbox:<project_id>:<purpose>`.
+    #[must_use]
+    pub fn mailbox(project_id: &str, purpose: &str) -> SecretAt {
+        SecretAt {
+            project_id: project_id.to_string(),
+            agent_id: String::new(),
+            server: purpose.to_string(),
+        }
+    }
+
     /// The keychain account, and the key in `connectors.json`:
-    /// `connector:<project_id>:<agent_id>:<server>`.
+    /// `connector:<project_id>:<agent_id>:<server>`; a mailbox's, which has no agent, is
+    /// `mailbox:<project_id>:<purpose>`.
     #[must_use]
     pub fn account(&self) -> String {
+        if self.agent_id.is_empty() {
+            return format!("mailbox:{}:{}", self.project_id, self.server);
+        }
         format!(
             "connector:{}:{}:{}",
             self.project_id, self.agent_id, self.server

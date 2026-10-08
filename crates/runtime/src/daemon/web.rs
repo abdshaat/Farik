@@ -621,7 +621,12 @@ const SETUP_METHODS: [&str; 5] = [
 ];
 /// The methods whose params hold a secret, whose refusal never quotes them: the schema's errors
 /// quote the whole frame.
-const SECRET_METHODS: [&str; 3] = ["account.connect", "connector.connect", "connector.tools"];
+const SECRET_METHODS: [&str; 4] = [
+    "account.connect",
+    "connector.connect",
+    "connector.tools",
+    "procurement_mailbox.connect",
+];
 
 /// The id a response to `request` carries: its own when it is an integer, else `null`.
 fn id_of(request: &Value) -> Value {
@@ -3195,5 +3200,22 @@ mod tests {
         .await;
         assert_eq!(refused["error"]["code"], -32005, "{text}");
         assert!(!text.contains(secret), "{text}");
+    }
+    #[tokio::test(flavor = "multi_thread")]
+    async fn never_echoes_the_mailbox_password() {
+        let home = scratch("mailbox-secret");
+        let (state, _) = in_setup(&home, "");
+        let word = "lemon-curd-7731";
+        // A frame that does not fit the schema is refused without quoting its params, whose
+        // password the schema's own errors would otherwise print.
+        let (text, malformed) = asked(
+            &state,
+            "procurement_mailbox.connect",
+            &json!({ "address": "buying@bakery.test", "password": word, "provider": "mars" }),
+        )
+        .await;
+        assert_eq!(malformed["error"]["code"], -32602, "{text}");
+        assert!(malformed["error"].get("data").is_none(), "{text}");
+        assert!(!text.contains(word), "{text}");
     }
 }

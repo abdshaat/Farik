@@ -35,6 +35,8 @@ pub mod renewals;
 pub mod requests;
 /// What the repository says it is.
 pub mod scan;
+/// The messages to sellers and the replies the log holds.
+pub mod seller_mail;
 /// The sites the Procurement Specialist may read.
 pub mod sites;
 /// What waits on the human.

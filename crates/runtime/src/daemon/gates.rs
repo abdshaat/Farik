@@ -286,6 +286,9 @@ pub(super) fn query(
             marketing_plan_get(state, deps, params["plan"].as_str().unwrap_or(""))
         }
         "sites.list" => crate::tools::sites::site_list(&deps.log).map_err(|e| internal(&e)),
+        "procurement_mailbox.get" => {
+            crate::procurement::mailbox_state(deps).map_err(|e| internal(&e))
+        }
         "purchase_orders.list" => {
             crate::procurement::purchase_orders_list(&deps.log, deps.clock.now().date_naive())
                 .map_err(|e| internal(&e))

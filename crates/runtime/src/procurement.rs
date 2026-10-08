@@ -14,8 +14,9 @@ use farik_core::pipeline::PipelineCost;
 use farik_core::renewals::{RegisterRow, due_renewals};
 use farik_core::team::{Team, private_folder};
 use farik_protocol::event::{
-    EventBody, EventIds, PurchaseOrderExpiredBody, PurchaseOrderStatus, RenewalCheckedBody,
-    RenewalFlaggedBody, new_event,
+    EventBody, EventIds, MailboxConnectedBody, MailboxDisconnectedBody, MailboxPurpose,
+    PurchaseOrderExpiredBody, PurchaseOrderStatus, RenewalCheckedBody, RenewalFlaggedBody,
+    new_event,
 };
 use farik_roles::{Kit, KitConnector};
 use farik_store::pipelines::{PipelineRecord, data_pipelines};
@@ -24,10 +25,17 @@ use farik_store::renewals::{last_check, renewals};
 use farik_store::requests::{
     RequestError, file_request, placeholder_budget_usd, request_from_text,
 };
+use farik_store::seller_mail::{seller_mail, sent_on};
 use farik_store::waiting::PipelineAsk;
 use farik_store::{EventLog, StoreError};
 use serde_json::{Value, json};
 
+use crate::claude::Secret;
+use crate::credential::CredentialError;
+use crate::mailbox::{
+    Ledger, MailboxAt, MailboxError, MailboxSecrets, MailboxSettings, ProviderChoice, ProviderOf,
+    Server, Trust, check_login, provider_of, servers, validate_settings,
+};
 use crate::tools::{ToolDeps, ToolError};
 
 /// Held from the first read of the orders to the record that changes them: by the agent's draft,
@@ -35,6 +43,15 @@ use crate::tools::{ToolDeps, ToolError};
 /// one number, decide one order twice or expire an order being placed. One lock for every project
 /// in the process.
 pub(crate) static ORDERS: Mutex<()> = Mutex::new(());
+
+/// Held by everything that numbers, writes, discards or counts a message to a seller or a reply,
+/// and by connecting the mailbox: drafting, the first and last steps of a send, discarding, the
+/// check, and connecting, so that two of them never take one number or send one message twice.
+/// A std lock, as `ORDERS` is: every tool handler is a plain function called from async code, so
+/// an async lock could not be taken by a draft, and a std guard cannot be held across a server.
+/// A send holds this lock to claim its message, lets it go while it talks to the servers, and takes
+/// it again to record, with the claim (`SENDING`) refusing a second send meanwhile.
+pub(crate) static MAIL: Mutex<()> = Mutex::new(());
 
 /// Held from the first read of the renewals to the record that changes them: by the daily check
 /// and by the owner's dismissal.
@@ -608,6 +625,304 @@ fn checked_body(due: usize, unreadable: u32) -> Result<RenewalCheckedBody, serde
     }))
 }
 
+/// The folder of the procurement mailbox's files under `root`: `.farik/local/procurement/mail`.
+const MAIL_FOLDER: &str = "mail";
+
+/// Whether the mailbox files can be kept: the folder `.farik/local/procurement/mail` of `deps`'s
+/// project, made owner-only, refused if it or any part of its path is a link.
+fn mail_dir(deps: &ToolDeps) -> Result<std::path::PathBuf, MailboxRefusal> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    let failed = |why: String| {
+        MailboxRefusal::new(
+            "mailbox_files",
+            format!("The mailbox\u{2019}s folder could not be made: {why}"),
+        )
+    };
+    let folder = private_folder(Role::ProcurementSpecialist)
+        .ok_or_else(|| failed("the role has no folder".to_string()))?;
+    let mut at = deps.files.root().to_path_buf();
+    for part in folder.split('/').chain([MAIL_FOLDER]) {
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(failed(format!("{} is a link", at.display())));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::DirBuilder::new()
+                    .mode(0o700)
+                    .create(&at)
+                    .map_err(|error| failed(error.to_string()))?;
+            }
+            Err(error) => return Err(failed(error.to_string())),
+        }
+    }
+    Ok(at)
+}
+
+/// What the owner connects: the mailbox's settings but the password, with the provider as chosen
+/// on the page (which can be Microsoft, refused).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MailboxConnect {
+    /// The address mail is sent from and read for.
+    pub address: String,
+    /// The name sellers see.
+    pub name: String,
+    /// The provider chosen.
+    pub provider: ProviderChoice,
+    /// Where mail is read.
+    pub imap: Server,
+    /// Where mail is sent.
+    pub smtp: Server,
+    /// The sign-in name.
+    pub username: String,
+    /// The folder Farik reads.
+    pub folder: String,
+    /// What Farik adds under every message.
+    pub signature: String,
+    /// Whether Farik says an AI assistant wrote it.
+    pub disclose_ai: bool,
+}
+
+/// Why a mailbox command was refused: a code and Farik's words, which never quote the password.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MailboxRefusal {
+    /// The refusal code the owner is shown.
+    pub code: &'static str,
+    /// Farik's words.
+    pub words: String,
+}
+
+impl MailboxRefusal {
+    fn new(code: &'static str, words: impl Into<String>) -> MailboxRefusal {
+        MailboxRefusal {
+            code,
+            words: words.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for MailboxRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.words)
+    }
+}
+
+impl From<MailboxError> for MailboxRefusal {
+    fn from(error: MailboxError) -> MailboxRefusal {
+        MailboxRefusal::new(error.code(), error.to_string())
+    }
+}
+
+/// The refusal for a key store that could not keep or forget the password.
+fn store_refusal(error: CredentialError) -> MailboxRefusal {
+    let words = match error {
+        CredentialError::NoKeychain => {
+            "this computer has no keychain to keep the password in".to_string()
+        }
+        CredentialError::Failed(why) => why,
+    };
+    MailboxRefusal::new("secret_store_unavailable", words)
+}
+
+fn mail_failed(error: impl std::fmt::Display) -> MailboxRefusal {
+    MailboxRefusal::new(
+        "mailbox_files",
+        format!("Farik could not keep the mailbox: {error}"),
+    )
+}
+
+/// Connects the procurement mailbox: refuses Microsoft before any connection, checks the fields,
+/// logs in to both servers (sending nothing), then keeps the password as a secret in `secrets`,
+/// writes `mail/mailbox.json` and `mail/ledger.json` (which starts after the last message there
+/// is) and records `mailbox.connected`. Connecting again replaces all of it.
+///
+/// # Errors
+///
+/// `mailbox_provider_unsupported` for Microsoft, `mailbox_settings_invalid` naming the field, any
+/// of `MailboxError`'s codes from the logins, `mailbox_files` when the files or the record could
+/// not be written, and the key store's own words when the password could not be kept.
+pub(crate) async fn connect_mailbox(
+    deps: &ToolDeps,
+    secrets: &(impl MailboxSecrets + ?Sized),
+    at: &MailboxAt,
+    input: MailboxConnect,
+    password: &Secret,
+    trust: &Trust,
+) -> Result<(), MailboxRefusal> {
+    let unsupported = || {
+        MailboxRefusal::new(
+            "mailbox_provider_unsupported",
+            "Microsoft mailboxes are not supported yet.",
+        )
+    };
+    let provider = input.provider.known().ok_or_else(unsupported)?;
+    if provider_of(&input.address) == ProviderOf::Microsoft {
+        return Err(unsupported());
+    }
+    let (imap, smtp) = match servers(provider) {
+        Some((imap, smtp)) => (imap, smtp),
+        None => (input.imap.clone(), input.smtp.clone()),
+    };
+    let settings = MailboxSettings {
+        address: input.address,
+        name: input.name,
+        provider,
+        imap,
+        smtp,
+        username: input.username,
+        folder: input.folder,
+        signature: input.signature,
+        disclose_ai: input.disclose_ai,
+    };
+    validate_settings(&settings).map_err(|field| {
+        MailboxRefusal::new(
+            "mailbox_settings_invalid",
+            format!("The {field} of the mailbox does not fit."),
+        )
+    })?;
+    let mut ledger = check_login(&settings, password, trust).await?;
+    let _held = crate::locked(&MAIL);
+    ledger.checked_at = None;
+    let dir = mail_dir(deps)?;
+    secrets.save(at, password).map_err(store_refusal)?;
+    let write = |name: &str, value: &Value| {
+        crate::write_private(&dir.join(name), value.to_string().as_bytes()).map_err(mail_failed)
+    };
+    write(
+        "mailbox.json",
+        &serde_json::to_value(&settings).map_err(mail_failed)?,
+    )?;
+    write(
+        "ledger.json",
+        &serde_json::to_value(&ledger).map_err(mail_failed)?,
+    )?;
+    let body = EventBody::MailboxConnected(MailboxConnectedBody {
+        purpose: MailboxPurpose::Procurement,
+        address: settings.address.parse().map_err(mail_failed)?,
+    });
+    record_unattended(deps, body, None).map_err(mail_failed)
+}
+
+/// Records `body` as Farik's own: the envelope names no agent and no session, and `task` when the
+/// event is about one.
+fn record_unattended(
+    deps: &ToolDeps,
+    body: EventBody,
+    task: Option<TaskId>,
+) -> Result<(), ToolError> {
+    let ids = EventIds {
+        task_id: task,
+        ..deps.ids.clone()
+    };
+    let event = new_event(body, deps.clock.now(), ids).map_err(|error| ToolError::Failed {
+        detail: format!("the event cannot be stamped: {error:?}"),
+    })?;
+    let appended = deps.log.append(&event).map_err(|error| ToolError::Failed {
+        detail: error.to_string(),
+    })?;
+    deps.projections
+        .apply(&appended)
+        .map_err(|error| ToolError::Failed {
+            detail: error.to_string(),
+        })
+}
+
+/// Disconnects the procurement mailbox: forgets its password and deletes `mail/mailbox.json`, keeps
+/// `mail/out/` and `mail/in/`, and records `mailbox.disconnected`. Nothing connected is nothing to
+/// forget and records nothing.
+///
+/// # Errors
+///
+/// The key store's or the files' own words, or the record's.
+pub(crate) fn disconnect_mailbox(
+    deps: &ToolDeps,
+    secrets: &(impl MailboxSecrets + ?Sized),
+    at: &MailboxAt,
+) -> Result<(), MailboxRefusal> {
+    let _held = crate::locked(&MAIL);
+    let dir = mail_dir(deps)?;
+    let settings = dir.join("mailbox.json");
+    let was_connected = settings.exists();
+    secrets.delete(at).map_err(store_refusal)?;
+    match std::fs::remove_file(&settings) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(mail_failed(error));
+        }
+        _ => {}
+    }
+    if was_connected {
+        record_unattended(
+            deps,
+            EventBody::MailboxDisconnected(MailboxDisconnectedBody {
+                purpose: MailboxPurpose::Procurement,
+            }),
+            None,
+        )
+        .map_err(mail_failed)?;
+    }
+    Ok(())
+}
+
+/// The settings kept in `mail/mailbox.json`, when a mailbox is connected.
+pub(crate) fn mailbox_settings(deps: &ToolDeps) -> Option<MailboxSettings> {
+    let at = deps
+        .files
+        .root()
+        .join(private_folder(Role::ProcurementSpecialist)?)
+        .join(MAIL_FOLDER)
+        .join("mailbox.json");
+    serde_json::from_str(&std::fs::read_to_string(at).ok()?).ok()
+}
+
+/// The ledger kept in `mail/ledger.json`, when there is one.
+pub(crate) fn mailbox_ledger(deps: &ToolDeps) -> Option<Ledger> {
+    let at = deps
+        .files
+        .root()
+        .join(private_folder(Role::ProcurementSpecialist)?)
+        .join(MAIL_FOLDER)
+        .join("ledger.json");
+    serde_json::from_str(&std::fs::read_to_string(at).ok()?).ok()
+}
+
+/// The most messages Farik sends to sellers in a UTC day.
+pub const MOST_SENT_A_DAY: u32 = 50;
+
+/// What `procurement_mailbox.get` answers: whether a mailbox is connected and which, when Farik
+/// last read it and what failed, and how many messages went today of the most Farik sends.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn mailbox_state(deps: &ToolDeps) -> Result<Value, StoreError> {
+    let mail = seller_mail(&deps.log)?;
+    let mut state = json!({
+        "connected": false,
+        "sent_today": sent_on(&mail, deps.clock.now().date_naive()),
+        "cap": MOST_SENT_A_DAY,
+    });
+    if let Some(settings) = mailbox_settings(deps) {
+        state["connected"] = json!(true);
+        state["address"] = json!(settings.address);
+        state["name"] = json!(settings.name);
+        state["provider"] = json!(settings.provider);
+        state["folder"] = json!(settings.folder);
+        if let Some(ledger) = mailbox_ledger(deps) {
+            if let Some(checked) = ledger.checked_at {
+                state["checked_at"] = json!(checked);
+            }
+            if let Some(error) = ledger.error {
+                state["error"] = json!(error);
+            }
+            if let Some(restarted) = ledger.restarted_at {
+                state["restarted_at"] = json!(restarted);
+            }
+        }
+    }
+    Ok(state)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -1148,5 +1463,270 @@ mod tests {
 
         orchestrator.tick().await.expect("a tick");
         assert_eq!(states(&harness), [(1, OrderState::Expired)]);
+    }
+
+    // The procurement mailbox (step 10f): connecting, disconnecting and what the page is told.
+    mod mailbox {
+        use farik_protocol::event::{EventBody, EventKind};
+
+        use crate::claude::Secret;
+        use crate::connectors::MemoryConnectorSecrets;
+        use crate::greenmail::{BUYING, GreenMail};
+        use crate::mailbox::{
+            MailboxAt, MailboxSecrets as _, Provider, ProviderChoice, Security, Server, Trust,
+        };
+        use crate::orchestrator::fixtures::Harness;
+        use crate::procurement::{
+            MailboxConnect, connect_mailbox, disconnect_mailbox, mailbox_state,
+        };
+
+        const PROJECT: &str = "0123456789abcdef0123456789abcdef";
+
+        fn at() -> MailboxAt {
+            MailboxAt {
+                project_id: PROJECT.to_string(),
+            }
+        }
+
+        fn secret(word: &str) -> Secret {
+            Secret::new(word.to_string())
+        }
+
+        fn server(port: u16) -> Server {
+            Server {
+                host: "localhost".to_string(),
+                port,
+                security: Security::Tls,
+            }
+        }
+
+        fn input(fixture: &GreenMail) -> MailboxConnect {
+            MailboxConnect {
+                address: BUYING.address.to_string(),
+                name: "Sam Ortiz".to_string(),
+                provider: ProviderChoice::Other,
+                imap: server(fixture.imaps),
+                smtp: server(fixture.smtps),
+                username: BUYING.login.to_string(),
+                folder: "INBOX".to_string(),
+                signature: String::new(),
+                disclose_ai: true,
+            }
+        }
+
+        fn mail_folder(harness: &Harness) -> std::path::PathBuf {
+            harness.procurement_folder().join("mail")
+        }
+
+        #[tokio::test]
+        #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+        async fn connects_after_logging_in_to_both() {
+            let fixture = GreenMail::start("connect", &[&BUYING]);
+            let harness = Harness::with_procurement("mailbox-connect");
+            let deps = &harness.project.deps;
+            let store = MemoryConnectorSecrets::default();
+            let trust = Trust::Root(fixture.ca_der.clone());
+            // A message that was in the mailbox before the connection is never read.
+            fixture.deliver(
+                BUYING.address,
+                "From: a@sellers.test\r\nTo: buying@bakery.test\r\nSubject: old\r\n\r\nold\r\n",
+            );
+            connect_mailbox(
+                deps,
+                &store,
+                &at(),
+                input(&fixture),
+                &secret(BUYING.password),
+                &trust,
+            )
+            .await
+            .expect("the mailbox connects");
+
+            let events = harness.events(&[EventKind::MailboxConnected]);
+            assert_eq!(events.len(), 1);
+            let EventBody::MailboxConnected(body) = &events[0].body else {
+                panic!("a connection");
+            };
+            assert_eq!(body.address.as_str(), "buying@bakery.test");
+            assert_eq!(
+                (
+                    &events[0].envelope.ids.agent_id,
+                    &events[0].envelope.ids.session_id
+                ),
+                (&None, &None)
+            );
+            // The password is kept at mailbox:<id>:procurement, and written nowhere else.
+            let kept = store.load(&at()).expect("reads").expect("kept");
+            assert_eq!(kept.expose(), BUYING.password);
+            assert_eq!(at().account(), format!("mailbox:{PROJECT}:procurement"));
+            let settings = std::fs::read_to_string(mail_folder(&harness).join("mailbox.json"))
+                .expect("the settings are written");
+            assert!(settings.contains("buying@bakery.test"));
+            assert!(!settings.contains(BUYING.password), "{settings}");
+            let ledger: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(mail_folder(&harness).join("ledger.json"))
+                    .expect("the ledger is written"),
+            )
+            .expect("json");
+            assert_eq!(ledger["last_uid"], 1, "after the message already there");
+            assert_eq!(fixture.inbox(&BUYING).len(), 1, "nothing was sent");
+            let state = mailbox_state(deps).expect("the state");
+            assert_eq!(state["connected"], true);
+            assert_eq!(state["address"], "buying@bakery.test");
+            assert_eq!(state["provider"], "other");
+            assert_eq!(state["sent_today"], 0);
+            assert_eq!(state["cap"], 50);
+            assert!(state.get("password").is_none());
+        }
+
+        #[tokio::test]
+        #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+        async fn a_wrong_password_keeps_nothing() {
+            let fixture = GreenMail::start("wrong", &[&BUYING]);
+            let harness = Harness::with_procurement("mailbox-wrong");
+            let deps = &harness.project.deps;
+            let store = MemoryConnectorSecrets::default();
+            let trust = Trust::Root(fixture.ca_der.clone());
+            let refused = connect_mailbox(
+                deps,
+                &store,
+                &at(),
+                input(&fixture),
+                &secret("not-the-word"),
+                &trust,
+            )
+            .await
+            .expect_err("the sign-in is refused");
+            assert_eq!(refused.code, "mailbox_login_failed");
+            assert!(store.load(&at()).expect("reads").is_none());
+            assert!(!mail_folder(&harness).join("mailbox.json").exists());
+            assert!(!mail_folder(&harness).join("ledger.json").exists());
+            assert!(harness.events(&[EventKind::MailboxConnected]).is_empty());
+            assert_eq!(mailbox_state(deps).expect("the state")["connected"], false);
+        }
+
+        #[tokio::test]
+        #[ignore = "needs the git program: cargo xtask check --integration"]
+        async fn refuses_microsoft_before_connecting() {
+            let harness = Harness::with_procurement("mailbox-microsoft");
+            let deps = &harness.project.deps;
+            let store = MemoryConnectorSecrets::default();
+            // The servers named are a closed port: any connection would be `mailbox_unreachable`.
+            let closed = |port: u16| Server {
+                host: "127.0.0.1".to_string(),
+                port,
+                security: Security::Tls,
+            };
+            let port = crate::ports::free_port();
+            let mut microsoft = MailboxConnect {
+                address: "ivo@bakery.test".to_string(),
+                name: "Ivo".to_string(),
+                provider: ProviderChoice::Microsoft,
+                imap: closed(port),
+                smtp: closed(port),
+                username: "ivo".to_string(),
+                folder: "INBOX".to_string(),
+                signature: String::new(),
+                disclose_ai: true,
+            };
+            for address in ["ivo@bakery.test", "ivo@outlook.com", "ivo@Hotmail.com"] {
+                if address != "ivo@bakery.test" {
+                    microsoft.provider = ProviderChoice::Other;
+                }
+                microsoft.address = address.to_string();
+                let refused = connect_mailbox(
+                    deps,
+                    &store,
+                    &at(),
+                    microsoft.clone(),
+                    &secret("anything"),
+                    &Trust::Platform,
+                )
+                .await
+                .expect_err("Microsoft is not supported yet");
+                assert_eq!(refused.code, "mailbox_provider_unsupported", "{address}");
+            }
+            assert!(store.load(&at()).expect("reads").is_none());
+            assert!(harness.events(&[EventKind::MailboxConnected]).is_empty());
+            // Gmail is a known provider with servers of its own; the closed port is not used for it.
+            assert_eq!(
+                Provider::Gmail,
+                match ProviderChoice::Gmail.known() {
+                    Some(provider) => provider,
+                    None => panic!("Gmail is known"),
+                }
+            );
+        }
+
+        #[tokio::test]
+        #[ignore = "needs the git program: cargo xtask check --integration"]
+        async fn disconnecting_forgets_the_password() {
+            let harness = Harness::with_procurement("mailbox-disconnect");
+            let deps = &harness.project.deps;
+            let store = MemoryConnectorSecrets::default();
+            store
+                .save(&at(), &secret("open-sesame"))
+                .expect("the password is kept");
+            let mail = mail_folder(&harness);
+            for file in [
+                "mailbox.json",
+                "ledger.json",
+                "out/1.txt",
+                "in/2026-10/1/text.txt",
+            ] {
+                let path = mail.join(file);
+                std::fs::create_dir_all(path.parent().expect("a folder")).expect("made");
+                std::fs::write(path, "kept").expect("written");
+            }
+            disconnect_mailbox(deps, &store, &at()).expect("disconnects");
+            assert!(store.load(&at()).expect("reads").is_none());
+            assert!(!mail.join("mailbox.json").exists());
+            assert!(mail.join("out/1.txt").exists(), "messages stay");
+            assert!(mail.join("in/2026-10/1/text.txt").exists(), "replies stay");
+            let events = harness.events(&[EventKind::MailboxDisconnected]);
+            assert_eq!(events.len(), 1);
+            assert_eq!(mailbox_state(deps).expect("the state")["connected"], false);
+            // Disconnecting again forgets nothing and records nothing more.
+            disconnect_mailbox(deps, &store, &at()).expect("disconnects again");
+            assert_eq!(harness.events(&[EventKind::MailboxDisconnected]).len(), 1);
+        }
+
+        #[tokio::test]
+        #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+        async fn the_password_is_never_shown() {
+            let fixture = GreenMail::start("never-shown", &[&BUYING]);
+            let harness = Harness::with_procurement("mailbox-never-shown");
+            let deps = &harness.project.deps;
+            let store = MemoryConnectorSecrets::default();
+            let word = "lemon-curd-7731";
+            let trust = Trust::Root(fixture.ca_der.clone());
+            let mut said = Vec::new();
+            // A wrong password, a server that is not encrypted and a port nothing listens on.
+            let mut plain = input(&fixture);
+            plain.imap = Server {
+                host: "localhost".to_string(),
+                port: fixture.imap,
+                security: Security::StartTls,
+            };
+            let mut closed = input(&fixture);
+            closed.imap.port = crate::ports::free_port();
+            for attempt in [input(&fixture), plain, closed] {
+                let refused = connect_mailbox(deps, &store, &at(), attempt, &secret(word), &trust)
+                    .await
+                    .expect_err("refused");
+                said.push(format!("{refused} {refused:?}"));
+            }
+            said.push(format!("{:?}", secret(word)));
+            let events: Vec<String> = harness
+                .events(&[])
+                .iter()
+                .map(|event| format!("{event:?}"))
+                .collect();
+            for text in said.iter().chain(events.iter()) {
+                assert!(!text.contains(word), "the password is shown: {text}");
+            }
+            assert_eq!(said[3], "[redacted]");
+            assert!(store.load(&at()).expect("reads").is_none());
+        }
     }
 }

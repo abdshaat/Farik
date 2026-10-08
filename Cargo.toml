@@ -11,6 +11,8 @@ rust-version = "1.98.1"
 
 [workspace.dependencies]
 anyhow = "=1.0.104"
+# IMAP for the procurement mailbox (step 10f): a reader that never marks a message read. Tokio runtime, not async-std.
+async-imap = { version = "=0.12.0", default-features = false, features = ["runtime-tokio"] }
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio", "ws"] }
 base64 = "=0.23.1"
 calamine = { version = "=0.36.1", default-features = false }
@@ -24,6 +26,10 @@ farik-store = { path = "crates/store" }
 futures-util = { version = "=0.3.34", default-features = false, features = ["sink"] }
 globset = { version = "=0.4.20", default-features = false }
 http = "=1.5.0"
+# SMTP for the procurement mailbox (step 10f), over rustls with the platform verifier (not native-tls).
+lettre = { version = "=0.11.23", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls", "rustls-platform-verifier", "aws-lc-rs"] }
+# Parses the replies read from the procurement mailbox (step 10f).
+mail-parser = "=0.11.9"
 jsonschema = { version = "=0.56.0", default-features = false }
 keyring = "=4.2.0"
 # Only for its in-memory mock store, standing in for the OS keychain in tests.
@@ -35,6 +41,8 @@ regress = "=0.12.0"
 reqwest = { version = "=0.13.5", default-features = false, features = ["form"] }
 rmcp = { version = "=3.3.0", default-features = false, features = ["auth", "client", "reqwest", "server", "transport-child-process", "transport-io", "transport-streamable-http-client-reqwest", "transport-streamable-http-server"] }
 rpassword = "=7.5.4"
+# Already locked through other crates; direct for the mailbox connections (step 10f).
+rustls-platform-verifier = "=0.7.1"
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
 rust-embed = { version = "=8.12.0", features = ["mime-guess"] }
 rust_xlsxwriter = { version = "=0.99.1", default-features = false }
@@ -46,6 +54,8 @@ sha2 = "=0.11.0"
 # Already locked through tokio; direct for the sign-in's callback listener, which `shutdown` stops listening for every copy of its socket (`unsafe_code` is forbidden, so no `libc`).
 socket2 = "=0.6.5"
 tokio = { version = "=1.53.1", default-features = false }
+# Already locked through other crates; direct for the mailbox connections (step 10f).
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws-lc-rs"] }
 tokio-tungstenite = "=0.29.0"
 tokio-util = { version = "=0.7.19", default-features = false }
 tower = { version = "=0.5.3", default-features = false, features = ["util"] }

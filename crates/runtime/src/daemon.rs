@@ -488,6 +488,21 @@ impl DaemonState {
         crate::connectors::working_folder(self.state_dir()?, deps.files.root(), at)
     }
 
+    /// Where the procurement mailbox\u{2019}s password is kept in the project at `root`
+    /// ([`MailboxAt`](crate::mailbox::MailboxAt)).
+    ///
+    /// # Errors
+    ///
+    /// No state folder was set, or the project\u{2019}s id could not be read or made.
+    pub(crate) fn mailbox_at(
+        &self,
+        root: &std::path::Path,
+    ) -> std::io::Result<crate::mailbox::MailboxAt> {
+        Ok(crate::mailbox::MailboxAt {
+            project_id: crate::connectors::local_project_id(self.state_dir()?, root)?,
+        })
+    }
+
     /// Where the agents' connector keys are kept: until a store is set, an empty one, so that no
     /// custom connector is confirmed and none runs.
     pub(crate) fn connector_secrets(&self) -> Arc<dyn ConnectorSecrets> {

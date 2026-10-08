@@ -42,6 +42,13 @@ pub mod google_ads;
 #[cfg(all(test, unix))]
 #[path = "../tests/support/google_ads_fixture.rs"]
 mod google_ads_fixture;
+/// A mail server in Docker for the tests of the procurement mailbox.
+#[cfg(all(test, unix))]
+#[path = "../tests/support/greenmail.rs"]
+mod greenmail;
+/// The procurement mailbox over IMAP and SMTP: its settings, the login, sending and reading.
+#[cfg(unix)]
+pub mod mailbox;
 /// The owner's decisions on marketing plans, the ends that dates bring, and how a plan is worded
 /// on the wire.
 pub mod marketing;
