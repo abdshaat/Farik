@@ -79,9 +79,9 @@ Once a day, with no model and no session, Farik reads `vendors.xlsx` and records
 The founder's words: the agent "may request a data pipeline from the pm who can decide whether the data pipeline is necessary or whether this decision must be escalated to the owner", and "the PM must escalate any process that cost money" (O6).
 
 - **The ask.** `farik_request_data_pipeline { name, what, source_url, why, cost, needs_account, sends_project_data }` records `data_pipeline.requested`; the task goes on with public pages meanwhile.
-- **The Product Manager decides** in a decision session whose one tool is `farik_decide_data_pipeline { pipeline, decision, reason }`: `approve`, `decline` or `escalate`. The governor refuses `approve` (`pipeline_needs_owner`) when `cost` is `paid` or `unknown`; whether a free pipeline is needed, and whether its account or its data matter, is the Product Manager's judgement.
+- **The Product Manager decides** in a decision session whose one tool is `farik_decide_data_pipeline { pipeline, decision, reason }`: `approve`, `decline` or `escalate`. The governor refuses `approve` (`pipeline_needs_owner`) when `cost` is `paid` or `unknown`, or when `sends_project_data` is true (as built in step 10e: a source that gets the project's data goes to the owner alone, since the data leaves the machine); whether a free pipeline that sends nothing out is needed, and whether its account matters, is the Product Manager's judgement. The session is a tick rule about no task, three tries and then Farik escalates it with "The Product Manager did not decide".
 - **The owner decides an escalated one** on Today ("Approve", "Decline"), the human's alone.
-- **Approval** files an ordinary request for the team to set the source up; it connects, pays for and builds nothing.
+- **Approval** files an ordinary request for the team to set the source up, in the name of whoever approved it; it connects, pays for and builds nothing, and approves no site.
 
 ## Contacting sellers (step 10f)
 
@@ -167,7 +167,7 @@ Rejected, each with its reason:
 
 ## Potential connectors and skills
 
-Candidates the agent may ask for through a data pipeline request (10e), each probed or read on 2026-10-05; each becomes a kit connector only through a later step plan with its pin and tags. "Gate" is who approves under the founder's rule: anything that costs money goes to the owner.
+Candidates the agent may ask for through a data pipeline request (10e), each probed or read on 2026-10-05; each becomes a kit connector only through a later step plan with its pin and tags. "Gate" is who approves under the founder's rule: anything that costs money, or sends your data out, goes to the owner.
 
 | Source | What for | Server | Route | Gate |
 |---|---|---|---|---|
@@ -180,7 +180,7 @@ Candidates the agent may ask for through a data pipeline request (10e), each pro
 | Health Canada recalls | Canadian recalls | 15.7 MB daily open data, keyless | none | Product Manager (a Farik server) |
 | Open Food Facts, Open Products Facts, UPCitemdb | a barcode's product | keyless (UPCitemdb's trial is 20 a window) | none | Product Manager |
 | AliExpress affiliate API | AliExpress prices | app key | key | Product Manager |
-| Shippo rates | shipping quotes | official, registers clients; its label tools `denied` | 1 | owner (labels cost) |
+| Shippo rates | shipping quotes | official, registers clients; its label tools `denied` | 1 | owner (labels cost; it sends your data) |
 | Azure retail prices, AI model prices, domain availability | software teams' list prices | keyless public lists (Farik servers) | none | Product Manager |
 | Crunchbase | a seller's age and backing | paid API | key | owner |
 

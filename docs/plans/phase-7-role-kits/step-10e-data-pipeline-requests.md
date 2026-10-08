@@ -169,7 +169,7 @@ As the approved mockups. `Today.test.tsx`: `shows_why_the_owner_is_asked` (for `
 
 `docs/SPEC.md`, the revision after step 10d's: 6.10 (as built: the decision session about no task and counted against none, the three tries, the rule with the data that goes out, the filed request's author, `auto` as step 10h will build it), 6.1 (the Product Manager decides data pipelines and escalates to the owner), 5.7 (an escalated pipeline waits on the owner like a question but holds no task; its row and end-of-run line), 5.16 (the filed request is triaged as any), 8.5 (the four kinds; `session.started`'s `pipeline`), 8.6 (what the agent and the Product Manager wrote is untrusted and shown as text; approving a pipeline approves no site), F3 (Today's row); the revision line. `docs/design/procurement-specialist.md`: the pipeline section, the tools table and the candidates' "Gate" column (one that sends your data goes to the owner). Project plan row 10e.
 
-- [ ] `docs(spec): record data pipeline requests`
+- [x] `docs(spec): record data pipeline requests`
 
 ## Verification
 
@@ -231,3 +231,8 @@ Corrections against the code, read at HEAD `9028296` on 2026-10-08 before Task 1
 - **GREEN**: the six tests pass; `pnpm check` (biome, typecheck, every package's tests) passes, `apps/web` with 42 files and the new tests among its tests.
 - **Choices the plan left open**: (1) "Why it comes to you" is a `fieldset` (the linter refuses `role="group"` on a `div`) holding Farik's sentences, then the Product Manager's reason in its own `untrusted` fieldset named "The Product Manager asks you:". (2) "Open" is a link only for an address that starts `http://` or `https://`; any other is shown as text alone. (3) `reason` absent (Farik escalated it) shows "The Product Manager did not decide." in its place. (4) The refusals are `refusePipelineDecided`, `refusePipelineNotEscalated`, `refusePipelineUnknown` and `refusePipelineNoteLong` in `WORDS`; `pipeline_not_filed` has no words of its own, and shows the generic refusal. (5) Fixtures are in `apps/web/src/test/pipelines.ts`.
 - **Mutants** (by hand, each restored; 15 run): the reason, `what` and the filed text not through `visibly`; `rel` and `target` dropped from "Open"; any address linked; the account line always shown; `paid` shown for an unknown cost; the data line never shown; undecided only when the reason is empty; the script warning always shown; the note untrimmed; approve and decline swapped; the filed text shown on a decline; the `untrusted` mark dropped. Three survived the first tests (`visibly` on the reason, on `what` and on the filed text, and any address linked); a right-to-left override in each field, and an address `javascript:alert(1)`, now kill them.
+
+### Task 7: Spec and plan
+
+- No test; documents. `docs/SPEC.md` is revision 0.76: 6.10 (rewritten data pipelines paragraph: the tools' limits, the decision session about no task, three tries, the owner-only rule, the filed request's author, `auto` as step 10h builds it), 6.1, 5.7 (the waiting row and `data_pipeline_decide`), 5.16, 8.5 (the four kinds, `session.started`'s `pipeline`, 93 kinds in place of 89), 8.6, F3, and the revision line. `docs/design/procurement-specialist.md`: the pipeline section and the candidates' "Gate" column. Project plan row 10e. No phase numbers in the new text beyond phase 7 step 10e and 10h.
+- **Choice the plan left open**: the "89 kinds" sentence is moved to one total in the new 8.5 paragraph rather than kept beside it, so that the spec states one count.
