@@ -5113,6 +5113,17 @@ mod tests {
     }
     /// `proc`'s order `number` on `task_id`, drafted in its session: 59.98 USD from `seller`.
     fn order_drafted(harness: &Harness, task_id: &str, number: u64, seller: &str) {
+        order_drafted_in(harness, task_id, number, seller, "USD");
+    }
+
+    /// `order_drafted`, priced in `currency`.
+    fn order_drafted_in(
+        harness: &Harness,
+        task_id: &str,
+        number: u64,
+        seller: &str,
+        currency: &str,
+    ) {
         harness.project.record_by(
             Some("proc"),
             crate::tools::fixtures::at(),
@@ -5126,7 +5137,7 @@ mod tests {
                     { "item": "Mounting kit", "quantity": 1, "unit": "",
                       "unit_price": "0.01", "line_total": "0.01" }
                 ],
-                "currency": "USD", "period": "once", "total": "59.98",
+                "currency": currency, "period": "once", "total": "59.98",
                 "delivery": "3 days", "terms": "Net 30",
                 "url": "https://www.acme.example/shop", "evaluation": "evaluations/mirrors.md",
                 "why": "It is the cheapest seller that ships to us."
@@ -5468,6 +5479,78 @@ mod tests {
             let reason = refused(&orchestrator, command).await;
             assert!(reason.starts_with("purchase_order_expired: "), "{reason}");
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_note_of_six_hundred_characters_is_taken() {
+        let harness = Harness::with_procurement("human-order-note-edge");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let orchestrator = an_orchestrator(&harness);
+        order_drafted(&harness, "FRK-1", 1, "Acme");
+        let note = "n".repeat(600);
+
+        // 600 characters are the most a note holds: one more is refused, as the other test shows.
+        handled(&orchestrator, decide_order(1, true, Some(&note))).await;
+        handled(&orchestrator, place_order(1)).await;
+        handled(&orchestrator, close_order(1, Some(&note))).await;
+
+        let approved = last(&harness, EventKind::PurchaseOrderApproved).expect("recorded");
+        let EventBody::PurchaseOrderApproved(body) = &approved.body else {
+            panic!("an approval");
+        };
+        assert_eq!(body.note.to_string(), note);
+        let closed = last(&harness, EventKind::PurchaseOrderClosed).expect("recorded");
+        let EventBody::PurchaseOrderClosed(body) = &closed.body else {
+            panic!("a closing");
+        };
+        assert_eq!(body.note.to_string(), note);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_amount_paid_with_no_currency_is_in_the_orders_own() {
+        let harness = Harness::with_procurement("human-order-currency");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let orchestrator = an_orchestrator(&harness);
+        order_drafted_in(&harness, "FRK-1", 1, "Acme", "EUR");
+        order_drafted_in(&harness, "FRK-1", 2, "Bolt", "GBP");
+        handled(&orchestrator, decide_order(1, true, None)).await;
+        handled(&orchestrator, decide_order(2, true, None)).await;
+
+        // At placing, the amount alone is in the order's currency, whatever that is.
+        handled(
+            &orchestrator,
+            Command::PurchaseOrderPlace {
+                order: 1,
+                placed_on: None,
+                paid: Some("20".to_string()),
+                currency: None,
+            },
+        )
+        .await;
+        assert_eq!(
+            orders_now(&harness)[0].paid,
+            Some(("20.00".to_string(), "EUR".to_string()))
+        );
+
+        // At receiving too, and a currency given is the one that stands.
+        handled(&orchestrator, place_order(2)).await;
+        handled(
+            &orchestrator,
+            Command::PurchaseOrderReceive {
+                order: 2,
+                received_on: None,
+                paid: Some("30".to_string()),
+                currency: None,
+                renews_on: None,
+            },
+        )
+        .await;
+        assert_eq!(
+            orders_now(&harness)[1].paid,
+            Some(("30.00".to_string(), "GBP".to_string()))
+        );
     }
 
     #[tokio::test]
