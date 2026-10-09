@@ -7822,8 +7822,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn gives_the_procurement_specialists_chat_its_lists() {
-        // The role the lists are for gets every chat tool: sites, orders and data pipeline
-        // requests among them.
+        // The role the lists are for gets every chat tool: sites, orders, data pipeline
+        // requests and the messages to sellers and their replies among them.
         let harness = Harness::with_procurement("orch-chat-procurement");
         chatted(&harness, "proc", "human", "Status?", None);
         let adapter = harness.recorded(vec![chat_answers_with_a_request()]);
@@ -7848,6 +7848,8 @@ mod tests {
                 "farik_read_sites",
                 "farik_read_purchase_orders",
                 "farik_read_data_pipelines",
+                "farik_read_seller_messages",
+                "farik_read_seller_replies",
                 "farik_chat_reply",
             ])
         );
