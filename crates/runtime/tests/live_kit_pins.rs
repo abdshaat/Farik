@@ -190,6 +190,149 @@ fn names_the_variable_a_live_run_reads() {
     assert_eq!(variable("notion", "BEARER"), "FARIK_KIT_NOTION_BEARER");
 }
 
+/// Whether `answer` is what the live run should get from `tool`: rows that exist, each with the
+/// fields Farik reads from the service as text. `scalar` and `plain` turn a field that is missing
+/// or renamed into null, so a check that accepts any answer cannot see the drift this run is for.
+fn live_answer_holds(tool: &str, answer: &Value) -> bool {
+    // Every one of `fields` of `row` is text.
+    let text = |row: &Value, fields: &[&str]| fields.iter().all(|field| row[*field].is_string());
+    // The first row of the list `list` holds `fields` as text, so the list is not empty.
+    let first = |list: &str, fields: &[&str]| {
+        answer[list]
+            .as_array()
+            .and_then(|rows| rows.first())
+            .is_some_and(|row| text(row, fields))
+    };
+    match tool {
+        "product_recalls" => first("recalls", &["number", "date", "title"]),
+        "vehicle_recalls" => first("recalls", &["campaign", "component", "summary"]),
+        "vehicle_complaints" => {
+            answer["count"].as_u64().is_some_and(|count| count > 0)
+                && answer["by_component"]
+                    .as_object()
+                    .is_some_and(|components| !components.is_empty())
+                && first("newest", &["date", "summary"])
+        }
+        "vehicle_safety_ratings" => first("ratings", &["vehicle"]),
+        "decode_vin" => answer["Make"] == "HONDA" && answer["ErrorCode"] == "0",
+        "search_items" => first("items", &["item_id", "title", "price", "currency", "url"]),
+        "get_item" => text(answer, &["item_id", "title", "price"]),
+        _ => false,
+    }
+}
+
+/// Every tool the live run calls, with an answer that holds what a real one does and the places
+/// in it a field the service renamed would leave null (`scalar` and `plain` turn a field that is
+/// missing into null, so a renamed field never fails by itself).
+fn live_samples() -> Vec<(&'static str, Value, Vec<&'static str>)> {
+    vec![
+        (
+            "product_recalls",
+            json!({ "recalls": [{ "number": "24-100", "date": "2024-02-29T00:00:00",
+                "title": "Baby mirrors recalled" }], "more": false }),
+            vec!["/recalls/0/number", "/recalls/0/date", "/recalls/0/title"],
+        ),
+        (
+            "vehicle_recalls",
+            json!({ "recalls": [{ "campaign": "18V268", "date": "26/04/2018",
+                "component": "AIR BAGS", "summary": "The inflator can rupture." }] }),
+            vec![
+                "/recalls/0/campaign",
+                "/recalls/0/component",
+                "/recalls/0/summary",
+            ],
+        ),
+        (
+            "vehicle_complaints",
+            json!({ "count": 25, "by_component": { "ENGINE": 12 },
+                "newest": [{ "date": "01/02/2020", "summary": "It stalled." }] }),
+            vec![
+                "/count",
+                "/by_component",
+                "/newest/0/date",
+                "/newest/0/summary",
+            ],
+        ),
+        (
+            "vehicle_safety_ratings",
+            json!({ "ratings": [{ "vehicle": "2003 Honda Accord 4 DR", "overall": "5" }],
+                "more": false }),
+            vec!["/ratings/0/vehicle"],
+        ),
+        (
+            "decode_vin",
+            json!({ "Make": "HONDA", "ErrorCode": "0", "Model": "Accord" }),
+            vec!["/Make", "/ErrorCode"],
+        ),
+        (
+            "search_items",
+            json!({ "items": [{ "item_id": "v1|110000000001|0", "title": "Baby car mirror",
+                "price": "12.99", "currency": "USD",
+                "url": "https://www.ebay.com/itm/110000000001" }], "total": 1, "more": false }),
+            vec![
+                "/items/0/item_id",
+                "/items/0/title",
+                "/items/0/price",
+                "/items/0/currency",
+                "/items/0/url",
+            ],
+        ),
+        (
+            "get_item",
+            json!({ "item_id": "v1|110000000001|0", "title": "Baby car mirror", "price": "12.99",
+                "currency": "USD" }),
+            vec!["/item_id", "/title", "/price"],
+        ),
+    ]
+}
+
+/// The live run's own check has to be able to fail on the drift it exists to find: a field the
+/// agencies or eBay renamed comes out of Farik's servers as null, and a list that is empty is not
+/// an answer. Offline, so it runs in every check.
+#[test]
+fn the_live_checks_refuse_answers_with_renamed_fields() {
+    let samples = live_samples();
+    assert_eq!(samples.len(), 7);
+    for (tool, present, fields) in samples {
+        assert!(
+            live_answer_holds(tool, &present),
+            "{tool} refuses an answer with every field: {present}"
+        );
+        // Each field alone gone.
+        for field in &fields {
+            let mut renamed = present.clone();
+            *renamed.pointer_mut(field).expect("a place in the sample") = Value::Null;
+            assert!(
+                !live_answer_holds(tool, &renamed),
+                "{tool} accepts an answer whose {field} is null: {renamed}"
+            );
+        }
+        // Every field gone at once.
+        let mut all = present.clone();
+        for field in &fields {
+            *all.pointer_mut(field).expect("a place in the sample") = Value::Null;
+        }
+        assert!(
+            !live_answer_holds(tool, &all),
+            "{tool} accepts an answer whose fields are all null: {all}"
+        );
+        // A list with no rows, and an answer with nothing in it.
+        assert!(
+            !live_answer_holds(
+                tool,
+                &json!({ "recalls": [], "ratings": [], "items": [], "newest": [], "count": 0, "by_component": {} })
+            ),
+            "{tool} accepts an answer with no rows"
+        );
+        assert!(
+            !live_answer_holds(tool, &json!({})),
+            "{tool} accepts an empty answer"
+        );
+    }
+    // A tool the run does not call is never held.
+    assert!(!live_answer_holds("other_tool", &json!({})));
+}
+
 /// Farik's own servers `recalls` and `ebay`, called once per tool against the real hosts, by hand
 /// (step 10g): the agencies' public data, and eBay with the founder's own developer keys in
 /// `FARIK_KIT_EBAY_EBAY_CLIENT_ID` and `FARIK_KIT_EBAY_EBAY_CLIENT_SECRET`. Their tool lists are
@@ -209,9 +352,9 @@ async fn live_farik_servers_answer() {
     let mut failed: Vec<String> = Vec::new();
     let mut check = |tool: &str,
                      answered: Result<Value, String>,
-                     shows: &dyn Fn(&Value) -> bool| {
+                     holds: &dyn Fn(&Value) -> bool| {
         match answered {
-            Ok(answer) if shows(&answer) => {}
+            Ok(answer) if holds(&answer) => {}
             Ok(answer) => failed.push(format!("{tool} answered without what it should: {answer}")),
             Err(why) => failed.push(format!("{tool}: {why}")),
         }
@@ -219,30 +362,20 @@ async fn live_farik_servers_answer() {
 
     let recalls = Recalls::new(CPSC_API, NHTSA_API, VPIC_API).expect("the recalls server");
     let honda = json!({ "make": "Honda", "model": "Accord", "model_year": 2003 });
-    check(
-        "product_recalls",
-        recalls
-            .call(
-                "product_recalls",
-                &json!({ "words": "mirror", "field": "title" }),
-            )
-            .await,
-        &|_| true,
-    );
-    for tool in [
-        "vehicle_recalls",
-        "vehicle_complaints",
-        "vehicle_safety_ratings",
+    for (tool, input) in [
+        (
+            "product_recalls",
+            json!({ "words": "mirror", "field": "title" }),
+        ),
+        ("vehicle_recalls", honda.clone()),
+        ("vehicle_complaints", honda.clone()),
+        ("vehicle_safety_ratings", honda),
+        ("decode_vin", json!({ "vin": "1HGCM82633A004352" })),
     ] {
-        check(tool, recalls.call(tool, &honda).await, &|_| true);
+        check(tool, recalls.call(tool, &input).await, &|answer| {
+            live_answer_holds(tool, answer)
+        });
     }
-    check(
-        "decode_vin",
-        recalls
-            .call("decode_vin", &json!({ "vin": "1HGCM82633A004352" }))
-            .await,
-        &|answer| answer["Make"] == "HONDA" && answer["ErrorCode"] == "0",
-    );
 
     let ebay = Ebay::new(EBAY_API, client_id, client_secret).expect("the eBay server");
     let searched = ebay
@@ -255,17 +388,21 @@ async fn live_farik_servers_answer() {
         .as_ref()
         .ok()
         .and_then(|answer| answer["items"][0]["item_id"].as_str().map(str::to_string));
+    let searched_ok = searched.is_ok();
     check("search_items", searched, &|answer| {
-        answer["items"]
-            .as_array()
-            .is_some_and(|items| !items.is_empty())
+        live_answer_holds("search_items", answer)
     });
-    if let Some(item_id) = first {
-        check(
+    match first {
+        Some(item_id) => check(
             "get_item",
             ebay.call("get_item", &json!({ "item_id": item_id })).await,
-            &|_| true,
-        );
+            &|answer| live_answer_holds("get_item", answer) && answer["item_id"] == item_id,
+        ),
+        // A search that answered but named no item must not hide that get_item was never tried.
+        None if searched_ok => {
+            failed.push("search_items gave no item_id, so get_item was not called".to_string());
+        }
+        None => {}
     }
     assert!(
         failed.is_empty(),
