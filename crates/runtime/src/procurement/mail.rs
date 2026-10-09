@@ -166,7 +166,7 @@ fn new_uuid() -> std::io::Result<String> {
 }
 
 /// The draft file `mail/out/<n>.txt`, as the agent wrote it.
-fn draft_text(deps: &ToolDeps, message: u64) -> String {
+pub(crate) fn draft_text(deps: &ToolDeps, message: u64) -> String {
     mail_dir(deps)
         .ok()
         .and_then(|dir| {
@@ -494,7 +494,7 @@ fn domain_of(address: &str) -> Option<String> {
 }
 
 /// The text of a sent message: after the subject line and the blank line of `out/<n>.sent.txt`.
-fn sent_parts(deps: &ToolDeps, message: u64) -> Option<(String, String)> {
+pub(crate) fn sent_parts(deps: &ToolDeps, message: u64) -> Option<(String, String)> {
     let dir = mail_dir(deps).ok()?;
     let kept = std::fs::read_to_string(dir.join("out").join(format!("{message}.sent.txt"))).ok()?;
     let (subject, text) = kept.split_once("\n\n")?;

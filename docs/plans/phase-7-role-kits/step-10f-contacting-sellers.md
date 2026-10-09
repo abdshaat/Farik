@@ -211,7 +211,7 @@ Files: `tools/seller.rs`, `tools.rs`, `mcp.rs`, `session.rs`, `rules.rs`. Produc
 
 The slice and the count go to `[..41]` and 48 here.
 
-- [ ] `feat(runtime): let the Procurement Specialist read its messages and replies`
+- [x] `feat(runtime): let the Procurement Specialist read its messages and replies`
 
 ### Task 6: The command line
 
@@ -278,3 +278,9 @@ Choices the plan left open (none a founder decision): the commands run the send 
 Mutants, 31 re-introduced; killed: the 25 MB edge, the address required, the alias rule's `||`, `Cc` and `Delivered-To` read, every new body fetched, the 10 MB limit, the renumbering, the ledger passing what it read, the newest-message quirk of `n:*` (after the filter moved into `headers_after`, a pure function with its own test), duplicated answers, the 64 KiB cut, case folding of addresses, the 15 minutes (both sides of the edge), the one-check-at-a-time guard, the reply's number (not its UID) naming its folder (first survived: the number test now looks for the folder `8`), the number read from the folders, the latest message sent to a sender, a check's error kept in the ledger, a reply dismissed twice. Two survive as equivalents, each guarded twice on purpose: `BODY.PEEK[]` read as `BODY[]` (the folder is opened with `EXAMINE`, so a server that follows the protocol sets no flag either way), and an attachment index of 0 (`checked_sub` is the first guard and the file `0.<ext>` that does not exist is the second).
 
 Choices the plan left open (none a founder decision): attachments are numbered from 1 in the lists, in `seller_reply.attachment` and in the file names (`1.pdf`), the plan's example; `Fetched` also says `restarted`, which `check_now` turns into `restarted_at` from the injected clock, since `fetch_replies` reads no clock; a check is `tokio::spawn`ed by the tick and `finished_checks` (tests only) waits for it; `procurement_mailbox.check` waits for its own read and answers `{ replies: 0 }` when a check of the project is running already. A reply is kept in the month folder of the time Farik read it, and its number is one more than the highest in the log and in the folders.
+
+**Task 5, 2026-10-09.** RED as run: `reads_nothing_but_in_the_procurement_specialist_s_task_and_chat` and `the_agent_reads_what_was_sent_and_replies_as_untrusted`: `there is no Farik tool named farik_read_seller_messages`; `offers_the_seller_tools_to_procurement_alone`: `left: ["farik_draft_seller_message"]`.
+
+Mutants, 4 re-introduced and killed: the role check dropped, the `message` filter dropped, the `untrusted` frame dropped on `seller_wrote`, the chat allowance dropped. The CI fix of eb930aa rides along: `records_a_reply_and_keeps_its_files` is split into itself and `numbers_a_reply_after_the_highest_in_the_log_and_the_folders`, every assertion kept, no lint allowed.
+
+Choices the plan left open (none a founder decision): the reads return `files` as `{index, kept, path?}`; a refusal carries the code `seller_mail_refused`.

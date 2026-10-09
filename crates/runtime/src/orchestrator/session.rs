@@ -840,6 +840,10 @@ const READ_DATA_PIPELINES_TOOL: &str = "farik_read_data_pipelines";
 /// The tool that drafts a message to a seller, the Procurement Specialist's alone, in the
 /// implement session of a task (step 10f).
 const DRAFT_SELLER_MESSAGE_TOOL: &str = "farik_draft_seller_message";
+/// The tools that read the messages to sellers and their replies: the Procurement Specialist's, in
+/// the implement session of a task and in its chat.
+const READ_SELLER_MESSAGES_TOOL: &str = "farik_read_seller_messages";
+const READ_SELLER_REPLIES_TOOL: &str = "farik_read_seller_replies";
 
 /// The Farik tools a read-only session is not offered: the command runner, which has no
 /// executor there, and the git writes, which only the assignee may make.
@@ -896,7 +900,10 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
             }
             // The orders and the data pipeline requests are read where the role works on a task and
             // where it is asked about them.
-            READ_PURCHASE_ORDERS_TOOL | READ_DATA_PIPELINES_TOOL => {
+            READ_PURCHASE_ORDERS_TOOL
+            | READ_DATA_PIPELINES_TOOL
+            | READ_SELLER_MESSAGES_TOOL
+            | READ_SELLER_REPLIES_TOOL => {
                 ask.agent.role == RoleWire::ProcurementSpecialist
                     && ((ask.purpose == SessionPurpose::Implement && ask.contract.is_some())
                         || ask.purpose == SessionPurpose::Chat)
@@ -2040,6 +2047,67 @@ mod tests {
                     about.is_some()
                 );
             }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_the_seller_tools_to_procurement_alone() {
+        const SELLER: [&str; 3] = [
+            "farik_draft_seller_message",
+            "farik_read_seller_messages",
+            "farik_read_seller_replies",
+        ];
+        let harness = Harness::with_procurement("session-seller-tools");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.ready("FRK-2");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let procurement = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("an id"))
+            .expect("the contract");
+        let developers = deps
+            .tools
+            .files
+            .read_contract(&"FRK-2".parse().expect("an id"))
+            .expect("the contract");
+        let offered = |who: &str, purpose: SessionPurpose, about| {
+            let mut ask = asked(deps, agent(&team, who), purpose, about);
+            ask.read_only = purpose == SessionPurpose::Verify;
+            let given = session_spec(deps, &team, &ask)
+                .expect("the spec")
+                .farik_tools;
+            SELLER
+                .iter()
+                .copied()
+                .filter(|tool| given.iter().any(|one| one == tool))
+                .collect::<Vec<_>>()
+        };
+        // The role's implement session of a task is given the three; its chat the two reads.
+        assert_eq!(
+            offered("proc", SessionPurpose::Implement, Some(&procurement)),
+            SELLER
+        );
+        assert_eq!(
+            offered("proc", SessionPurpose::Chat, None),
+            ["farik_read_seller_messages", "farik_read_seller_replies"]
+        );
+        // Not an implement session about no task, nor a verify session of its task.
+        assert!(offered("proc", SessionPurpose::Implement, None).is_empty());
+        assert!(offered("proc", SessionPurpose::Verify, Some(&procurement)).is_empty());
+        // Not another role's, in a session or a chat.
+        for who in ["dev-a", "fin", "pm"] {
+            assert!(
+                offered(who, SessionPurpose::Implement, Some(&developers)).is_empty(),
+                "{who}'s session"
+            );
+            assert!(
+                offered(who, SessionPurpose::Chat, None).is_empty(),
+                "{who}'s chat"
+            );
         }
     }
 

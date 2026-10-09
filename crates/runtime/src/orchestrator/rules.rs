@@ -725,6 +725,8 @@ pub(super) const CHAT_TOOLS: &[&str] = &[
     "farik_read_sites",
     "farik_read_purchase_orders",
     "farik_read_data_pipelines",
+    "farik_read_seller_messages",
+    "farik_read_seller_replies",
     "farik_chat_reply",
 ];
 
@@ -5196,6 +5198,8 @@ mod tests {
                     "farik_read_data_pipelines",
                     "farik_decide_data_pipeline",
                     "farik_draft_seller_message",
+                    "farik_read_seller_messages",
+                    "farik_read_seller_replies",
                     "farik_schedule_post",
                 ]
                 .contains(&tool.name)
@@ -7793,6 +7797,8 @@ mod tests {
                     "farik_read_sites",
                     "farik_read_purchase_orders",
                     "farik_read_data_pipelines",
+                    "farik_read_seller_messages",
+                    "farik_read_seller_replies",
                 ]
                 .contains(tool)
             })

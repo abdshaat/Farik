@@ -9,10 +9,11 @@ mod replies;
 mod story;
 
 pub(crate) use mail::{
-    Mailer, SendAsk, discard_message, order_is_sending, prepare, record_failed, record_sent,
-    send_message, transmit,
+    Mailer, SendAsk, discard_message, draft_text, order_is_sending, prepare, record_failed,
+    record_sent, send_message, sent_parts, transmit,
 };
 pub use mail::{add_order_send_fields, seller_messages_list};
+pub(crate) use replies::reply_folder;
 pub(crate) use replies::{check_by_hand, dismiss_reply, start_check};
 pub use replies::{reply_attachment, seller_replies_list};
 

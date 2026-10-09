@@ -381,7 +381,11 @@ pub fn seller_replies_list(deps: &ToolDeps) -> Result<Value, StoreError> {
 }
 
 /// The folder a reply was kept in: `mail/in/<yyyy-mm>/<r>/`, the month it was received in.
-fn reply_folder(deps: &ToolDeps, reply: u64, received_at: DateTime<Utc>) -> Option<PathBuf> {
+pub(crate) fn reply_folder(
+    deps: &ToolDeps,
+    reply: u64,
+    received_at: DateTime<Utc>,
+) -> Option<PathBuf> {
     Some(
         mail_dir(deps)
             .ok()?
@@ -614,6 +618,20 @@ mod tests {
         // A second check records nothing.
         assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 0);
         assert_eq!(story.events(&[EventKind::SellerReplyReceived]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    async fn numbers_a_reply_after_the_highest_in_the_log_and_the_folders() {
+        let story = Story::new("numbers").await;
+        let (_, id) = sent(&story).await;
+        let deps = &story.harness.project.deps;
+        let month = deps.clock.now().format("%Y-%m").to_string();
+        story.fixture.deliver(
+            BUYING.address,
+            &answer(&id, "r1@pieboxpros.test", "Re: Quote").build(),
+        );
+        assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 1);
 
         // A reply's number is one more than the highest the log and the folders hold.
         std::fs::create_dir_all(story.harness.procurement_folder().join("mail/in/2026-01/7"))
