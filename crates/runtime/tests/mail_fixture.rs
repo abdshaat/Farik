@@ -11,8 +11,8 @@ mod ports;
 
 use farik_runtime::claude::Secret;
 use farik_runtime::mailbox::{
-    Known, MailboxError, MailboxSettings, Provider, Security, Server, Trust, check_login,
-    fetch_replies,
+    Known, MailboxError, MailboxSettings, Outgoing, Provider, Security, Server, Trust, check_login,
+    fetch_replies, send,
 };
 use greenmail::{Account, BUYING, GreenMail, Mime};
 
@@ -149,6 +149,39 @@ async fn a_wrong_password_at_the_sending_server_alone_is_a_login_failure() {
             .await
             .is_err(),
         "the reading server does not know it"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs Docker and the GreenMail image: cargo xtask check --integration"]
+async fn refuses_a_sending_server_whose_certificate_it_cannot_trust() {
+    // Reading is one server and sending another with its own certificate authority, so that the
+    // IMAP login passes and the SMTP certificate is the one nobody trusts.
+    let reading = GreenMail::start("reads", &[&BUYING]);
+    let sending = GreenMail::start("sends", &[&BUYING]);
+    let mut split = settings(&reading);
+    split.smtp = server(sending.smtps, Security::Tls);
+    let trust = Trust::Root(reading.ca_der.clone());
+    let word = secret(BUYING.password);
+    assert!(matches!(
+        check_login(&split, &word, &trust).await,
+        Err(MailboxError::Certificate)
+    ));
+    // Sending is refused the same way, and nothing reaches the server.
+    let message = Outgoing {
+        to: BUYING.address.to_string(),
+        subject: "Quote for 500 printed pie boxes".to_string(),
+        text: "Hello, could you quote 500 printed pie boxes?".to_string(),
+        message_id: "m1@bakery.test".to_string(),
+        attachment: None,
+    };
+    assert!(matches!(
+        send(&split, &word, &trust, &message).await,
+        Err(MailboxError::Certificate)
+    ));
+    assert!(
+        sending.inbox(&BUYING).is_empty(),
+        "nothing was delivered over a connection that could not be trusted"
     );
 }
 
