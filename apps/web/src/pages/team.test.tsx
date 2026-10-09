@@ -653,15 +653,11 @@ describe("team page", () => {
 		const hers = screen.getByRole("switch", { name: en.connectorPlaywright });
 		expect(hers.getAttribute("aria-checked")).toBe("true");
 		expect(
-			screen.queryByText(
-				"Without it Iris cannot look at your app, so Farik gives Iris no work.",
-			),
+			screen.queryByText("Off: Iris can’t see your app, so gets no work."),
 		).toBeNull();
 		fireEvent.click(hers);
 		expect(
-			screen.getByText(
-				"Without it Iris cannot look at your app, so Farik gives Iris no work.",
-			),
+			screen.getByText("Off: Iris can’t see your app, so gets no work."),
 		).toBeTruthy();
 	});
 

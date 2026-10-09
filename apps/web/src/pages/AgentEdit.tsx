@@ -1,4 +1,4 @@
-import { Button, Choice, Dialog, Switch, TextField } from "@farik/ui";
+import { Button, Choice, Dialog, InfoTip, Switch, TextField } from "@farik/ui";
 import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -21,6 +21,7 @@ import { KitConnect } from "./KitConnect.tsx";
 import { MailboxSection } from "./Mailbox.tsx";
 import { OrdersSection } from "./Orders.tsx";
 import styles from "./pages.module.css";
+import { ServiceLogo } from "./ServiceLogo.tsx";
 import { useAdvanced } from "./Settings.tsx";
 import { SitesSection } from "./Sites.tsx";
 import {
@@ -495,29 +496,41 @@ function Editor({
 				</span>
 			</section>
 			<section className={styles.section} aria-labelledby="connectors-heading">
-				<h2 id="connectors-heading">
-					{t("connectors")}{" "}
-					<span className={styles.muted}>{t("connectorsLead", { name })}</span>
-				</h2>
-				<Switch
-					id="connector-playwright"
-					label={t("connectorPlaywright")}
-					description={t("connectorPlaywrightNote", { name })}
-					checked={browsing}
-					onChange={(on) => setDraft(withPlaywright(agent, on))}
-				/>
+				<div className={styles.titled}>
+					<h2 id="connectors-heading">{t("connectors")}</h2>
+					<InfoTip id="connectorsLead-info">
+						{t("connectorsLead", { name })}
+					</InfoTip>
+				</div>
+				<div className={styles.titled}>
+					<ServiceLogo name="playwright" />
+					<Switch
+						id="connector-playwright"
+						label={t("connectorPlaywright")}
+						description={t("connectorPlaywrightShort")}
+						info={
+							<>
+								<span>{t("connectorPlaywrightNote", { name })}</span>
+								<span>{t("connectorsNote")}</span>
+							</>
+						}
+						checked={browsing}
+						onChange={(on) => setDraft(withPlaywright(agent, on))}
+					/>
+				</div>
 				{!browsing && agent.role === "ui_ux_designer" && (
 					<p>
 						<strong>{t("connectorOff", { name })}</strong>
 					</p>
 				)}
-				<p className={styles.muted}>{t("connectorsNote")}</p>
 				{(offered.length > 0 || gone.length > 0) && (
 					<>
-						<h3 id="kit-heading" className={styles.subheading}>
-							{t("kitHeading", { role: roleName(agent.role) })}{" "}
-							<span className={styles.muted}>{t("kitLead")}</span>
-						</h3>
+						<div className={styles.titled}>
+							<h3 id="kit-heading" className={styles.subheading}>
+								{t("kitHeading", { role: roleName(agent.role) })}
+							</h3>
+							<InfoTip id="kitLead-info">{t("kitLead")}</InfoTip>
+						</div>
 						<ul
 							className={styles.ruled}
 							aria-label={t("kitHeading", { role: roleName(agent.role) })}
@@ -550,9 +563,11 @@ function Editor({
 								<li key={c.name} className={styles.kitRow}>
 									<strong>{c.name}</strong>
 									<p>
-										<strong className={styles.warn}>{t("kitGone")}</strong>
+										<strong className={styles.warn}>{t("kitGone")}</strong>{" "}
+										<InfoTip id={`gone-${c.name}-info`}>
+											{t("kitGoneNote", { name })}
+										</InfoTip>
 									</p>
-									<p className={styles.muted}>{t("kitGoneNote", { name })}</p>
 									<span className={styles.actions}>
 										<Button
 											kind="quiet"
@@ -572,10 +587,14 @@ function Editor({
 				)}
 				{custom.length > 0 && (
 					<>
-						<h3 id="yours-heading" className={styles.subheading}>
-							{t("connectorsYours")}{" "}
-							<span className={styles.muted}>{t("connectorsYoursLead")}</span>
-						</h3>
+						<div className={styles.titled}>
+							<h3 id="yours-heading" className={styles.subheading}>
+								{t("connectorsYours")}
+							</h3>
+							<InfoTip id="connectorsYoursLead-info">
+								{t("connectorsYoursLead")}
+							</InfoTip>
+						</div>
 						<ul className={styles.ruled} aria-label={t("connectorsYours")}>
 							{custom.map((c) => {
 								const provider = stateOf(c.name)?.provider;
@@ -788,13 +807,19 @@ function CustomRow({
 	return (
 		<li>
 			<div className={styles.rowHead}>
-				<span>
-					<strong>{server.name}</strong>{" "}
+				<span className={styles.titled}>
+					<ServiceLogo name="plug" />
+					<strong>{server.name}</strong>
 					<span className={styles.muted}>
 						{t(
 							server.transport === "http" ? "connectorHttp" : "connectorStdio",
 						)}
 					</span>
+					<InfoTip id={`custom-${server.name}-info`}>
+						{tags.length === 1
+							? t("connectorOneTool", { labels })
+							: t("connectorTools", { count: tags.length, labels })}
+					</InfoTip>
 				</span>
 				<span className={styles.actions}>
 					{state === "connect_again" && (
@@ -826,30 +851,23 @@ function CustomRow({
 					})}
 				</p>
 			)}
-			<p className={styles.muted}>
-				{tags.length === 1
-					? t("connectorOneTool", { labels })
-					: t("connectorTools", { count: tags.length, labels })}
-			</p>
 			{state === "connect_again" && (
-				<>
-					<p>
-						<strong>{t("connectorAgain")}</strong>
-					</p>
-					<p className={styles.muted}>{t("connectorAgainNote", { name })}</p>
-				</>
+				<p>
+					<strong>{t("connectorAgain")}</strong>{" "}
+					<InfoTip id={`connectorAgainNote-${server.name}-info`}>
+						{t("connectorAgainNote", { name })}
+					</InfoTip>
+				</p>
 			)}
 			{state === "store_unavailable" && (
-				<>
-					<p>
-						<strong>
-							{t("connectorUnreadable", { name, server: server.name })}
-						</strong>
-					</p>
-					<p className={styles.muted}>
+				<p>
+					<strong>
+						{t("connectorUnreadable", { name, server: server.name })}
+					</strong>{" "}
+					<InfoTip id={`connectorUnreadableNote-${server.name}-info`}>
 						{t("connectorUnreadableNote", { name, server: server.name })}
-					</p>
-				</>
+					</InfoTip>
+				</p>
 			)}
 		</li>
 	);
@@ -886,15 +904,16 @@ function KitRow({
 	const connected = held !== undefined && state === "connected";
 	return (
 		<li className={styles.kitRow}>
-			<strong>{service.title}</strong>
-			<p className={styles.muted}>{service.why}</p>
+			<span className={styles.titled}>
+				<ServiceLogo name={service.name} />
+				<strong>{service.title}</strong>
+				<span className={styles.muted}>{service.about}</span>
+				<InfoTip id={`kit-${service.name}-info`}>{service.why}</InfoTip>
+			</span>
 			{service.atLaunch && !held && (
-				<>
-					<p className={styles.muted}>{service.about}</p>
-					<p>
-						<strong>{t("kitAtLaunch", { service: service.title })}</strong>
-					</p>
-				</>
+				<p>
+					<strong>{t("kitAtLaunch")}</strong>
+				</p>
 			)}
 			{connected && (
 				<>

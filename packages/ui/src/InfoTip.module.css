@@ -40,3 +40,7 @@
 .wrap.open .tip {
 	visibility: visible;
 }
+
+.tip > * {
+	display: block;
+}

@@ -220,7 +220,7 @@ Tests:
 - `it('shows the plug for a connector you added')` — the "Added by you" row's `img` `getAttribute("src")` equals `serviceLogo("plug")`; its tool list sits inside a tooltip.
 - `it('shows Playwright with its logo, a short line and the rest behind info')` — the switch row has an `img` whose `getAttribute("src")` equals `serviceLogo("playwright")`, the text `connectorPlaywrightShort`, and a tooltip holding `connectorPlaywrightNote`.
 
-- [ ] `feat(web): show service logos and hide connector details behind info`
+- [x] `feat(web): show service logos and hide connector details behind info`
 
 ### Task 5: the rest of the agent page
 

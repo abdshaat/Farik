@@ -14,6 +14,7 @@ import { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import { serviceLogo } from "./service-logo.ts";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
 	id,
@@ -355,12 +356,12 @@ describe("connectors on the agent page", () => {
 			},
 			{ agent: "theo", server: "notion", state: "store_unavailable" },
 		]);
-		const keychain = "Theo’s keys are in your keychain.";
-		const file = "Theo’s keys are in a private file on this computer.";
+		const keychain = "Keys in your keychain.";
+		const file = "Keys in a private file here.";
 		expect(within(row("airtable")).getByText(keychain)).toBeTruthy();
 		expect(within(row("linear")).getByText(file)).toBeTruthy();
 		// Nothing read, nothing said.
-		expect(within(row("notion")).queryByText(/keys are in/)).toBeNull();
+		expect(within(row("notion")).queryByText(/^Keys in /)).toBeNull();
 		await expectNoAxeViolations(container);
 
 		// Remove says which store it deletes the keys from.
@@ -1535,7 +1536,7 @@ describe("signing in to a service", () => {
 				"2 tools: 1 Only reads, 1 Changes things, asks you",
 			),
 		).toBeTruthy();
-		expect(within(notion).queryByText(/keys are in/)).toBeNull();
+		expect(within(notion).queryByText(/^Keys in /)).toBeNull();
 		expect(
 			within(notion).queryByRole("button", { name: en.connectorSignInAgain }),
 		).toBeNull();
@@ -1804,10 +1805,8 @@ describe("a role's kit on the agent page", () => {
 		const { container } = await openedWithKit([KIT_ADS, KIT_NOTION], [], []);
 		const ads = kitRow("Google Ads");
 		expect(within(ads).getByText(KIT_ADS.about)).toBeTruthy();
-		expect(
-			within(ads).getByText("Google Ads comes with Farik’s web launch."),
-		).toBeTruthy();
-		expect(within(ads).queryByRole("button")).toBeNull();
+		expect(within(ads).getByText(en.kitAtLaunch)).toBeTruthy();
+		expect(within(ads).queryByRole("button", { name: /Connect/ })).toBeNull();
 		// A service that does not come at launch still offers Connect, and says nothing of it.
 		const notion = kitRow("Notion");
 		expect(
@@ -2645,5 +2644,59 @@ describe("removing Google Ads from an agent", () => {
 				"Nobody else on the team is affected. To use it again, add it again and sign in.",
 			),
 		).toBeTruthy();
+	});
+});
+
+/** Every place `text` shows in `root`, each of which must sit inside an info button's tip. */
+function onlyInTips(root: HTMLElement, text: string | RegExp) {
+	const found = within(root).getAllByText(text);
+	expect(found.length).toBeGreaterThan(0);
+	for (const el of found) expect(el.closest('[role="tooltip"]')).not.toBeNull();
+}
+
+describe("logos and info buttons on the Connectors section", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+		localStorage.clear();
+	});
+
+	it("shows each kit service with its logo, title and short line, its reason behind info", async () => {
+		await openedWithKit([KIT_NOTION], [], []);
+		const notion = kitRow("Notion");
+		const logo = notion.querySelector("img");
+		expect(logo?.getAttribute("src")).toBe(serviceLogo("notion"));
+		expect(logo?.getAttribute("alt")).toBe("");
+		expect(within(notion).getByText(KIT_NOTION.about)).toBeTruthy();
+		const tip = within(notion).getByRole("button", {
+			name: "More about this",
+		});
+		expect(tip.getAttribute("aria-describedby")).toBe("kit-notion-info");
+		expect(document.getElementById("kit-notion-info")?.textContent).toBe(
+			KIT_NOTION.why,
+		);
+		onlyInTips(notion, KIT_NOTION.why);
+	});
+
+	it("shows the plug for a connector you added", async () => {
+		await opened();
+		const airtable = row("airtable");
+		expect(airtable.querySelector("img")?.getAttribute("src")).toBe(
+			serviceLogo("plug"),
+		);
+		onlyInTips(airtable, /^4 tools/);
+	});
+
+	it("shows Playwright with its logo, a short line and the rest behind info", async () => {
+		await opened();
+		const sw = screen.getByRole("switch", { name: en.connectorPlaywright });
+		const playwright = sw.closest("div")?.parentElement as HTMLElement;
+		expect(playwright.querySelector("img")?.getAttribute("src")).toBe(
+			serviceLogo("playwright"),
+		);
+		expect(
+			within(playwright).getByText(en.connectorPlaywrightShort),
+		).toBeTruthy();
+		onlyInTips(playwright, t("connectorPlaywrightNote", { name: "Theo" }));
 	});
 });
