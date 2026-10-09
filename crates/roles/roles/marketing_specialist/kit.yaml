@@ -31,8 +31,8 @@ connectors:
     url: https://mcp.higgsfield.ai/mcp
     oauth: { scopes: [openid, email, offline_access] }
     title: Higgsfield
-    about: "Higgsfield makes images, short videos and voice-overs from a description, with many AI models in one account."
-    why: "So the Marketing Specialist can make the pictures and clips a launch or a listing needs. Each one uses your Higgsfield credits, so Farik counts them and asks you before going past the number you allow."
+    about: "AI images and videos"
+    why: "Makes pictures and clips. Uses your credits; asks before going past your limit."
     setup: "Higgsfield needs a paid plan for this. Sign in with your Higgsfield account and allow Farik to use it. Every picture or clip your agent makes uses your Higgsfield credits; you choose how many it may make without asking. Farik counts each request, a price check included, and one request can hold up to four pictures."
     labels:
       generate_image: "make an image"
@@ -197,8 +197,8 @@ connectors:
     url: https://mcp.recraft.ai/mcp
     oauth: { scopes: [openid, email, profile] }
     title: Recraft
-    about: "Recraft makes images, logos and vector graphics in a consistent brand style."
-    why: "So the Marketing Specialist can make on-brand graphics, icons and vector art. Each one uses your Recraft credits, so Farik counts them and asks you before going past the number you allow."
+    about: "AI logos and graphics"
+    why: "Makes on-brand graphics and icons. Uses your credits; asks before going past your limit."
     setup: "Sign in with your Recraft account and allow Farik to use it. Every graphic your agent makes uses your Recraft credits; you choose how many it may make without asking. Farik counts each request, and one request can hold up to six pictures. Recraft may ask you to sign in again from time to time."
     labels:
       generate_image: "make an image"
@@ -232,8 +232,8 @@ connectors:
     url: https://mcp.buffer.com/mcp
     oauth: { scopes: [offline_access, posts:read, posts:write, account:read, insights:read, ideas:read] }
     title: Buffer
-    about: "Buffer schedules posts to your social channels: Instagram, Facebook, X, LinkedIn, Pinterest, YouTube, TikTok, Threads, Bluesky and more."
-    why: "So the Marketing Specialist can read your channels and how earlier posts did. Farik sends the posts in a marketing plan you approved, and asks you about any other."
+    about: "Schedules social posts"
+    why: "Reads your channels and past posts. Sends posts from your approved plan; asks about others."
     setup: "Sign in with your Buffer account and allow Farik to read and schedule posts. Farik can reach every channel your Buffer account has. A post in a plan you approved shows on Today before it goes out, with a Stop button; Farik asks you about any other. To remove Farik completely, also remove it in Buffer's settings."
     labels:
       get_account: "read the account"
@@ -268,8 +268,8 @@ connectors:
     url: https://app.kit.com/mcp
     oauth: { scopes: [public] }
     title: Kit
-    about: "Kit sends your email newsletters and sequences, and hosts landing pages that collect sign-ups."
-    why: "So the Marketing Specialist can draft campaigns and landing pages, and read how earlier emails did. You send every email yourself from Kit."
+    about: "Email newsletters"
+    why: "Drafts emails and landing pages. You send every email."
     setup: "Kit needs a paid plan for this. Sign in with your Kit account and allow Farik to use it. Farik drafts emails for you to send from Kit, asks you before changing a page or an email series, and never reads your subscribers' own details."
     labels:
       create_broadcast: "draft an email"
@@ -382,8 +382,8 @@ connectors:
     args: [connector, google-ads]
     oauth: { scopes: ["https://www.googleapis.com/auth/adwords"] }
     title: Google Ads
-    about: "Google Ads shows your ads to people searching on Google and charges you for the clicks."
-    why: "So the Marketing Specialist can find the words your customers search for and run the search ads in a marketing plan you approved, within its budget."
+    about: "Google search ads"
+    why: "Finds what customers search for. Runs ads from your approved plan, within budget."
     setup: "Sign in with the Google account that manages your ads and allow Farik to manage them. Farik makes and changes search ads only inside a marketing plan you approved, never deletes anything, and never touches billing or who can use your account. The ads cost money at Google, up to the budget in your plan."
     labels:
       list_accounts: "list ad accounts"

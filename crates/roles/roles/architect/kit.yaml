@@ -19,8 +19,8 @@ connectors:
     url: https://mcp.context7.com/mcp/oauth
     oauth: { scopes: [profile, email, offline_access] }
     title: Context7
-    about: "Context7 keeps up-to-date documentation and code examples for thousands of programming libraries."
-    why: "So the Architect checks how a library works today, in the version your project uses, before it writes a decision. It only reads."
+    about: "Current coding docs"
+    why: "Checks how a library works today, in your version, before deciding. Read-only."
     setup: "Sign in with a free Context7 account and allow Farik to use it. The questions your agent asks about a library go to Context7; the free plan allows about a thousand a month."
     labels:
       resolve-library-id: "find a library"
@@ -32,8 +32,8 @@ connectors:
     transport: http
     url: https://mcp.grep.app
     title: Grep
-    about: "Grep, run by Vercel, searches the code of over a million public projects on GitHub."
-    why: "So the Architect sees how other projects really use a library or solve a problem before it chooses a pattern. It only reads public code."
+    about: "Search public code"
+    why: "Sees how other projects solve it before choosing. Read-only."
     setup: "Nothing to set up: Grep needs no account. What the Architect searches for goes to Grep; it searches public projects only, never your private ones."
     labels:
       searchGitHub: "search public code"
@@ -44,8 +44,8 @@ connectors:
     command: farik
     args: [connector, osv]
     title: OSV
-    about: "OSV is a free, open database of known security flaws in open-source packages, run by Google."
-    why: "So the Architect can check whether a library your project uses, or one it is about to add, has a known flaw, and which version fixes it. It only reads."
+    about: "Known security flaws"
+    why: "Checks your libraries for known flaws and the version that fixes them. Read-only."
     setup: "Nothing to set up: Farik looks packages up in OSV itself, with no account. Farik sends OSV only the names and versions of the packages it checks."
     labels:
       query_package: "check a package for known flaws"
@@ -65,8 +65,8 @@ connectors:
     credential_keys: [GITHUB_KEY]
     key_page: "https://github.com/settings/personal-access-tokens/new?name=Farik+Architect&description=Farik%27s+Architect+reads+code+and+pull+requests+and+changes+nothing.&expires_in=366&contents=read&pull_requests=read"
     title: GitHub
-    about: "GitHub keeps your code and the work around it: issues, pull requests and project boards."
-    why: "So the Architect can search and read the code and pull requests in your own repositories, private ones included, before it writes a decision. It only reads."
+    about: "Your code and issues"
+    why: "Reads your repositories and pull requests, private ones too. Read-only."
     setup: "“Get your key” opens GitHub's page with the key's name, a year's life and read access to code and pull requests filled in. Under ‘Resource owner’, choose the owner of your code; under ‘Repository access’, choose ‘Only select repositories’ and pick the ones the Architect may read. Choose ‘Generate token’ and paste the key here. An organisation may allow a shorter life, need you signed in to its single sign-on, or need its owner's approval. The Architect only reads."
     labels:
       search_code: "search code"

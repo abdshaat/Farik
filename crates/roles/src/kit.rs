@@ -1602,13 +1602,10 @@ mod tests {
         assert!(copy.key_page.is_none());
         assert!(allowances_of(Role::ProcurementSpecialist, "fx").is_empty());
         assert_eq!(copy.title, "Exchange rates");
-        assert_eq!(
-            copy.about,
-            "Frankfurter publishes the reference exchange rates of central banks, free and with no account."
-        );
+        assert_eq!(copy.about, "Daily central-bank rates");
         assert_eq!(
             copy.why,
-            "So the Procurement Specialist compares prices in one currency, with the rate and its date beside each. It only reads."
+            "Compares prices in one currency, rate and date shown. Read-only."
         );
         assert_eq!(
             copy.setup,
@@ -1666,13 +1663,10 @@ mod tests {
         assert!(copy.key_page.is_none());
         assert!(allowances_of(Role::ProcurementSpecialist, "recalls").is_empty());
         assert_eq!(copy.title, "Safety recalls");
-        assert_eq!(
-            copy.about,
-            "US product and vehicle safety agencies publish every recall, complaint and crash rating."
-        );
+        assert_eq!(copy.about, "Product and car recalls");
         assert_eq!(
             copy.why,
-            "So the Procurement Specialist never recommends a product or a car with an open recall, and can check a used car's VIN. It only reads."
+            "Never suggests a recalled product; checks a used car's VIN. Read-only."
         );
         assert_eq!(
             copy.setup,
@@ -1733,13 +1727,10 @@ mod tests {
         }
         assert!(allowances_of(Role::ProcurementSpecialist, "ebay").is_empty());
         assert_eq!(copy.title, "eBay listings");
-        assert_eq!(
-            copy.about,
-            "eBay's listing search shows what sellers ask for new and used goods right now."
-        );
+        assert_eq!(copy.about, "eBay asking prices");
         assert_eq!(
             copy.why,
-            "So the Procurement Specialist can see real asking prices, and how well rated each seller is, for anything sold on eBay. It only reads; it can never bid or buy."
+            "Real prices and seller ratings. Read-only; never bids or buys."
         );
         assert_eq!(
             copy.setup,
@@ -1790,13 +1781,10 @@ mod tests {
         );
         assert!(allowances_of(Role::ProcurementSpecialist, "exa").is_empty());
         assert_eq!(copy.title, "Exa web search");
-        assert_eq!(
-            copy.about,
-            "Exa searches the web for assistants that research, and answers with text from the pages it finds."
-        );
+        assert_eq!(copy.about, "Web search");
         assert_eq!(
             copy.why,
-            "So the Procurement Specialist can find makers, sellers and their price pages for anything you need to buy. It only reads."
+            "Finds makers, sellers and price pages. Read-only."
         );
         assert_eq!(
             copy.setup,
@@ -1857,13 +1845,10 @@ mod tests {
             )])
         );
         assert_eq!(copy.title, "Shopping prices");
-        assert_eq!(
-            copy.about,
-            "SerpApi reads shopping results from Google Shopping, Amazon, eBay and Walmart."
-        );
+        assert_eq!(copy.about, "Prices across big shops");
         assert_eq!(
             copy.why,
-            "So the Procurement Specialist can compare what a product costs across the big shops in one search. Each search uses one of your SerpApi searches, so Farik counts them."
+            "Google Shopping, Amazon, eBay, Walmart in one search. Each uses one of your SerpApi searches."
         );
         assert_eq!(
             copy.setup,
@@ -1936,13 +1921,10 @@ mod tests {
         assert_eq!(server.tools.len(), 43);
         assert!(allowances_of(Role::ProcurementSpecialist, "brex").is_empty());
         assert_eq!(copy.title, "Brex");
-        assert_eq!(
-            copy.about,
-            "Brex holds your company's cards, bills and the vendors you pay."
-        );
+        assert_eq!(copy.about, "Your company cards and bills");
         assert_eq!(
             copy.why,
-            "So the Procurement Specialist can see what you already pay a vendor, and charges that repeat every month that nobody listed. It only reads."
+            "Sees what you pay vendors, and repeat charges nobody listed. Read-only."
         );
         assert_eq!(
             copy.setup,
@@ -2011,13 +1993,10 @@ mod tests {
         assert_eq!(server.tools.len(), 9);
         assert!(allowances_of(Role::ProcurementSpecialist, "aws-pricing").is_empty());
         assert_eq!(copy.title, "AWS prices");
-        assert_eq!(
-            copy.about,
-            "AWS publishes the price of every one of its services, by region and by plan."
-        );
+        assert_eq!(copy.about, "AWS price list");
         assert_eq!(
             copy.why,
-            "So the Procurement Specialist can price an AWS option exactly before anyone buys it. It only reads public prices."
+            "Prices an AWS option exactly before anyone buys. Read-only."
         );
         assert_eq!(
             copy.setup,
@@ -2635,6 +2614,47 @@ mod tests {
 
     fn pm_service(name: &str) -> (CustomServer, SetupCopy) {
         service(Role::ProductManager, name)
+    }
+
+    /// The agent page shows `about` beside the service's name and keeps `why` behind an info
+    /// button, so both stay a few words. Pinned here, not in the loader: a kit from elsewhere is
+    /// not the founder's copy.
+    #[test]
+    fn shipped_kit_copy_is_short() {
+        let roles = [
+            Role::ProductManager,
+            Role::ScrumMaster,
+            Role::Architect,
+            Role::SoftwareDeveloper,
+            Role::MarketingSpecialist,
+            Role::UiUxDesigner,
+            Role::FinanceSpecialist,
+            Role::ProcurementSpecialist,
+        ];
+        let mut seen = 0;
+        for role in roles {
+            let kit = load_kit(role).expect("a shipped kit");
+            for connector in kit.connectors {
+                let KitConnector::Server { copy, .. } = connector else {
+                    continue;
+                };
+                seen += 1;
+                let words = |text: &str| text.split_whitespace().count();
+                assert!(
+                    words(&copy.about) <= 6,
+                    "{role} {}: about has {} words",
+                    copy.title,
+                    words(&copy.about)
+                );
+                assert!(
+                    words(&copy.why) <= 20,
+                    "{role} {}: why has {} words",
+                    copy.title,
+                    words(&copy.why)
+                );
+            }
+        }
+        assert!(seen > 0, "no service was checked");
     }
 
     fn tagged(server: &CustomServer, tag: ConnectorTag) -> usize {
@@ -3537,8 +3557,7 @@ mod tests {
         assert_eq!(copy.title, "Buffer");
         assert_eq!(
             copy.why,
-            "So the Marketing Specialist can read your channels and how earlier posts did. Farik \
-             sends the posts in a marketing plan you approved, and asks you about any other."
+            "Reads your channels and past posts. Sends posts from your approved plan; asks about others."
         );
         assert_eq!(
             copy.setup,
@@ -3844,14 +3863,10 @@ mod tests {
             }
         }
         assert_eq!(copy.title, "Google Ads");
-        assert_eq!(
-            copy.about,
-            "Google Ads shows your ads to people searching on Google and charges you for the clicks."
-        );
+        assert_eq!(copy.about, "Google search ads");
         assert_eq!(
             copy.why,
-            "So the Marketing Specialist can find the words your customers search for and run the \
-             search ads in a marketing plan you approved, within its budget."
+            "Finds what customers search for. Runs ads from your approved plan, within budget."
         );
         assert_eq!(
             copy.setup,
@@ -3923,13 +3938,10 @@ mod tests {
         assert_eq!(server.tools.len(), 10);
         assert!(allowances_of(Role::FinanceSpecialist, "stripe").is_empty());
         assert_eq!(copy.title, "Stripe");
-        assert_eq!(
-            copy.about,
-            "Stripe takes your product's payments: charges, subscriptions, invoices, fees, refunds and payouts."
-        );
+        assert_eq!(copy.about, "Your payments");
         assert_eq!(
             copy.why,
-            "So the Finance Specialist can put your revenue, fees and payouts in the books from Stripe's own numbers. It only reads."
+            "Books revenue, fees and payouts from Stripe's own numbers. Read-only."
         );
         assert_eq!(
             copy.setup,
@@ -3973,13 +3985,10 @@ mod tests {
         );
         assert_eq!(server.tools.len(), 10);
         assert_eq!(copy.title, "Digits");
-        assert_eq!(
-            copy.about,
-            "Digits keeps your books: every transaction, with profit and loss, balance sheet, cash flow and who owes whom."
-        );
+        assert_eq!(copy.about, "Your books");
         assert_eq!(
             copy.why,
-            "So the Finance Specialist can read the books you already keep there instead of rebuilding them. It only reads."
+            "Reads the books you already keep there. Read-only."
         );
         assert_eq!(
             copy.setup,
@@ -4055,13 +4064,10 @@ mod tests {
         );
         assert_eq!(server.tools.len(), 39);
         assert_eq!(copy.title, "Kick");
-        assert_eq!(
-            copy.about,
-            "Kick keeps your books from your bank and card accounts: transactions, categories, journals and reports."
-        );
+        assert_eq!(copy.about, "Your books, from your bank");
         assert_eq!(
             copy.why,
-            "So the Finance Specialist can read the books you already keep there instead of rebuilding them. It only reads."
+            "Reads the books you already keep there. Read-only."
         );
         assert_eq!(
             copy.setup,

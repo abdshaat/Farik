@@ -245,7 +245,7 @@ Tests:
 
 The existing tests in `kit.rs` that pin the old `why` text (kit.rs:1611, 1675, 1742, 1799, 1866, 1945, 2020, 3540, 3853, 3932, 3982, 4064) are updated to the new copy in the same commit; what each asserts besides the words stays.
 
-- [ ] `feat(roles): say each kit service in a few plain words`
+- [x] `feat(roles): say each kit service in a few plain words`
 
 ### Task 7: docs
 
