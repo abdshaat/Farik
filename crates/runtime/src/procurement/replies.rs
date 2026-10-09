@@ -632,6 +632,16 @@ mod tests {
             })
             .collect();
         assert_eq!(numbers, [1, 8]);
+        assert!(
+            story
+                .harness
+                .procurement_folder()
+                .join("mail/in")
+                .join(&month)
+                .join("8/text.txt")
+                .exists(),
+            "the folder is named by the reply's number, not by its place in the mailbox"
+        );
     }
 
     #[tokio::test]

@@ -898,6 +898,25 @@ fn headers_of(raw: &[u8], size: u64) -> Headers {
     }
 }
 
+/// The messages after `first` among the headers a `UID FETCH first:*` answered, oldest first, with
+/// what their headers say. `n:*` always answers the newest message, even one older than `n`, as
+/// when the messages after `n` were deleted since the folder was opened: that one was looked at
+/// already, and is left out.
+fn headers_after(
+    first: u32,
+    found: impl IntoIterator<Item = (Option<u32>, u32, Vec<u8>)>,
+) -> Vec<(u32, Headers)> {
+    let mut headers: Vec<(u32, Headers)> = found
+        .into_iter()
+        .filter_map(|(uid, size, raw)| {
+            let uid = uid.filter(|uid| *uid >= first)?;
+            Some((uid, headers_of(&raw, u64::from(size))))
+        })
+        .collect();
+    headers.sort_by_key(|(uid, _)| *uid);
+    headers
+}
+
 /// The reply a whole message is.
 fn reply_of(uid: u32, raw: &[u8]) -> Option<Reply> {
     use mail_parser::{MessageParser, MimeHeaders as _};
@@ -1022,21 +1041,14 @@ async fn read_replies(
             .try_collect()
             .await
             .map_err(|error| imap_error(&error))?;
-        let mut headers: Vec<(u32, Headers)> = found
-            .iter()
-            // `n:*` always includes the newest message, even one older than `n`.
-            .filter_map(|one| {
-                let uid = one.uid.filter(|uid| *uid >= first)?;
-                Some((
-                    uid,
-                    headers_of(
-                        one.header().unwrap_or_default(),
-                        u64::from(one.size.unwrap_or(0)),
-                    ),
-                ))
-            })
-            .collect();
-        headers.sort_by_key(|(uid, _)| *uid);
+        let fetched_headers = found.iter().map(|one| {
+            (
+                one.uid,
+                one.size.unwrap_or(0),
+                one.header().unwrap_or_default().to_vec(),
+            )
+        });
+        let headers = headers_after(first, fetched_headers);
         Ok(headers)
     })
     .await?;
@@ -1325,5 +1337,25 @@ mod tests {
         assert!(is_for_us(&big, &known()));
         big.size += 1;
         assert!(!is_for_us(&big, &known()));
+    }
+    #[test]
+    fn leaves_out_a_message_older_than_the_range_asked() {
+        let raw =
+            |from: &str| format!("From: {from}\r\nTo: buying@bakery.test\r\n\r\n").into_bytes();
+        let found = vec![
+            (Some(9), 300, raw("late@x.test")),
+            (Some(4), 200, raw("old@x.test")),
+            (None, 100, raw("nobody@x.test")),
+            (Some(7), 150, raw("mid@x.test")),
+        ];
+        let headers = super::headers_after(7, found);
+        assert_eq!(
+            headers
+                .iter()
+                .map(|(uid, header)| (*uid, header.from.as_str(), header.size))
+                .collect::<Vec<_>>(),
+            [(7, "mid@x.test", 150), (9, "late@x.test", 300)],
+            "oldest first, and neither the one below 7 nor the one with no UID"
+        );
     }
 }
