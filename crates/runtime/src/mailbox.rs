@@ -682,6 +682,399 @@ pub async fn send(
     }
 }
 
+/// The most bytes of a message Farik reads: bigger ones are passed on their headers.
+const MOST_MESSAGE_BYTES: u64 = 25 * 1024 * 1024;
+/// The most bytes of a reply's text Farik keeps.
+const MOST_TEXT_BYTES: usize = 64 * 1024;
+/// The most bytes of one attachment Farik keeps.
+const MOST_KEPT_BYTES: usize = 10 * 1024 * 1024;
+/// The headers fetched of every new message, and nothing else of it.
+const HEADER_FIELDS: &str = "BODY.PEEK[HEADER.FIELDS (FROM TO CC DELIVERED-TO MESSAGE-ID \
+                             IN-REPLY-TO REFERENCES SUBJECT DATE)]";
+
+/// What the headers of a message say, read before its body is: addresses are bare and `answers`
+/// are `Message-ID`s without angle brackets.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Headers {
+    /// The sender's address.
+    pub from: String,
+    /// The `To` addresses.
+    pub to: Vec<String>,
+    /// The `Cc` addresses.
+    pub cc: Vec<String>,
+    /// The `Delivered-To` addresses.
+    pub delivered_to: Vec<String>,
+    /// The `In-Reply-To` ids.
+    pub in_reply_to: Vec<String>,
+    /// The `References` ids.
+    pub references: Vec<String>,
+    /// The size of the whole message, `RFC822.SIZE`.
+    pub size: u64,
+}
+
+/// What Farik knows of the mail it sent: the procurement address, the `Message-ID` of every message
+/// sent, and the addresses they were sent to.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Known {
+    /// The procurement mailbox's address.
+    pub address: String,
+    /// The `Message-ID`s of the messages sent.
+    pub sent_ids: Vec<String>,
+    /// The addresses the messages were sent to.
+    pub written_to: Vec<String>,
+}
+
+/// An address with no angle brackets and no case: how two are compared.
+fn bare(address: &str) -> String {
+    address
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .to_ascii_lowercase()
+}
+
+/// Whether a message is one Farik reads: the procurement address is in its `To`, `Cc` or
+/// `Delivered-To`, compared without regard to case; and it answers a message Farik sent (its
+/// `In-Reply-To` or `References` holds one's `Message-ID`) or comes from an address Farik wrote to;
+/// and it is at most 25 MB. This is the alias rule: the login reaches the whole mailbox, and
+/// anything this refuses is passed on its headers and its body is never fetched.
+#[must_use]
+pub fn is_for_us(headers: &Headers, known: &Known) -> bool {
+    if headers.size > MOST_MESSAGE_BYTES {
+        return false;
+    }
+    let ours = bare(&known.address);
+    let addressed = headers
+        .to
+        .iter()
+        .chain(&headers.cc)
+        .chain(&headers.delivered_to)
+        .any(|address| bare(address) == ours);
+    if !addressed {
+        return false;
+    }
+    let answers = headers
+        .in_reply_to
+        .iter()
+        .chain(&headers.references)
+        .any(|id| known.sent_ids.iter().any(|sent| bare(sent) == bare(id)));
+    let from = bare(&headers.from);
+    answers || known.written_to.iter().any(|written| bare(written) == from)
+}
+
+/// One file attached to a reply. `bytes` and `media_type` are set only for one Farik keeps: a PDF,
+/// a PNG or a JPEG, as its bytes say whatever its name does, of at most 10 MB.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Attachment {
+    /// The seller's name for it: text, never a path.
+    pub name: String,
+    /// What its bytes are, when kept.
+    pub media_type: Option<String>,
+    /// Its bytes, when kept.
+    pub bytes: Option<Vec<u8>>,
+    /// How many bytes it has.
+    pub size: u64,
+}
+
+/// A seller's message Farik read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reply {
+    /// Its UID in the folder.
+    pub uid: u32,
+    /// Who it is from: `Name <address>`, or the address.
+    pub from: String,
+    /// Its subject.
+    pub subject: String,
+    /// Its `Date`, when it has a valid one.
+    pub date: Option<DateTime<Utc>>,
+    /// The `Message-ID`s it answers, without brackets.
+    pub answers: Vec<String>,
+    /// Its text, converted from HTML when it is HTML alone, at most 64 KiB.
+    pub text: String,
+    /// Its attachments, in order.
+    pub attachments: Vec<Attachment>,
+}
+
+/// What one reading of the mailbox found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fetched {
+    /// The replies, oldest first.
+    pub replies: Vec<Reply>,
+    /// The UIDs whose body was fetched.
+    pub bodies: Vec<u32>,
+    /// The UIDs passed on their headers.
+    pub skipped: Vec<u32>,
+    /// The ledger after this reading: every message looked at is passed.
+    pub ledger: Ledger,
+    /// Whether the folder was renumbered, so that the ledger started again at the next UID.
+    pub restarted: bool,
+}
+
+/// The media type of `bytes` when Farik keeps them: a PDF, a PNG or a JPEG by their first bytes.
+fn kept_type(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
+    if bytes.starts_with(b"%PDF-") {
+        Some(("application/pdf", "pdf"))
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some(("image/png", "png"))
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some(("image/jpeg", "jpg"))
+    } else {
+        None
+    }
+}
+
+/// The extension a kept media type is saved under.
+#[must_use]
+pub fn extension_of(media_type: &str) -> Option<&'static str> {
+    match media_type {
+        "application/pdf" => Some("pdf"),
+        "image/png" => Some("png"),
+        "image/jpeg" => Some("jpg"),
+        _ => None,
+    }
+}
+
+/// `text` cut at `most` bytes on a character boundary.
+fn cut(text: &str, most: usize) -> String {
+    if text.len() <= most {
+        return text.to_string();
+    }
+    let mut end = most;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_string()
+}
+
+/// Text from a header with every control character a space, at most `most` characters.
+fn plain(text: &str, most: usize) -> String {
+    text.chars()
+        .map(|one| if one.is_control() { ' ' } else { one })
+        .take(most)
+        .collect()
+}
+
+/// The addresses and ids of a header value, however mail-parser read it.
+fn texts(value: &mail_parser::HeaderValue<'_>) -> Vec<String> {
+    if let Some(list) = value.as_text_list() {
+        return list.iter().map(ToString::to_string).collect();
+    }
+    value
+        .as_address()
+        .map(|addresses| {
+            addresses
+                .iter()
+                .filter_map(|one| one.address().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What the headers fetched of one message say.
+fn headers_of(raw: &[u8], size: u64) -> Headers {
+    use mail_parser::{HeaderName, MessageParser};
+    let Some(message) = MessageParser::default().parse(raw) else {
+        return Headers {
+            size,
+            ..Headers::default()
+        };
+    };
+    let list = |name: HeaderName<'static>| -> Vec<String> {
+        message.header_values(name).flat_map(texts).collect()
+    };
+    Headers {
+        from: message
+            .from()
+            .and_then(|from| from.first())
+            .and_then(|one| one.address())
+            .unwrap_or_default()
+            .to_string(),
+        to: list(HeaderName::To),
+        cc: list(HeaderName::Cc),
+        delivered_to: list(HeaderName::DeliveredTo),
+        in_reply_to: texts(message.in_reply_to()),
+        references: texts(message.references()),
+        size,
+    }
+}
+
+/// The reply a whole message is.
+fn reply_of(uid: u32, raw: &[u8]) -> Option<Reply> {
+    use mail_parser::{MessageParser, MimeHeaders as _};
+    let message = MessageParser::default().parse(raw)?;
+    let from = message
+        .from()
+        .and_then(|from| from.first())
+        .map_or_else(String::new, |one| match (one.name(), one.address()) {
+            (Some(name), Some(address)) => format!("{name} <{address}>"),
+            (None, Some(address)) => address.to_string(),
+            (Some(name), None) => name.to_string(),
+            (None, None) => String::new(),
+        });
+    let attachments = message
+        .attachments()
+        .map(|part| {
+            let bytes = part.contents();
+            let size = bytes.len() as u64;
+            let kind = kept_type(bytes).filter(|_| bytes.len() <= MOST_KEPT_BYTES);
+            Attachment {
+                name: plain(part.attachment_name().unwrap_or("attachment"), 255),
+                media_type: kind.map(|(media, _)| media.to_string()),
+                bytes: kind.map(|_| bytes.to_vec()),
+                size,
+            }
+        })
+        .collect();
+    Some(Reply {
+        uid,
+        from: plain(&from, 320),
+        subject: plain(message.subject().unwrap_or_default(), 998),
+        date: message
+            .date()
+            .and_then(|date| DateTime::from_timestamp(date.to_timestamp(), 0)),
+        answers: {
+            let mut answers: Vec<String> = Vec::new();
+            for id in texts(message.in_reply_to())
+                .into_iter()
+                .chain(texts(message.references()))
+            {
+                if !answers.contains(&id) {
+                    answers.push(id);
+                }
+            }
+            answers
+        },
+        text: cut(
+            message.body_text(0).as_deref().unwrap_or_default(),
+            MOST_TEXT_BYTES,
+        ),
+        attachments,
+    })
+}
+
+/// Reads the new messages of the folder that are for us (`is_for_us`): fetches the headers of every
+/// message after the ledger's last UID with `EXAMINE` and `BODY.PEEK`, so that nothing is marked
+/// read, moved or deleted, and the body of those that are for us alone. A folder the provider
+/// renumbered (a changed `UIDVALIDITY`) starts again at the next UID and reads nothing older.
+///
+/// # Errors
+///
+/// As [`check_login`] for the connection and the sign-in; `Server` for an answer Farik cannot use.
+pub async fn fetch_replies(
+    settings: &MailboxSettings,
+    password: &Secret,
+    trust: &Trust,
+    ledger: &Ledger,
+    known: &Known,
+) -> Result<Fetched, MailboxError> {
+    let mut session = imap_login(settings, password, trust).await?;
+    let read = read_replies(&mut session, settings, ledger, known).await;
+    let _ = session.logout().await;
+    read
+}
+
+async fn read_replies(
+    session: &mut ImapSession,
+    settings: &MailboxSettings,
+    ledger: &Ledger,
+    known: &Known,
+) -> Result<Fetched, MailboxError> {
+    use futures_util::TryStreamExt as _;
+    let unusable = || {
+        MailboxError::Server(
+            "The mail server answered in a way Farik can\u{2019}t use.".to_string(),
+        )
+    };
+    let mailbox = within(async {
+        session
+            .examine(&settings.folder)
+            .await
+            .map_err(|error| imap_error(&error))
+    })
+    .await?;
+    let (Some(validity), Some(next)) = (mailbox.uid_validity, mailbox.uid_next) else {
+        return Err(unusable());
+    };
+    let mut ledger = ledger.clone();
+    let restarted = validity != ledger.uidvalidity;
+    if restarted {
+        ledger.uidvalidity = validity;
+        ledger.last_uid = next.saturating_sub(1);
+    }
+    let mut fetched = Fetched {
+        replies: Vec::new(),
+        bodies: Vec::new(),
+        skipped: Vec::new(),
+        ledger,
+        restarted,
+    };
+    if next.saturating_sub(1) <= fetched.ledger.last_uid {
+        return Ok(fetched);
+    }
+    let first = fetched.ledger.last_uid + 1;
+    let query = format!("(UID RFC822.SIZE {HEADER_FIELDS})");
+    let headers: Vec<(u32, Headers)> = within(async {
+        let stream = session
+            .uid_fetch(format!("{first}:*"), &query)
+            .await
+            .map_err(|error| imap_error(&error))?;
+        let found: Vec<async_imap::types::Fetch> = stream
+            .try_collect()
+            .await
+            .map_err(|error| imap_error(&error))?;
+        let mut headers: Vec<(u32, Headers)> = found
+            .iter()
+            // `n:*` always includes the newest message, even one older than `n`.
+            .filter_map(|one| {
+                let uid = one.uid.filter(|uid| *uid >= first)?;
+                Some((
+                    uid,
+                    headers_of(
+                        one.header().unwrap_or_default(),
+                        u64::from(one.size.unwrap_or(0)),
+                    ),
+                ))
+            })
+            .collect();
+        headers.sort_by_key(|(uid, _)| *uid);
+        Ok(headers)
+    })
+    .await?;
+    for (uid, header) in &headers {
+        if is_for_us(header, known) {
+            fetched.bodies.push(*uid);
+        } else {
+            fetched.skipped.push(*uid);
+        }
+    }
+    for uid in fetched.bodies.clone() {
+        let raw: Vec<u8> = within(async {
+            let stream = session
+                .uid_fetch(uid.to_string(), "(UID BODY.PEEK[])")
+                .await
+                .map_err(|error| imap_error(&error))?;
+            let found: Vec<async_imap::types::Fetch> = stream
+                .try_collect()
+                .await
+                .map_err(|error| imap_error(&error))?;
+            Ok(found
+                .iter()
+                .find(|one| one.uid == Some(uid))
+                .and_then(|one| one.body())
+                .map(<[u8]>::to_vec)
+                .unwrap_or_default())
+        })
+        .await?;
+        if let Some(reply) = reply_of(uid, &raw) {
+            fetched.replies.push(reply);
+        }
+    }
+    if let Some((uid, _)) = headers.last() {
+        fetched.ledger.last_uid = *uid;
+    }
+    Ok(fetched)
+}
+
 /// Where the procurement mailbox's password is kept: one per project on this computer, in the
 /// keychain at `mailbox:<project id>:procurement`, or without a keychain in `connectors.json`
 /// under that key.
@@ -761,8 +1154,8 @@ impl<Store: crate::connectors::ConnectorSecrets + ?Sized> MailboxSecrets for Sto
 #[cfg(test)]
 mod tests {
     use super::{
-        MailboxSettings, Provider, ProviderOf, Security, Server, provider_of, servers,
-        validate_settings,
+        Headers, Known, MailboxSettings, Provider, ProviderOf, Security, Server, is_for_us,
+        provider_of, servers, validate_settings,
     };
 
     fn server(host: &str, port: u16, security: Security) -> Server {
@@ -866,5 +1259,71 @@ mod tests {
         let mut lines = settings();
         lines.signature = "Sam Ortiz\nCorner Bakery".into();
         assert_eq!(validate_settings(&lines), Ok(()));
+    }
+    fn known() -> Known {
+        Known {
+            address: "buying@bakery.test".to_string(),
+            sent_ids: vec!["m1@bakery.test".to_string()],
+            written_to: vec!["sales@pieboxpros.test".to_string()],
+        }
+    }
+
+    /// A reply from Dana answering message `m1`, addressed to the procurement address.
+    fn a_reply() -> Headers {
+        Headers {
+            from: "sales@pieboxpros.test".to_string(),
+            to: vec!["Buying@Bakery.test".to_string()],
+            cc: Vec::new(),
+            delivered_to: Vec::new(),
+            in_reply_to: vec!["m1@bakery.test".to_string()],
+            references: Vec::new(),
+            size: 4_000,
+        }
+    }
+
+    #[test]
+    fn is_for_us_reads_only_the_procurement_address() {
+        // To, Cc or Delivered-To holds the address, without regard to case, and the message
+        // answers a sent one.
+        assert!(is_for_us(&a_reply(), &known()));
+        let mut cc = a_reply();
+        cc.to = vec!["someone@else.test".to_string()];
+        cc.cc = vec!["BUYING@bakery.test".to_string()];
+        assert!(is_for_us(&cc, &known()));
+        let mut delivered = a_reply();
+        delivered.to = Vec::new();
+        delivered.delivered_to = vec!["buying@bakery.test".to_string()];
+        assert!(is_for_us(&delivered, &known()));
+        // A reference names the sent message as well as an In-Reply-To does.
+        let mut referenced = a_reply();
+        referenced.in_reply_to = Vec::new();
+        referenced.references = vec!["old@x.test".to_string(), "m1@bakery.test".to_string()];
+        assert!(is_for_us(&referenced, &known()));
+        // From an address a message was written to, answering nothing, holds too.
+        let mut from_a_seller = a_reply();
+        from_a_seller.in_reply_to = Vec::new();
+        from_a_seller.from = "Sales@PieBoxPros.test".to_string();
+        assert!(is_for_us(&from_a_seller, &known()));
+
+        // The same answer addressed only to the account's main address does not.
+        let mut main = a_reply();
+        main.to = vec!["owner@bakery.test".to_string()];
+        assert!(!is_for_us(&main, &known()));
+        // Addressed to us, answering nothing, from an address never written to: no.
+        let mut stranger = a_reply();
+        stranger.in_reply_to = Vec::new();
+        stranger.from = "promo@elsewhere.test".to_string();
+        assert!(!is_for_us(&stranger, &known()));
+        // Answering a message that is not ours, from a stranger: no.
+        let mut other = a_reply();
+        other.in_reply_to = vec!["unrelated@x.test".to_string()];
+        other.from = "promo@elsewhere.test".to_string();
+        assert!(!is_for_us(&other, &known()));
+        // 25 MB is read, and one byte more is not.
+        let mut big = a_reply();
+        big.size = 25 * 1024 * 1024;
+        assert!(is_for_us(&big, &known()));
+        big.size += 1;
+        assert!(!is_for_us(&big, &known()));
     }
 }

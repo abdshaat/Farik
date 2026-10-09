@@ -4,12 +4,17 @@
 //! runs with no model: the orders that close by themselves and the renewals coming up.
 
 mod mail;
+mod replies;
+#[cfg(test)]
+mod story;
 
 pub(crate) use mail::{
     Mailer, SendAsk, discard_message, order_is_sending, prepare, record_failed, record_sent,
     send_message, transmit,
 };
 pub use mail::{add_order_send_fields, seller_messages_list};
+pub(crate) use replies::{check_by_hand, dismiss_reply, start_check};
+pub use replies::{reply_attachment, seller_replies_list};
 
 use std::io::Cursor;
 use std::path::Path;

@@ -21,10 +21,11 @@ use crate::generated::command::{
     MarketingPlanEndBody, MessagePostBody, PurchaseOrderDecideBody,
     PurchaseOrderDecideBodyDecision, PurchaseOrderSendBody, PurchaseOrderStepBody,
     PurchaseOrderUpdateBody, QuestionAnswerBody, RenewalDismissBody, RequestTriageBody,
-    RequestTriageBodySize, SellerMessageDiscardBody, SellerMessageSendBody, SessionStopBody,
-    SiteAddBody, SiteDecideBody, SiteRemoveBody, SkillConfirmBody, SkillLevel, SkillRemoveBody,
-    SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision, SocialPostStopBody,
-    SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody, ToolDecisionBody,
+    RequestTriageBodySize, SellerMessageDiscardBody, SellerMessageSendBody, SellerReplyDismissBody,
+    SessionStopBody, SiteAddBody, SiteDecideBody, SiteRemoveBody, SkillConfirmBody, SkillLevel,
+    SkillRemoveBody, SkillSaveBody, SocialPostDecideBody, SocialPostDecideBodyDecision,
+    SocialPostStopBody, SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
+    ToolDecisionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -336,6 +337,11 @@ pub enum Command {
         /// The message's number.
         message: u64,
     },
+    /// Dismiss reply `reply` from a seller on Today; it stays kept (ADR 0039).
+    SellerReplyDismiss {
+        /// The reply's number.
+        reply: u64,
+    },
     /// Approve an order and email it, with its workbook, to its seller in one press, which records
     /// it placed: the owner pays the seller outside Farik (ADR 0039).
     PurchaseOrderSend {
@@ -620,6 +626,12 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             let body: SellerMessageDiscardBody = read_body(body, name)?;
             Ok(Command::SellerMessageDiscard {
                 message: body.message.get(),
+            })
+        }
+        CommandName::SellerReplyDismiss => {
+            let body: SellerReplyDismissBody = read_body(body, name)?;
+            Ok(Command::SellerReplyDismiss {
+                reply: body.reply.get(),
             })
         }
         CommandName::PurchaseOrderSend => {
@@ -990,6 +1002,9 @@ pub fn command_to_value(command: &Command) -> Value {
             CommandName::SellerMessageDiscard,
             json!({ "message": message }),
         ),
+        Command::SellerReplyDismiss { reply } => {
+            (CommandName::SellerReplyDismiss, json!({ "reply": reply }))
+        }
         Command::PurchaseOrderSend {
             order,
             message,
@@ -1908,6 +1923,11 @@ mod tests {
                 Command::SellerMessageDiscard { message: 4 },
             ),
             (
+                "seller_reply_dismiss",
+                json!({ "reply": 2 }),
+                Command::SellerReplyDismiss { reply: 2 },
+            ),
+            (
                 "purchase_order_send",
                 json!({ "order": 12, "message": 5, "subject": "Order PO-12", "body": "Attached." }),
                 Command::PurchaseOrderSend {
@@ -1977,6 +1997,9 @@ mod tests {
                 json!({ "message": 3, "subject": "S", "body": "B", "note": "n" }),
             ),
             ("seller_message_discard", json!({})),
+            ("seller_reply_dismiss", json!({})),
+            ("seller_reply_dismiss", json!({ "reply": 0 })),
+            ("seller_reply_dismiss", json!({ "reply": 1, "message": 2 })),
             ("seller_message_discard", json!({ "message": 0 })),
             (
                 "seller_message_discard",

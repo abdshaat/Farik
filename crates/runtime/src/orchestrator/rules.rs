@@ -75,6 +75,12 @@ pub(super) struct Waiting {
 /// What the log refused.
 pub(super) use super::hand_over::hand_over_posts;
 
+/// Starts a check of the procurement mailbox when one is due: spawned, at most one at a time, and
+/// reading no message that is not for the procurement address (spec 6.10).
+pub(super) fn check_mail(deps: &OrchestratorDeps) {
+    crate::procurement::start_check(&deps.tools, &deps.daemon);
+}
+
 pub(super) async fn end_marketing_plans(
     deps: &OrchestratorDeps,
 ) -> Result<Vec<FarikEvent>, OrchestratorError> {

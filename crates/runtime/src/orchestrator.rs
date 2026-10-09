@@ -478,6 +478,9 @@ impl Orchestrator {
             // The orders nobody decided in time, and the renewals coming up, close and flag with
             // no model too (ADR 0039).
             rules::close_orders_and_flag_renewals(&self.deps)?;
+            // The procurement mailbox is read every 15 minutes with no model, in a task of its own
+            // so that a slow server never holds the tick, and under a pause too (ADR 0039).
+            rules::check_mail(&self.deps);
         }
         if crate::pause::paused(log)? {
             // A paused team still answers its chats (ADR 0026), unless the provider refused the

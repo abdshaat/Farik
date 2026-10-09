@@ -37,7 +37,7 @@ use crate::daemon::{secret_at, with_server};
 use crate::marketing::{decide_plan, decide_post, end_plan, stop_post};
 use crate::pause::paused;
 use crate::procurement::{
-    MailboxRefusal, Mailer, ORDERS, PIPELINES, check_follow_up, discard_message,
+    MailboxRefusal, Mailer, ORDERS, PIPELINES, check_follow_up, discard_message, dismiss_reply,
     file_pipeline_request, order_is_sending, prepare, record_failed, record_sent, send_message,
     transmit,
 };
@@ -224,6 +224,7 @@ pub(super) async fn handle(
             body,
         } => send_to_seller(orchestrator, message, &subject, &body).await,
         Command::SellerMessageDiscard { message } => discard_to_seller(tools, message),
+        Command::SellerReplyDismiss { reply } => dismiss_seller_reply(tools, reply),
         Command::PurchaseOrderSend {
             order,
             message,
@@ -1028,6 +1029,16 @@ async fn send_to_seller(
         .map_err(mail_refusal)?;
     Ok(CommandReport {
         said: format!("Sent to {seller}."),
+        events: vec![seq],
+    })
+}
+
+/// `seller_reply_dismiss`: the reply leaves Today and stays kept; `seller_reply.dismissed` is
+/// recorded. Refused `unknown_seller_reply` and `seller_reply_dismissed`.
+fn dismiss_seller_reply(tools: &ToolDeps, reply: u64) -> Result<CommandReport, CommandError> {
+    let seq = dismiss_reply(tools, reply).map_err(mail_refusal)?;
+    Ok(CommandReport {
+        said: format!("Dismissed reply {reply}."),
         events: vec![seq],
     })
 }

@@ -70,7 +70,8 @@
         "purchase_order.evaluation",
         "renewals.list",
         "procurement_mailbox.get",
-        "seller_messages.list"
+        "seller_messages.list",
+        "seller_replies.list"
       ]
     },
     "subscribeRequest": {
@@ -312,6 +313,9 @@
             },
             {
               "$ref": "#/$defs/sellerMessagesListQuery"
+            },
+            {
+              "$ref": "#/$defs/sellerRepliesListQuery"
             },
             {
               "$ref": "#/$defs/metricsQuery"
@@ -564,6 +568,12 @@
         },
         {
           "$ref": "#/$defs/procurementMailboxDisconnectRequest"
+        },
+        {
+          "$ref": "#/$defs/procurementMailboxCheckRequest"
+        },
+        {
+          "$ref": "#/$defs/sellerReplyAttachmentRequest"
         }
       ]
     },
@@ -3733,6 +3743,68 @@
         "cap": { "type": "integer", "minimum": 1 }
       }
     },
+    "procurementMailboxCheckResult": {
+      "description": "How many replies the check recorded.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["replies"],
+      "properties": { "replies": { "type": "integer", "minimum": 0 } }
+    },
+    "sellerReplyAttachmentResult": {
+      "description": "An attachment of a seller's reply: media_type (application/pdf, image/png or image/jpeg), its bytes as base64, and a name made from the reply and the index with the extension its bytes call for, never the seller's own file name.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["media_type", "base64", "name"],
+      "properties": {
+        "media_type": { "type": "string", "enum": ["application/pdf", "image/png", "image/jpeg"] },
+        "base64": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "sellerRepliesListResult": {
+      "description": "Every reply Farik read in the procurement mailbox, oldest first (docs/SPEC.md 6.10, 8.6): reply, its number; message, the message of Farik's it answers, with seller and sent_subject, what Farik sent (the subject shown is never the reply's own); from, subject, text, date and attachments, what the seller wrote (untrusted; text is at most 64 KiB, and each attachment has its index counted from 1, the name the seller gave it as text, kept, media_type and bytes when kept); received_at; order, set for a reply to an order's message or a follow-up; and dismissed, whether the owner dismissed it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["replies"],
+      "properties": {
+        "replies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reply", "message", "seller", "sent_subject", "from", "subject", "text", "received_at", "attachments", "dismissed"],
+            "properties": {
+              "reply": { "type": "integer", "minimum": 1 },
+              "message": { "type": "integer", "minimum": 1 },
+              "seller": { "type": "string" },
+              "sent_subject": { "type": "string" },
+              "from": { "type": "string" },
+              "subject": { "type": "string" },
+              "text": { "type": "string" },
+              "date": { "type": "string", "format": "date-time" },
+              "received_at": { "type": "string", "format": "date-time" },
+              "order": { "type": "integer", "minimum": 1 },
+              "dismissed": { "type": "boolean" },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["index", "name", "kept", "bytes"],
+                  "properties": {
+                    "index": { "type": "integer", "minimum": 1 },
+                    "name": { "type": "string" },
+                    "kept": { "type": "boolean" },
+                    "media_type": { "type": "string", "enum": ["application/pdf", "image/png", "image/jpeg"] },
+                    "bytes": { "type": "integer", "minimum": 0 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "purchaseOrderEvaluationResult": {
       "description": "The comparison an order rests on, evaluations/<name>.md in the agent's private folder, as text: the agent's own words, untrusted, shown as text and never as a page.",
       "type": "object",
@@ -3894,6 +3966,16 @@
         "params": { "type": "object", "additionalProperties": false, "properties": {} }
       }
     },
+    "sellerRepliesListQuery": {
+      "title": "Seller Replies List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "seller_replies.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
     "procurementMailboxGetQuery": {
       "title": "Procurement Mailbox Get Query",
       "description": "The procurement mailbox (docs/SPEC.md 6.10; ADR 0039): { connected, address?, name?, provider?, folder?, checked_at?, error?, restarted_at?, sent_today, cap }. The password is never in it. checked_at is when Farik last read the mailbox; error is Farik's own sentence about the last check that failed; restarted_at is when the provider renumbered the folder; sent_today counts the messages sent to sellers on the UTC day, of the cap.",
@@ -3955,6 +4037,40 @@
         "id": { "$ref": "#/$defs/requestId" },
         "method": { "const": "procurement_mailbox.disconnect" },
         "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "procurementMailboxCheckRequest": {
+      "title": "Procurement Mailbox Check Request",
+      "description": "Reads the procurement mailbox now, as Farik does by itself every 15 minutes with no model (docs/SPEC.md 6.10): only messages addressed to the procurement address that answer a message Farik sent, or come from an address it wrote to, are opened. Answers procurementMailboxCheckResult; refused mailbox_not_connected, or with the reason a login or a server gave, in Farik's words (mailbox_login_failed, mailbox_needs_tls, mailbox_certificate, mailbox_unreachable, mailbox_server). A check already running answers replies 0.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "procurement_mailbox.check" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "sellerReplyAttachmentRequest": {
+      "title": "Seller Reply Attachment Request",
+      "description": "A file a seller attached to a reply, for the owner to download: answers sellerReplyAttachmentResult; refused not_found for a reply nobody received, an index it has not (counted from 1) and a file that was not kept (Farik keeps only PDFs and pictures of 10 MB or less, as their bytes say).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "seller_reply.attachment" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reply", "index"],
+          "properties": {
+            "reply": { "type": "integer", "minimum": 1 },
+            "index": { "type": "integer", "minimum": 1 }
+          }
+        }
       }
     },
     "purchaseOrderFileRequest": {

@@ -361,7 +361,7 @@ pub(crate) async fn transmit(prepared: &Prepared) -> Result<(), MailboxError> {
 
 /// Keeps what was sent as `mail/out/<n>.sent.txt`, the subject line, a blank line and exactly the
 /// text, and records `seller_message.sent` with the hash of that file; the envelope names the
-/// message\u{2019}s task and no agent and no session. Answers the record\u{2019}s number.
+/// message's task and no agent and no session. Answers the record's number.
 ///
 /// # Errors
 ///
@@ -399,7 +399,7 @@ pub(crate) fn record_sent(deps: &ToolDeps, prepared: &Prepared) -> Result<u64, M
     .map_err(mail_failed)
 }
 
-/// Records `seller_message.failed` with Farik\u{2019}s sentence for `error`, and answers the refusal
+/// Records `seller_message.failed` with Farik's sentence for `error`, and answers the refusal
 /// the owner is shown; the message waits to be tried again.
 pub(crate) fn record_failed(
     deps: &ToolDeps,
@@ -424,8 +424,8 @@ pub(crate) fn record_failed(
 }
 
 /// Sends message `message` with the subject and body the owner saw: checks, sends, and records
-/// `seller_message.sent` (or `.failed` when a server refuses it). Answers the sent record\u{2019}s
-/// number and the seller\u{2019}s name.
+/// `seller_message.sent` (or `.failed` when a server refuses it). Answers the sent record's
+/// number and the seller's name.
 ///
 /// # Errors
 ///
@@ -565,7 +565,7 @@ pub fn seller_messages_list(deps: &ToolDeps) -> Result<Value, StoreError> {
     }))
 }
 
-/// Adds `send` to a waiting order\u{2019}s row: its message, the seller\u{2019}s address and domain, whether
+/// Adds `send` to a waiting order's row: its message, the seller's address and domain, whether
 /// a message went there before, and the subject and body the owner will send.
 pub fn add_order_send_fields(row: &mut Value, deps: &ToolDeps, send: &OrderSend) {
     let domain = domain_of(&send.to);
@@ -586,8 +586,6 @@ pub fn add_order_send_fields(row: &mut Value, deps: &ToolDeps, send: &OrderSend)
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use farik_protocol::command::Command;
     use farik_protocol::event::{EventBody, EventKind};
     use farik_store::purchase_orders::{OrderState, purchase_orders};
@@ -600,178 +598,10 @@ mod tests {
     use super::{
         Mailer, SendAsk, add_order_send_fields, discard_message, prepare, seller_messages_list,
     };
-    use crate::claude::Secret;
-    use crate::connectors::MemoryConnectorSecrets;
-    use crate::greenmail::{Account, BUYING, GreenMail};
-    use crate::mailbox::{MailboxAt, MailboxSecrets as _, ProviderChoice, Security, Server, Trust};
+    use crate::greenmail::BUYING;
+    use crate::mailbox::{MailboxSecrets as _, Trust};
     use crate::orchestrator::fixtures::Harness;
-    use crate::orchestrator::{CommandError, Orchestrator};
-    use crate::procurement::{MailboxConnect, connect_mailbox};
-
-    /// Dana of Pie Box Pros, whose mailbox the fixture holds.
-    const DANA: Account = Account {
-        login: "sales",
-        password: "seller-word",
-        address: "sales@pieboxpros.test",
-    };
-
-    /// The story: Ivo writes from `buying@bakery.test` to Dana, in a project whose mailbox is
-    /// connected to the fixture.
-    struct Story {
-        fixture: GreenMail,
-        harness: Harness,
-        store: Arc<MemoryConnectorSecrets>,
-        at: MailboxAt,
-    }
-
-    /// A draft of Ivo's through the tool, on a thread of its own: the tool runs a runtime, and the
-    /// test is on one already. Answers the message's number.
-    fn drafted(project: &crate::tools::fixtures::TestProject, input: Value) -> u64 {
-        std::thread::scope(|scope| {
-            scope
-                .spawn(|| {
-                    project
-                        .call("proc", Some("FRK-1"), "farik_draft_seller_message", input)
-                        .expect("a draft")["message"]
-                        .as_u64()
-                        .expect("a number")
-                })
-                .join()
-                .expect("the draft ends")
-        })
-    }
-
-    fn secret(word: &str) -> Secret {
-        Secret::new(word.to_string())
-    }
-
-    fn connection(fixture: &GreenMail, disclose_ai: bool) -> MailboxConnect {
-        let server = |port: u16| Server {
-            host: "localhost".to_string(),
-            port,
-            security: Security::Tls,
-        };
-        MailboxConnect {
-            address: BUYING.address.to_string(),
-            name: "Sam Ortiz".to_string(),
-            provider: ProviderChoice::Other,
-            imap: server(fixture.imaps),
-            smtp: server(fixture.smtps),
-            username: BUYING.login.to_string(),
-            folder: "INBOX".to_string(),
-            signature: "Corner Bakery".to_string(),
-            disclose_ai,
-        }
-    }
-
-    impl Story {
-        async fn new(name: &str) -> Story {
-            let fixture = GreenMail::start(name, &[&BUYING, &DANA]);
-            let harness = Harness::with_procurement(&format!("send-{name}"));
-            harness.procurement_task("FRK-1", Some("in_progress"));
-            let keys = Arc::new(MemoryConnectorSecrets::default());
-            assert!(harness.daemon.set_connector_secrets(keys.clone()));
-            assert!(
-                harness
-                    .daemon
-                    .set_mail_trust(Trust::Root(fixture.ca_der.clone()))
-            );
-            let at = harness
-                .daemon
-                .mailbox_at(harness.project.deps.files.root())
-                .expect("the project's id");
-            let story = Story {
-                fixture,
-                harness,
-                store: keys,
-                at,
-            };
-            story.connect(true, BUYING.password).await;
-            story
-        }
-
-        async fn connect(&self, disclose_ai: bool, password: &str) {
-            connect_mailbox(
-                &self.harness.project.deps,
-                &*self.store,
-                &self.at,
-                connection(&self.fixture, disclose_ai),
-                &secret(password),
-                &Trust::Root(self.fixture.ca_der.clone()),
-            )
-            .await
-            .expect("the mailbox connects");
-        }
-
-        /// A quote request of Ivo's to Dana, drafted as the tool drafts it; answers its number.
-        fn draft(&self, subject: &str, body: &str) -> u64 {
-            self.draft_as(json!({
-                "seller": "Pie Box Pros", "to": DANA.address, "subject": subject,
-                "body": body, "purpose": "quote_request"
-            }))
-        }
-
-        fn draft_as(&self, input: Value) -> u64 {
-            drafted(&self.harness.project, input)
-        }
-
-        fn orchestrator(&self) -> Orchestrator {
-            self.harness.orchestrator(self.harness.recorded(Vec::new()))
-        }
-
-        async fn send(&self, message: u64, subject: &str, body: &str) -> Result<String, String> {
-            self.orchestrator()
-                .handle(Command::SellerMessageSend {
-                    message,
-                    subject: subject.to_string(),
-                    body: body.to_string(),
-                })
-                .await
-                .map(|report| report.said)
-                .map_err(reason)
-        }
-
-        fn events(&self, kinds: &[EventKind]) -> Vec<farik_protocol::event::FarikEvent> {
-            self.harness.events(kinds)
-        }
-
-        fn out(&self, name: &str) -> String {
-            std::fs::read_to_string(
-                self.harness
-                    .procurement_folder()
-                    .join("mail/out")
-                    .join(name),
-            )
-            .unwrap_or_default()
-        }
-
-        /// What Dana received, whole.
-        fn dana_has(&self) -> Vec<String> {
-            self.fixture.inbox(&DANA)
-        }
-    }
-
-    fn reason(error: CommandError) -> String {
-        match error {
-            CommandError::Refused { reason } => reason,
-            other => panic!("expected a refusal, got {other:?}"),
-        }
-    }
-
-    /// The purchase orders that wait for the owner, as the store lists them.
-    fn orders_waiting(story: &Story) -> Vec<farik_store::waiting::OrderAsk> {
-        let deps = &story.harness.project.deps;
-        let team = deps.files.read_team().expect("the team");
-        farik_store::waiting::waiting(&deps.projections, &deps.log, &deps.files, &team)
-            .expect("the store reads")
-            .into_iter()
-            .filter_map(|item| item.order)
-            .collect()
-    }
-
-    fn lf(text: &str) -> String {
-        text.replace("\r\n", "\n")
-    }
+    use crate::procurement::story::{DANA, Story, drafted, lf, orders_waiting, reason, secret};
 
     use crate::tools::seller::hex;
 

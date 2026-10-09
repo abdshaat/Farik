@@ -200,7 +200,7 @@ Files: `mailbox.rs`, `procurement.rs`, `orchestrator.rs`, `daemon/team.rs`, `gat
 - `checks_every_fifteen_minutes_without_a_session` (fixture): an unscoped tick checks, one 14 minutes later does not, one 15 minutes later does; a paused team's tick checks; a tick scoped to a task does not; none starts a session; `procurement_mailbox.check` checks at once; a check against a stopped fixture writes `error` and the next good one clears it. RED: no such rule.
 - `replies_list_and_dismiss`: `seller_replies.list` gives each reply with its message's seller and subject and `order` for a reply to an order's message; `seller_reply_dismiss` records `dismissed`, a second `seller_reply_dismissed`, an unknown number `unknown_seller_reply`; `seller_reply.attachment` answers a kept file's bytes and `not_found` for one not kept. RED: no such query, command or method.
 
-- [ ] `feat(runtime): read sellers' replies from the procurement mailbox`
+- [x] `feat(runtime): read sellers' replies from the procurement mailbox`
 
 ### Task 5: What the agent reads
 

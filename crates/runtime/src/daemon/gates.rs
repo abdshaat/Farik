@@ -49,12 +49,13 @@ use crate::tools::media::fetch_picture;
 use crate::transitions::last_move_into;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 5] = [
+pub(super) const METHODS: [&str; 6] = [
     "request.file",
     "contract.save",
     "social_post.media",
     "marketing_budget.raise",
     "purchase_order.file",
+    "seller_reply.attachment",
 ];
 
 /// Who the human is in the log.
@@ -289,6 +290,9 @@ pub(super) fn query(
             marketing_plan_get(state, deps, params["plan"].as_str().unwrap_or(""))
         }
         "sites.list" => crate::tools::sites::site_list(&deps.log).map_err(|e| internal(&e)),
+        "seller_replies.list" => {
+            crate::procurement::seller_replies_list(deps).map_err(|e| internal(&e))
+        }
         "seller_messages.list" => {
             crate::procurement::seller_messages_list(deps).map_err(|e| internal(&e))
         }
@@ -673,6 +677,21 @@ pub(super) async fn call(
     if method == "purchase_order.file" {
         let order = params["order"].as_u64().unwrap_or_default();
         return off_the_worker(move || order_file(&deps, order)).await;
+    }
+    if method == "seller_reply.attachment" {
+        let (reply, index) = (
+            params["reply"].as_u64().unwrap_or_default(),
+            params["index"].as_u64().unwrap_or_default(),
+        );
+        return off_the_worker(move || {
+            crate::procurement::reply_attachment(&deps, reply, index).ok_or_else(|| {
+                Failure::new(
+                    NOT_FOUND,
+                    format!("there is no attachment {index} kept of reply {reply}"),
+                )
+            })
+        })
+        .await;
     }
     if method == "request.file" {
         let text = params["text"].as_str().unwrap_or_default().to_string();
@@ -4704,6 +4723,105 @@ pub(super) mod tests {
                 .expect("rows")
                 .iter()
                 .all(|row| row["kind"] != "purchase_order")
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one story, from a reply to its dismissal"
+    )]
+    fn lists_a_reply_serves_its_file_and_reads_nothing_without_a_mailbox() {
+        let harness = Harness::with_procurement("gates-seller-replies");
+        harness.procurement_task("FRK-1", Some("in_progress"));
+        let project = &harness.project;
+        // A message sent, and a reply to it kept with a picture and a file that was not kept.
+        project.record_in(
+            Some("proc"),
+            Some("session-1"),
+            "FRK-1",
+            "seller_message.drafted",
+            &json!({
+                "message": 1, "seller": "Pie Box Pros", "to": "sales@pieboxpros.test",
+                "subject": "Quote", "purpose": "quote_request",
+                "sha256": "9f2b0c1d5e7a4b3c8d6e1f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c"
+            }),
+        );
+        project.record(
+            "",
+            "seller_message.sent",
+            &json!({
+                "message": 1, "message_id": "m1@bakery.test", "edited": false,
+                "sha256": "9f2b0c1d5e7a4b3c8d6e1f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c"
+            }),
+        );
+        project.record(
+            "",
+            "seller_reply.received",
+            &json!({
+                "reply": 1, "message": 1, "from": "Dana <sales@pieboxpros.test>",
+                "subject": "Re: Quote",
+                "attachments": [
+                    { "name": "shot.png", "kept": true, "media_type": "image/png", "bytes": 4 },
+                    { "name": "tool.exe", "kept": false, "bytes": 9 }
+                ]
+            }),
+        );
+        let month = at().format("%Y-%m").to_string();
+        let folder = harness
+            .procurement_folder()
+            .join("mail/in")
+            .join(month)
+            .join("1");
+        std::fs::create_dir_all(&folder).expect("the reply's folder");
+        std::fs::write(folder.join("text.txt"), "We can do 0.38.").expect("text");
+        std::fs::write(folder.join("1.png"), b"\x89PNG").expect("picture");
+
+        let listed = query(
+            &harness.daemon,
+            "seller_replies.list",
+            &json!({}),
+            "sellerRepliesListResult",
+        );
+        let row = &listed["replies"][0];
+        assert_eq!(row["text"], "We can do 0.38.");
+        assert_eq!(row["sent_subject"], "Quote");
+        assert_eq!(row["attachments"][0]["index"], 1);
+        assert_eq!(row["attachments"][1]["kept"], false);
+
+        let file = rpc(
+            &harness.daemon,
+            "seller_reply.attachment",
+            &json!({ "reply": 1, "index": 1 }),
+        );
+        conforms(&file["result"], "sellerReplyAttachmentResult", &file);
+        assert_eq!(file["result"]["name"], "1-1.png");
+        assert_eq!(file["result"]["media_type"], "image/png");
+        for (reply, index) in [(1, 2), (1, 3), (2, 1)] {
+            let gone = rpc(
+                &harness.daemon,
+                "seller_reply.attachment",
+                &json!({ "reply": reply, "index": index }),
+            );
+            assert_eq!(
+                gone["error"]["code"],
+                crate::daemon::web::NOT_FOUND,
+                "{gone}"
+            );
+        }
+        // Checking a mailbox that is not connected is refused in Farik's words.
+        let refused = rpc(&harness.daemon, "procurement_mailbox.check", &json!({}));
+        assert_eq!(
+            refused["error"]["code"],
+            crate::daemon::web::REFUSED,
+            "{refused}"
+        );
+        assert!(
+            refused["error"]["message"]
+                .as_str()
+                .is_some_and(|words| words.starts_with("mailbox_not_connected: ")),
+            "{refused}"
         );
     }
 

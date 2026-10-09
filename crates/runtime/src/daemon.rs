@@ -495,8 +495,8 @@ impl DaemonState {
         crate::connectors::working_folder(self.state_dir()?, deps.files.root(), at)
     }
 
-    /// Trusts `trust` for the mailbox connections from now on: a test\u{2019}s own certificate authority.
-    /// The product always trusts the platform\u{2019}s certificates and nothing else. Answers `true`, or
+    /// Trusts `trust` for the mailbox connections from now on: a test's own certificate authority.
+    /// The product always trusts the platform's certificates and nothing else. Answers `true`, or
     /// `false` when one was already set, which is kept.
     #[cfg(test)]
     pub(crate) fn set_mail_trust(&self, trust: crate::mailbox::Trust) -> bool {
@@ -516,12 +516,12 @@ impl DaemonState {
         crate::mailbox::Trust::Platform
     }
 
-    /// Where the procurement mailbox\u{2019}s password is kept in the project at `root`
+    /// Where the procurement mailbox's password is kept in the project at `root`
     /// ([`MailboxAt`](crate::mailbox::MailboxAt)).
     ///
     /// # Errors
     ///
-    /// No state folder was set, or the project\u{2019}s id could not be read or made.
+    /// No state folder was set, or the project's id could not be read or made.
     pub(crate) fn mailbox_at(
         &self,
         root: &std::path::Path,

@@ -98,7 +98,12 @@ impl GreenMail {
     }
 
     fn start_with(test: &str, accounts: &[&Account], beside: Option<&GreenMail>) -> GreenMail {
-        let name = format!("farik-greenmail-{}-{test}", std::process::id());
+        static STARTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let name = format!(
+            "farik-greenmail-{}-{}-{test}",
+            std::process::id(),
+            STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
         let dir = std::env::temp_dir().join(&name);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("the folder is made");
@@ -388,6 +393,43 @@ impl GreenMail {
         messages
     }
 
+    /// How many messages of `account`'s inbox are unseen, by a `SEARCH UNSEEN` that changes nothing.
+    pub fn unseen(&self, account: &Account) -> usize {
+        let mut stream = TcpStream::connect(("127.0.0.1", self.imap)).expect("IMAP is reachable");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("a timeout");
+        let mut reader = BufReader::new(stream.try_clone().expect("a clone"));
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("a greeting");
+        let mut run = |tag: &str, command: String| -> String {
+            stream
+                .write_all(format!("{tag} {command}\r\n").as_bytes())
+                .expect("written");
+            let mut all = String::new();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("a line");
+                if line.starts_with(&format!("{tag} ")) {
+                    break;
+                }
+                all.push_str(&line);
+            }
+            all
+        };
+        run(
+            "a1",
+            format!("LOGIN {} {}", account.login, account.password),
+        );
+        run("a2", "EXAMINE INBOX".to_string());
+        let found = run("a3", "SEARCH UNSEEN".to_string());
+        run("z", "LOGOUT".to_string());
+        found
+            .lines()
+            .find_map(|line| line.strip_prefix("* SEARCH"))
+            .map_or(0, |ids| ids.split_whitespace().count())
+    }
+
     /// Whether the container is gone.
     pub fn is_removed(&self) -> bool {
         docker(&[
@@ -407,5 +449,66 @@ impl Drop for GreenMail {
     fn drop(&mut self) {
         let _ = docker(&["rm", "-f", &self.name]);
         let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// A message of the story, built as a mail program would write it: a reply from `from` to `to`,
+/// answering `in_reply_to` (a Message-ID without brackets), as plain text, as HTML alone, or with
+/// attachments.
+pub struct Mime<'a> {
+    pub from: &'a str,
+    pub to: &'a str,
+    pub subject: &'a str,
+    pub message_id: &'a str,
+    pub in_reply_to: Option<&'a str>,
+    pub text: Option<&'a str>,
+    pub html: Option<&'a str>,
+    pub attachments: Vec<(&'a str, &'a str, Vec<u8>)>,
+}
+
+impl Mime<'_> {
+    /// The whole message with CRLF line ends.
+    pub fn build(&self) -> String {
+        use base64::Engine as _;
+        let mut headers = format!(
+            "From: {}\r\nTo: {}\r\nSubject: {}\r\nMessage-ID: <{}>\r\nDate: Mon, 05 Oct 2026 10:00:00 +0000\r\nMIME-Version: 1.0\r\n",
+            self.from, self.to, self.subject, self.message_id
+        );
+        if let Some(id) = self.in_reply_to {
+            headers.push_str(&format!("In-Reply-To: <{id}>\r\nReferences: <{id}>\r\n"));
+        }
+        let body_part = |kind: &str, text: &str| {
+            format!(
+                "Content-Type: {kind}; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{text}\r\n"
+            )
+        };
+        if self.attachments.is_empty() {
+            return match (self.text, self.html) {
+                (Some(text), _) => format!("{headers}{}", body_part("text/plain", text)),
+                (None, Some(html)) => format!("{headers}{}", body_part("text/html", html)),
+                (None, None) => headers,
+            };
+        }
+        let boundary = "farik-test-boundary";
+        let mut raw =
+            format!("{headers}Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n");
+        raw.push_str(&format!(
+            "--{boundary}\r\n{}",
+            body_part("text/plain", self.text.unwrap_or("See the attachment."))
+        ));
+        for (name, media, bytes) in &self.attachments {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+            let lines: Vec<&str> = encoded
+                .as_bytes()
+                .chunks(76)
+                .map(|chunk| std::str::from_utf8(chunk).expect("base64 is ascii"))
+                .collect();
+            raw.push_str(&format!(
+                "--{boundary}\r\nContent-Type: {media}; name=\"{name}\"\r\nContent-Disposition: attachment; filename=\"{name}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n",
+                lines.join("\r\n")
+            ));
+        }
+        raw.push_str(&format!("--{boundary}--\r\n"));
+        raw
     }
 }

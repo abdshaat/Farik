@@ -38,7 +38,7 @@ use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 15] = [
+pub(super) const METHODS: [&str; 16] = [
     "team.save",
     "agent.replace",
     "team.start",
@@ -54,6 +54,7 @@ pub(super) const METHODS: [&str; 15] = [
     "connector.sign_in_cancel",
     "procurement_mailbox.connect",
     "procurement_mailbox.disconnect",
+    "procurement_mailbox.check",
 ];
 
 /// The marker the setup host leaves in a project it just made one, which "Start the team" removes.
@@ -1839,6 +1840,7 @@ pub(super) async fn call(
         }
         "procurement_mailbox.connect" => Box::pin(mailbox_connect(state, &deps, &params)).await,
         "procurement_mailbox.disconnect" => mailbox_disconnect(state, &deps).await,
+        "procurement_mailbox.check" => Box::pin(mailbox_check(state, &deps)).await,
         "project.note" => off_the_worker(move || {
             deps.files
                 .append_project_note(
@@ -2007,7 +2009,7 @@ fn mailbox_at(state: &DaemonState, deps: &ToolDeps) -> Result<crate::mailbox::Ma
 }
 
 /// `procurement_mailbox.connect`: logs in to both servers (the platform's certificates alone
-/// are trusted), then keeps the password where the connectors\u{2019} keys are kept.
+/// are trusted), then keeps the password where the connectors' keys are kept.
 async fn mailbox_connect(
     state: &Arc<DaemonState>,
     deps: &Arc<ToolDeps>,
@@ -2041,6 +2043,21 @@ async fn mailbox_connect(
     .await
     .map_err(|refusal| mailbox_failure(&refusal))?;
     Ok(json!({}))
+}
+
+/// `procurement_mailbox.check`: reads the mailbox now.
+async fn mailbox_check(state: &Arc<DaemonState>, deps: &Arc<ToolDeps>) -> Result<Value, Failure> {
+    let at = mailbox_at(state, deps)?;
+    let secrets = state.connector_secrets();
+    let mailer = crate::procurement::Mailer {
+        secrets: &*secrets,
+        at,
+        trust: state.mail_trust(),
+    };
+    let replies = crate::procurement::check_by_hand(deps, &mailer)
+        .await
+        .map_err(|refusal| mailbox_failure(&refusal))?;
+    Ok(json!({ "replies": replies }))
 }
 
 /// `procurement_mailbox.disconnect`.
