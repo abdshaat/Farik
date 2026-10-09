@@ -350,6 +350,11 @@ impl Ebay {
             request = request.header("X-EBAY-C-MARKETPLACE-ID", marketplace);
         }
         let response = request.send().await.map_err(|error| self.trouble(&error))?;
+        // A token eBay stopped taking, as after a computer's sleep that the clock does not count,
+        // is not used again: the next call asks for a new grant. The words stay the same.
+        if response.status().as_u16() == 401 {
+            *self.grant.lock().await = None;
+        }
         // Whatever it says other than a listing or listings, a redirect included, is one
         // sentence of Farik's.
         if !response.status().is_success() {
@@ -1167,6 +1172,48 @@ mod tests {
             1,
             "the second call waited for the first's grant"
         );
+    }
+
+    /// A token eBay refuses is dropped, and the next call asks for a new grant: a clock that does
+    /// not count a computer's sleep keeps believing a token eBay has stopped taking.
+    #[tokio::test]
+    async fn a_refused_token_is_asked_for_again() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        for (tool, input) in [
+            ("search_items", search("one")),
+            ("get_item", json!({ "item_id": "v1|123456789|0" })),
+        ] {
+            let browsed = Arc::new(AtomicUsize::new(0));
+            let counted = browsed.clone();
+            let fixture = Fixture::start(move |seen| {
+                if seen.is_grant() {
+                    Reply::Json(grant(7200))
+                } else if counted.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Reply::Status(401)
+                } else if seen.uri.path().contains("/item_summary/search") {
+                    Reply::Json(a_search(3, 3))
+                } else {
+                    Reply::Json(an_item())
+                }
+            })
+            .await;
+            let server = asking(&fixture);
+            let error = server
+                .call(tool, &input)
+                .await
+                .expect_err("a refused token");
+            assert_eq!(error, COULD_NOT, "{tool}");
+            server
+                .call(tool, &input)
+                .await
+                .unwrap_or_else(|error| panic!("{tool}: {error}"));
+            assert_eq!(
+                fixture.grants(),
+                2,
+                "{tool}: a refused token is not used again"
+            );
+        }
     }
 
     /// A grant that claims to last for ever is believed for a day at most, and does not panic.
