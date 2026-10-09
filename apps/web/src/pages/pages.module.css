@@ -936,3 +936,11 @@
 	border-left: 3px solid var(--farik-color-ink);
 	border-radius: var(--farik-radius-control);
 }
+
+/* A heading, name or switch beside its logo and info button. */
+.titled {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-2);
+}

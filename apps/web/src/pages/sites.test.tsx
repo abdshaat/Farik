@@ -58,7 +58,7 @@ describe("the sites on the Procurement Specialist's page", () => {
 				.closest("section"),
 		);
 		expect(section.textContent).toContain(
-			"Ivo searches the whole web, but opens pages only on these sites. To read another site, Ivo asks you on Today.",
+			"Searches the whole web; opens pages only on these sites. Asks you on Today for others.",
 		);
 		expect(
 			within(section).getByRole("heading", { name: en.sitesFarikTitle }),

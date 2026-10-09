@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+import { InfoTip } from "./InfoTip.tsx";
 import styles from "./Switch.module.css";
 
 export function Switch({
@@ -6,12 +8,15 @@ export function Switch({
 	checked,
 	onChange,
 	description,
+	info,
 }: {
 	id: string;
 	label: string;
 	checked: boolean;
 	onChange: (checked: boolean) => void;
 	description?: string;
+	/** A longer note, kept behind an info button after the label. */
+	info?: ReactNode;
 }) {
 	return (
 		<div className={styles.row}>
@@ -28,8 +33,11 @@ export function Switch({
 				<span className={styles.thumb} />
 			</button>
 			<span className={styles.text}>
-				<span id={`${id}-label`} className={styles.label}>
-					{label}
+				<span className={styles.labelRow}>
+					<span id={`${id}-label`} className={styles.label}>
+						{label}
+					</span>
+					{info ? <InfoTip id={`${id}-info`}>{info}</InfoTip> : null}
 				</span>
 				{description ? (
 					<span id={`${id}-description`} className={styles.description}>

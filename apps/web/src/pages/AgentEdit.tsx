@@ -1,4 +1,4 @@
-import { Button, Choice, Dialog, Switch, TextField } from "@farik/ui";
+import { Button, Choice, Dialog, InfoTip, Switch, TextField } from "@farik/ui";
 import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -21,6 +21,7 @@ import { KitConnect } from "./KitConnect.tsx";
 import { MailboxSection } from "./Mailbox.tsx";
 import { OrdersSection } from "./Orders.tsx";
 import styles from "./pages.module.css";
+import { ServiceLogo } from "./ServiceLogo.tsx";
 import { useAdvanced } from "./Settings.tsx";
 import { SitesSection } from "./Sites.tsx";
 import {
@@ -373,6 +374,11 @@ function Editor({
 				name="effort"
 				legend={say("agentEffort")}
 				value={effort}
+				info={t("effortInfo", {
+					low: t("effortLowNote"),
+					medium: t("effortMediumNote"),
+					high: t("effortHighNote"),
+				})}
 				onChange={(e) =>
 					// How carefully an agent works never changes what it runs on.
 					setDraft({
@@ -381,21 +387,9 @@ function Editor({
 					})
 				}
 				options={[
-					{
-						value: "low",
-						label: t("effortLow"),
-						description: t("effortLowNote"),
-					},
-					{
-						value: "medium",
-						label: t("effortMedium"),
-						description: t("effortMediumNote"),
-					},
-					{
-						value: "high",
-						label: t("effortHigh"),
-						description: t("effortHighNote"),
-					},
+					{ value: "low", label: t("effortLow") },
+					{ value: "medium", label: t("effortMedium") },
+					{ value: "high", label: t("effortHigh") },
 				]}
 			/>
 			<div className={styles.field}>
@@ -442,7 +436,14 @@ function Editor({
 			{/* The Procurement Specialist reads only the sites it is given: they come before what it may do. */}
 			{saved.role === "procurement_specialist" && <SitesSection name={name} />}
 			<section className={styles.section} aria-labelledby="may-heading">
-				<h2 id="may-heading">{say("agentMay")}</h2>
+				<div className={styles.titled}>
+					<h2 id="may-heading">{say("agentMay")}</h2>
+					{!advanced && (
+						<InfoTip id="agentMayAdvanced-info">
+							{t("agentMayAdvanced")}
+						</InfoTip>
+					)}
+				</div>
 				<Switch
 					id="agent-advanced"
 					label={t("advancedSwitch")}
@@ -456,26 +457,28 @@ function Editor({
 								<Switch
 									id={`tier-${tier}`}
 									label={t(label)}
-									description={t(note)}
+									info={t(note)}
 									checked={tiers.has(tier)}
 									onChange={(on) => setDraft(withTier(agent, base, tier, on))}
 								/>
 							</li>
 						))}
 					</ul>
-				) : (
-					<p className={styles.muted}>{t("agentMayAdvanced")}</p>
-				)}
+				) : null}
 				{advanced && (
 					<>
-						<h3 className={styles.subheading}>{t("connectorCustom")}</h3>
-						<p>{t("connectorCustomNote")}</p>
+						<div className={styles.titled}>
+							<h3 className={styles.subheading}>{t("connectorCustom")}</h3>
+							<InfoTip id="connectorCustomNote-info">
+								<span>{t("connectorCustomNote")}</span>
+								<span>{t("connectorCustomKeychain")}</span>
+							</InfoTip>
+						</div>
 						<span>
 							<Button onClick={() => setAdding({})}>
 								{t("connectorCustomAdd")}
 							</Button>
 						</span>
-						<p className={styles.muted}>{t("connectorCustomKeychain")}</p>
 					</>
 				)}
 				<span>
@@ -495,29 +498,41 @@ function Editor({
 				</span>
 			</section>
 			<section className={styles.section} aria-labelledby="connectors-heading">
-				<h2 id="connectors-heading">
-					{t("connectors")}{" "}
-					<span className={styles.muted}>{t("connectorsLead", { name })}</span>
-				</h2>
-				<Switch
-					id="connector-playwright"
-					label={t("connectorPlaywright")}
-					description={t("connectorPlaywrightNote", { name })}
-					checked={browsing}
-					onChange={(on) => setDraft(withPlaywright(agent, on))}
-				/>
+				<div className={styles.titled}>
+					<h2 id="connectors-heading">{t("connectors")}</h2>
+					<InfoTip id="connectorsLead-info">
+						{t("connectorsLead", { name })}
+					</InfoTip>
+				</div>
+				<div className={styles.titled}>
+					<ServiceLogo name="playwright" />
+					<Switch
+						id="connector-playwright"
+						label={t("connectorPlaywright")}
+						description={t("connectorPlaywrightShort")}
+						info={
+							<>
+								<span>{t("connectorPlaywrightNote", { name })}</span>
+								<span>{t("connectorsNote")}</span>
+							</>
+						}
+						checked={browsing}
+						onChange={(on) => setDraft(withPlaywright(agent, on))}
+					/>
+				</div>
 				{!browsing && agent.role === "ui_ux_designer" && (
 					<p>
 						<strong>{t("connectorOff", { name })}</strong>
 					</p>
 				)}
-				<p className={styles.muted}>{t("connectorsNote")}</p>
 				{(offered.length > 0 || gone.length > 0) && (
 					<>
-						<h3 id="kit-heading" className={styles.subheading}>
-							{t("kitHeading", { role: roleName(agent.role) })}{" "}
-							<span className={styles.muted}>{t("kitLead")}</span>
-						</h3>
+						<div className={styles.titled}>
+							<h3 id="kit-heading" className={styles.subheading}>
+								{t("kitHeading", { role: roleName(agent.role) })}
+							</h3>
+							<InfoTip id="kitLead-info">{t("kitLead")}</InfoTip>
+						</div>
 						<ul
 							className={styles.ruled}
 							aria-label={t("kitHeading", { role: roleName(agent.role) })}
@@ -550,9 +565,11 @@ function Editor({
 								<li key={c.name} className={styles.kitRow}>
 									<strong>{c.name}</strong>
 									<p>
-										<strong className={styles.warn}>{t("kitGone")}</strong>
+										<strong className={styles.warn}>{t("kitGone")}</strong>{" "}
+										<InfoTip id={`gone-${c.name}-info`}>
+											{t("kitGoneNote", { name })}
+										</InfoTip>
 									</p>
-									<p className={styles.muted}>{t("kitGoneNote", { name })}</p>
 									<span className={styles.actions}>
 										<Button
 											kind="quiet"
@@ -572,10 +589,14 @@ function Editor({
 				)}
 				{custom.length > 0 && (
 					<>
-						<h3 id="yours-heading" className={styles.subheading}>
-							{t("connectorsYours")}{" "}
-							<span className={styles.muted}>{t("connectorsYoursLead")}</span>
-						</h3>
+						<div className={styles.titled}>
+							<h3 id="yours-heading" className={styles.subheading}>
+								{t("connectorsYours")}
+							</h3>
+							<InfoTip id="connectorsYoursLead-info">
+								{t("connectorsYoursLead")}
+							</InfoTip>
+						</div>
 						<ul className={styles.ruled} aria-label={t("connectorsYours")}>
 							{custom.map((c) => {
 								const provider = stateOf(c.name)?.provider;
@@ -737,8 +758,8 @@ function Editor({
 				<Button onClick={() => setDraft(undefined)} disabled={!changed}>
 					{t("agentCancel")}
 				</Button>
+				<InfoTip id="agentNextWork-info">{say("agentNextWork")}</InfoTip>
 			</div>
-			<p className={styles.muted}>{say("agentNextWork")}</p>
 			<section className={styles.section} aria-labelledby="place-heading">
 				<h2 id="place-heading">{say("agentPlace")}</h2>
 				<div className={styles.place}>
@@ -747,11 +768,13 @@ function Editor({
 					>
 						{say(paused ? "agentResume" : "agentPause")}
 					</Button>
-					<p>{say("agentPauseNote")}</p>
+					<InfoTip id="agentPauseNote-info">{say("agentPauseNote")}</InfoTip>
 					<Button onClick={replace}>{say("agentReplace")}</Button>
-					<p>{say("agentReplaceNote")}</p>
+					<InfoTip id="agentReplaceNote-info">
+						{say("agentReplaceNote")}
+					</InfoTip>
 					<Button onClick={retire}>{say("agentRetire")}</Button>
-					<p>{say("agentRetireNote")}</p>
+					<InfoTip id="agentRetireNote-info">{say("agentRetireNote")}</InfoTip>
 				</div>
 			</section>
 		</div>
@@ -788,13 +811,19 @@ function CustomRow({
 	return (
 		<li>
 			<div className={styles.rowHead}>
-				<span>
-					<strong>{server.name}</strong>{" "}
+				<span className={styles.titled}>
+					<ServiceLogo name="plug" />
+					<strong>{server.name}</strong>
 					<span className={styles.muted}>
 						{t(
 							server.transport === "http" ? "connectorHttp" : "connectorStdio",
 						)}
 					</span>
+					<InfoTip id={`custom-${server.name}-info`}>
+						{tags.length === 1
+							? t("connectorOneTool", { labels })
+							: t("connectorTools", { count: tags.length, labels })}
+					</InfoTip>
 				</span>
 				<span className={styles.actions}>
 					{state === "connect_again" && (
@@ -826,30 +855,23 @@ function CustomRow({
 					})}
 				</p>
 			)}
-			<p className={styles.muted}>
-				{tags.length === 1
-					? t("connectorOneTool", { labels })
-					: t("connectorTools", { count: tags.length, labels })}
-			</p>
 			{state === "connect_again" && (
-				<>
-					<p>
-						<strong>{t("connectorAgain")}</strong>
-					</p>
-					<p className={styles.muted}>{t("connectorAgainNote", { name })}</p>
-				</>
+				<p>
+					<strong>{t("connectorAgain")}</strong>{" "}
+					<InfoTip id={`connectorAgainNote-${server.name}-info`}>
+						{t("connectorAgainNote", { name })}
+					</InfoTip>
+				</p>
 			)}
 			{state === "store_unavailable" && (
-				<>
-					<p>
-						<strong>
-							{t("connectorUnreadable", { name, server: server.name })}
-						</strong>
-					</p>
-					<p className={styles.muted}>
+				<p>
+					<strong>
+						{t("connectorUnreadable", { name, server: server.name })}
+					</strong>{" "}
+					<InfoTip id={`connectorUnreadableNote-${server.name}-info`}>
 						{t("connectorUnreadableNote", { name, server: server.name })}
-					</p>
-				</>
+					</InfoTip>
+				</p>
 			)}
 		</li>
 	);
@@ -886,15 +908,16 @@ function KitRow({
 	const connected = held !== undefined && state === "connected";
 	return (
 		<li className={styles.kitRow}>
-			<strong>{service.title}</strong>
-			<p className={styles.muted}>{service.why}</p>
+			<span className={styles.titled}>
+				<ServiceLogo name={service.name} />
+				<strong>{service.title}</strong>
+				<span className={styles.muted}>{service.about}</span>
+				<InfoTip id={`kit-${service.name}-info`}>{service.why}</InfoTip>
+			</span>
 			{service.atLaunch && !held && (
-				<>
-					<p className={styles.muted}>{service.about}</p>
-					<p>
-						<strong>{t("kitAtLaunch", { service: service.title })}</strong>
-					</p>
-				</>
+				<p>
+					<strong>{t("kitAtLaunch")}</strong>
+				</p>
 			)}
 			{connected && (
 				<>
@@ -1050,10 +1073,10 @@ function SkillsSection({
 	] as const;
 	return (
 		<section className={styles.section} aria-labelledby="skills-heading">
-			<h2 id="skills-heading">
-				{t("skills")}{" "}
-				<span className={styles.muted}>{t("skillsLead", { name })}</span>
-			</h2>
+			<div className={styles.titled}>
+				<h2 id="skills-heading">{t("skills")}</h2>
+				<InfoTip id="skillsLead-info">{t("skillsLead", { name })}</InfoTip>
+			</div>
 			{groups.map(([level, heading]) => {
 				const here = rows.filter((r) => r.level === level);
 				if (!here.length) return null;

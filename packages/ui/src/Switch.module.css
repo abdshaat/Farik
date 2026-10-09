@@ -47,6 +47,12 @@
 	flex-direction: column;
 }
 
+.labelRow {
+	display: flex;
+	align-items: baseline;
+	gap: var(--farik-space-1);
+}
+
 .label {
 	font:
 		var(--farik-type-body-weight) var(--farik-type-body-size) /

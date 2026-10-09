@@ -29,8 +29,8 @@ connectors:
     url: https://mcp.stripe.com
     oauth: { scopes: [mcp] }
     title: Stripe
-    about: "Stripe takes your product's payments: charges, subscriptions, invoices, fees, refunds and payouts."
-    why: "So the Finance Specialist can put your revenue, fees and payouts in the books from Stripe's own numbers. It only reads."
+    about: "Your payments"
+    why: "Books revenue, fees and payouts from Stripe's own numbers. Read-only."
     setup: "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see your customers' names, emails, addresses and the last four digits of their cards; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under ‘OAuth sessions’ in your Stripe user settings."
     labels:
       stripe_api_search: "find what Stripe can answer"
@@ -56,8 +56,8 @@ connectors:
     url: https://api.digits.com/mcp
     oauth: {}
     title: Digits
-    about: "Digits keeps your books: every transaction, with profit and loss, balance sheet, cash flow and who owes whom."
-    why: "So the Finance Specialist can read the books you already keep there instead of rebuilding them. It only reads."
+    about: "Your books"
+    why: "Reads the books you already keep there. Read-only."
     setup: "Sign in with your Digits account and choose the business. Digits gives Farik read access only."
     labels:
       list_businesses: "list businesses"
@@ -85,8 +85,8 @@ connectors:
     url: https://use.kick.co/mcp
     oauth: { scopes: ["mcp:read"] }
     title: Kick
-    about: "Kick keeps your books from your bank and card accounts: transactions, categories, journals and reports."
-    why: "So the Finance Specialist can read the books you already keep there instead of rebuilding them. It only reads."
+    about: "Your books, from your bank"
+    why: "Reads the books you already keep there. Read-only."
     setup: "Sign in with your Kick account. Farik asks Kick for read access only, so it cannot change your books, and it refuses every change anyway."
     labels:
       context_browse: "list workspaces"

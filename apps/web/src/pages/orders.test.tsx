@@ -71,7 +71,7 @@ describe("the orders on the Procurement Specialist's page", () => {
 			screen.getByRole("heading", { name: en.sitesTitle }).closest("section"),
 		);
 		expect(section.textContent).toContain(
-			"Ivo suggests orders and follows them up. Farik never orders or pays: you place each order yourself, then mark it placed and, when it comes, received.",
+			"Ivo suggests and tracks orders. Farik never orders or pays: you place each, then mark it placed and received.",
 		);
 
 		// An approved order waits for the owner to place it, with the day it closes by itself.
@@ -977,9 +977,7 @@ describe("the orders on the Procurement Specialist's page", () => {
 		const waiting = await itemOf(en.ordersToPlace, "31");
 		expect(waiting.textContent).toContain("Set up by Kai.");
 		// The page is still Ivo's.
-		expect(
-			screen.getByText(/^Ivo suggests orders and follows them up\./),
-		).toBeTruthy();
+		expect(screen.getByText(/^Ivo suggests and tracks orders\./)).toBeTruthy();
 
 		// The request to follow it up goes to the agent that set it up.
 		fireEvent.click(

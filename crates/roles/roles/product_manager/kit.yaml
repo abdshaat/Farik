@@ -18,8 +18,8 @@ connectors:
     url: https://mcp.amplitude.com/mcp
     oauth: { scopes: [mcp:read, offline_access] }
     title: Amplitude
-    about: "Amplitude shows how people use your product: which features they open, where they stop, and what changed after a release."
-    why: "So the Product Manager can check how a feature is really used before deciding what to build, and read the numbers again after it ships. It only reads."
+    about: "How people use your product"
+    why: "Checks real feature use before deciding, and again after release. Read-only."
     setup: "Sign in with your Amplitude account and allow Farik to read your project. Farik connects to Amplitude's United States service; a project kept in Amplitude's European service cannot be connected yet."
     labels:
       search: "search charts and dashboards"
@@ -87,8 +87,8 @@ connectors:
     url: https://mcp.linear.app/mcp/readonly
     oauth: { scopes: [read] }
     title: Linear
-    about: "Linear is where many teams keep their backlog: issues, projects and the talk around them."
-    why: "So the Product Manager can turn an issue you already wrote into a request, with its comments, instead of you typing it again. It only reads."
+    about: "Your backlog"
+    why: "Turns your Linear issues into requests, comments included. Read-only."
     setup: "Sign in with your Linear account and allow Farik to read your workspace. Farik asks Linear for reading only, so it can never change an issue."
     labels:
       list_issues: "list issues"
@@ -139,8 +139,8 @@ connectors:
     url: https://mcp.notion.com/mcp
     oauth: {}
     title: Notion
-    about: "Notion holds your team's pages and databases: plans, notes and product documents."
-    why: "So the Product Manager starts from what you already wrote, such as a product brief or customer notes, instead of asking again. It only reads."
+    about: "Your docs and notes"
+    why: "Starts from what you already wrote. Read-only."
     setup: "Sign in with your Notion account and allow Farik to read your workspace. Farik can see the pages you can see there, and it never changes them."
     labels:
       notion-search: "search pages"
@@ -197,8 +197,8 @@ connectors:
     credential_keys: [GITHUB_KEY]
     key_page: "https://github.com/settings/personal-access-tokens/new?name=Farik+Product+Manager&description=Farik%27s+Product+Manager+reads+issues+and+files+the+issues+and+comments+you+allow.&expires_in=366&issues=write"
     title: GitHub
-    about: "GitHub keeps your code and the work around it: issues, pull requests and project boards."
-    why: "So the Product Manager can turn an issue you already wrote into a request, read your project boards, and file an issue or a comment when you say yes."
+    about: "Your code and issues"
+    why: "Turns your issues into requests. Files an issue or comment only when you say yes."
     setup: "“Get your key” opens GitHub's page with the key's name, a year's life and its access filled in. Under ‘Resource owner’, choose the owner of your issues; under ‘Repository access’, choose ‘Only select repositories’ and pick them. For an organisation's boards, also give ‘Projects’ read access. Choose ‘Generate token’ and paste the key here. An organisation may allow a shorter life, need you signed in to its single sign-on, or need its owner's approval. Farik asks you before each issue or comment it posts."
     labels:
       issue_read: "read an issue and its comments"

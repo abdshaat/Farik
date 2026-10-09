@@ -44,6 +44,7 @@ The backend (every crate under `crates/`) is Rust. The front end (`packages/ui`,
 |---|---|---|
 | Project plan | `docs/plans/project-plan.md` | |
 | Step plan | `docs/plans/phase-<n>-<name-kebab>/step-<nn>-<name-kebab>.md`; phase numbers from 0, step numbers two-digit from 01 | `docs/plans/phase-1-harness/step-03-transition-table.md` |
+| Plan outside a phase | `docs/plans/standalone/<name-kebab>.md`, from the step template | `docs/plans/standalone/agent-page-logos.md` |
 | Architecture decision record | `docs/decisions/NNNN-<title-kebab>.md`, four-digit, never reused | `docs/decisions/0001-adopt-superpowers-workflow.md` |
 | Standard | `docs/standards/<topic>.md`, lower-case | `docs/standards/code.md` |
 | Top-level project documents | `UPPER_CASE.md` at the level they describe | `README.md`, `CONTRIBUTING.md`, `docs/SPEC.md` |

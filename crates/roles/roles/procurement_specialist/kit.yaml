@@ -35,8 +35,8 @@ connectors:
     command: farik
     args: [connector, fx]
     title: Exchange rates
-    about: "Frankfurter publishes the reference exchange rates of central banks, free and with no account."
-    why: "So the Procurement Specialist compares prices in one currency, with the rate and its date beside each. It only reads."
+    about: "Daily central-bank rates"
+    why: "Compares prices in one currency, rate and date shown. Read-only."
     setup: "Nothing to set up: Farik looks rates up in Frankfurter itself, with no account. Farik sends Frankfurter only currency codes and a date."
     labels:
       latest_rates: "latest exchange rates"
@@ -50,8 +50,8 @@ connectors:
     transport: http
     url: https://mcp.exa.ai/mcp
     title: Exa web search
-    about: "Exa searches the web for assistants that research, and answers with text from the pages it finds."
-    why: "So the Procurement Specialist can find makers, sellers and their price pages for anything you need to buy. It only reads."
+    about: "Web search"
+    why: "Finds makers, sellers and price pages. Read-only."
     setup: "Nothing to set up: Exa answers a limited number of searches free, with no account. What your agent searches for goes to Exa as written. Exa's results carry text from the pages it finds on any site, so your agent may read text from sites you have not approved; it still opens pages only on the sites you approved, and sends those other sites nothing."
     labels:
       web_search_exa: "search the web"
@@ -66,8 +66,8 @@ connectors:
     credential_keys: [SERPAPI_KEY]
     key_page: https://serpapi.com/manage-api-key
     title: Shopping prices
-    about: "SerpApi reads shopping results from Google Shopping, Amazon, eBay and Walmart."
-    why: "So the Procurement Specialist can compare what a product costs across the big shops in one search. Each search uses one of your SerpApi searches, so Farik counts them."
+    about: "Prices across big shops"
+    why: "Google Shopping, Amazon, eBay, Walmart in one search. Each uses one of your SerpApi searches."
     setup: "Make a free SerpApi account, which includes 250 searches a month and at most 50 in an hour, then copy your private key from its ‘Api Key’ page and paste it here. What your agent searches for goes to SerpApi as written. Some of SerpApi's searches open a picture or page address on SerpApi's own servers. Farik only lets your agent give it addresses on sites you approved, but SerpApi may follow a link from there to another site."
     allowances:
       search: { calls: 50, what: "shopping searches" }
@@ -82,8 +82,8 @@ connectors:
     url: https://api.brex.com/mcp
     oauth: { scopes: [offline_access, vendors.readonly, expenses.card.readonly, departments.readonly] }
     title: Brex
-    about: "Brex holds your company's cards, bills and the vendors you pay."
-    why: "So the Procurement Specialist can see what you already pay a vendor, and charges that repeat every month that nobody listed. It only reads."
+    about: "Your company cards and bills"
+    why: "Sees what you pay vendors, and repeat charges nobody listed. Read-only."
     setup: "First, an account admin or card admin in Brex accepts the Developer API agreement under ‘Settings’, then ‘Developer’. Then sign in with your Brex account and allow Farik to read your vendors, card spending and departments; Farik asks for reading only."
     labels:
       list_vendors: "list vendors"
@@ -148,8 +148,8 @@ connectors:
     credential_keys: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]
     key_page: "https://console.aws.amazon.com/iam/home#/users"
     title: AWS prices
-    about: "AWS publishes the price of every one of its services, by region and by plan."
-    why: "So the Procurement Specialist can price an AWS option exactly before anyone buys it. It only reads public prices."
+    about: "AWS price list"
+    why: "Prices an AWS option exactly before anyone buys. Read-only."
     setup: "This needs the free program uv on your computer (docs.astral.sh/uv). In your AWS account, make a user that may only read prices: give it a policy allowing pricing:GetProducts, pricing:DescribeServices, pricing:GetAttributeValues, pricing:ListPriceLists and pricing:GetPriceListFileUrl, and nothing else. Make a key for it, then paste the ‘Access key’ and the ‘Secret access key’ here. Reading prices costs nothing."
     labels:
       get_pricing: "read a service's prices"
@@ -173,8 +173,8 @@ connectors:
     command: farik
     args: [connector, recalls]
     title: Safety recalls
-    about: "US product and vehicle safety agencies publish every recall, complaint and crash rating."
-    why: "So the Procurement Specialist never recommends a product or a car with an open recall, and can check a used car's VIN. It only reads."
+    about: "Product and car recalls"
+    why: "Never suggests a recalled product; checks a used car's VIN. Read-only."
     setup: "Nothing to set up: Farik reads the CPSC's and NHTSA's public lists itself, with no account. It covers products and vehicles sold in the United States. What your agent looks up goes to them as written."
     labels:
       product_recalls: "look up product recalls"
@@ -195,8 +195,8 @@ connectors:
     credential_keys: [EBAY_CLIENT_ID, EBAY_CLIENT_SECRET]
     key_page: https://developer.ebay.com/my/keys
     title: eBay listings
-    about: "eBay's listing search shows what sellers ask for new and used goods right now."
-    why: "So the Procurement Specialist can see real asking prices, and how well rated each seller is, for anything sold on eBay. It only reads; it can never bid or buy."
+    about: "eBay asking prices"
+    why: "Real prices and seller ratings. Read-only; never bids or buys."
     setup: "Make a free eBay developer account and create an application. Before its production keys work, eBay asks how you handle account deletions: choose ‘Not persisting eBay data’, since Farik never keeps an eBay member's name. Then paste the ‘App ID (Client ID)’ and ‘Cert ID (Client Secret)’ from its production keys. Farik only searches and reads listings; eBay allows 5,000 searches a day. What your agent searches for goes to eBay as written."
     labels:
       search_items: "search eBay listings"

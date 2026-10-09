@@ -1,4 +1,4 @@
-import { Button, Dialog, Switch, TextField } from "@farik/ui";
+import { Button, Dialog, InfoTip, Switch, TextField } from "@farik/ui";
 import { type FormEvent, useState } from "react";
 import { useQuery } from "../app/store.ts";
 import type { en } from "../strings/en.ts";
@@ -130,10 +130,16 @@ export function SitesSection({ name }: { name: string }) {
 	};
 	return (
 		<section className={styles.section} aria-labelledby="sites-heading">
-			<h2 id="sites-heading">{t("sitesTitle")}</h2>
-			<p className={styles.muted}>{t("sitesLead", { name })}</p>
-			<h3 className={styles.subheading}>{t("sitesFarikTitle")}</h3>
-			<p className={styles.muted}>{t("sitesFarikNote", { name })}</p>
+			<div className={styles.titled}>
+				<h2 id="sites-heading">{t("sitesTitle")}</h2>
+				<InfoTip id="sitesLead-info">{t("sitesLead", { name })}</InfoTip>
+			</div>
+			<div className={styles.titled}>
+				<h3 className={styles.subheading}>{t("sitesFarikTitle")}</h3>
+				<InfoTip id="sitesFarikNote-info">
+					{t("sitesFarikNote", { name })}
+				</InfoTip>
+			</div>
 			<ul className={styles.siteCategories}>
 				{categories.map((category) => {
 					const shops = data.farik.filter((shop) => shop.category === category);

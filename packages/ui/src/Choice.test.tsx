@@ -64,4 +64,24 @@ describe("Choice", () => {
 		);
 		await expectNoAxeViolations(container);
 	});
+	it("shows one info button by the legend, outside every option", () => {
+		render(
+			<Choice
+				name="pick"
+				legend="Pick one"
+				options={options}
+				value="one"
+				onChange={() => {}}
+				info="One, two or three."
+			/>,
+		);
+		const button = screen.getByRole("button", { name: "More about this" });
+		expect(button.closest("label")).toBeNull();
+		expect(document.getElementById("pick-info")?.textContent).toBe(
+			"One, two or three.",
+		);
+		expect(screen.getByRole("radio", { name: "One" })).toBeTruthy();
+		expect(screen.getByRole("radio", { name: "Three" })).toBeTruthy();
+		expect(screen.getByRole("group", { name: "Pick one" })).toBeTruthy();
+	});
 });

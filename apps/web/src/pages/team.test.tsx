@@ -12,7 +12,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
+import {
+	ORDERS,
+	EFFECTIVE as PROC_EFFECTIVE,
+	TEAM as PROC_TEAM,
+} from "../test/orders.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import { NO_MAILBOX } from "../test/sellerMail.ts";
+import { SITES } from "../test/sites.ts";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
 	id,
@@ -653,15 +660,11 @@ describe("team page", () => {
 		const hers = screen.getByRole("switch", { name: en.connectorPlaywright });
 		expect(hers.getAttribute("aria-checked")).toBe("true");
 		expect(
-			screen.queryByText(
-				"Without it Iris cannot look at your app, so Farik gives Iris no work.",
-			),
+			screen.queryByText("Off: Iris can’t see your app, so gets no work."),
 		).toBeNull();
 		fireEvent.click(hers);
 		expect(
-			screen.getByText(
-				"Without it Iris cannot look at your app, so Farik gives Iris no work.",
-			),
+			screen.getByText("Off: Iris can’t see your app, so gets no work."),
 		).toBeTruthy();
 	});
 
@@ -1697,5 +1700,92 @@ describe("team templates", () => {
 		);
 		const deleted = await sent(s, "template.delete");
 		expect(deleted.params).toEqual({ slug: "my-usual-team" });
+	});
+});
+
+/** Every place `text` shows on the page, each of which must sit inside an info button's tip. */
+function onlyInTips(text: string) {
+	const found = screen.getAllByText(text);
+	expect(found.length).toBeGreaterThan(0);
+	for (const el of found) expect(el.closest('[role="tooltip"]')).not.toBeNull();
+}
+
+describe("info buttons on the agent page", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		cleanup();
+	});
+
+	it("puts every note on the agent page behind an info button", async () => {
+		await opened("/team/theo");
+		await screen.findByRole("heading", { name: "Theo, your Developer" });
+		const say = (key: keyof typeof en) =>
+			t(key, { name: "Theo", role: "Developer" });
+		for (const key of [
+			"agentMayAdvanced",
+			"agentNextWork",
+			"agentPauseNote",
+			"agentReplaceNote",
+			"agentRetireNote",
+			"skillsLead",
+		] as const)
+			onlyInTips(say(key));
+		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		for (const key of [
+			"tierReadNote",
+			"tierWriteNote",
+			"tierExecuteNote",
+			"tierGitLocalNote",
+			"tierNetworkNote",
+			"tierGitRemoteNote",
+			"tierExternalNote",
+			"connectorCustomNote",
+		] as const)
+			onlyInTips(say(key));
+	});
+
+	it("explains the effort levels once, by the legend", async () => {
+		await opened("/team/theo");
+		await screen.findByRole("heading", { name: "Theo, your Developer" });
+		const group = screen.getByRole("group", {
+			name: "How carefully Theo works",
+		});
+		for (const label of ["Quick", "Balanced", "Careful"])
+			expect(within(group).getByRole("radio", { name: label })).toBeTruthy();
+		const tips = within(group).getAllByRole("tooltip", { hidden: true });
+		expect(tips).toHaveLength(1);
+		for (const note of [
+			en.effortLowNote,
+			en.effortMediumNote,
+			en.effortHighNote,
+		])
+			expect(tips[0]?.textContent).toContain(note);
+	});
+
+	it("puts the Procurement Specialist's notes behind info", async () => {
+		const { socket } = await renderApp("/team/ivo");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "team.get", {
+			team: PROC_TEAM,
+			agents: PROC_EFFECTIVE,
+			judges: JUDGES,
+			max_agents: 7,
+		});
+		await answerQuery(s, "models.list", MODELS);
+		await answerQuery(s, "skills.list", { skills: [] });
+		await answerQuery(s, "sites.list", SITES);
+		await answerQuery(s, "purchase_orders.list", ORDERS);
+		await answerQuery(s, "procurement_mailbox.get", NO_MAILBOX);
+		await screen.findByRole("heading", {
+			name: "Ivo, your Procurement Specialist",
+		});
+		for (const key of [
+			"ordersLead",
+			"sitesLead",
+			"sitesFarikNote",
+			"mailboxNoneNote",
+		] as const)
+			onlyInTips(t(key, { name: "Ivo" }));
 	});
 });

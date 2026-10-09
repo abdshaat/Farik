@@ -1,4 +1,4 @@
-import { Button } from "@farik/ui";
+import { Button, InfoTip } from "@farik/ui";
 import { useState } from "react";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
@@ -75,8 +75,10 @@ export function OrdersSection({
 	const who = (order: OrderItem) => nameOf(agents, order);
 	return (
 		<section className={styles.section} aria-labelledby="orders-heading">
-			<h2 id="orders-heading">{t("ordersTitle")}</h2>
-			<p className={styles.muted}>{t("ordersLead", { name })}</p>
+			<div className={styles.titled}>
+				<h2 id="orders-heading">{t("ordersTitle")}</h2>
+				<InfoTip id="ordersLead-info">{t("ordersLead", { name })}</InfoTip>
+			</div>
 			{approved.length > 0 && (
 				<>
 					<h3 id="orders-to-place" className={styles.subheading}>
