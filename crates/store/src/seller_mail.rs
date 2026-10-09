@@ -467,6 +467,17 @@ mod tests {
             [1, 2, 3, 4],
             "none of the three drafts is a message"
         );
+
+        // A number is taken once: a second draft of message 1 is none, and the first stands.
+        let mut again = draft_body(1, "question", None);
+        again["subject"] = json!("Another subject");
+        board.session(at(10, 21), Some("FRK-1"), "ivo", "session-1", kind, again);
+        let mail = seller_mail(&board.log).expect("folds");
+        assert_eq!(mail.messages.len(), 4);
+        assert_eq!(
+            mail.messages[0].drafted.subject.as_str(),
+            "Quote for 500 printed pie boxes"
+        );
     }
 
     #[test]
@@ -503,6 +514,13 @@ mod tests {
             "a reply to a message that was not sent is no reply"
         );
         assert!(!mail.replies[0].dismissed, "a dismissal an agent recorded");
+        // A number is taken once: a second reply numbered 1 is none.
+        unattended(&board, 17, "seller_reply.received", reply_body(1, 1));
+        assert_eq!(
+            seller_mail(&board.log).expect("folds").replies.len(),
+            1,
+            "a reply number is taken once"
+        );
         unattended(&board, 18, "seller_reply.dismissed", json!({ "reply": 1 }));
         let mail = seller_mail(&board.log).expect("folds");
         assert!(mail.replies[0].dismissed);
