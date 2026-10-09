@@ -50,6 +50,7 @@ export function InfoTip({
 	}
 
 	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: hover only repositions and un-hushes the tip; the button carries the keyboard and screen-reader behaviour
 		<span
 			className={styles.wrap}
 			onMouseEnter={fit}
