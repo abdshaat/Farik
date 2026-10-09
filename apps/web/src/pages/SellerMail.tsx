@@ -44,8 +44,9 @@ export function SellerMailSections({ agents, pm }: Names) {
 	const { data: tasks } = useQuery<{
 		tasks: { taskId: string; title: string }[];
 	}>("tasks.list", {}, !unreadAny);
+	// An order's own message is sent from its order; a follow-up about a placed order is not.
 	const waiting = (messages?.messages ?? []).filter(
-		(one) => one.state === "waiting" && one.purchaseOrder === undefined,
+		(one) => one.state === "waiting" && one.purpose !== "purchase_order",
 	);
 	const unread = (replies?.replies ?? []).filter((one) => !one.dismissed);
 	return (
@@ -134,6 +135,9 @@ function SellerMessageRow({
 						name,
 						seller,
 					})}
+					{item.purpose === "question" &&
+						item.purchaseOrder !== undefined &&
+						t("sellerAboutOrder", { order: item.purchaseOrder })}
 				</strong>
 				<SendFields
 					seller={item.seller}

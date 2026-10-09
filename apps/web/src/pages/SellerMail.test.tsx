@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { sentCommand } from "../test/gate.ts";
 import {
+	FOLLOW_UP,
 	KNOWN,
 	MAILBOX,
 	MARKUP,
@@ -33,15 +34,15 @@ afterEach(() => {
 describe("Today, messages to sellers", () => {
 	it("shows_each_message_whole", async () => {
 		const { container } = await todayWithMail({
-			messages: [MESSAGE, KNOWN, ORDERS_MESSAGE],
+			messages: [MESSAGE, KNOWN, ORDERS_MESSAGE, FOLLOW_UP],
 		});
 		const section = await screen.findByRole("region", {
-			name: "Messages to sellers (2)",
+			name: "Messages to sellers (3)",
 		});
 		expect(within(section).getByText(en.sellerLead)).toBeTruthy();
 		const rows = within(section).getAllByRole("listitem");
-		// An order's message is sent from its order, not here.
-		expect(rows).toHaveLength(2);
+		// An order's message is sent from its order, not here; a follow-up about a placed order is.
+		expect(rows).toHaveLength(3);
 		const first = within(rows[0] as HTMLElement);
 		// Everything the agent wrote is text: the markup shows as typed, the hidden character is
 		// written out, and the body sits in a frame that says whose words it is.
@@ -63,6 +64,10 @@ describe("Today, messages to sellers", () => {
 		const second = within(rows[1] as HTMLElement);
 		expect(second.queryByText(/has gone to/)).toBeNull();
 		expect(second.getByText("Ivo asks Pie Box Pros a question")).toBeTruthy();
+		const third = within(rows[2] as HTMLElement);
+		expect(
+			third.getByText("Ivo asks Kitchen Parts Direct a question about PO-10"),
+		).toBeTruthy();
 		// What Farik adds under every message is shown with it.
 		expect(
 			first.getByText(/Written with an AI assistant and sent by Sam Ortiz/),
@@ -102,6 +107,29 @@ describe("Today, messages to sellers", () => {
 		expect((await row.findByRole("alert")).textContent).toBe(
 			en.refuseSellerMessageSent,
 		);
+	});
+
+	it("a_follow_up_about_a_placed_order_is_sent_from_here", async () => {
+		const { s } = await todayWithMail({ messages: [FOLLOW_UP] });
+		const row = within(
+			(await screen.findAllByRole("listitem"))[0] as HTMLElement,
+		);
+		const send = row.getByRole("button", {
+			name: "Send",
+		}) as HTMLButtonElement;
+		expect(send.disabled).toBe(false);
+		fireEvent.click(send);
+		const sent = await sentCommand(s);
+		expect(sent.params).toEqual({
+			command: {
+				command: "seller_message_send",
+				body: {
+					message: 4,
+					subject: "Delivery date",
+					body: "When would 500 boxes arrive?",
+				},
+			},
+		});
 	});
 
 	it("no_mailbox_or_the_cap_means_no_send", async () => {

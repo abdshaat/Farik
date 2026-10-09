@@ -63,6 +63,16 @@ export const ORDERS_MESSAGE = {
 	purchase_order: 12,
 };
 
+/** A follow-up: a question to another seller about an order the owner placed (10c's `placed`). */
+export const FOLLOW_UP = {
+	...KNOWN,
+	message: 4,
+	seller: "Kitchen Parts Direct",
+	to: "orders@kitchenparts.test",
+	domain: "kitchenparts.test",
+	purchase_order: 10,
+};
+
 /** The reply to message 1, with a kept PDF and a file that was not kept. */
 export const REPLY = {
 	reply: 1,
