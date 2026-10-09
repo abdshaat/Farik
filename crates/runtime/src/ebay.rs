@@ -1741,12 +1741,22 @@ mod tests {
 
     #[tokio::test]
     async fn says_so_when_ebay_cannot_be_reached() {
-        let closed = {
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-                .await
-                .expect("a port");
-            format!("http://{}", listener.local_addr().expect("an address"))
-        };
+        // Held, bound and not listening, for the whole test: a connect is refused, and no other
+        // test's server can take the port.
+        let held = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None)
+            .expect("a socket");
+        held.bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into())
+            .expect("a port");
+        let address = held
+            .local_addr()
+            .expect("an address")
+            .as_socket()
+            .expect("an IP address");
+        let closed = format!("http://{address}");
+        assert!(
+            tokio::net::TcpListener::bind(address).await.is_err(),
+            "another server cannot take the held port"
+        );
         let error = Ebay::new(&closed, id(), secret())
             .expect("a server")
             .call("search_items", &search("mirror"))
