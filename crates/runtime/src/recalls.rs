@@ -2087,6 +2087,67 @@ mod tests {
             .expect("4 MiB and a byte are read for complaints");
     }
 
+    /// The caps are met while an answer is read, not after all of it is in: one byte past a cap
+    /// and then a body that never ends is refused at once, not when the timeout runs out.
+    #[tokio::test]
+    async fn stops_reading_at_the_cap_without_waiting_for_the_end() {
+        use futures_util::StreamExt as _;
+
+        const MIB: usize = 1024 * 1024;
+        // Complaints have the 8 MiB cap, everything else 4 MiB.
+        let app = Router::new().fallback(|uri: Uri| async move {
+            let past = if uri.path().contains("complaints") {
+                8 * MIB + 1
+            } else {
+                4 * MIB + 1
+            };
+            Body::from_stream(
+                futures_util::stream::iter([Ok::<Vec<u8>, std::io::Error>(vec![b' '; past])])
+                    .chain(futures_util::stream::pending()),
+            )
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a port");
+        let address = format!("http://{}", listener.local_addr().expect("an address"));
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let server = Recalls::with_timeout(
+            &address,
+            &address,
+            &address,
+            today(),
+            Duration::from_secs(5),
+        )
+        .expect("a server");
+        let cpsc_words = "The CPSC's answer is too large; ask a narrower question";
+        let nhtsa_words = "NHTSA's answer is too large to read here";
+        for (tool, input, words) in [
+            (
+                "product_recalls",
+                json!({ "field": "title", "words": "baby" }),
+                cpsc_words,
+            ),
+            ("vehicle_recalls", honda(), nhtsa_words),
+            ("vehicle_complaints", honda(), nhtsa_words),
+            ("vehicle_safety_ratings", honda(), nhtsa_words),
+            (
+                "decode_vin",
+                json!({ "vin": "1HGCM82633A004352" }),
+                nhtsa_words,
+            ),
+        ] {
+            let started = Instant::now();
+            let error = server.call(tool, &input).await.expect_err("past the cap");
+            assert_eq!(error, words, "{tool}");
+            assert!(
+                started.elapsed() < Duration::from_secs(4),
+                "{tool} waited for the end of the answer"
+            );
+        }
+    }
+
     /// No address an answer carries is ever asked for: not the recall's own page, not a `next`
     /// or an `href`.
     #[tokio::test]

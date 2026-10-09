@@ -2142,6 +2142,48 @@ mod tests {
         assert_eq!(error, words);
     }
 
+    /// The cap is met while the answer is read, not after all of it is in: one byte past it and
+    /// then a body that never ends is refused at once, not when the timeout runs out.
+    #[tokio::test]
+    async fn stops_reading_at_the_cap_without_waiting_for_the_end() {
+        use futures_util::StreamExt as _;
+
+        const MIB: usize = 1024 * 1024;
+        let app = Router::new().fallback(|uri: Uri| async move {
+            if uri.path() == "/identity/v1/oauth2/token" {
+                return Body::from(grant(7200).to_string());
+            }
+            Body::from_stream(
+                futures_util::stream::iter([Ok::<Vec<u8>, std::io::Error>(vec![
+                    b' ';
+                    4 * MIB + 1
+                ])])
+                .chain(futures_util::stream::pending()),
+            )
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a port");
+        let address = format!("http://{}", listener.local_addr().expect("an address"));
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let server =
+            Ebay::with_timeout(&address, id(), secret(), Duration::from_secs(5)).expect("a server");
+        for (tool, input) in [
+            ("search_items", search("mirror")),
+            ("get_item", json!({ "item_id": "v1|123456789|0" })),
+        ] {
+            let started = Instant::now();
+            let error = server.call(tool, &input).await.expect_err("past the cap");
+            assert_eq!(error, "eBay's answer is too large to read here", "{tool}");
+            assert!(
+                started.elapsed() < Duration::from_secs(4),
+                "{tool} waited for the end of the answer"
+            );
+        }
+    }
+
     /// No address an answer carries is ever asked for: not a `next`, an `href`, an `itemHref`,
     /// nor a listing's own page.
     #[tokio::test]
