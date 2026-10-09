@@ -103,7 +103,7 @@ fn waiting(mail: &mut SellerMail, message: u64) -> Option<&mut SellerMessageReco
 }
 
 /// Every message and reply the log holds, oldest first. A draft counts when its envelope names the
-/// task and the agent; a failure, a send, a discard, a reply and a dismissal count only from an
+/// task, the agent and its session; a failure, a send, a discard, a reply and a dismissal count only from an
 /// envelope naming no agent and no session, and a send, a failure or a discard only while the
 /// message waits. A reply counts when it answers a message that was sent. The waiting message of an
 /// order is closed when the order is rejected or expires (a send recorded after that counts for
@@ -138,10 +138,10 @@ pub fn seller_mail(log: &EventLog) -> Result<SellerMail, StoreError> {
             }
             EventBody::MailboxDisconnected(_) if is_unattended(event) => mail.address = None,
             EventBody::SellerMessageDrafted(body) => {
-                let (Some(task_id), Some(agent_id)) = (
-                    event.envelope.ids.task_id.clone(),
-                    event.envelope.ids.agent_id.clone(),
-                ) else {
+                let ids = &event.envelope.ids;
+                let (Some(task_id), Some(agent_id), Some(_)) =
+                    (ids.task_id.clone(), ids.agent_id.clone(), &ids.session_id)
+                else {
                     continue;
                 };
                 if mail
@@ -431,6 +431,42 @@ mod tests {
                 .is_none(),
             "a failure an agent recorded"
         );
+
+        // A discard of a message that was sent counts for nothing, and so does a send of one that
+        // was discarded: a step counts only from the state it may happen in.
+        unattended(
+            &board,
+            15,
+            "seller_message.discarded",
+            json!({ "message": 1 }),
+        );
+        unattended(&board, 16, "seller_message.sent", sent_body(2));
+        let mail = seller_mail(&board.log).expect("folds");
+        assert_eq!(mail.messages[0].state, MessageState::Sent);
+        assert_eq!(mail.messages[1].state, MessageState::Discarded);
+        assert!(mail.messages[1].sent.is_none() && mail.messages[1].sent_at.is_none());
+
+        // A draft counts only from an agent in its session on a task: not from an agent with no
+        // session, a session with no agent, or neither.
+        let drafted = |message: u64| draft_body(message, "quote_request", None);
+        let kind = "seller_message.drafted";
+        board.put(at(10, 17), Some("FRK-1"), Some("ivo"), kind, drafted(5));
+        board.put_with(
+            at(10, 18),
+            Some("FRK-1"),
+            None,
+            Some("s-1"),
+            kind,
+            drafted(6),
+        );
+        board.put(at(10, 19), Some("FRK-1"), None, kind, drafted(7));
+        let mail = seller_mail(&board.log).expect("folds");
+        let numbers: Vec<u64> = mail.messages.iter().map(|record| record.message).collect();
+        assert_eq!(
+            numbers,
+            [1, 2, 3, 4],
+            "none of the three drafts is a message"
+        );
     }
 
     #[test]
@@ -548,6 +584,19 @@ mod tests {
         assert_eq!(
             seller_mail(&board.log).expect("folds").address.as_deref(),
             Some("buying@bakery.test")
+        );
+        board.session(
+            at(10, 1),
+            None,
+            "ivo",
+            "session-1",
+            "mailbox.disconnected",
+            json!({ "purpose": "procurement" }),
+        );
+        assert_eq!(
+            seller_mail(&board.log).expect("folds").address.as_deref(),
+            Some("buying@bakery.test"),
+            "a disconnection an agent recorded"
         );
         unattended(
             &board,
