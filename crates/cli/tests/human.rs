@@ -2353,3 +2353,305 @@ fn farik_renewal_lists_and_dismisses() {
         again.err
     );
 }
+
+/// Message `number` that `theo` drafted on `task` for `seller`, its draft kept as the tool keeps it.
+fn message_drafted(
+    repository: &farik_store::git::fixtures::TempRepo,
+    task: &str,
+    number: u64,
+    body: &str,
+    order: Option<u64>,
+) {
+    let mut drafted = json!({
+        "message": number, "seller": "Pie Box Pros", "to": "sales@pieboxpros.test",
+        "subject": "Quote for 500 printed pie boxes", "purpose": "quote_request",
+        "sha256": "9f2b0c1d5e7a4b3c8d6e1f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c"
+    });
+    if let Some(order) = order {
+        drafted["purpose"] = json!("purchase_order");
+        drafted["purchase_order"] = json!(order);
+    }
+    record_as(
+        repository,
+        task,
+        Some(("theo", "session-1")),
+        "seller_message.drafted",
+        &drafted,
+    );
+    let out = repository.path.join(".farik/local/procurement/mail/out");
+    std::fs::create_dir_all(&out).expect("the folder");
+    std::fs::write(out.join(format!("{number}.txt")), body).expect("the draft");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one project, from the waiting message to the commands the driver was sent"
+)]
+fn farik_procurement_lists_sends_and_discards() {
+    let repository = a_project("human-procurement");
+    let task = filed(&repository, "Source pie boxes");
+    message_drafted(
+        &repository,
+        &task,
+        1,
+        "Hello,\nWhat would 500 boxes cost?\u{1b}[31m",
+        None,
+    );
+    message_drafted(&repository, &task, 2, "About your order.", Some(7));
+    message_drafted(&repository, &task, 3, "Never mind.", None);
+    record(
+        &repository,
+        &task,
+        "seller_message.discarded",
+        &json!({ "message": 3 }),
+    );
+
+    // The list shows each waiting message whole, the agent's words with their control characters
+    // escaped.
+    let listed = run(&repository.path, &["procurement", "messages"]);
+    assert_eq!(listed.code, 0, "{}", listed.err);
+    for part in [
+        "Message 1 to Pie Box Pros <sales@pieboxpros.test>",
+        "nothing was sent to this domain before",
+        "Subject: Quote for 500 printed pie boxes",
+        "What would 500 boxes cost?\\u001b[31m",
+    ] {
+        assert!(listed.out.contains(part), "{part}: {}", listed.out);
+    }
+    assert!(
+        !listed.out.contains('\u{1b}'),
+        "no escape reaches the terminal"
+    );
+    let machine = run(&repository.path, &["--json", "procurement", "messages"]);
+    assert_eq!(machine.code, 0, "{}", machine.err);
+    let wire: Value = serde_json::from_str(machine.out.trim()).expect("one JSON object alone");
+    assert_eq!(wire["messages"].as_array().map(Vec::len), Some(3), "{wire}");
+    assert!(
+        !listed.out.contains("Never mind."),
+        "a discarded message does not wait"
+    );
+    assert_eq!(wire["cap"], 50);
+
+    // The mailbox is not connected, and the page says so.
+    let shown = run(
+        &repository.path,
+        &["--json", "procurement", "mailbox", "show"],
+    );
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    let state: Value = serde_json::from_str(shown.out.trim()).expect("JSON");
+    assert_eq!(state["connected"], false, "{state}");
+    let said = run(&repository.path, &["procurement", "mailbox", "show"]);
+    assert!(
+        said.out.contains("No mailbox is connected."),
+        "{}",
+        said.out
+    );
+
+    // Sending prints the message whole, then sends it as drafted to the process driving.
+    let driver = LiveDriver::new(&repository);
+    let sent = run(&repository.path, &["procurement", "send", "1"]);
+    assert_eq!(sent.code, 0, "{}", sent.err);
+    assert!(
+        sent.out.contains("What would 500 boxes cost?\\u001b[31m"),
+        "{}",
+        sent.out
+    );
+    assert!(sent.out.contains("handled by the run"), "{}", sent.out);
+    assert_eq!(
+        driver.commands(),
+        [Command::SellerMessageSend {
+            message: 1,
+            subject: "Quote for 500 printed pie boxes".to_string(),
+            body: "Hello,\nWhat would 500 boxes cost?\u{1b}[31m".to_string(),
+        }]
+    );
+    let discarded = run(&repository.path, &["procurement", "discard", "1"]);
+    assert_eq!(discarded.code, 0, "{}", discarded.err);
+    assert_eq!(
+        driver.commands()[1],
+        Command::SellerMessageDiscard { message: 1 }
+    );
+
+    // An order's message is sent from the web app beside its order; an unknown one is not there.
+    let order = run(&repository.path, &["procurement", "send", "2"]);
+    assert_ne!(order.code, 0);
+    assert!(order.err.contains("carries an order"), "{}", order.err);
+    let unknown = run(&repository.path, &["procurement", "send", "9"]);
+    assert_ne!(unknown.code, 0);
+    assert!(
+        unknown.err.contains("message 9 is not in this project"),
+        "{}",
+        unknown.err
+    );
+    let gone = run(&repository.path, &["procurement", "send", "3"]);
+    assert_ne!(gone.code, 0);
+    assert!(
+        gone.err.contains("does not wait to be sent"),
+        "{}",
+        gone.err
+    );
+    assert_eq!(driver.commands().len(), 2, "nothing else was sent");
+
+    // Reading the mailbox, like connecting it, is the web app's while another process drives.
+    let checked = run(&repository.path, &["procurement", "check"]);
+    assert_ne!(checked.code, 0);
+    assert!(
+        checked.err.contains("another farik process"),
+        "{}",
+        checked.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn mailbox_connect_sends_the_password_it_read() {
+    let repository = a_project("human-mailbox-connect");
+    let config = format!("{}-config", repository.path.display());
+    let with_password = |args: &[&str]| with_password(&repository, args);
+
+    // Microsoft is refused in the daemon's words, before the password is read.
+    let microsoft = with_password(&[
+        "procurement",
+        "mailbox",
+        "connect",
+        "--address",
+        "ivo@outlook.com",
+        "--name",
+        "Ivo",
+    ]);
+    assert_ne!(microsoft.code, 0);
+    assert!(
+        microsoft.err.contains("mailbox_provider_unsupported"),
+        "{}",
+        microsoft.err
+    );
+    let chosen = with_password(&[
+        "procurement",
+        "mailbox",
+        "connect",
+        "--address",
+        "ivo@example.test",
+        "--name",
+        "Ivo",
+        "--provider",
+        "microsoft",
+    ]);
+    assert!(
+        chosen.err.contains("mailbox_provider_unsupported"),
+        "{}",
+        chosen.err
+    );
+
+    // No password is no mailbox.
+    let silent = run_with(
+        &repository.path,
+        &[
+            "procurement",
+            "mailbox",
+            "connect",
+            "--address",
+            "ivo@example.test",
+            "--name",
+            "Ivo",
+            "--imap",
+            "127.0.0.1:1",
+            "--smtp",
+            "127.0.0.1:1",
+        ],
+        |io| {
+            io.stdin = Box::new(std::io::Cursor::new(Vec::new()));
+            io.env.insert("XDG_CONFIG_HOME".to_string(), config.clone());
+        },
+    );
+    assert_ne!(silent.code, 0);
+    assert!(silent.err.contains("no password"), "{}", silent.err);
+
+    // Another provider needs its servers.
+    let bare = with_password(&[
+        "procurement",
+        "mailbox",
+        "connect",
+        "--address",
+        "ivo@example.test",
+        "--name",
+        "Ivo",
+    ]);
+    assert_ne!(bare.code, 0);
+    assert!(bare.err.contains("--imap"), "{}", bare.err);
+
+    // Servers that cannot be reached refuse in Farik's words, which never quote the password.
+    let down = with_password(&[
+        "procurement",
+        "mailbox",
+        "connect",
+        "--address",
+        "ivo@example.test",
+        "--name",
+        "Ivo",
+        "--imap",
+        "127.0.0.1:1",
+        "--smtp",
+        "127.0.0.1:1",
+    ]);
+    assert_ne!(down.code, 0);
+    assert!(down.err.contains("mailbox_"), "{}", down.err);
+    for text in [&down.out, &down.err, &microsoft.err] {
+        assert!(!text.contains("swordfish"), "{text}");
+    }
+    let state = run(
+        &repository.path,
+        &["--json", "procurement", "mailbox", "show"],
+    );
+    let state: Value = serde_json::from_str(state.out.trim()).expect("JSON");
+    assert_eq!(
+        state["connected"], false,
+        "a refused login connects nothing: {state}"
+    );
+}
+
+/// `farik <args>` with the mailbox's password on standard input, in a state folder of its own and
+/// with no keychain.
+fn with_password(repository: &farik_store::git::fixtures::TempRepo, args: &[&str]) -> project::Ran {
+    run_with(&repository.path, args, |io| {
+        io.stdin = Box::new(std::io::Cursor::new(b"swordfish\n".to_vec()));
+        io.connector_secrets =
+            Arc::new(farik_runtime::connectors::MemoryConnectorSecrets::default());
+        io.env.insert(
+            "XDG_CONFIG_HOME".to_string(),
+            format!("{}-config", repository.path.display()),
+        );
+    })
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn mailbox_connect_is_the_web_app_s_while_another_process_drives() {
+    let repository = a_project("human-mailbox-driven");
+    // Another process driving the project changes the mailbox in the web app.
+    let _driver = LiveDriver::new(&repository);
+    let driven = with_password(
+        &repository,
+        &[
+            "procurement",
+            "mailbox",
+            "connect",
+            "--address",
+            "ivo@example.test",
+            "--name",
+            "Ivo",
+            "--imap",
+            "127.0.0.1:1",
+            "--smtp",
+            "127.0.0.1:1",
+        ],
+    );
+    assert_ne!(driven.code, 0);
+    assert!(
+        driven.err.contains("another farik process"),
+        "{}",
+        driven.err
+    );
+    assert!(!driven.err.contains("swordfish"), "{}", driven.err);
+}

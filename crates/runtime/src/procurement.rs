@@ -847,6 +847,69 @@ pub(crate) fn record_unattended(
     Ok(appended.envelope.seq)
 }
 
+/// Where `daemon` keeps the procurement mailbox's password in the project of `deps`.
+fn mailbox_at_of(
+    daemon: &crate::daemon::DaemonState,
+    deps: &ToolDeps,
+) -> Result<MailboxAt, MailboxRefusal> {
+    daemon.mailbox_at(deps.files.root()).map_err(|error| {
+        MailboxRefusal::new(
+            "secret_store_unavailable",
+            format!("this project\u{2019}s id could not be read: {error}"),
+        )
+    })
+}
+
+/// [`connect_mailbox`] for a process that is not the daemon (the command line), keeping the
+/// password where `daemon` keeps the connectors' keys and trusting the platform's certificates.
+///
+/// # Errors
+///
+/// As [`connect_mailbox`].
+pub async fn connect_mailbox_on(
+    daemon: &crate::daemon::DaemonState,
+    deps: &ToolDeps,
+    input: MailboxConnect,
+    password: &Secret,
+) -> Result<(), MailboxRefusal> {
+    let at = mailbox_at_of(daemon, deps)?;
+    let secrets = daemon.connector_secrets();
+    connect_mailbox(deps, &*secrets, &at, input, password, &daemon.mail_trust()).await
+}
+
+/// [`disconnect_mailbox`] for a process that is not the daemon.
+///
+/// # Errors
+///
+/// As [`disconnect_mailbox`].
+pub fn disconnect_mailbox_on(
+    daemon: &crate::daemon::DaemonState,
+    deps: &ToolDeps,
+) -> Result<(), MailboxRefusal> {
+    let at = mailbox_at_of(daemon, deps)?;
+    let secrets = daemon.connector_secrets();
+    disconnect_mailbox(deps, &*secrets, &at)
+}
+
+/// [`check_by_hand`] for a process that is not the daemon: how many replies were recorded.
+///
+/// # Errors
+///
+/// As [`check_by_hand`].
+pub async fn check_mailbox_on(
+    daemon: &crate::daemon::DaemonState,
+    deps: &ToolDeps,
+) -> Result<u32, MailboxRefusal> {
+    let at = mailbox_at_of(daemon, deps)?;
+    let secrets = daemon.connector_secrets();
+    let mailer = Mailer {
+        secrets: &*secrets,
+        at,
+        trust: daemon.mail_trust(),
+    };
+    check_by_hand(deps, &mailer).await
+}
+
 /// Disconnects the procurement mailbox: forgets its password and deletes `mail/mailbox.json`, keeps
 /// `mail/out/` and `mail/in/`, and records `mailbox.disconnected`. Nothing connected is nothing to
 /// forget and records nothing.

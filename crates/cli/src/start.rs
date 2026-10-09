@@ -254,7 +254,7 @@ pub(crate) fn command_deps(
 
 /// A daemon over `tools` that keeps connector keys where `io` says, and runs each stdio
 /// connector in a folder of the user's state folder (ADR 0030).
-fn connected_daemon(
+pub(crate) fn connected_daemon(
     tools: &Arc<farik_runtime::tools::ToolDeps>,
     io: &CliIo<'_>,
 ) -> Arc<DaemonState> {

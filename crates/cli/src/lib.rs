@@ -47,6 +47,8 @@ pub mod order;
 pub mod pipeline;
 /// Text as a terminal may be given it.
 pub mod printable;
+/// The procurement mailbox and the messages to sellers.
+pub mod procurement;
 /// The project a command runs against.
 pub mod project;
 /// The governor's refusals in words.
@@ -533,6 +535,12 @@ enum Commands {
         #[command(subcommand)]
         command: SiteCommands,
     },
+    /// Connect the mailbox the Procurement Specialist's messages go from, and send, discard or
+    /// read what it wrote to sellers (6.10).
+    Procurement {
+        #[command(subcommand)]
+        command: ProcurementCommands,
+    },
     /// List the Procurement Specialist's purchase orders, decide one, and say that you placed it,
     /// that it came, or that it will not (6.10).
     Order {
@@ -754,6 +762,67 @@ enum SprintCommands {
         /// The sprint, as S<n>.
         sprint_id: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum ProcurementCommands {
+    /// Connect, disconnect or show the mailbox.
+    Mailbox {
+        #[command(subcommand)]
+        command: MailboxCommands,
+    },
+    /// Read the mailbox now, for replies.
+    Check,
+    /// The messages that wait to be sent, whole.
+    Messages,
+    /// Send a message that waits, exactly as printed: nothing leaves Farik but by this.
+    Send {
+        /// The message's number, as `farik procurement messages` prints it.
+        message: u64,
+    },
+    /// Do not send a message that waits.
+    Discard {
+        /// The message's number.
+        message: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum MailboxCommands {
+    /// Connect a mailbox. The password is read without echo, or from standard input.
+    Connect {
+        /// The address mail is sent from and read for.
+        #[arg(long)]
+        address: String,
+        /// The name sellers see.
+        #[arg(long)]
+        name: String,
+        /// gmail, icloud, fastmail or other; told from the address when left out.
+        #[arg(long)]
+        provider: Option<String>,
+        /// The reading server as host:port, for another provider.
+        #[arg(long)]
+        imap: Option<String>,
+        /// The sending server as host:port, for another provider.
+        #[arg(long)]
+        smtp: Option<String>,
+        /// The sign-in name, the address when left out.
+        #[arg(long)]
+        username: Option<String>,
+        /// The folder Farik reads (INBOX when left out).
+        #[arg(long)]
+        folder: Option<String>,
+        /// What Farik adds under every message.
+        #[arg(long)]
+        signature: Option<String>,
+        /// Leave out the line that says an AI assistant wrote the message.
+        #[arg(long)]
+        no_disclosure: bool,
+    },
+    /// Forget the password and the settings; the messages and replies stay.
+    Disconnect,
+    /// The connected mailbox and what was sent today.
+    Show,
 }
 
 #[derive(Subcommand)]
@@ -1166,6 +1235,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             let (name, command) = humans(&parsed.command)?;
             human_command(&project, command, name, io)
         }),
+        Commands::Procurement { command } => procurement_arm(command, io, now),
         Commands::Site {
             command: SiteCommands::List,
         } => open_project(&io.cwd, now).and_then(|project| site::list(&project)),
@@ -1296,6 +1366,77 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         } => unreachable!("a hook, run, plan, or contract new command returned above"),
     };
     report(outcome, parsed.json, io)
+}
+
+/// `farik procurement`: the reads here, the writes through the process that drives the project.
+fn procurement_arm(
+    command: &ProcurementCommands,
+    io: &mut CliIo<'_>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Report, String> {
+    let project = open_project(&io.cwd, now)?;
+    match command {
+        ProcurementCommands::Messages => procurement::messages(&project, io),
+        ProcurementCommands::Mailbox {
+            command: MailboxCommands::Show,
+        } => procurement::show(&project, io),
+        ProcurementCommands::Send { message } => {
+            let row = procurement::waiting(&project, io, *message)?;
+            let said = human_command(
+                &project,
+                procurement::send_command(&row),
+                "procurement send",
+                io,
+            )?;
+            Ok(procurement::shown_then(&row, said))
+        }
+        ProcurementCommands::Discard { message } => human_command(
+            &project,
+            Command::SellerMessageDiscard { message: *message },
+            "procurement discard",
+            io,
+        ),
+        #[cfg(unix)]
+        ProcurementCommands::Check => procurement::check(&project, io),
+        #[cfg(unix)]
+        ProcurementCommands::Mailbox {
+            command: MailboxCommands::Disconnect,
+        } => procurement::disconnect(&project, io),
+        #[cfg(unix)]
+        ProcurementCommands::Mailbox {
+            command:
+                MailboxCommands::Connect {
+                    address,
+                    name,
+                    provider,
+                    imap,
+                    smtp,
+                    username,
+                    folder,
+                    signature,
+                    no_disclosure,
+                },
+        } => procurement::connect(
+            &project,
+            &procurement::ConnectArgs {
+                address,
+                name,
+                provider: provider.as_deref(),
+                imap: imap.as_deref(),
+                smtp: smtp.as_deref(),
+                username: username.as_deref(),
+                folder: folder.as_deref(),
+                signature: signature.as_deref(),
+                no_disclosure: *no_disclosure,
+            },
+            io,
+        ),
+        #[cfg(not(unix))]
+        _ => Err(
+            "this farik procurement command needs the daemon, which runs on Linux and macOS"
+                .to_string(),
+        ),
+    }
 }
 
 /// One of phase 2's writes, which reach the process driving the project when one does.

@@ -220,7 +220,7 @@ Files: `crates/cli/src/{procurement.rs,lib.rs}`, `crates/cli/tests/human.rs`. Co
 - `mailbox_connect_sends_the_password_it_read`: `--provider gmail` with the password on standard input sends `procurement_mailbox.connect` with Gmail's servers and that password, and prints no part of it; `--provider microsoft` refuses with `mailbox_provider_unsupported`'s words. RED: no `procurement` subcommand.
 - `farik_procurement_lists_sends_and_discards`: `messages` prints each waiting message whole, escaped, `--json` `seller_messages.list` alone; `send 3` prints it, then sends `seller_message_send { message: 3, subject, body }` as drafted; `discard 3`; `check` sends `procurement_mailbox.check`; `mailbox show --json` prints `procurement_mailbox.get`. RED: no such subcommands.
 
-- [ ] `feat(cli): connect the procurement mailbox and send its messages`
+- [x] `feat(cli): connect the procurement mailbox and send its messages`
 
 ### Task 7: The web app
 
@@ -284,3 +284,9 @@ Choices the plan left open (none a founder decision): attachments are numbered f
 Mutants, 4 re-introduced and killed: the role check dropped, the `message` filter dropped, the `untrusted` frame dropped on `seller_wrote`, the chat allowance dropped. The CI fix of eb930aa rides along: `records_a_reply_and_keeps_its_files` is split into itself and `numbers_a_reply_after_the_highest_in_the_log_and_the_folders`, every assertion kept, no lint allowed.
 
 Choices the plan left open (none a founder decision): the reads return `files` as `{index, kept, path?}`; a refusal carries the code `seller_mail_refused`.
+
+**Task 6, 2026-10-09.** RED as run (the CLI's code held back, the tests written, then the code put back): both tests `error: unrecognized subcommand 'procurement'`.
+
+Mutants, 10 re-introduced; killed: the disclosure default inverted, Microsoft let through, an order's message sendable, the body not as drafted, a message that does not wait sendable, the empty password accepted, a send of an unknown message. Equivalent, guarded twice on purpose: `printable` in `whole` for the subject and body (the printer escapes every line itself).
+
+Choices the plan left open (none a founder decision): `connect`, `disconnect` and `check` run in this process through new public `connect_mailbox_on`, `disconnect_mailbox_on` and `check_mailbox_on` (runtime), and while another process drives the project they refuse and point to the web app, because the daemon's bearer route carries commands, not the browser's methods, and a password must not travel as a command (the log would hold it); `send` and `discard` are commands, as the plan says. The provider is told from the address when `--provider` is left out. Tests could not connect to a real server, so the success path of `connect` is the runtime fixture's; the CLI tests cover the refusals and that the password is never printed.
