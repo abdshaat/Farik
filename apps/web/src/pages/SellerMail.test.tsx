@@ -49,6 +49,14 @@ describe("Today, messages to sellers", () => {
 		// An order's message is sent from its order, not here; a follow-up about a placed order is.
 		expect(rows).toHaveLength(3);
 		const first = within(rows[0] as HTMLElement);
+		// The row says which task the message is for, and the task's title is a link to it.
+		const task = await first.findByRole("link", {
+			name: "FRK-31 Find a supplier for 500 pie boxes",
+		});
+		expect(task.getAttribute("href")).toBe("/tasks/FRK-31");
+		expect(task.parentElement?.textContent).toBe(
+			"For FRK-31 Find a supplier for 500 pie boxes.",
+		);
 		// Everything the agent wrote is text: the markup shows as typed, the hidden character is
 		// written out, and the body sits in a frame that says whose words it is.
 		expect(

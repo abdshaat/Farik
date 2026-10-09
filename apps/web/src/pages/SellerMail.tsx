@@ -40,14 +40,14 @@ export function SellerMailSections({ agents, pm }: Names) {
 		{},
 	);
 	const unreadAny = (replies?.replies ?? []).some((one) => !one.dismissed);
-	// The task titles a comparison names, asked only while a reply waits.
-	const { data: tasks } = useQuery<{
-		tasks: { taskId: string; title: string }[];
-	}>("tasks.list", {}, !unreadAny);
 	// An order's own message is sent from its order; a follow-up about a placed order is not.
 	const waiting = (messages?.messages ?? []).filter(
 		(one) => one.state === "waiting" && one.purpose !== "purchase_order",
 	);
+	// The task titles a message and a comparison name, asked only while one waits.
+	const { data: tasks } = useQuery<{
+		tasks: { taskId: string; title: string }[];
+	}>("tasks.list", {}, !unreadAny && waiting.length === 0);
 	const unread = (replies?.replies ?? []).filter((one) => !one.dismissed);
 	return (
 		<>
@@ -76,6 +76,7 @@ export function SellerMailSections({ agents, pm }: Names) {
 								item={one}
 								agents={agents}
 								mailbox={mailbox}
+								titles={tasks?.tasks ?? []}
 							/>
 						))}
 					</ul>
@@ -110,10 +111,12 @@ function SellerMessageRow({
 	item,
 	agents,
 	mailbox,
+	titles,
 }: {
 	item: SellerMessageItem;
 	agents: Agent[];
 	mailbox: Mailbox | undefined;
+	titles: { taskId: string; title: string }[];
 }) {
 	const { agent, name } = who(agents, item.agentId);
 	const seller = visibly(item.seller);
@@ -124,6 +127,10 @@ function SellerMessageRow({
 	const cannot = !mailbox?.connected || capped;
 	const titleId = `seller-message-${item.message}`;
 	const refusal = sent.refusal ?? discarded.refusal;
+	const [forTask, forTaskEnd] = t("sellerTask", { task: "{task}" }).split(
+		"{task}",
+	);
+	const title = titles.find((one) => one.taskId === item.taskId)?.title;
 	return (
 		<li className={styles.row}>
 			{agent?.avatar && (
@@ -139,6 +146,13 @@ function SellerMessageRow({
 						item.purchaseOrder !== undefined &&
 						t("sellerAboutOrder", { order: item.purchaseOrder })}
 				</strong>
+				<span>
+					{forTask}
+					<Link to={`/tasks/${item.taskId}`}>
+						{[item.taskId, title].filter((part) => part).join(" ")}
+					</Link>
+					{forTaskEnd}
+				</span>
 				<SendFields
 					seller={item.seller}
 					to={item.to}

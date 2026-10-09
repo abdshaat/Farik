@@ -164,7 +164,15 @@ export async function todayWithMail(fields: {
 	await answerQuery(s, "seller_replies.list", {
 		replies: fields.replies ?? [],
 	});
-	if (fields.replies?.length)
+	// Task titles are asked while a message waits or a reply is unread, as Today's sections do.
+	const waits = (fields.messages ?? []).some((one) => {
+		const { state, purpose } = one as { state: string; purpose: string };
+		return state === "waiting" && purpose !== "purchase_order";
+	});
+	const unread = (fields.replies ?? []).some(
+		(one) => !(one as { dismissed: boolean }).dismissed,
+	);
+	if (waits || unread)
 		await answerQuery(s, "tasks.list", {
 			tasks: [
 				{
