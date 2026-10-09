@@ -168,6 +168,15 @@ describe("Today, messages to sellers", () => {
 		const row = within(
 			(await screen.findAllByRole("listitem"))[0] as HTMLElement,
 		);
+		// The three buttons are a group named for the message, so each row's are told apart.
+		const buttons = row.getByRole("group", {
+			name: "Ivo asks Pie Box Pros a question",
+		});
+		expect(
+			within(buttons)
+				.getAllByRole("button")
+				.map((one) => one.textContent),
+		).toEqual(["Send", "Edit", "Discard"]);
 		fireEvent.click(row.getByRole("button", { name: "Send" }));
 		const sent = await sentCommand(s);
 		expect(sent.params).toEqual({
@@ -291,6 +300,15 @@ describe("Today, replies from sellers", () => {
 		).toBe("CODE");
 		expect(first.getByRole("button", { name: en.replyCompare })).toBeTruthy();
 		expect(first.queryByRole("button", { name: en.ordersFollowUp })).toBeNull();
+		// Its buttons are a group named for the reply, so each row's are told apart.
+		const buttons = first.getByRole("group", {
+			name: "Packaging Express replied to “Quote for 500 printed pie boxes”",
+		});
+		expect(
+			within(buttons)
+				.getAllByRole("button")
+				.map((one) => one.textContent),
+		).toEqual(["Read", "Ask for a comparison", "Dismiss"]);
 		const second = within(order as HTMLElement);
 		expect(
 			second.getByRole("button", { name: en.ordersFollowUp }),
@@ -353,7 +371,7 @@ describe("Today, replies from sellers", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
 		const sent = await sentCommand(s);
 		expect(sent.params).toEqual({
-			command: { command: "seller_reply_dismiss", body: { reply: 1 } },
+			command: { command: "seller_reply_dismiss", body: { reply: 7 } },
 		});
 		expect(refusedBy("sellerReplyDismissBody", bodyOf(sent))).toEqual([]);
 	});

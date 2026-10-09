@@ -96,7 +96,7 @@ export const WRITTEN_MAILBOX = { ...MAILBOX, name: `Sam${HIDE} Ortiz` };
 
 /** The reply to message 1, with a kept PDF and a file that was not kept. */
 export const REPLY = {
-	reply: 1,
+	reply: 7,
 	message: 1,
 	task_id: "FRK-31",
 	seller: "Packaging Express",

@@ -175,7 +175,9 @@ describe("a purchase order that can be emailed", () => {
 	});
 
 	async function sending(send: object = SEND) {
-		const { s } = await todayWithMail({ waiting: [{ ...ORDER_ROW, send }] });
+		const { container, s } = await todayWithMail({
+			waiting: [{ ...ORDER_ROW, send }],
+		});
 		fireEvent.click(
 			await screen.findByRole("button", {
 				name: "Approve and send to Pie Box Pros",
@@ -184,11 +186,14 @@ describe("a purchase order that can be emailed", () => {
 		const dialog = await screen.findByRole("dialog", {
 			name: "Approve PO-12 and send it to Pie Box Pros?",
 		});
-		return { s, dialog };
+		return { container, s, dialog };
 	}
 
 	it("approve_and_send_sends_then_asks_for_the_follow_up", async () => {
-		const { s, dialog } = await sending();
+		const { container, s, dialog } = await sending();
+		// On a phone the dialog fills the screen, and nothing in it breaks an accessibility rule.
+		expect(dialog.hasAttribute("data-fills-phone")).toBe(true);
+		await expectNoAxeViolations(container);
 		expect(
 			within(dialog).getByText(
 				/Farik emails this order to Pie Box Pros from your procurement mailbox/,
@@ -242,6 +247,30 @@ describe("a purchase order that can be emailed", () => {
 		expect(s.calls("request.file")[0]?.params.text).toBe(
 			"Follow up on PO-12 from Pie Box Pros until it arrives. I placed it on 26 October.",
 		);
+	});
+
+	it("an_email_with_nothing_in_it_or_too_much_is_not_sent", async () => {
+		const { dialog } = await sending();
+		const send = () =>
+			within(dialog).getByRole("button", {
+				name: "Approve and send",
+			}) as HTMLButtonElement;
+		const subject = within(dialog).getByLabelText("Subject");
+		const message = within(dialog).getByLabelText("Message");
+		const type = (field: HTMLElement, value: string) =>
+			fireEvent.change(field, { target: { value } });
+		expect(send().disabled).toBe(false);
+		type(message, "");
+		expect(send().disabled).toBe(true);
+		type(message, "m".repeat(8000));
+		expect(send().disabled).toBe(false);
+		type(message, "m".repeat(8001));
+		expect(send().disabled).toBe(true);
+		expect(within(dialog).getByText(en.sellerMessageLong)).toBeTruthy();
+		type(message, "Hello");
+		type(subject, "s".repeat(201));
+		expect(send().disabled).toBe(true);
+		expect(within(dialog).getByText(en.sellerSubjectLong)).toBeTruthy();
 	});
 
 	it("unticked_asks_for_nothing", async () => {

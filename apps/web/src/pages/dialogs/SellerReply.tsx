@@ -2,6 +2,7 @@ import { Dialog } from "@farik/ui";
 import { type ReactNode, useState } from "react";
 import { useConnection } from "../../app/connection.tsx";
 import { t } from "../../strings/t.ts";
+import { clock, dayWords } from "../PostGoingOut.tsx";
 import styles from "../pages.module.css";
 import { type ReplyFile, sizeWords } from "../sellerMail.ts";
 import { visibly } from "./ToolApproval.tsx";
@@ -63,8 +64,8 @@ function Download({ reply, file }: { reply: number; file: ReplyFile }) {
 	return (
 		<>
 			<button type="button" disabled={busy} onClick={download}>
-				{t("replyDownload")}
-				<span hidden> {visibly(file.name)}</span>
+				{t("replyDownload")}{" "}
+				<span className={styles.hidden}>{visibly(file.name)}</span>
 			</button>
 			{gone && <span role="alert">{t("replyGone")}</span>}
 		</>
@@ -102,14 +103,8 @@ export function SellerReply({
 	onClose: () => void;
 }) {
 	const received = new Date(receivedAt);
-	const day = new Intl.DateTimeFormat("en-GB", {
-		day: "numeric",
-		month: "long",
-	}).format(received);
-	const time = new Intl.DateTimeFormat("en-GB", {
-		hour: "2-digit",
-		minute: "2-digit",
-	}).format(received);
+	const day = dayWords(received, new Date());
+	const time = clock(received);
 	return (
 		<Dialog
 			open

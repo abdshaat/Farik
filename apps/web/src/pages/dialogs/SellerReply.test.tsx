@@ -1,3 +1,4 @@
+import { expectNoAxeViolations } from "@farik/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sentCommand } from "../../test/gate.ts";
@@ -19,12 +20,15 @@ afterEach(() => {
 });
 
 async function read() {
-	const { s } = await todayWithMail({ messages: [MESSAGE], replies: [REPLY] });
+	const { container, s } = await todayWithMail({
+		messages: [MESSAGE],
+		replies: [REPLY],
+	});
 	fireEvent.click(await screen.findByRole("button", { name: "Read" }));
 	const dialog = await screen.findByRole("dialog", {
 		name: "Reply from Packaging Express",
 	});
-	return { s, dialog };
+	return { container, s, dialog };
 }
 
 describe("a reply from a seller, read", () => {
@@ -74,6 +78,14 @@ describe("a reply from a seller, read", () => {
 		expect(s.calls("command")).toHaveLength(0);
 	});
 
+	it("the_reply_dialog_fills_a_phone_and_says_when_it_came", async () => {
+		const { container, dialog } = await read();
+		// On a phone the dialog fills the screen, so a long reply is read on the whole of it.
+		expect(dialog.hasAttribute("data-fills-phone")).toBe(true);
+		expect(within(dialog).getByText("Received today at 09:00")).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
 	it("ask_for_a_comparison_files_then_dismisses", async () => {
 		const { s, dialog } = await read();
 		fireEvent.click(
@@ -96,7 +108,7 @@ describe("a reply from a seller, read", () => {
 		await s.reply(s.calls("request.file")[0] as never, { task_id: "FRK-40" });
 		const dismissed = await sentCommand(s);
 		expect(dismissed.params).toEqual({
-			command: { command: "seller_reply_dismiss", body: { reply: 1 } },
+			command: { command: "seller_reply_dismiss", body: { reply: 7 } },
 		});
 		expect(refusedBy("sellerReplyDismissBody", bodyOf(dismissed))).toEqual([]);
 	});
@@ -127,13 +139,16 @@ describe("a reply from a seller, read", () => {
 		const clicked = vi
 			.spyOn(HTMLAnchorElement.prototype, "click")
 			.mockImplementation(() => {});
-		fireEvent.click(within(dialog).getByRole("button", { name: /Download/ }));
+		// Each file's button says which file it fetches, so two of them are told apart.
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Download quote.pdf" }),
+		);
 		await waitFor(() =>
 			expect(s.calls("seller_reply.attachment")).toHaveLength(1),
 		);
 		const frame = s.calls("seller_reply.attachment")[0] as never;
 		expect((frame as { params: unknown }).params).toEqual({
-			reply: 1,
+			reply: 7,
 			index: 1,
 		});
 		await s.reply(frame, {

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { t } from "../../strings/t.ts";
 import { calendarDay, todayIso } from "../orders.ts";
 import styles from "../pages.module.css";
-import type { Mailbox, OrderSend } from "../sellerMail.ts";
+import { emailFault, type Mailbox, type OrderSend } from "../sellerMail.ts";
 import { Ask } from "./Ask.tsx";
 import { useSteps } from "./AskTeam.tsx";
 import { SendFields } from "./SellerMessage.tsx";
@@ -130,6 +130,7 @@ function SendForm({
 	});
 	const text = (edited ?? draft).trim();
 	const said = note.trim();
+	const fault = emailFault(subject, body);
 	return (
 		<Dialog
 			open
@@ -140,9 +141,7 @@ function SendForm({
 				<Button
 					kind="primary"
 					busy={busy}
-					disabled={
-						subject.trim() === "" || body.trim() === "" || (ask && text === "")
-					}
+					disabled={fault.blocked || (ask && text === "")}
 					onClick={() =>
 						steps([
 							{
@@ -179,6 +178,7 @@ function SendForm({
 					label={t("sellerSubject")}
 					value={subject}
 					onChange={setSubject}
+					{...(fault.subjectLong && { error: t("sellerSubjectLong") })}
 				/>
 				<TextArea
 					id="order-send-message"
@@ -186,6 +186,7 @@ function SendForm({
 					value={body}
 					onChange={setBody}
 					rows={8}
+					{...(fault.bodyLong && { error: t("sellerMessageLong") })}
 				/>
 				<p className={styles.orderHint}>{t("orderAttached", { order })}</p>
 				<Ask

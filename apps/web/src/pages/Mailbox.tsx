@@ -60,11 +60,11 @@ export function MailboxSection({ id, name }: { id: string; name: string }) {
 							})}
 						</p>
 					) : (
-						mailbox.checkedAt && (
-							<p>
-								{t("mailboxChecked", { time: timeWords(mailbox.checkedAt) })}
-							</p>
-						)
+						<p>
+							{mailbox.checkedAt
+								? t("mailboxChecked", { time: timeWords(mailbox.checkedAt) })
+								: t("mailboxEvery")}
+						</p>
 					)}
 					{mailbox.restartedAt && (
 						<p>
@@ -86,6 +86,7 @@ export function MailboxSection({ id, name }: { id: string; name: string }) {
 					{asking && (
 						<Dialog
 							open
+							fillsPhone
 							title={t("mailboxDisconnectTitle", {
 								address: visibly(mailbox.address ?? ""),
 							})}

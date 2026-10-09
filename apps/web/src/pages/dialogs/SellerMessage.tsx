@@ -3,7 +3,7 @@ import { useState } from "react";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
 import type { Mailbox } from "../sellerMail.ts";
-import { adds as addsOf } from "../sellerMail.ts";
+import { adds as addsOf, emailFault } from "../sellerMail.ts";
 import { isScript, ScriptWarning } from "./SiteRequest.tsx";
 import { useCommand } from "./StartSprint.tsx";
 import { visibly } from "./ToolApproval.tsx";
@@ -116,6 +116,7 @@ export function SellerMessage({
 	const [body, setBody] = useState(item.body);
 	const { busy, refusal, send } = useCommand(onClose);
 	const cannot = !mailbox?.connected || capped;
+	const fault = emailFault(subject, body);
 	return (
 		<Dialog
 			open
@@ -127,7 +128,7 @@ export function SellerMessage({
 					<Button
 						kind="primary"
 						busy={busy}
-						disabled={subject.trim() === "" || body.trim() === ""}
+						disabled={fault.blocked}
 						onClick={() =>
 							send({
 								command: "seller_message_send",
@@ -153,6 +154,7 @@ export function SellerMessage({
 					label={t("sellerSubject")}
 					value={subject}
 					onChange={setSubject}
+					{...(fault.subjectLong && { error: t("sellerSubjectLong") })}
 				/>
 				<TextArea
 					id="seller-message"
@@ -160,6 +162,7 @@ export function SellerMessage({
 					value={body}
 					onChange={setBody}
 					rows={8}
+					{...(fault.bodyLong && { error: t("sellerMessageLong") })}
 				/>
 				<p className={styles.orderHint}>
 					{t("sellerEditBody", { name: agent })}

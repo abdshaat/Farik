@@ -1,3 +1,4 @@
+import { RpcError } from "@farik/protocol-client";
 import { Button, Choice, TextArea, TextField } from "@farik/ui";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
@@ -57,14 +58,45 @@ const NOTE: Record<string, Parameters<typeof t>[0]> = {
 	other: "mailboxHowOther",
 };
 const PROVIDER_NAME: Record<string, string> = {
-	gmail: "Google",
-	icloud: "Apple",
+	gmail: "Gmail",
+	icloud: "iCloud",
 	fastmail: "Fastmail",
 };
+
+/** The provider an address names by its domain, for the domains Farik knows. */
+const DOMAINS: Record<string, Provider> = {
+	"gmail.com": "gmail",
+	"googlemail.com": "gmail",
+	"icloud.com": "icloud",
+	"me.com": "icloud",
+	"mac.com": "icloud",
+	"fastmail.com": "fastmail",
+	"fastmail.fm": "fastmail",
+	"outlook.com": "microsoft",
+	"hotmail.com": "microsoft",
+	"live.com": "microsoft",
+	"msn.com": "microsoft",
+};
+
+/** Whether a server is named: a host and a port that is a number from 1 to 65535. */
+const named = (server: Server) =>
+	server.host.trim() !== "" &&
+	/^\d+$/.test(server.port.trim()) &&
+	Number(server.port) >= 1 &&
+	Number(server.port) <= 65535;
 
 /** The code a daemon refusal leads with, as `code: words`. */
 const codeOfMessage = (e: unknown) =>
 	/^([a-z_]+): /.exec(e instanceof Error ? e.message : "")?.[1];
+
+/** JSON-RPC's code for params that do not fit the method's schema. */
+const INVALID_PARAMS = -32602;
+
+/** A refused connect in plain words: params the schema refuses carry no code, and are settings that do not fit. */
+const refusedWords = (e: unknown) =>
+	e instanceof RpcError && e.code === INVALID_PARAMS
+		? said("mailbox_settings_invalid")
+		: said(codeOfMessage(e), {}, "refuseCommand");
 
 /** One server's three fields. */
 function ServerFields({
@@ -157,6 +189,19 @@ export function ProcurementMailbox() {
 			setSmtp(KNOWN[next][1]);
 		}
 	};
+	// The domain of an address Farik knows chooses the provider; any other leaves the choice be.
+	const typeAddress = (next: string) => {
+		setAddress(next);
+		const found = next.includes("@")
+			? DOMAINS[
+					next
+						.slice(next.lastIndexOf("@") + 1)
+						.trim()
+						.toLowerCase()
+				]
+			: undefined;
+		if (found && found !== provider) choose(found);
+	};
 	const microsoft = provider === "microsoft";
 	const known = provider !== "other" && provider !== "microsoft";
 	const connect = async () => {
@@ -183,7 +228,7 @@ export function ProcurementMailbox() {
 			});
 			navigate(`/team/${id}`);
 		} catch (e) {
-			setRefusal(said(codeOfMessage(e), {}, "refuseCommand"));
+			setRefusal(refusedWords(e));
 		} finally {
 			// The password is not kept here once it has been sent, whatever the answer.
 			setPassword("");
@@ -204,7 +249,7 @@ export function ProcurementMailbox() {
 					id="mailbox-address"
 					label={t("mailboxAddress")}
 					value={address}
-					onChange={setAddress}
+					onChange={typeAddress}
 				/>
 				<TextField
 					id="mailbox-name"
@@ -318,7 +363,9 @@ export function ProcurementMailbox() {
 								disabled={
 									address.trim() === "" ||
 									yourName.trim() === "" ||
-									password === ""
+									password === "" ||
+									!named(imap) ||
+									!named(smtp)
 								}
 								onClick={connect}
 							>

@@ -8,7 +8,6 @@ import { EFFECTIVE, ORDERS, TEAM } from "../test/orders.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 import { at, MAILBOX, NO_MAILBOX } from "../test/sellerMail.ts";
 import { NOW, SITES } from "../test/sites.ts";
-import { timeWords } from "./sellerMail.ts";
 
 /** One agent's page; the mailbox is asked for only where the role has one. */
 async function opened(agent: string, mailbox: object) {
@@ -61,10 +60,29 @@ describe("the procurement mailbox on the Procurement Specialist's page", () => {
 		).toBeTruthy();
 		expect(
 			mailbox.getByText(
-				`Farik checks it for replies every 15 minutes. Last checked ${timeWords(MAILBOX.checked_at)}.`,
+				"Farik checks it for replies every 15 minutes. Last checked at 08:00.",
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
+	});
+
+	it("says_a_check_of_another_day_with_its_day", async () => {
+		await opened("ivo", { ...MAILBOX, checked_at: at(25, 8) });
+		expect(
+			within(await section()).getByText(
+				"Farik checks it for replies every 15 minutes. Last checked yesterday at 08:00.",
+			),
+		).toBeTruthy();
+	});
+
+	it("says_how_often_it_checks_before_the_first_check", async () => {
+		const { checked_at: _checked, ...unchecked } = MAILBOX;
+		await opened("ivo", unchecked);
+		const mailbox = within(await section());
+		expect(
+			mailbox.getByText("Farik checks it for replies every 15 minutes."),
+		).toBeTruthy();
+		expect(mailbox.queryByText(/Last checked/)).toBeNull();
 	});
 
 	it("says_why_the_last_check_failed_in_the_page_s_own_words", async () => {
@@ -77,7 +95,7 @@ describe("the procurement mailbox on the Procurement Specialist's page", () => {
 		// Farik's sentence, the time of the try, and what it holds that hides is written out.
 		expect(
 			mailbox.getByText(
-				`Farik could not read it ${timeWords(MAILBOX.checked_at)}: Your provider\\u{202e} did not accept the sign-in`,
+				"Farik could not read it at 08:00: Your provider\\u{202e} did not accept the sign-in",
 			),
 		).toBeTruthy();
 		showsWhatItHides(await section());
@@ -108,6 +126,8 @@ describe("the procurement mailbox on the Procurement Specialist's page", () => {
 		const dialog = await screen.findByRole("dialog", {
 			name: "Disconnect buying@cornerbakery.test?",
 		});
+		// On a phone the question fills the screen.
+		expect(dialog.hasAttribute("data-fills-phone")).toBe(true);
 		expect(
 			within(dialog).getByText(
 				"Farik forgets its app password and stops reading it. Messages and replies already kept stay in Ivo’s folder.",

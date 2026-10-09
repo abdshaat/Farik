@@ -1,3 +1,4 @@
+import { expectNoAxeViolations } from "@farik/ui/test";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../../strings/en.ts";
@@ -19,7 +20,7 @@ afterEach(() => {
 });
 
 async function edited(message: object = KNOWN, mailbox?: object) {
-	const { s } = await todayWithMail({
+	const { container, s } = await todayWithMail({
 		messages: [message],
 		...(mailbox ? { mailbox } : {}),
 	});
@@ -27,12 +28,15 @@ async function edited(message: object = KNOWN, mailbox?: object) {
 	const dialog = await screen.findByRole("dialog", {
 		name: "Edit the message to Pie Box Pros",
 	});
-	return { s, dialog };
+	return { container, s, dialog };
 }
 
 describe("a message to a seller, edited", () => {
 	it("edit_then_send_sends_the_edited_text", async () => {
-		const { s, dialog } = await edited();
+		const { container, s, dialog } = await edited();
+		// On a phone the dialog fills the screen, and nothing in it breaks an accessibility rule.
+		expect(dialog.hasAttribute("data-fills-phone")).toBe(true);
+		await expectNoAxeViolations(container);
 		// From and To stay as the agent wrote them, with what Farik adds.
 		expect(within(dialog).getByText("buying@cornerbakery.test")).toBeTruthy();
 		expect(within(dialog).getByText("pieboxpros.test").tagName).toBe("STRONG");
@@ -102,6 +106,34 @@ describe("a message to a seller, edited", () => {
 		expect(
 			within(none.dialog).queryByRole("button", { name: "Send" }),
 		).toBeNull();
+	});
+
+	it("nothing_to_send_or_too_much_leaves_the_dialog_no_send", async () => {
+		const { dialog } = await edited();
+		const send = () =>
+			within(dialog).getByRole("button", { name: "Send" }) as HTMLButtonElement;
+		const subject = within(dialog).getByLabelText("Subject");
+		const message = within(dialog).getByLabelText("Message");
+		const type = (field: HTMLElement, value: string) =>
+			fireEvent.change(field, { target: { value } });
+		expect(send().disabled).toBe(false);
+		// A message with nothing in it is not sent.
+		type(message, "   ");
+		expect(send().disabled).toBe(true);
+		// The most the daemon takes is 8,000 characters of the message and 200 of the subject.
+		type(message, "m".repeat(8000));
+		expect(send().disabled).toBe(false);
+		type(message, "m".repeat(8001));
+		expect(send().disabled).toBe(true);
+		expect(within(dialog).getByText(en.sellerMessageLong)).toBeTruthy();
+		type(message, "Hello");
+		type(subject, "");
+		expect(send().disabled).toBe(true);
+		type(subject, "s".repeat(200));
+		expect(send().disabled).toBe(false);
+		type(subject, "s".repeat(201));
+		expect(send().disabled).toBe(true);
+		expect(within(dialog).getByText(en.sellerSubjectLong)).toBeTruthy();
 	});
 
 	it("close_sends_nothing", async () => {

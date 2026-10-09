@@ -2314,6 +2314,7 @@ export const en = {
 	mailboxFrom: "{name} writes from {address}.",
 	mailboxChecked:
 		"Farik checks it for replies every 15 minutes. Last checked {time}.",
+	mailboxEvery: "Farik checks it for replies every 15 minutes.",
 	mailboxError: "Farik could not read it {time}: {why}",
 	mailboxRestarted:
 		"Your provider renumbered this mailbox {day}, so replies that came shortly before may not be on Today.",
@@ -2344,6 +2345,9 @@ export const en = {
 	sellerBody: "The message, in {name}’s words",
 	sellerAdds: "Farik adds",
 	sellerFailed: "Farik could not send it: {why}. It is kept here to try again.",
+	sellerSubjectLong: "The subject can be 200 characters at most.",
+	sellerMessageLong: "The message can be 8,000 characters at most.",
+	timeAt: "at {time}",
 	sellerSend: "Send",
 	sellerEdit: "Edit",
 	sellerDiscard: "Discard",
@@ -2406,4 +2410,16 @@ export const en = {
 	refuseSellerMessageFailed:
 		"The mail server did not take the message. It is kept here to try again.",
 	refusePurchaseOrderSending: "A send of this order is in flight.",
+	refuseMailboxSettings:
+		"Farik can’t use those settings. Check the address, your name, the servers and the folder.",
+	refuseSellerMessageTooLong:
+		"That message is too long. Farik sends at most 8,000 characters.",
+	refuseSellerMessageField:
+		"The subject must be one line of up to 200 characters, and the message plain text of up to 8,000.",
+	refuseMailboxFiles:
+		"Farik could not keep the mailbox in this project’s folder. Check that the folder can be written to.",
+	refuseSecretStore:
+		"Farik could not keep the app password on this computer. If it asks whether Farik may use the keychain, choose “Always”, then connect again.",
+	refuseSellerMessageClosed:
+		"This message went with an order that was decided without it, so it is not sent.",
 };

@@ -104,6 +104,12 @@ const WORDS: Record<string, keyof typeof en> = {
 	seller_message_not_this_order: "refuseSellerMessageNotThisOrder",
 	unknown_seller_message: "refuseSellerMessageUnknown",
 	seller_message_failed: "refuseSellerMessageFailed",
+	seller_message_closed: "refuseSellerMessageClosed",
+	seller_message_too_long: "refuseSellerMessageTooLong",
+	seller_message_field_invalid: "refuseSellerMessageField",
+	mailbox_settings_invalid: "refuseMailboxSettings",
+	mailbox_files: "refuseMailboxFiles",
+	secret_store_unavailable: "refuseSecretStore",
 	seller_reply_dismissed: "refuseSellerReplyDismissed",
 	unknown_seller_reply: "refuseSellerReplyUnknown",
 	// A skill's refusals (SPEC 6.7), said at the field they belong to.

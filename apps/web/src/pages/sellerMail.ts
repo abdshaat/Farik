@@ -3,6 +3,9 @@
 // `send` of a `purchase_order` row of `waiting.list`), and the words and times they are said with
 // (spec 6.10, ADR 0039).
 
+import { t } from "../strings/t.ts";
+import { clock, dayWords } from "./PostGoingOut.tsx";
+
 /** The connected mailbox, or `connected: false`. */
 export type Mailbox = {
 	connected: boolean;
@@ -86,14 +89,32 @@ export function adds(mailbox: Mailbox | undefined, disclosure: string): string {
 		.join("\n\n");
 }
 
-/** A time in the browser's own zone: "6 November, 09:41". */
-export const timeWords = (when: string): string =>
-	new Intl.DateTimeFormat("en-GB", {
-		day: "numeric",
-		month: "long",
-		hour: "2-digit",
-		minute: "2-digit",
-	}).format(new Date(when));
+/**
+ * A time in the browser's own zone as the rest of the app says one: "at 09:41" today, else
+ * "yesterday at 09:41" or "Wednesday 28 October at 09:41".
+ */
+export function timeWords(when: string, now: Date = new Date()): string {
+	const time = new Date(when);
+	const day = dayWords(time, now);
+	const at = t("timeAt", { time: clock(time) });
+	return day === t("postToday") ? at : `${day} ${at}`;
+}
+
+/** The most characters of a subject and of a message that the daemon takes. */
+const MOST_SUBJECT = 200;
+const MOST_BODY = 8000;
+
+/** What keeps an email's subject and message from being sent: nothing in them, or too much. */
+export function emailFault(subject: string, body: string) {
+	const subjectLong = Array.from(subject.trim()).length > MOST_SUBJECT;
+	const bodyLong = Array.from(body).length > MOST_BODY;
+	return {
+		subjectLong,
+		bodyLong,
+		blocked:
+			subject.trim() === "" || body.trim() === "" || subjectLong || bodyLong,
+	};
+}
 
 /** A size in bytes as "812 KB" or "1.4 MB". */
 export function sizeWords(bytes: number): string {
