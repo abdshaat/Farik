@@ -7,6 +7,7 @@
 }
 
 .button {
+	display: inline-flex;
 	padding: 0 var(--farik-space-1);
 	border: 0;
 	background: none;
@@ -26,7 +27,7 @@
 	inset-block-start: 100%;
 	z-index: 1;
 	width: max-content;
-	max-width: 20rem;
+	max-width: min(20rem, calc(100vw - 2 * var(--farik-space-4)));
 	padding: var(--farik-space-2) var(--farik-space-3);
 	border: 1px solid var(--farik-color-control-border);
 	border-radius: var(--farik-radius-control);
@@ -35,9 +36,8 @@
 	visibility: hidden;
 }
 
-.wrap:hover .tip,
-.wrap:focus-within .tip,
-.wrap.open .tip {
+.wrap:hover .tip:not([data-shut]),
+.tip[data-open] {
 	visibility: visible;
 }
 
