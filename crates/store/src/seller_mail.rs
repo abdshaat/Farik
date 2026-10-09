@@ -105,8 +105,10 @@ fn waiting(mail: &mut SellerMail, message: u64) -> Option<&mut SellerMessageReco
 /// Every message and reply the log holds, oldest first. A draft counts when its envelope names the
 /// task and the agent; a failure, a send, a discard, a reply and a dismissal count only from an
 /// envelope naming no agent and no session, and a send, a failure or a discard only while the
-/// message waits. A reply counts when it answers a message the log holds. A waiting message of an
-/// order that is not `drafted` any more is closed, unless it was sent.
+/// message waits. A reply counts when it answers a message that was sent. The waiting message of an
+/// order is closed when the order is rejected or expires (a send recorded after that counts for
+/// nothing), and when the order is not `drafted` any more at the end of the log, unless it was
+/// sent.
 ///
 /// # Errors
 ///
@@ -122,6 +124,8 @@ pub fn seller_mail(log: &EventLog) -> Result<SellerMail, StoreError> {
             EventKind::SellerMessageDiscarded,
             EventKind::SellerReplyReceived,
             EventKind::SellerReplyDismissed,
+            EventKind::PurchaseOrderRejected,
+            EventKind::PurchaseOrderExpired,
         ],
         ..EventQuery::default()
     })?;
@@ -176,11 +180,21 @@ pub fn seller_mail(log: &EventLog) -> Result<SellerMail, StoreError> {
                     record.state = MessageState::Discarded;
                 }
             }
+            // An order ended by the owner or by Farik ends its message with it, from that moment:
+            // a send recorded later is no send.
+            EventBody::PurchaseOrderRejected(body) if is_unattended(event) => {
+                close_orders_message(&mut mail, body.order.get());
+            }
+            EventBody::PurchaseOrderExpired(body) if is_unattended(event) => {
+                close_orders_message(&mut mail, body.order.get());
+            }
             EventBody::SellerReplyReceived(body) if is_unattended(event) => {
                 let task = mail
                     .messages
                     .iter()
-                    .find(|record| record.message == body.message.get())
+                    .find(|record| {
+                        record.message == body.message.get() && record.state == MessageState::Sent
+                    })
                     .map(|record| record.task_id.clone());
                 if let Some(task_id) = task
                     && mail
@@ -213,7 +227,21 @@ pub fn seller_mail(log: &EventLog) -> Result<SellerMail, StoreError> {
     Ok(mail)
 }
 
-/// Closes each waiting message of an order the owner decided without it.
+/// Closes the waiting message of order `order`, which was ended without it.
+fn close_orders_message(mail: &mut SellerMail, order: u64) {
+    for record in &mut mail.messages {
+        if record.state == MessageState::Waiting
+            && record.drafted.purpose == SellerMessagePurpose::PurchaseOrder
+            && record.drafted.purchase_order.as_ref().map(|n| n.get()) == Some(order)
+        {
+            record.state = MessageState::Closed;
+        }
+    }
+}
+
+/// Closes each waiting message of an order that is not drafted any more, which the owner decided
+/// without it (approved alone: "Approve and send" records `approved` before `sent`, so only the
+/// state at the end of the log tells).
 fn close_orders_messages(log: &EventLog, mail: &mut SellerMail) -> Result<(), StoreError> {
     if mail.messages.iter().all(|record| {
         record.state != MessageState::Waiting
@@ -409,6 +437,7 @@ mod tests {
     fn folds_each_reply_and_the_days_count() {
         let board = Board::new("folds-seller-replies");
         draft(&board, 1, 1, "quote_request", None);
+        draft(&board, 2, 2, "quote_request", None);
         unattended(&board, 11, "seller_message.sent", sent_body(1));
         // Replies: one counts from Farik and one from a session does not; one is dismissed.
         unattended(&board, 15, "seller_reply.received", reply_body(1, 1));
@@ -421,6 +450,8 @@ mod tests {
             reply_body(2, 1),
         );
         unattended(&board, 17, "seller_reply.received", reply_body(3, 99));
+        // Message 2 was drafted and never sent: nothing can answer it.
+        unattended(&board, 17, "seller_reply.received", reply_body(4, 2));
         board.session(
             at(10, 17),
             None,
@@ -433,7 +464,7 @@ mod tests {
         assert_eq!(
             mail.replies.len(),
             1,
-            "a reply to no sent message is no reply"
+            "a reply to a message that was not sent is no reply"
         );
         assert!(!mail.replies[0].dismissed, "a dismissal an agent recorded");
         unattended(&board, 18, "seller_reply.dismissed", json!({ "reply": 1 }));
@@ -464,6 +495,14 @@ mod tests {
         let mail = seller_mail(&board.log).expect("folds");
         assert_eq!(mail.messages[0].state, MessageState::Closed);
         assert_eq!(mail.messages[1].state, MessageState::Waiting);
+        // A send of the closed message that is recorded after its order was rejected counts for
+        // nothing: it stays closed, adds to no day's count, and its id is no sent id.
+        unattended(&board, 5, "seller_message.sent", sent_body(1));
+        let mail = seller_mail(&board.log).expect("folds");
+        assert_eq!(mail.messages[0].state, MessageState::Closed);
+        assert!(mail.messages[0].sent.is_none() && mail.messages[0].sent_at.is_none());
+        let day = NaiveDate::from_ymd_opt(2026, 9, 28).expect("a day");
+        assert_eq!(sent_on(&mail, day), 0);
         // An order approved with its email: approved, sent, placed, in that order.
         board.put(
             at(10, 6),
