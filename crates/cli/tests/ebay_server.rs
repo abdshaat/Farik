@@ -9,7 +9,7 @@ use farik_core::contract::Role;
 use farik_core::team::{CustomServer, custom_server};
 use farik_roles::{KitConnector, load_kit, pin_drift};
 use farik_runtime::claude::Secret;
-use farik_runtime::connectors::list_tools;
+use farik_runtime::connectors::{ConnectorError, call_tool, list_tools};
 
 /// The Procurement Specialist's `ebay`, as the daemon would hold it.
 fn ebay_in_the_kit() -> CustomServer {
@@ -25,18 +25,24 @@ fn ebay_in_the_kit() -> CustomServer {
         .expect("the Procurement Specialist's kit has ebay")
 }
 
+/// A scratch folder of its own, and in it a name no `which farik` would find, linked to the built
+/// binary: only the executable a call was handed can answer.
+fn scratch_with_the_binary(folder: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let scratch = std::env::temp_dir().join(format!("{folder}-{}", std::process::id()));
+    std::fs::create_dir_all(&scratch).expect("a scratch folder");
+    let under_test = scratch.join("ebay-under-test");
+    let _ = std::fs::remove_file(&under_test);
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_farik"), &under_test).expect("a symlink");
+    (scratch, under_test)
+}
+
 /// The names `server` lists when `farik` is started with `keys`, from a folder of its own.
 async fn listed_names(
     server: &CustomServer,
     keys: &BTreeMap<String, Secret>,
     folder: &str,
 ) -> Vec<String> {
-    // A name no `which farik` would find: only the executable `list_tools` was handed can answer.
-    let scratch = std::env::temp_dir().join(format!("{folder}-{}", std::process::id()));
-    std::fs::create_dir_all(&scratch).expect("a scratch folder");
-    let under_test = scratch.join("ebay-under-test");
-    let _ = std::fs::remove_file(&under_test);
-    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_farik"), &under_test).expect("a symlink");
+    let (scratch, under_test) = scratch_with_the_binary(folder);
 
     let listed = list_tools(server, keys, None, &scratch, &under_test)
         .await
@@ -90,4 +96,69 @@ async fn ebay_server_lists_its_tools_without_its_keys() {
     bare.credential_keys.clear();
     let names = listed_names(&bare, &BTreeMap::new(), "farik-ebay-bare-under-test").await;
     assert_the_kit_tags_exactly(&bare, &names);
+}
+
+/// A call through the built binary: `get_item` with an id that is not one, which the server
+/// refuses for the id before it sends anything to eBay, once it has both keys. With the keys in
+/// the launcher's environment the refusal is for the id; with none it is for the missing keys.
+/// So the binary reads `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` from its environment, and the
+/// test sends nothing to eBay.
+#[tokio::test]
+async fn ebay_server_reads_its_keys_from_its_environment() {
+    let ebay = ebay_in_the_kit();
+    let keys = BTreeMap::from([
+        (
+            "EBAY_CLIENT_ID".to_string(),
+            Secret::new("test-app-id".to_string()),
+        ),
+        (
+            "EBAY_CLIENT_SECRET".to_string(),
+            Secret::new("test-cert-id".to_string()),
+        ),
+    ]);
+    let (scratch, under_test) = scratch_with_the_binary("farik-ebay-keys-under-test");
+    let arguments = || {
+        serde_json::json!({ "item_id": "123" })
+            .as_object()
+            .cloned()
+            .expect("an object")
+    };
+
+    let with_keys = call_tool(
+        &ebay,
+        &keys,
+        None,
+        &scratch,
+        &under_test,
+        "get_item",
+        arguments(),
+    )
+    .await;
+
+    let mut bare = ebay_in_the_kit();
+    bare.credential_keys.clear();
+    let without_keys = call_tool(
+        &bare,
+        &BTreeMap::new(),
+        None,
+        &scratch,
+        &under_test,
+        "get_item",
+        arguments(),
+    )
+    .await;
+    let _ = std::fs::remove_dir_all(&scratch);
+
+    assert_eq!(
+        with_keys,
+        Err(ConnectorError::ToolError {
+            text: "item_id is an id from a search, such as v1|123456789|0".to_string()
+        })
+    );
+    assert_eq!(
+        without_keys,
+        Err(ConnectorError::ToolError {
+            text: "eBay is not set up; connect it again with your App ID and Cert ID".to_string()
+        })
+    );
 }
