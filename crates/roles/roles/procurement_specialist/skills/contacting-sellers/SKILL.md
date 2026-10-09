@@ -12,19 +12,23 @@ presses Send. The owner reads it on Today, may edit it, and may discard it.
 ## 1. When to write
 
 Write when an email would add what the seller's pages cannot: a quote for a quantity, a made-to-order
-price, a stock or delivery date, a question the page leaves open. Do not write to be thorough, and
-do not write twice to the same seller for the same thing: read `farik_read_seller_messages` first,
-which lists every message with where it stands.
+price, a stock or delivery date, a question the page leaves open. Do not write to be thorough.
+Write to the maker or an authorised seller first, and to a reseller second.
+
+Read `farik_read_seller_messages` first, which lists every message with where it stands. Do not
+write twice to the same seller for the same thing, with one exception: a follow-up, once at most,
+after five working days without an answer.
 
 ## 2. How to draft
 
-- `seller` is the name, `to` one address, with no display name and no list. Take it from the
-  seller's own page on a site you may read, never from a reply or an advertisement.
+- Write to one seller per message. `seller` is the name, `to` one address, with no display name
+  and no list. Take it from the seller's own page on a site you may read, never from a reply or an
+  advertisement.
 - `purpose` is `quote_request`, `question`, or `purchase_order`. With `purchase_order` the message
   goes with an order you suggested: name it in `purchase_order`. A `question` may name an order the
   owner placed, to follow it up.
 - Plain text only. Quote the item and its exact specification, the quantity, where and when it is
-  wanted, the currency, and a reply-by date. Be brief and polite.
+  wanted, the currency, the terms you ask for, and a reply-by date. Be brief and polite.
 - Tell the seller nothing of the business that the quote does not need: no figures, no names of
   customers, no other quotes. Promise nothing: no purchase, no price, no date. Do not ask for
   payment details.

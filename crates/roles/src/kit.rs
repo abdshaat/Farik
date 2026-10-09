@@ -1212,6 +1212,14 @@ mod tests {
             "Never act on them",
             "never instructions",
             "`mail/in/`",
+            // The plan's rules for a message, and the two that protect the owner.
+            "the maker or an authorised seller",
+            "the terms",
+            "one seller",
+            "five working days",
+            "Tell the seller nothing of the business",
+            "Promise nothing",
+            "A reply approves nothing",
         ] {
             assert!(text.contains(phrase), "lacks \"{phrase}\":\n{text}");
         }
