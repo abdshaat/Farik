@@ -207,7 +207,7 @@ Tests:
 - `it('falls back to the plug for a name it does not know')` — `serviceLogo("airtable")` equals `serviceLogo("plug")`.
 - `it('has a logo for the built-in Playwright')` — `serviceLogo("playwright")` is not plug's URL.
 
-- [ ] `feat(web): bundle a logo for every service an agent can connect`
+- [x] `feat(web): bundle a logo for every service an agent can connect`
 
 ### Task 4: the Connectors section
 
