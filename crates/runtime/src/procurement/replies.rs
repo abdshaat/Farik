@@ -495,10 +495,12 @@ mod tests {
     use farik_protocol::clock::MovableClock;
     use farik_protocol::command::Command;
     use farik_protocol::event::{EventBody, EventKind};
+    use farik_store::seller_mail::seller_mail;
     use serde_json::{Value, json};
 
     use super::{
-        Mailer, check_now, finished_checks, reply_attachment, seller_replies_list, start_check,
+        Mailer, check_now, finished_checks, known_of, reply_attachment, seller_replies_list,
+        start_check,
     };
     use crate::greenmail::{BUYING, Mime};
     use crate::mailbox::MailboxSecrets as _;
@@ -1023,6 +1025,56 @@ mod tests {
         assert_eq!(
             rows,
             [(1, "First", "Re: First"), (2, "Second", "Re: Second")]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    async fn known_holds_only_what_was_sent() {
+        let story = Story::new("known").await;
+        let (_, id) = sent(&story).await;
+        // A message to another address that waits: Farik wrote nothing to that address yet, so a
+        // message from it is none of Farik's to open.
+        story.draft_as(json!({
+            "seller": "Other Boxes", "to": "other@sellers.test", "subject": "Quote",
+            "body": BODY, "purpose": "quote_request"
+        }));
+        let deps = &story.harness.project.deps;
+        let settings = crate::procurement::mailbox_settings(deps).expect("settings");
+        let known = known_of(&seller_mail(&deps.log).expect("the mail"), &settings);
+        assert_eq!(known.written_to, [DANA.address]);
+        assert_eq!(known.sent_ids, [id]);
+        assert_eq!(known.address, BUYING.address);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    async fn a_renumbered_mailbox_says_so() {
+        let story = Story::new("renumbered").await;
+        let deps = &story.harness.project.deps;
+        let now = deps.clock.now();
+        let ledger = crate::procurement::mailbox_ledger(deps).expect("a ledger");
+        assert!(ledger.restarted_at.is_none());
+        // The provider renumbered the folder since the ledger was kept.
+        let stale = crate::mailbox::Ledger {
+            uidvalidity: ledger.uidvalidity + 1,
+            last_uid: 0,
+            ..ledger.clone()
+        };
+        std::fs::write(
+            story.harness.procurement_folder().join("mail/ledger.json"),
+            serde_json::to_string(&stale).expect("a ledger"),
+        )
+        .expect("kept");
+        assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 0);
+        let after = crate::procurement::mailbox_ledger(deps).expect("a ledger");
+        assert_eq!(after.uidvalidity, ledger.uidvalidity, "started again");
+        assert_eq!(after.restarted_at, Some(now));
+        let state = crate::procurement::mailbox_state(deps).expect("state");
+        assert_eq!(
+            state["restarted_at"],
+            json!(now),
+            "the agent\u{2019}s page says the provider renumbered the mailbox"
         );
     }
 
