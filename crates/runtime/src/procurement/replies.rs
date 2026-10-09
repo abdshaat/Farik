@@ -26,6 +26,11 @@ use crate::tools::ToolDeps;
 /// How long after a check the next one is due.
 const EVERY: Duration = Duration::minutes(15);
 
+/// Farik's words when a reply cannot be kept or recorded: in the ledger and in the refusal, never
+/// the store's detail, which repeats what the seller wrote.
+const COULD_NOT_KEEP: &str =
+    "Farik could not keep a reply from the mailbox; it tries again in 15 minutes.";
+
 /// The projects whose mailbox is being read now: at most one check at a time in each, so that a
 /// slow server never holds a tick and two checks never read one message twice.
 static CHECKING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
@@ -130,25 +135,8 @@ fn keep_reply(
     };
     let inbox = mail_dir(deps)?.join("in");
     let number = next_reply(mail, &inbox);
-    let folder = inbox
-        .join(now.format("%Y-%m").to_string())
-        .join(number.to_string());
-    let kept = || -> std::io::Result<()> {
-        make_dir(&folder)?;
-        write_new(&folder.join("text.txt"), reply.text.as_bytes())?;
-        for (index, file) in reply.attachments.iter().enumerate() {
-            if let (Some(bytes), Some(media)) = (&file.bytes, &file.media_type)
-                && let Some(extension) = extension_of(media)
-            {
-                write_new(&folder.join(format!("{}.{extension}", index + 1)), bytes)?;
-            }
-        }
-        Ok(())
-    };
-    if let Err(error) = kept() {
-        let _ = std::fs::remove_dir_all(&folder);
-        return Err(mail_failed(error));
-    }
+    // The record is built, and so checked against the wire's rules, before any folder is made: a
+    // reply the log would refuse leaves nothing on disk.
     let attachments: Vec<Value> = reply
         .attachments
         .iter()
@@ -170,6 +158,25 @@ fn keep_reply(
         body["date"] = json!(date.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
     }
     let body: SellerReplyReceivedBody = serde_json::from_value(body).map_err(mail_failed)?;
+    let folder = inbox
+        .join(now.format("%Y-%m").to_string())
+        .join(number.to_string());
+    let kept = || -> std::io::Result<()> {
+        make_dir(&folder)?;
+        write_new(&folder.join("text.txt"), reply.text.as_bytes())?;
+        for (index, file) in reply.attachments.iter().enumerate() {
+            if let (Some(bytes), Some(media)) = (&file.bytes, &file.media_type)
+                && let Some(extension) = extension_of(media)
+            {
+                write_new(&folder.join(format!("{}.{extension}", index + 1)), bytes)?;
+            }
+        }
+        Ok(())
+    };
+    if let Err(error) = kept() {
+        let _ = std::fs::remove_dir_all(&folder);
+        return Err(mail_failed(error));
+    }
     if let Err(error) = record_unattended(deps, EventBody::SellerReplyReceived(body), None) {
         let _ = std::fs::remove_dir_all(&folder);
         return Err(mail_failed(error));
@@ -227,23 +234,49 @@ pub(crate) async fn check_now(deps: &ToolDeps, mailer: &Mailer<'_>) -> Result<u3
     };
     let _guard = crate::locked(&MAIL);
     let mut recorded = 0;
-    // Each reply is kept and recorded against the log as it stands after the one before.
+    let mut stuck_at = None;
+    // Each reply is kept and recorded against the log as it stands after the one before. A reply
+    // that cannot be kept ends the check there: the ones before it are passed, and it is tried again.
     for reply in &fetched.replies {
-        let mail = seller_mail(&deps.log).map_err(mail_failed)?;
-        if keep_reply(deps, &mail, reply, now)? {
-            recorded += 1;
+        let kept = seller_mail(&deps.log)
+            .map_err(mail_failed)
+            .and_then(|mail| keep_reply(deps, &mail, reply, now));
+        match kept {
+            Ok(true) => recorded += 1,
+            Ok(false) => {}
+            Err(_) => {
+                stuck_at = Some(reply.uid);
+                break;
+            }
         }
+    }
+    let restarted_at = if fetched.restarted {
+        Some(now)
+    } else {
+        fetched.ledger.restarted_at
+    };
+    if let Some(uid) = stuck_at {
+        write_ledger(
+            deps,
+            &Ledger {
+                last_uid: uid.saturating_sub(1),
+                checked_at: Some(now),
+                error: Some(COULD_NOT_KEEP.to_string()),
+                restarted_at,
+                ..fetched.ledger
+            },
+        )?;
+        return Err(MailboxRefusal {
+            code: "mailbox_files",
+            words: COULD_NOT_KEEP.to_string(),
+        });
     }
     write_ledger(
         deps,
         &Ledger {
             checked_at: Some(now),
             error: None,
-            restarted_at: if fetched.restarted {
-                Some(now)
-            } else {
-                fetched.ledger.restarted_at
-            },
+            restarted_at,
             ..fetched.ledger
         },
     )?;
@@ -939,6 +972,125 @@ mod tests {
             !start_check(deps, &story.harness.daemon),
             "it was read a moment ago, so none is due"
         );
+    }
+
+    /// The words a reply that cannot be kept leaves in the ledger and the refusal.
+    const COULD_NOT_KEEP: &str =
+        "Farik could not keep a reply from the mailbox; it tries again in 15 minutes.";
+
+    #[tokio::test]
+    #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    async fn a_reply_that_cannot_be_kept_neither_repeats_nor_blocks() {
+        let story = Story::new("unkeepable").await;
+        let (_, id) = sent(&story).await;
+        let deps = &story.harness.project.deps;
+        let before = crate::procurement::mailbox_ledger(deps).expect("a ledger");
+        // A good reply, one with no From header at all, one with 101 attachments, a good one.
+        story.fixture.deliver(
+            BUYING.address,
+            &answer(&id, "a@pieboxpros.test", "Re: A").build(),
+        );
+        story.fixture.deliver(
+            BUYING.address,
+            &format!(
+                "To: buying@bakery.test\r\nSubject: Re: no sender\r\nMessage-ID: <n@pieboxpros.test>\r\n\
+                 Date: Mon, 05 Oct 2026 10:00:00 +0000\r\nIn-Reply-To: <{id}>\r\nReferences: <{id}>\r\n\
+                 \r\nWho am I?\r\n"
+            ),
+        );
+        let names: Vec<String> = (1..=101).map(|n| format!("file{n}.txt")).collect();
+        story.fixture.deliver(
+            BUYING.address,
+            &Mime {
+                attachments: names
+                    .iter()
+                    .map(|name| (name.as_str(), "text/plain", b"x".to_vec()))
+                    .collect(),
+                ..answer(&id, "many@pieboxpros.test", "Re: many files")
+            }
+            .build(),
+        );
+        story.fixture.deliver(
+            BUYING.address,
+            &answer(&id, "b@pieboxpros.test", "Re: B").build(),
+        );
+
+        // One check records all four, and passes them.
+        assert_eq!(
+            check_now(deps, &mailer(&story)).await.expect("checked"),
+            4,
+            "no reply stops the ones after it"
+        );
+        let received = || -> Vec<(String, String, usize)> {
+            story
+                .events(&[EventKind::SellerReplyReceived])
+                .iter()
+                .filter_map(|event| match &event.body {
+                    EventBody::SellerReplyReceived(body) => Some((
+                        body.subject.to_string(),
+                        body.from.to_string(),
+                        body.attachments.len(),
+                    )),
+                    _ => None,
+                })
+                .collect()
+        };
+        let subject = |at: usize| received()[at].0.clone();
+        assert_eq!(received().len(), 4);
+        assert_eq!(subject(0), "Re: A");
+        assert_eq!(received()[1].1, "unknown sender", "a reply with no sender");
+        assert_eq!(received()[2].2, 100, "at most a hundred files are listed");
+        assert_eq!(subject(3), "Re: B");
+        let after = crate::procurement::mailbox_ledger(deps).expect("a ledger");
+        assert_eq!(after.last_uid, before.last_uid + 4);
+        assert!(after.error.is_none());
+        let month = deps.clock.now().format("%Y-%m").to_string();
+        let inbox = story.harness.procurement_folder().join("mail/in");
+        assert_eq!(
+            files_in(&inbox.join(&month)),
+            ["1", "2", "3", "4"],
+            "one folder for each reply recorded"
+        );
+        // A second check reads none of them again.
+        assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 0);
+        assert_eq!(received().len(), 4);
+
+        // A reply Farik cannot keep (its folder cannot be made): the ledger says so in Farik's words
+        // and stops just before it; the refusal repeats those words and not the store's detail.
+        std::fs::remove_dir_all(&inbox).expect("the folder goes");
+        std::fs::write(&inbox, b"not a folder").expect("a file in its place");
+        story.fixture.deliver(
+            BUYING.address,
+            &answer(&id, "c@pieboxpros.test", "Re: C").build(),
+        );
+        let refused = check_now(deps, &mailer(&story))
+            .await
+            .expect_err("C cannot be kept");
+        assert_eq!(
+            (refused.code, refused.words.as_str()),
+            ("mailbox_files", COULD_NOT_KEEP)
+        );
+        assert_eq!(received().len(), 4, "nothing was recorded");
+        let stuck = crate::procurement::mailbox_ledger(deps).expect("a ledger");
+        assert_eq!(stuck.checked_at, Some(deps.clock.now()));
+        assert_eq!(stuck.error.as_deref(), Some(COULD_NOT_KEEP));
+        assert_eq!(
+            stuck.last_uid, after.last_uid,
+            "just before the reply that was not kept"
+        );
+        let state = crate::procurement::mailbox_state(deps).expect("state");
+        assert_eq!(
+            state["error"], COULD_NOT_KEEP,
+            "the page shows the same words"
+        );
+        // The folder comes back: the next check records C once, and clears the error.
+        std::fs::remove_file(&inbox).expect("the file goes");
+        assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 1);
+        assert_eq!(received().len(), 5);
+        assert_eq!(subject(4), "Re: C");
+        let healed = crate::procurement::mailbox_ledger(deps).expect("a ledger");
+        assert!(healed.error.is_none());
+        assert_eq!(healed.last_uid, after.last_uid + 1);
     }
 
     fn base64_decode(text: &str) -> Vec<u8> {

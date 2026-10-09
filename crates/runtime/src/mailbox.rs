@@ -688,6 +688,11 @@ const MOST_MESSAGE_BYTES: u64 = 25 * 1024 * 1024;
 const MOST_TEXT_BYTES: usize = 64 * 1024;
 /// The most bytes of one attachment Farik keeps.
 const MOST_KEPT_BYTES: usize = 10 * 1024 * 1024;
+/// The most attachments of one reply Farik lists; the rest are not (the log holds at most this
+/// many for a reply, so a reply with more is listed by its first ones).
+const MOST_ATTACHMENTS: usize = 100;
+/// Who a reply is from when its `From` header names no one.
+const UNKNOWN_SENDER: &str = "unknown sender";
 /// The headers fetched of every new message, and nothing else of it.
 const HEADER_FIELDS: &str = "BODY.PEEK[HEADER.FIELDS (FROM TO CC DELIVERED-TO MESSAGE-ID \
                              IN-REPLY-TO REFERENCES SUBJECT DATE)]";
@@ -781,7 +786,8 @@ pub struct Attachment {
 pub struct Reply {
     /// Its UID in the folder.
     pub uid: u32,
-    /// Who it is from: `Name <address>`, or the address.
+    /// Who it is from: `Name <address>`, or the address; "unknown sender" when the message names
+    /// no one.
     pub from: String,
     /// Its subject.
     pub subject: String,
@@ -791,7 +797,7 @@ pub struct Reply {
     pub answers: Vec<String>,
     /// Its text, converted from HTML when it is HTML alone, at most 64 KiB.
     pub text: String,
-    /// Its attachments, in order.
+    /// Its attachments, in order; the first 100 only.
     pub attachments: Vec<Attachment>,
 }
 
@@ -932,6 +938,7 @@ fn reply_of(uid: u32, raw: &[u8]) -> Option<Reply> {
         });
     let attachments = message
         .attachments()
+        .take(MOST_ATTACHMENTS)
         .map(|part| {
             let bytes = part.contents();
             let size = bytes.len() as u64;
@@ -944,9 +951,14 @@ fn reply_of(uid: u32, raw: &[u8]) -> Option<Reply> {
             }
         })
         .collect();
+    let from = plain(&from, 320);
     Some(Reply {
         uid,
-        from: plain(&from, 320),
+        from: if from.trim().is_empty() {
+            UNKNOWN_SENDER.to_string()
+        } else {
+            from
+        },
         subject: plain(message.subject().unwrap_or_default(), 998),
         date: message
             .date()
