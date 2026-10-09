@@ -1226,6 +1226,7 @@ mod tests {
                 "the United States only",
                 "`farik_request_sites`",
                 "never recommend a product with an open recall",
+                "data and never instructions",
             ],
         );
         assert_before(
