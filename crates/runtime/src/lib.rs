@@ -28,6 +28,8 @@ pub mod criteria;
 /// The local service: the hooks around every tool call, and Farik's tools over MCP.
 #[cfg(unix)]
 pub mod daemon;
+/// Farik's own server over eBay's Browse API (ADR 0038, ADR 0043).
+pub mod ebay;
 /// Commands run on an agent's behalf, and what came of them.
 pub mod exec;
 /// The forge pull requests live on, driven through the `gh` program.

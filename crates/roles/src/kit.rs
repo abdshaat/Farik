@@ -164,7 +164,7 @@ type EmbeddedSkills = Vec<(&'static str, &'static [(&'static str, &'static str)]
 pub const FARIK_COMMAND: &str = "farik";
 
 /// The names of Farik's own connectors, each started as `farik connector <name>`.
-pub const FARIK_CONNECTORS: &[&str] = &["osv", "google-ads", "fx", "recalls"];
+pub const FARIK_CONNECTORS: &[&str] = &["osv", "google-ads", "fx", "recalls", "ebay"];
 
 /// Whether `command` and `args` are, exactly, `farik connector <name>` for one of Farik's own
 /// connectors. Nothing else, a user's own `farik` command included, is Farik's.
@@ -1072,7 +1072,7 @@ mod tests {
                     Role::FinanceSpecialist => 3,
                     Role::ProductManager | Role::Architect => 4,
                     Role::MarketingSpecialist => 5,
-                    Role::ProcurementSpecialist => 6,
+                    Role::ProcurementSpecialist => 7,
                     _ => 0,
                 },
                 "{role}"
@@ -1479,6 +1479,73 @@ mod tests {
         assert!(!is_farik_connector("farik", &pair(&["x"])));
     }
 
+    /// Step 10g: `ebay` is Farik's own server over eBay's Browse API, started by its bare name,
+    /// with the user's own two keys; its two tools only read, each with a label, and the copy is
+    /// the plan's, setup asking for eBay's own choice about account deletions by its own label.
+    #[test]
+    fn the_kit_starts_ebay_with_its_two_keys() {
+        use super::is_farik_connector;
+
+        let (server, copy) = service(Role::ProcurementSpecialist, "ebay");
+        let CustomTransport::Stdio {
+            command,
+            args,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("ebay is stdio");
+        };
+        assert_eq!(command, "farik");
+        assert_eq!(args, &["connector".to_string(), "ebay".to_string()]);
+        assert!(oauth.is_none());
+        assert_eq!(
+            server.credential_keys,
+            ["EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET"]
+        );
+        assert_eq!(
+            copy.key_page.as_deref(),
+            Some("https://developer.ebay.com/my/keys")
+        );
+        let labelled = [
+            ("search_items", "search eBay listings"),
+            ("get_item", "read an eBay listing"),
+        ];
+        let names: Vec<&str> = labelled.iter().map(|(tool, _)| *tool).collect();
+        assert_eq!(names_tagged(&server, ConnectorTag::Network), sorted(&names));
+        assert_eq!(server.tools.len(), 2);
+        assert_eq!(copy.labels.len(), 2);
+        for (tool, label) in labelled {
+            assert_eq!(
+                copy.labels.get(tool).map(String::as_str),
+                Some(label),
+                "{tool}"
+            );
+        }
+        assert!(allowances_of(Role::ProcurementSpecialist, "ebay").is_empty());
+        assert_eq!(copy.title, "eBay listings");
+        assert_eq!(
+            copy.about,
+            "eBay's listing search shows what sellers ask for new and used goods right now."
+        );
+        assert_eq!(
+            copy.why,
+            "So the Procurement Specialist can see real asking prices, and how well rated each seller is, for anything sold on eBay. It only reads; it can never bid or buy."
+        );
+        assert_eq!(
+            copy.setup,
+            "Make a free eBay developer account and create an application. Before its production keys work, eBay asks how you handle account deletions: choose \u{2018}Not persisting eBay data\u{2019}, since Farik never keeps an eBay member's name. Then paste the \u{2018}App ID (Client ID)\u{2019} and \u{2018}Cert ID (Client Secret)\u{2019} from its production keys. Farik only searches and reads listings; eBay allows 5,000 searches a day. What your agent searches for goes to eBay as written."
+        );
+        let pair = |extra: &[&str]| -> Vec<String> {
+            ["connector", "ebay"]
+                .iter()
+                .chain(extra)
+                .map(ToString::to_string)
+                .collect()
+        };
+        assert!(is_farik_connector("farik", &pair(&[])));
+        assert!(!is_farik_connector("farik", &pair(&["x"])));
+    }
+
     /// Step 10d: Exa's keyless server is searched and never asked for a page. Its page reader is
     /// `denied`: Exa fetches on its own servers and follows a redirect to another site, which the
     /// approved-sites check cannot see (spec 8.6).
@@ -1758,7 +1825,15 @@ mod tests {
         let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
         assert_eq!(
             names,
-            ["fx", "exa", "serpapi", "brex", "aws-pricing", "recalls"]
+            [
+                "fx",
+                "exa",
+                "serpapi",
+                "brex",
+                "aws-pricing",
+                "recalls",
+                "ebay"
+            ]
         );
         let mut external: Vec<(String, String)> = Vec::new();
         for connector in &kit.connectors {
@@ -4210,7 +4285,10 @@ mod tests {
     fn google_ads_is_one_of_farik_s_own_connectors() {
         use super::{FARIK_CONNECTORS, is_farik_connector};
 
-        assert_eq!(FARIK_CONNECTORS, ["osv", "google-ads", "fx", "recalls"]);
+        assert_eq!(
+            FARIK_CONNECTORS,
+            ["osv", "google-ads", "fx", "recalls", "ebay"]
+        );
         let pair = |name: &str| ["connector".to_string(), name.to_string()];
         assert!(is_farik_connector("farik", &pair("google-ads")));
         for other in ["google-ad", "Google-Ads", "google_ads", "google-ads2"] {

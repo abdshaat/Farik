@@ -5293,7 +5293,15 @@ pub(super) mod tests {
         });
         let procurement = farik_roles::load_kit(Role::ProcurementSpecialist)
             .expect("the Procurement Specialist's kit");
-        let names = ["fx", "exa", "serpapi", "brex", "aws-pricing", "recalls"];
+        let names = [
+            "fx",
+            "exa",
+            "serpapi",
+            "brex",
+            "aws-pricing",
+            "recalls",
+            "ebay",
+        ];
         for name in names {
             let (_, server) = super::kit_entry(&procurement, &team, "proc", name, &BTreeMap::new())
                 .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));

@@ -11,6 +11,7 @@ use std::os::unix::process::CommandExt as _;
 use std::path::Path;
 use std::time::Duration;
 
+use farik_runtime::claude::Secret;
 use farik_runtime::connectors::{KEPT_ENV, own_program_for, program};
 use serde_json::Value;
 
@@ -196,6 +197,40 @@ pub fn recalls(io: &mut CliIo<'_>) -> i32 {
     }
 }
 
+/// Serves the eBay listing server (ADR 0038, ADR 0043) on standard input and output, at eBay's one
+/// address, until its client leaves. The user's two keys come from the launcher's environment,
+/// `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET`; a key that is not there is passed as an empty one,
+/// so that the server still lists its tools and every call says it is not set up. Answers 1,
+/// saying why on standard error, when it cannot run.
+pub fn ebay(io: &mut CliIo<'_>) -> i32 {
+    use farik_runtime::ebay::{EBAY_API, serve_stdio};
+
+    let (client_id, client_secret) = ebay_keys(&io.env);
+    let served = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())
+        .and_then(|runtime| {
+            runtime
+                .block_on(serve_stdio(EBAY_API, client_id, client_secret))
+                .map_err(|error| error.to_string())
+        });
+    match served {
+        Ok(()) => 0,
+        Err(why) => {
+            let _ = writeln!(io.stderr, "farik connector ebay: {why}");
+            1
+        }
+    }
+}
+
+/// The eBay server's two keys, from the environment the launcher gave: `EBAY_CLIENT_ID` and
+/// `EBAY_CLIENT_SECRET`. One that is not there is an empty key.
+fn ebay_keys(env: &BTreeMap<String, String>) -> (Secret, Secret) {
+    let key = |name: &str| Secret::new(env.get(name).cloned().unwrap_or_default());
+    (key("EBAY_CLIENT_ID"), key("EBAY_CLIENT_SECRET"))
+}
+
 /// The variables a Farik connector's shim reads: where the daemon is, and the session's ticket.
 pub const CONNECTOR_URL: &str = "FARIK_CONNECTOR_URL";
 /// See [`CONNECTOR_URL`].
@@ -231,7 +266,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{CONNECTOR_TICKET, CONNECTOR_URL, environment};
+    use super::{CONNECTOR_TICKET, CONNECTOR_URL, ebay_keys, environment};
 
     fn session_env() -> BTreeMap<String, String> {
         [
@@ -246,6 +281,31 @@ mod tests {
         .into_iter()
         .map(|(name, value)| (name.to_string(), value.to_string()))
         .collect()
+    }
+
+    /// The launcher gives the eBay server its two keys by these two names; a key it did not give
+    /// is an empty one, so that the server still lists its tools.
+    #[test]
+    fn reads_ebay_s_two_keys_from_the_launchers_environment() {
+        let given = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+                .collect()
+        };
+        let (id, secret) = ebay_keys(&given(&[
+            ("EBAY_CLIENT_SECRET", "test-cert-id"),
+            ("EBAY_CLIENT_ID", "test-app-id"),
+            ("PATH", "/usr/bin"),
+        ]));
+        assert_eq!(id.expose(), "test-app-id");
+        assert_eq!(secret.expose(), "test-cert-id");
+        let (id, secret) = ebay_keys(&given(&[("EBAY_CLIENT_ID", "test-app-id")]));
+        assert_eq!((id.expose(), secret.expose()), ("test-app-id", ""));
+        let (id, secret) = ebay_keys(&given(&[("EBAY_CLIENT_SECRET", "test-cert-id")]));
+        assert_eq!((id.expose(), secret.expose()), ("", "test-cert-id"));
+        let (id, secret) = ebay_keys(&BTreeMap::new());
+        assert_eq!((id.expose(), secret.expose()), ("", ""));
     }
 
     #[test]

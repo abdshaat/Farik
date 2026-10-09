@@ -188,3 +188,19 @@ connectors:
       vehicle_complaints: network
       vehicle_safety_ratings: network
       decode_vin: network
+  - name: ebay
+    transport: stdio
+    command: farik
+    args: [connector, ebay]
+    credential_keys: [EBAY_CLIENT_ID, EBAY_CLIENT_SECRET]
+    key_page: https://developer.ebay.com/my/keys
+    title: eBay listings
+    about: "eBay's listing search shows what sellers ask for new and used goods right now."
+    why: "So the Procurement Specialist can see real asking prices, and how well rated each seller is, for anything sold on eBay. It only reads; it can never bid or buy."
+    setup: "Make a free eBay developer account and create an application. Before its production keys work, eBay asks how you handle account deletions: choose ‘Not persisting eBay data’, since Farik never keeps an eBay member's name. Then paste the ‘App ID (Client ID)’ and ‘Cert ID (Client Secret)’ from its production keys. Farik only searches and reads listings; eBay allows 5,000 searches a day. What your agent searches for goes to eBay as written."
+    labels:
+      search_items: "search eBay listings"
+      get_item: "read an eBay listing"
+    tools:
+      search_items: network
+      get_item: network

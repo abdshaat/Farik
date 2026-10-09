@@ -48,6 +48,9 @@ use farik_core::team::{CustomTransport, McpServerSource, custom_server};
 use farik_roles::{KitConnector, SHIPPED_ROLES, is_farik_connector, load_kit, pin_drift};
 use farik_runtime::claude::Secret;
 use farik_runtime::connectors::list_tools;
+use farik_runtime::ebay::{EBAY_API, Ebay};
+use farik_runtime::recalls::{CPSC_API, NHTSA_API, Recalls, VPIC_API};
+use serde_json::{Value, json};
 
 /// The integration test that pins one of Farik's own connectors offline: `crates/cli/tests/` and
 /// the connector's name with each `-` made `_`, then `_server.rs`.
@@ -169,7 +172,7 @@ fn names_the_offline_pin_of_each_farik_connector() {
         }
     }
     found.sort();
-    assert_eq!(found, ["fx", "google-ads", "osv", "recalls"]);
+    assert_eq!(found, ["ebay", "fx", "google-ads", "osv", "recalls"]);
 }
 
 #[test]
@@ -179,4 +182,88 @@ fn names_the_variable_a_live_run_reads() {
         "FARIK_KIT_MY_SERVICE_API_KEY"
     );
     assert_eq!(variable("notion", "BEARER"), "FARIK_KIT_NOTION_BEARER");
+}
+
+/// Farik's own servers `recalls` and `ebay`, called once per tool against the real hosts, by hand
+/// (step 10g): the agencies' public data, and eBay with the founder's own developer keys in
+/// `FARIK_KIT_EBAY_EBAY_CLIENT_ID` and `FARIK_KIT_EBAY_EBAY_CLIENT_SECRET`. Their tool lists are
+/// pinned offline; this is where what each real answer holds is first seen. Every failure is
+/// listed at once.
+#[tokio::test]
+async fn live_farik_servers_answer() {
+    if std::env::var("FARIK_LIVE_TESTS").as_deref() != Ok("1") {
+        eprintln!(
+            "skipped: set FARIK_LIVE_TESTS=1 to call Farik's own servers at their real hosts"
+        );
+        return;
+    }
+    // A missing key is a panic naming it, before anything is asked of anyone.
+    let client_id = secret("ebay", "EBAY_CLIENT_ID");
+    let client_secret = secret("ebay", "EBAY_CLIENT_SECRET");
+    let mut failed: Vec<String> = Vec::new();
+    let mut check = |tool: &str,
+                     answered: Result<Value, String>,
+                     shows: &dyn Fn(&Value) -> bool| {
+        match answered {
+            Ok(answer) if shows(&answer) => {}
+            Ok(answer) => failed.push(format!("{tool} answered without what it should: {answer}")),
+            Err(why) => failed.push(format!("{tool}: {why}")),
+        }
+    };
+
+    let recalls = Recalls::new(CPSC_API, NHTSA_API, VPIC_API).expect("the recalls server");
+    let honda = json!({ "make": "Honda", "model": "Accord", "model_year": 2003 });
+    check(
+        "product_recalls",
+        recalls
+            .call(
+                "product_recalls",
+                &json!({ "words": "mirror", "field": "title" }),
+            )
+            .await,
+        &|_| true,
+    );
+    for tool in [
+        "vehicle_recalls",
+        "vehicle_complaints",
+        "vehicle_safety_ratings",
+    ] {
+        check(tool, recalls.call(tool, &honda).await, &|_| true);
+    }
+    check(
+        "decode_vin",
+        recalls
+            .call("decode_vin", &json!({ "vin": "1HGCM82633A004352" }))
+            .await,
+        &|answer| answer["Make"] == "HONDA" && answer["ErrorCode"] == "0",
+    );
+
+    let ebay = Ebay::new(EBAY_API, client_id, client_secret).expect("the eBay server");
+    let searched = ebay
+        .call(
+            "search_items",
+            &json!({ "words": "baby car mirror", "marketplace": "EBAY_US", "limit": 3 }),
+        )
+        .await;
+    let first = searched
+        .as_ref()
+        .ok()
+        .and_then(|answer| answer["items"][0]["item_id"].as_str().map(str::to_string));
+    check("search_items", searched, &|answer| {
+        answer["items"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+    });
+    if let Some(item_id) = first {
+        check(
+            "get_item",
+            ebay.call("get_item", &json!({ "item_id": item_id })).await,
+            &|_| true,
+        );
+    }
+    assert!(
+        failed.is_empty(),
+        "Farik's own servers did not answer as they should:\n{}",
+        failed.join("\n")
+    );
 }
