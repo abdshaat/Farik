@@ -1648,7 +1648,7 @@
     },
     "sellerReplyReceivedBody": {
       "title": "Seller Reply Received Body",
-      "description": "Farik read a message in the procurement mailbox that answers a message it sent or comes from an address it wrote to, addressed to the procurement address (docs/SPEC.md 6.10, 8.6). reply is its number; message is the sent message it answers; from and subject are the seller's own words (untrusted); the text and kept attachments are under mail/in/. The envelope names no agent and no session: a check is Farik's, with no model.",
+      "description": "Farik read a message in the procurement mailbox that answers a message it sent or comes from an address it wrote to, addressed to the procurement address (docs/SPEC.md 6.10, 8.6). reply is its number; message is the sent message it answers; from and subject are the seller's own words (untrusted; \"unknown sender\" when the message names none); the text and kept attachments are under mail/in/, and at most 100 attachments are listed, the first ones. The envelope names no agent and no session: a check is Farik's, with no model.",
       "type": "object",
       "additionalProperties": false,
       "required": ["reply", "message", "from", "subject", "attachments"],
