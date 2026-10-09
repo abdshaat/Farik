@@ -964,21 +964,35 @@ mod tests {
     async fn the_fifty_first_send_of_a_day_is_refused() {
         let story = Story::new("fifty").await;
         let today = crate::tools::fixtures::at();
-        // Fifty went out yesterday (UTC): today's count is none, and the message goes.
+        // Fifty went out yesterday (UTC): today's count is none, and an order's email goes.
         fifty_sent(&story.harness, today - chrono::Duration::days(1), 100);
-        let first = story.draft(SUBJECT, BODY);
-        story.send(first, SUBJECT, BODY).await.expect("a new day");
-        // Fifty today, the order's among them: the next is refused and sends nothing.
-        fifty_sent(&story.harness, today, 200);
+        let ordered = an_order_with_its_message(&story, 12);
+        story
+            .orchestrator()
+            .handle(send_order(12, ordered))
+            .await
+            .expect("a new day");
+        // Forty-nine today, the order's among them: the fiftieth goes, and the next is refused and
+        // sends nothing.
+        many_sent(&story.harness, today, 200, 48);
+        let fiftieth = story.draft(SUBJECT, BODY);
+        story
+            .send(fiftieth, SUBJECT, BODY)
+            .await
+            .expect("the fiftieth");
         let second = story.draft(SUBJECT, BODY);
         let refused = story
             .send(second, SUBJECT, BODY)
             .await
             .expect_err("the limit");
         assert!(refused.starts_with("seller_send_limit: "), "{refused}");
-        assert_eq!(story.dana_has().len(), 1);
+        assert_eq!(
+            story.dana_has().len(),
+            2,
+            "the order's email and the fiftieth"
+        );
         let state = crate::procurement::mailbox_state(&story.harness.project.deps).expect("state");
-        assert_eq!(state["sent_today"], 51);
+        assert_eq!(state["sent_today"], 50);
         assert_eq!(state["cap"], 50);
     }
 
