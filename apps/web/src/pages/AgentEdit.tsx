@@ -374,6 +374,11 @@ function Editor({
 				name="effort"
 				legend={say("agentEffort")}
 				value={effort}
+				info={t("effortInfo", {
+					low: t("effortLowNote"),
+					medium: t("effortMediumNote"),
+					high: t("effortHighNote"),
+				})}
 				onChange={(e) =>
 					// How carefully an agent works never changes what it runs on.
 					setDraft({
@@ -382,21 +387,9 @@ function Editor({
 					})
 				}
 				options={[
-					{
-						value: "low",
-						label: t("effortLow"),
-						description: t("effortLowNote"),
-					},
-					{
-						value: "medium",
-						label: t("effortMedium"),
-						description: t("effortMediumNote"),
-					},
-					{
-						value: "high",
-						label: t("effortHigh"),
-						description: t("effortHighNote"),
-					},
+					{ value: "low", label: t("effortLow") },
+					{ value: "medium", label: t("effortMedium") },
+					{ value: "high", label: t("effortHigh") },
 				]}
 			/>
 			<div className={styles.field}>
@@ -443,7 +436,14 @@ function Editor({
 			{/* The Procurement Specialist reads only the sites it is given: they come before what it may do. */}
 			{saved.role === "procurement_specialist" && <SitesSection name={name} />}
 			<section className={styles.section} aria-labelledby="may-heading">
-				<h2 id="may-heading">{say("agentMay")}</h2>
+				<div className={styles.titled}>
+					<h2 id="may-heading">{say("agentMay")}</h2>
+					{!advanced && (
+						<InfoTip id="agentMayAdvanced-info">
+							{t("agentMayAdvanced")}
+						</InfoTip>
+					)}
+				</div>
 				<Switch
 					id="agent-advanced"
 					label={t("advancedSwitch")}
@@ -457,26 +457,28 @@ function Editor({
 								<Switch
 									id={`tier-${tier}`}
 									label={t(label)}
-									description={t(note)}
+									info={t(note)}
 									checked={tiers.has(tier)}
 									onChange={(on) => setDraft(withTier(agent, base, tier, on))}
 								/>
 							</li>
 						))}
 					</ul>
-				) : (
-					<p className={styles.muted}>{t("agentMayAdvanced")}</p>
-				)}
+				) : null}
 				{advanced && (
 					<>
-						<h3 className={styles.subheading}>{t("connectorCustom")}</h3>
-						<p>{t("connectorCustomNote")}</p>
+						<div className={styles.titled}>
+							<h3 className={styles.subheading}>{t("connectorCustom")}</h3>
+							<InfoTip id="connectorCustomNote-info">
+								<span>{t("connectorCustomNote")}</span>
+								<span>{t("connectorCustomKeychain")}</span>
+							</InfoTip>
+						</div>
 						<span>
 							<Button onClick={() => setAdding({})}>
 								{t("connectorCustomAdd")}
 							</Button>
 						</span>
-						<p className={styles.muted}>{t("connectorCustomKeychain")}</p>
 					</>
 				)}
 				<span>
@@ -756,8 +758,8 @@ function Editor({
 				<Button onClick={() => setDraft(undefined)} disabled={!changed}>
 					{t("agentCancel")}
 				</Button>
+				<InfoTip id="agentNextWork-info">{say("agentNextWork")}</InfoTip>
 			</div>
-			<p className={styles.muted}>{say("agentNextWork")}</p>
 			<section className={styles.section} aria-labelledby="place-heading">
 				<h2 id="place-heading">{say("agentPlace")}</h2>
 				<div className={styles.place}>
@@ -766,11 +768,13 @@ function Editor({
 					>
 						{say(paused ? "agentResume" : "agentPause")}
 					</Button>
-					<p>{say("agentPauseNote")}</p>
+					<InfoTip id="agentPauseNote-info">{say("agentPauseNote")}</InfoTip>
 					<Button onClick={replace}>{say("agentReplace")}</Button>
-					<p>{say("agentReplaceNote")}</p>
+					<InfoTip id="agentReplaceNote-info">
+						{say("agentReplaceNote")}
+					</InfoTip>
 					<Button onClick={retire}>{say("agentRetire")}</Button>
-					<p>{say("agentRetireNote")}</p>
+					<InfoTip id="agentRetireNote-info">{say("agentRetireNote")}</InfoTip>
 				</div>
 			</section>
 		</div>
@@ -1069,10 +1073,10 @@ function SkillsSection({
 	] as const;
 	return (
 		<section className={styles.section} aria-labelledby="skills-heading">
-			<h2 id="skills-heading">
-				{t("skills")}{" "}
-				<span className={styles.muted}>{t("skillsLead", { name })}</span>
-			</h2>
+			<div className={styles.titled}>
+				<h2 id="skills-heading">{t("skills")}</h2>
+				<InfoTip id="skillsLead-info">{t("skillsLead", { name })}</InfoTip>
+			</div>
 			{groups.map(([level, heading]) => {
 				const here = rows.filter((r) => r.level === level);
 				if (!here.length) return null;

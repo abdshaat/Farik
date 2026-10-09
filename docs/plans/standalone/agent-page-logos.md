@@ -233,7 +233,7 @@ Tests:
 - `it('explains the effort levels once, by the legend')` — the effort radios' names are exactly Quick, Balanced, Careful; one tooltip in the group holds all three notes.
 - `it('puts the Procurement Specialist's notes behind info')` — `ordersLead`, `sitesLead`, `sitesFarikNote`, `mailboxNoneNote` are each inside a tooltip.
 
-- [ ] `feat(web): hide the agent page's notes behind info buttons`
+- [x] `feat(web): hide the agent page's notes behind info buttons`
 
 ### Task 6: short kit copy
 

@@ -394,9 +394,7 @@ describe("connectors on the agent page", () => {
 		expect(screen.queryByText(/More connectors arrive/)).toBeNull();
 		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
 		expect(
-			screen.getByText(
-				/It runs in a folder Farik keeps for it, so give a file of yours by its full path, starting with \/\./,
-			),
+			screen.getByText(/Give files by full path, starting with \//),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
 	});

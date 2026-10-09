@@ -155,11 +155,7 @@ describe("the procurement mailbox on the Procurement Specialist's page", () => {
 	it("with_no_mailbox_it_says_so_and_links_to_the_page", async () => {
 		await opened("ivo", NO_MAILBOX);
 		const mailbox = within(await section());
-		expect(
-			mailbox.getByText(
-				"No mailbox yet. Ivo can draft messages to sellers; you send them once a mailbox is connected.",
-			),
-		).toBeTruthy();
+		expect(mailbox.getByText(en.mailboxNone)).toBeTruthy();
 		expect(
 			mailbox
 				.getByRole("link", { name: en.mailboxConnectLink })

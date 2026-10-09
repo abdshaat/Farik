@@ -1,4 +1,4 @@
-import { Button, Dialog } from "@farik/ui";
+import { Button, Dialog, InfoTip } from "@farik/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -112,7 +112,12 @@ export function MailboxSection({ id, name }: { id: string; name: string }) {
 				</>
 			) : (
 				<>
-					<p>{t("mailboxNone", { name })}</p>
+					<p>
+						{t("mailboxNone")}{" "}
+						<InfoTip id="mailboxNoneNote-info">
+							{t("mailboxNoneNote", { name })}
+						</InfoTip>
+					</p>
 					<Link to={`/team/${id}/mailbox`}>{t("mailboxConnectLink")}</Link>
 				</>
 			)}
