@@ -113,6 +113,10 @@ fn waiting(mail: &mut SellerMail, message: u64) -> Option<&mut SellerMessageReco
 /// # Errors
 ///
 /// What the log refused.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm per kind of event, side by side"
+)]
 pub fn seller_mail(log: &EventLog) -> Result<SellerMail, StoreError> {
     let events = log.read(&EventQuery {
         kinds: vec![
@@ -355,6 +359,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "each way a message is counted or not, side by side"
+    )]
     fn folds_each_message() {
         let board = Board::new("folds-seller-mail");
         for message in 1..=4 {
