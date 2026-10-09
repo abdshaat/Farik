@@ -1,5 +1,5 @@
-# The Procurement Specialist's kit (ADR 0039; phase 7 steps 10d and 10e): the thirteen skills of its
-# work, loaded on demand (step 10e added the thirteenth, `requesting-a-data-pipeline`), and five
+# The Procurement Specialist's kit (ADR 0039; phase 7 steps 10d and 10e): the fourteen skills of its
+# work, loaded on demand (step 10e added the thirteenth, `requesting-a-data-pipeline`, and step 10f the fourteenth, `contacting-sellers`), and five
 # services, none of which can buy: the role recommends and the founder decides (ADR 0039). `fx` is
 # Farik's own server over Frankfurter, started by `farik connector fx` (ADR 0038). Exa is searched
 # and never asked for a page: its `web_fetch_exa` fetches on Exa's own servers and follows a
@@ -28,6 +28,7 @@ skills:
   - writing-purchase-orders
   - using-procurement-sources
   - requesting-a-data-pipeline
+  - contacting-sellers
 connectors:
   - name: fx
     transport: stdio

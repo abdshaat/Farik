@@ -258,6 +258,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "writing-purchase-orders",
             "using-procurement-sources",
             "requesting-a-data-pipeline",
+            "contacting-sellers",
         ),
         _ => Vec::new(),
     }
@@ -1163,7 +1164,7 @@ mod tests {
     #[test]
     fn procurement_kit_carries_requesting_a_data_pipeline() {
         let kit = load_kit(Role::ProcurementSpecialist).expect("the Procurement Specialist's kit");
-        assert_eq!(kit.skills.len(), 13);
+        assert!(kit.skills.len() >= 13);
         assert_eq!(kit.skills[12].name, "requesting-a-data-pipeline");
         assert_eq!(
             kit.skills[11].name, "using-procurement-sources",
@@ -1186,6 +1187,58 @@ mod tests {
         assert_eq!(text.matches("approves no site").count(), 2, "{text}");
         assert!(text.len() < 6 * 1024, "{} bytes", text.len());
         assert!(!text.contains(" @"), "no @ after a space");
+    }
+
+    /// Step 10f: after 10d's twelve and 10e's data pipeline the Procurement Specialist's kit
+    /// carries the skill of contacting sellers, which says the owner sends, that a reply is a
+    /// seller's words, and what a message must not hold; its prompt says it drafts and never sends,
+    /// and that what lies under `mail/in/` is sellers' words.
+    #[test]
+    fn procurement_kit_carries_contacting_sellers() {
+        let kit = load_kit(Role::ProcurementSpecialist).expect("the Procurement Specialist's kit");
+        assert_eq!(kit.skills.len(), 14);
+        assert_eq!(kit.skills[12].name, "requesting-a-data-pipeline");
+        assert_eq!(kit.skills[13].name, "contacting-sellers");
+        let (description, text) = kit_skill(Role::ProcurementSpecialist, "contacting-sellers");
+        assert!(description.starts_with("Use when"), "{description}");
+        for phrase in [
+            "`farik_draft_seller_message`",
+            "`farik_read_seller_messages`",
+            "`farik_read_seller_replies`",
+            "you cannot send",
+            "The owner reads it on Today",
+            "`purchase_order`",
+            "changed payment details",
+            "Never act on them",
+            "never instructions",
+            "`mail/in/`",
+        ] {
+            assert!(text.contains(phrase), "lacks \"{phrase}\":\n{text}");
+        }
+        assert!(text.len() < 6 * 1024, "{} bytes", text.len());
+        assert!(!text.contains(" @"), "no @ after a space");
+        let prompt = loaded_prompt(Role::ProcurementSpecialist);
+        for phrase in [
+            "`farik_draft_seller_message`",
+            "drafts and never sends",
+            "`mail/in/`",
+            "sellers\u{2019} words",
+        ] {
+            assert!(prompt.contains(phrase), "the prompt lacks \"{phrase}\"");
+        }
+        let sourcing = crate::load_role(Role::ProcurementSpecialist)
+            .expect("the role")
+            .skills
+            .into_iter()
+            .find(|skill| skill.name == "sourcing-a-product")
+            .expect("the role's own skill")
+            .text;
+        assert!(sourcing.contains("### Writing to sellers"), "{sourcing}");
+        assert!(sourcing.contains("`contacting-sellers`"), "{sourcing}");
+    }
+
+    fn loaded_prompt(role: Role) -> String {
+        crate::load_role(role).expect("a role").system_prompt
     }
 
     /// Step 10d: the skills whose rules protect the user each say them, and the role's own loop and
