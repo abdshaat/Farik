@@ -64,7 +64,7 @@ function Download({ reply, file }: { reply: number; file: ReplyFile }) {
 		<>
 			<button type="button" disabled={busy} onClick={download}>
 				{t("replyDownload")}
-				<span hidden> {file.name}</span>
+				<span hidden> {visibly(file.name)}</span>
 			</button>
 			{gone && <span role="alert">{t("replyGone")}</span>}
 		</>

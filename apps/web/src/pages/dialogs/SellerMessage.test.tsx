@@ -2,8 +2,14 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../../strings/en.ts";
 import { sentCommand } from "../../test/gate.ts";
+import { showsWhatItHides } from "../../test/hidden.ts";
 import { bodyOf, refusedBy } from "../../test/schema.ts";
-import { KNOWN, todayWithMail } from "../../test/sellerMail.ts";
+import {
+	KNOWN,
+	todayWithMail,
+	WRITTEN_MAILBOX,
+	WRITTEN_MESSAGE,
+} from "../../test/sellerMail.ts";
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -54,6 +60,23 @@ describe("a message to a seller, edited", () => {
 		expect(refusedBy("sellerMessageSendBody", bodyOf(sent))).toEqual([]);
 		await s.reply(sent, { said: "Sent to Pie Box Pros.", events: [90] });
 		await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	});
+
+	it("the_edit_dialog_shows_what_the_agent_hid", async () => {
+		await todayWithMail({
+			messages: [WRITTEN_MESSAGE],
+			mailbox: WRITTEN_MAILBOX,
+		});
+		fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+		// The title names the seller with the hidden character written out.
+		const dialog = await screen.findByRole("dialog", {
+			name: "Edit the message to Packaging\\u{202e} Express",
+		});
+		// The note on a new domain, the failed try, From and To: none hides what is around it.
+		showsWhatItHides(dialog);
+		expect(within(dialog).getByRole("alert").textContent).toContain(
+			"The server\\u{202e} was busy",
+		);
 	});
 
 	it("close_sends_nothing", async () => {

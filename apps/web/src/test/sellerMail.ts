@@ -73,6 +73,22 @@ export const FOLLOW_UP = {
 	purchase_order: 10,
 };
 
+/** A character that reorders what is around it: shown, it would hide what the text says. */
+const HIDE = "\u202e";
+
+/** A message whose every text the agent wrote holds a hidden character, and a failed try. */
+export const WRITTEN_MESSAGE = {
+	...MESSAGE,
+	seller: `Packaging${HIDE} Express`,
+	to: `sa${HIDE}les@packagingexpress.test`,
+	subject: `Quote${HIDE} for pie boxes`,
+	body: `Hello${HIDE},\n\nCould you quote 500 printed pie boxes?`,
+	why: `The server${HIDE} was busy`,
+};
+
+/** The mailbox of a user whose name holds a hidden character. */
+export const WRITTEN_MAILBOX = { ...MAILBOX, name: `Sam${HIDE} Ortiz` };
+
 /** The reply to message 1, with a kept PDF and a file that was not kept. */
 export const REPLY = {
 	reply: 1,
@@ -95,6 +111,26 @@ export const REPLY = {
 		{ index: 2, name: "tool.exe", kept: false, bytes: 99 },
 	],
 	dismissed: false,
+};
+
+/** A reply whose every text the seller wrote holds a hidden character. */
+export const WRITTEN_REPLY = {
+	...REPLY,
+	seller: `Packaging${HIDE} Express`,
+	sent_subject: `Quote${HIDE} for pie boxes`,
+	from: `Dana${HIDE} Reyes <sales@packagingexpress.test>`,
+	subject: `Re:${HIDE} Quote`,
+	text: `Hello${HIDE}, 0.38 each.`,
+	attachments: [
+		{
+			index: 1,
+			name: `quote${HIDE}.pdf`,
+			kept: true,
+			bytes: 81_200,
+			media_type: "application/pdf",
+		},
+		{ index: 2, name: `tool${HIDE}.exe`, kept: false, bytes: 99 },
+	],
 };
 
 /** A reply to an order's message, which offers a follow-up. */

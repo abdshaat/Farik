@@ -1,12 +1,14 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sentCommand } from "../../test/gate.ts";
+import { showsWhatItHides } from "../../test/hidden.ts";
 import { bodyOf, refusedBy } from "../../test/schema.ts";
 import {
 	MARKUP,
 	MESSAGE,
 	REPLY,
 	todayWithMail,
+	WRITTEN_REPLY,
 } from "../../test/sellerMail.ts";
 
 afterEach(() => {
@@ -51,6 +53,21 @@ describe("a reply from a seller, read", () => {
 				"“tool.exe” was not kept: Farik keeps only PDFs and pictures of 10 MB or less.",
 			),
 		).toBeTruthy();
+	});
+
+	it("the_reply_shows_what_the_seller_hid", async () => {
+		const { s } = await todayWithMail({
+			messages: [MESSAGE],
+			replies: [WRITTEN_REPLY],
+		});
+		fireEvent.click(await screen.findByRole("button", { name: "Read" }));
+		// The title names the seller with the hidden character written out.
+		const dialog = await screen.findByRole("dialog", {
+			name: "Reply from Packaging\\u{202e} Express",
+		});
+		// From, the subject Farik sent, the reply's subject and words, and both file names.
+		showsWhatItHides(dialog);
+		expect(s.calls("command")).toHaveLength(0);
 	});
 
 	it("ask_for_a_comparison_files_then_dismisses", async () => {

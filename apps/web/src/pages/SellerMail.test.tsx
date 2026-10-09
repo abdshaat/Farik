@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { sentCommand } from "../test/gate.ts";
+import { showsWhatItHides } from "../test/hidden.ts";
 import { bodyOf, refusedBy } from "../test/schema.ts";
 import {
 	FOLLOW_UP,
@@ -16,6 +17,9 @@ import {
 	ORDERS_MESSAGE,
 	REPLY,
 	todayWithMail,
+	WRITTEN_MAILBOX,
+	WRITTEN_MESSAGE,
+	WRITTEN_REPLY,
 } from "../test/sellerMail.ts";
 
 const SEND = {
@@ -76,6 +80,25 @@ describe("Today, messages to sellers", () => {
 		expect(first.getByText(/Corner Bakery/)).toBeTruthy();
 		expect(first.getByText("buying@cornerbakery.test")).toBeTruthy();
 		await expectNoAxeViolations(container);
+	});
+
+	it("every_text_of_a_message_shows_what_it_hides", async () => {
+		await todayWithMail({
+			messages: [WRITTEN_MESSAGE],
+			mailbox: WRITTEN_MAILBOX,
+		});
+		const section = await screen.findByRole("region", {
+			name: "Messages to sellers (1)",
+		});
+		const row = within(section).getAllByRole("listitem")[0] as HTMLElement;
+		// The seller, the address, the subject, the words, the failed try, the note on a new domain
+		// and the owner's own name: each written out, none hiding what is around it.
+		showsWhatItHides(row);
+		expect(
+			within(row).getByText("Ivo asks Packaging\\u{202e} Express for a quote"),
+		).toBeTruthy();
+		expect(within(row).getAllByText(/Sam\\u\{202e\} Ortiz/).length).toBe(2);
+		expect(within(row).getByText(/sa\\u\{202e\}les@/)).toBeTruthy();
 	});
 
 	it("send_and_discard_act_at_once", async () => {
@@ -207,6 +230,24 @@ describe("Today, replies from sellers", () => {
 			second.getByRole("button", { name: en.ordersFollowUp }),
 		).toBeTruthy();
 		expect(second.queryByRole("button", { name: en.replyCompare })).toBeNull();
+	});
+
+	it("every_text_of_a_reply_shows_what_it_hides", async () => {
+		await todayWithMail({
+			messages: [MESSAGE],
+			replies: [WRITTEN_REPLY],
+		});
+		const section = await screen.findByRole("region", {
+			name: "Replies from sellers (1)",
+		});
+		const row = within(section).getAllByRole("listitem")[0] as HTMLElement;
+		// The seller, the subject Farik sent and the address it came from.
+		showsWhatItHides(row);
+		expect(
+			within(row).getByText(
+				/Packaging\\u\{202e\} Express replied to “Quote\\u\{202e\} for pie boxes”/,
+			),
+		).toBeTruthy();
 	});
 
 	it("dismiss_acts_at_once", async () => {
