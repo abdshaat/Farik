@@ -127,7 +127,7 @@ export function SellerReply({
 				<fieldset
 					aria-labelledby="reply-text"
 					data-trust="untrusted"
-					className={styles.orderForm}
+					className={styles.untrusted}
 				>
 					<strong>{visibly(subject)}</strong>
 					<pre>{visibly(text)}</pre>

@@ -10,6 +10,7 @@ import {
 	todayWithMail,
 	WRITTEN_REPLY,
 } from "../../test/sellerMail.ts";
+import styles from "../pages.module.css";
 
 afterEach(() => {
 	vi.useRealTimers();
@@ -30,9 +31,12 @@ describe("a reply from a seller, read", () => {
 	it("the_reply_is_text_and_links_are_not_links", async () => {
 		const { dialog } = await read();
 		const frame = within(dialog).getByText(/Pay at https:\/\/evil.test\/pay/);
-		expect(frame.closest("fieldset")?.getAttribute("data-trust")).toBe(
-			"untrusted",
-		);
+		const fieldset = frame.closest("fieldset") as HTMLElement;
+		expect(fieldset.getAttribute("data-trust")).toBe("untrusted");
+		// The frame wraps long lines, scrolls and is drawn as a frame, as every untrusted text is,
+		// and holds the reply's subject with its words.
+		expect(fieldset.className).toBe(styles.untrusted);
+		expect(within(fieldset).getByText(`Re: Quote ${MARKUP}`)).toBeTruthy();
 		// The address and the link are words, and the markup is shown as typed.
 		expect(frame.textContent).toContain("pay@evil.test");
 		expect(frame.textContent).toContain(MARKUP);
