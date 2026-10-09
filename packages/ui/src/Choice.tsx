@@ -37,34 +37,36 @@ export function Choice<V extends string>({
 		>
 			<legend className={styles.legend}>{legend}</legend>
 			{info ? <InfoTip id={`${name}-info`}>{info}</InfoTip> : null}
-			{options.map((o) => (
-				<Fragment key={o.value}>
-					<label className={styles.card}>
-						<input
-							type="radio"
-							className={styles.radio}
-							name={name}
-							value={o.value}
-							checked={o.value === value}
-							disabled={o.disabled}
-							onChange={() => onChange(o.value)}
-						/>
-						<span className={styles.text}>
-							<span className={styles.label}>{o.label}</span>
-							{o.description ? (
-								<span className={styles.description}>{o.description}</span>
-							) : null}
-							{o.extra}
-						</span>
-					</label>
-					{o.after}
-				</Fragment>
-			))}
-			{error ? (
-				<p id={`${name}-error`} className={styles.error}>
-					{error}
-				</p>
-			) : null}
+			<div className={styles.options}>
+				{options.map((o) => (
+					<Fragment key={o.value}>
+						<label className={styles.card}>
+							<input
+								type="radio"
+								className={styles.radio}
+								name={name}
+								value={o.value}
+								checked={o.value === value}
+								disabled={o.disabled}
+								onChange={() => onChange(o.value)}
+							/>
+							<span className={styles.text}>
+								<span className={styles.label}>{o.label}</span>
+								{o.description ? (
+									<span className={styles.description}>{o.description}</span>
+								) : null}
+								{o.extra}
+							</span>
+						</label>
+						{o.after}
+					</Fragment>
+				))}
+				{error ? (
+					<p id={`${name}-error`} className={styles.error}>
+						{error}
+					</p>
+				) : null}
+			</div>
 		</fieldset>
 	);
 }
