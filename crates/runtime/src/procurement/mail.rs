@@ -792,6 +792,10 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "each refusal, one after the other, in one project"
+    )]
     async fn refusals_by_state() {
         // No fixture mail is sent here: the mailbox is a settings file and a password.
         let harness = Harness::with_procurement("send-refusals");

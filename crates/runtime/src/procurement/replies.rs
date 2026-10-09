@@ -1059,14 +1059,14 @@ mod tests {
         let ledger = crate::procurement::mailbox_ledger(deps).expect("a ledger");
         assert!(ledger.restarted_at.is_none());
         // The provider renumbered the folder since the ledger was kept.
-        let stale = crate::mailbox::Ledger {
+        let renumbered = crate::mailbox::Ledger {
             uidvalidity: ledger.uidvalidity + 1,
             last_uid: 0,
             ..ledger.clone()
         };
         std::fs::write(
             story.harness.procurement_folder().join("mail/ledger.json"),
-            serde_json::to_string(&stale).expect("a ledger"),
+            serde_json::to_string(&renumbered).expect("a ledger"),
         )
         .expect("kept");
         assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 0);
@@ -1153,6 +1153,10 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one mailbox, from four replies read to the one that cannot be kept and its healing"
+    )]
     async fn a_reply_that_cannot_be_kept_neither_repeats_nor_blocks() {
         let story = Story::new("unkeepable").await;
         let (_, id) = sent(&story).await;
