@@ -8,7 +8,10 @@ import { isScript, ScriptWarning } from "./SiteRequest.tsx";
 import { useCommand } from "./StartSprint.tsx";
 import { visibly } from "./ToolApproval.tsx";
 
-/** The address, its domain set apart in bold and the code face, in its ASCII form. */
+/**
+ * The address, its domain set apart in bold and the code face, in its ASCII form: the agent's own
+ * spelling of what comes before the domain is kept, and the domain is the one Farik sends to.
+ */
 export function ToAddress({
 	to,
 	domain,
@@ -16,13 +19,13 @@ export function ToAddress({
 	to: string;
 	domain: string | null;
 }) {
-	const host = domain ?? "";
-	const at = host !== "" && to.endsWith(host) ? to.length - host.length : -1;
+	const at = to.lastIndexOf("@");
+	const host = domain ?? to.slice(at + 1);
 	return (
 		<>
 			<code>
-				{at >= 0 ? visibly(to.slice(0, at)) : visibly(to)}
-				{at >= 0 && <strong>{visibly(host)}</strong>}
+				{visibly(to.slice(0, at + 1))}
+				<strong>{visibly(host)}</strong>
 			</code>
 			{isScript(host) && <ScriptWarning className={styles.orderHint} />}
 		</>

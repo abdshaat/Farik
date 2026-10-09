@@ -101,6 +101,58 @@ describe("Today, messages to sellers", () => {
 		expect(within(row).getByText(/sa\\u\{202e\}les@/)).toBeTruthy();
 	});
 
+	it("to_shows_the_ascii_domain", async () => {
+		// The agent's own spelling of an address is kept (a Cyrillic i, capitals); the domain Farik
+		// sends to is the ASCII one it works out, and that is the one set in bold.
+		await todayWithMail({
+			messages: [
+				{
+					...KNOWN,
+					message: 6,
+					seller: "Uline",
+					to: "sales@ul\u0456ne.com",
+					domain: "xn--ulne-m9d.com",
+				},
+				{
+					...KNOWN,
+					message: 7,
+					seller: "Pie Box Pros",
+					to: "Dana@PieBoxPros.test",
+					domain: "pieboxpros.test",
+				},
+				{
+					...KNOWN,
+					message: 8,
+					to: "orders@pieboxpros.test",
+					domain: null,
+				},
+			],
+		});
+		const section = await screen.findByRole("region", {
+			name: "Messages to sellers (3)",
+		});
+		const [idn, capitals, unnamed] = within(section).getAllByRole("listitem");
+		const toLine = (row: HTMLElement | undefined) =>
+			within(row as HTMLElement).getByText("To").parentElement as HTMLElement;
+		expect(toLine(idn).querySelector("code strong")?.textContent).toBe(
+			"xn--ulne-m9d.com",
+		);
+		expect(toLine(capitals).querySelector("code strong")?.textContent).toBe(
+			"pieboxpros.test",
+		);
+		// With no domain worked out, the address's own is set in bold.
+		expect(toLine(unnamed).querySelector("code strong")?.textContent).toBe(
+			"pieboxpros.test",
+		);
+		// Only a name in another script carries the warning that it can pass for another.
+		expect(
+			within(idn as HTMLElement).getByText(en.siteRequestScriptWhat),
+		).toBeTruthy();
+		expect(
+			within(capitals as HTMLElement).queryByText(en.siteRequestScriptWhat),
+		).toBeNull();
+	});
+
 	it("send_and_discard_act_at_once", async () => {
 		const { s } = await todayWithMail({ messages: [KNOWN] });
 		const row = within(
