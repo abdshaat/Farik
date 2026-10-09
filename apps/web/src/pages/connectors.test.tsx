@@ -2697,4 +2697,29 @@ describe("logos and info buttons on the Connectors section", () => {
 		).toBeTruthy();
 		onlyInTips(playwright, t("connectorPlaywrightNote", { name: "Theo" }));
 	});
+	it("puts every connector note behind an info button", async () => {
+		await openedWithKit(
+			[KIT_POSTHOG],
+			[AIRTABLE, LINEAR, kitEntry("posthog"), kitEntry("plausible")],
+			[
+				{ agent: "theo", server: "airtable", state: "connect_again" },
+				{ agent: "theo", server: "linear", state: "store_unavailable" },
+				KIT_STATES[1] as object,
+				KIT_STATES[2] as object,
+			],
+		);
+		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		const page = document.body;
+		onlyInTips(page, en.connectorsNote);
+		onlyInTips(page, t("kitGoneNote", { name: "Theo" }));
+		onlyInTips(page, t("connectorAgainNote", { name: "Theo" }));
+		onlyInTips(
+			page,
+			t("connectorUnreadableNote", { name: "Theo", server: "linear" }),
+		);
+		onlyInTips(page, en.kitLead);
+		onlyInTips(page, t("connectorsLead", { name: "Theo" }));
+		onlyInTips(page, en.connectorsYoursLead);
+		onlyInTips(page, en.connectorCustomKeychain);
+	});
 });
