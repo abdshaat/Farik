@@ -230,9 +230,12 @@ describe("Today, messages to sellers", () => {
 			(row.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled,
 		).toBe(true);
 		expect(screen.getByText(en.sellerNoMailbox, { exact: false })).toBeTruthy();
+		// The link goes to the mailbox page of the agent whose messages wait.
 		expect(
-			screen.getByRole("link", { name: en.mailboxConnectLink }),
-		).toBeTruthy();
+			screen
+				.getByRole("link", { name: en.mailboxConnectLink })
+				.getAttribute("href"),
+		).toBe("/team/ivo/mailbox");
 		expect(
 			(row.getByRole("button", { name: "Discard" }) as HTMLButtonElement)
 				.disabled,

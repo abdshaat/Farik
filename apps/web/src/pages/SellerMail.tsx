@@ -60,7 +60,9 @@ export function SellerMailSections({ agents, pm }: Names) {
 					{!mailbox?.connected && (
 						<p>
 							{t("sellerNoMailbox")}{" "}
-							<Link to="/team">{t("mailboxConnectLink")}</Link>
+							<Link to={`/team/${waiting[0]?.agentId}/mailbox`}>
+								{t("mailboxConnectLink")}
+							</Link>
 						</p>
 					)}
 					{mailbox?.connected && mailbox.sentToday >= mailbox.cap && (
