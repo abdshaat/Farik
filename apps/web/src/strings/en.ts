@@ -2419,7 +2419,7 @@ export const en = {
 	refuseMailboxFiles:
 		"Farik could not keep the mailbox in this project’s folder. Check that the folder can be written to.",
 	refuseSecretStore:
-		"Farik could not keep the app password on this computer. If it asks whether Farik may use the keychain, choose “Always”, then connect again.",
+		"Farik could not keep the key on this computer. If it asks whether Farik may use the keychain, choose “Always”, then try again.",
 	refuseSellerMessageClosed:
 		"This message went with an order that was decided without it, so it is not sent.",
 };
