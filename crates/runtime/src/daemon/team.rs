@@ -5279,9 +5279,9 @@ pub(super) mod tests {
         }
     }
 
-    /// A guard: each of the Procurement Specialist's five services connects by name, Brex signed in
-    /// to with its four read scopes and the others not signed in, `SerpApi` with its one allowance,
-    /// and none is the Finance Specialist's (step 10d).
+    /// A guard: each of the Procurement Specialist's services connects by name, Brex signed in to
+    /// with its four read scopes and the others not signed in, `SerpApi` with its one allowance,
+    /// and none is the Finance Specialist's (steps 10d and 10g).
     #[test]
     fn connects_each_procurement_service_by_name() {
         use farik_core::contract::Role;
@@ -5293,7 +5293,7 @@ pub(super) mod tests {
         });
         let procurement = farik_roles::load_kit(Role::ProcurementSpecialist)
             .expect("the Procurement Specialist's kit");
-        let names = ["fx", "exa", "serpapi", "brex", "aws-pricing"];
+        let names = ["fx", "exa", "serpapi", "brex", "aws-pricing", "recalls"];
         for name in names {
             let (_, server) = super::kit_entry(&procurement, &team, "proc", name, &BTreeMap::new())
                 .unwrap_or_else(|refused| panic!("{name}: {refused:?}"));

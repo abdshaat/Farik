@@ -745,6 +745,9 @@ enum ConnectorCommands {
     GoogleAds,
     /// Look exchange rates up at Frankfurter (used by the Procurement Specialist's kit).
     Fx,
+    /// Look product and vehicle recalls up at the CPSC and NHTSA (used by the Procurement
+    /// Specialist's kit).
+    Recalls,
 }
 
 #[derive(Subcommand)]
@@ -1167,6 +1170,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             ConnectorCommands::Osv => connector_run::osv(io),
             ConnectorCommands::GoogleAds => connector_run::google_ads(io),
             ConnectorCommands::Fx => connector_run::fx(io),
+            ConnectorCommands::Recalls => connector_run::recalls(io),
         };
     }
     if parsed.json && matches!(parsed.command, Commands::Serve { .. }) {

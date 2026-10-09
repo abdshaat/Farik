@@ -168,3 +168,23 @@ connectors:
       analyze_cdk_project: denied
       analyze_terraform_project: denied
       generate_cost_report: denied
+  - name: recalls
+    transport: stdio
+    command: farik
+    args: [connector, recalls]
+    title: Safety recalls
+    about: "US product and vehicle safety agencies publish every recall, complaint and crash rating."
+    why: "So the Procurement Specialist never recommends a product or a car with an open recall, and can check a used car's VIN. It only reads."
+    setup: "Nothing to set up: Farik reads the CPSC's and NHTSA's public lists itself, with no account. It covers products and vehicles sold in the United States. What your agent looks up goes to them as written."
+    labels:
+      product_recalls: "look up product recalls"
+      vehicle_recalls: "look up a car's recalls"
+      vehicle_complaints: "read a car's complaints"
+      vehicle_safety_ratings: "read a car's crash ratings"
+      decode_vin: "decode a VIN"
+    tools:
+      product_recalls: network
+      vehicle_recalls: network
+      vehicle_complaints: network
+      vehicle_safety_ratings: network
+      decode_vin: network

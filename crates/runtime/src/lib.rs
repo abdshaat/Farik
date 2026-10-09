@@ -73,6 +73,8 @@ pub mod preview;
 pub mod procurement;
 /// A session's system prompt, assembled in one fixed order.
 pub mod prompt;
+/// Farik's own server over the United States' product and vehicle safety agencies (ADR 0038).
+pub mod recalls;
 /// Sessions replayed from recorded transcripts.
 pub mod recorded;
 /// The apps Farik has registered with a service, and which servers' addresses each serves.

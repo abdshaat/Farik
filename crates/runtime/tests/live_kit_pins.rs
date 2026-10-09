@@ -169,7 +169,7 @@ fn names_the_offline_pin_of_each_farik_connector() {
         }
     }
     found.sort();
-    assert_eq!(found, ["fx", "google-ads", "osv"]);
+    assert_eq!(found, ["fx", "google-ads", "osv", "recalls"]);
 }
 
 #[test]

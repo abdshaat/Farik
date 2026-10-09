@@ -172,6 +172,30 @@ pub fn fx(io: &mut CliIo<'_>) -> i32 {
     }
 }
 
+/// Serves the safety-recalls server (ADR 0038) on standard input and output, at the CPSC's, NHTSA's
+/// and vPIC's one address each, until its client leaves. Answers 1, saying why on standard error,
+/// when it cannot.
+pub fn recalls(io: &mut CliIo<'_>) -> i32 {
+    use farik_runtime::recalls::{CPSC_API, NHTSA_API, VPIC_API, serve_stdio};
+
+    let served = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())
+        .and_then(|runtime| {
+            runtime
+                .block_on(serve_stdio(CPSC_API, NHTSA_API, VPIC_API))
+                .map_err(|error| error.to_string())
+        });
+    match served {
+        Ok(()) => 0,
+        Err(why) => {
+            let _ = writeln!(io.stderr, "farik connector recalls: {why}");
+            1
+        }
+    }
+}
+
 /// The variables a Farik connector's shim reads: where the daemon is, and the session's ticket.
 pub const CONNECTOR_URL: &str = "FARIK_CONNECTOR_URL";
 /// See [`CONNECTOR_URL`].

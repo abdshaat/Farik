@@ -164,7 +164,7 @@ type EmbeddedSkills = Vec<(&'static str, &'static [(&'static str, &'static str)]
 pub const FARIK_COMMAND: &str = "farik";
 
 /// The names of Farik's own connectors, each started as `farik connector <name>`.
-pub const FARIK_CONNECTORS: &[&str] = &["osv", "google-ads", "fx"];
+pub const FARIK_CONNECTORS: &[&str] = &["osv", "google-ads", "fx", "recalls"];
 
 /// Whether `command` and `args` are, exactly, `farik connector <name>` for one of Farik's own
 /// connectors. Nothing else, a user's own `farik` command included, is Farik's.
@@ -1071,7 +1071,8 @@ mod tests {
                     Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
                     Role::FinanceSpecialist => 3,
                     Role::ProductManager | Role::Architect => 4,
-                    Role::MarketingSpecialist | Role::ProcurementSpecialist => 5,
+                    Role::MarketingSpecialist => 5,
+                    Role::ProcurementSpecialist => 6,
                     _ => 0,
                 },
                 "{role}"
@@ -1414,6 +1415,70 @@ mod tests {
         assert!(!is_farik_connector("farik", &pair(&["x"])));
     }
 
+    /// Step 10g: `recalls` is Farik's own server over the United States' product and vehicle
+    /// safety agencies, started by its bare name, with no key; its five tools only read, each with
+    /// a label, and the copy is the plan's.
+    #[test]
+    fn the_kit_starts_recalls_by_its_bare_name_with_its_copy_and_labels() {
+        use super::is_farik_connector;
+
+        let (server, copy) = service(Role::ProcurementSpecialist, "recalls");
+        let CustomTransport::Stdio {
+            command,
+            args,
+            oauth,
+        } = &server.transport
+        else {
+            panic!("recalls is stdio");
+        };
+        assert_eq!(command, "farik");
+        assert_eq!(args, &["connector".to_string(), "recalls".to_string()]);
+        assert!(oauth.is_none());
+        assert!(server.credential_keys.is_empty());
+        let labelled = [
+            ("product_recalls", "look up product recalls"),
+            ("vehicle_recalls", "look up a car's recalls"),
+            ("vehicle_complaints", "read a car's complaints"),
+            ("vehicle_safety_ratings", "read a car's crash ratings"),
+            ("decode_vin", "decode a VIN"),
+        ];
+        let names: Vec<&str> = labelled.iter().map(|(tool, _)| *tool).collect();
+        assert_eq!(names_tagged(&server, ConnectorTag::Network), sorted(&names));
+        assert_eq!(server.tools.len(), 5);
+        assert_eq!(copy.labels.len(), 5);
+        for (tool, label) in labelled {
+            assert_eq!(
+                copy.labels.get(tool).map(String::as_str),
+                Some(label),
+                "{tool}"
+            );
+        }
+        assert!(copy.key_page.is_none());
+        assert!(allowances_of(Role::ProcurementSpecialist, "recalls").is_empty());
+        assert_eq!(copy.title, "Safety recalls");
+        assert_eq!(
+            copy.about,
+            "US product and vehicle safety agencies publish every recall, complaint and crash rating."
+        );
+        assert_eq!(
+            copy.why,
+            "So the Procurement Specialist never recommends a product or a car with an open recall, and can check a used car's VIN. It only reads."
+        );
+        assert_eq!(
+            copy.setup,
+            "Nothing to set up: Farik reads the CPSC's and NHTSA's public lists itself, with no account. It covers products and vehicles sold in the United States. What your agent looks up goes to them as written."
+        );
+        let pair = |extra: &[&str]| -> Vec<String> {
+            ["connector", "recalls"]
+                .iter()
+                .chain(extra)
+                .map(ToString::to_string)
+                .collect()
+        };
+        assert!(is_farik_connector("farik", &pair(&[])));
+        assert!(!is_farik_connector("farik", &pair(&["x"])));
+    }
+
     /// Step 10d: Exa's keyless server is searched and never asked for a page. Its page reader is
     /// `denied`: Exa fetches on its own servers and follows a redirect to another site, which the
     /// approved-sites check cannot see (spec 8.6).
@@ -1683,7 +1748,7 @@ mod tests {
         );
     }
 
-    /// A guard over the Procurement Specialist's five services, in the order the page lists them:
+    /// A guard over the Procurement Specialist's services, in the order the page lists them:
     /// nothing in the kit can buy, check out, sign or send, so the only tool that is not read-only
     /// is `SerpApi`'s `search`, which spends the user's searches, and every tool that runs is
     /// labelled.
@@ -1691,7 +1756,10 @@ mod tests {
     fn the_procurement_kit_never_buys() {
         let kit = load_kit(Role::ProcurementSpecialist).expect("the Procurement Specialist's kit");
         let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
-        assert_eq!(names, ["fx", "exa", "serpapi", "brex", "aws-pricing"]);
+        assert_eq!(
+            names,
+            ["fx", "exa", "serpapi", "brex", "aws-pricing", "recalls"]
+        );
         let mut external: Vec<(String, String)> = Vec::new();
         for connector in &kit.connectors {
             let KitConnector::Server {
@@ -4142,7 +4210,7 @@ mod tests {
     fn google_ads_is_one_of_farik_s_own_connectors() {
         use super::{FARIK_CONNECTORS, is_farik_connector};
 
-        assert_eq!(FARIK_CONNECTORS, ["osv", "google-ads", "fx"]);
+        assert_eq!(FARIK_CONNECTORS, ["osv", "google-ads", "fx", "recalls"]);
         let pair = |name: &str| ["connector".to_string(), name.to_string()];
         assert!(is_farik_connector("farik", &pair("google-ads")));
         for other in ["google-ad", "Google-Ads", "google_ads", "google-ads2"] {
