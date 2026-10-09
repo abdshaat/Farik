@@ -1,4 +1,4 @@
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import styles from "./InfoTip.module.css";
 import { uiStrings } from "./strings.ts";
 
@@ -38,15 +38,19 @@ export function InfoTip({
 	function unfit() {
 		if (tip.current) tip.current.style.translate = "";
 	}
+	// A closed tip is display: none and cannot be measured; fit once it shows.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: fit and unfit only read refs; the effect must run on open alone
+	useLayoutEffect(() => {
+		if (open) fit();
+		else unfit();
+	}, [open]);
 	function show() {
 		setOpen(true);
 		setShut(false);
-		fit();
 	}
 	function close() {
 		setOpen(false);
 		setShut(true);
-		unfit();
 	}
 
 	return (
@@ -73,7 +77,6 @@ export function InfoTip({
 				onBlur={() => {
 					pointer.current = false;
 					setOpen(false);
-					unfit();
 				}}
 				type="button"
 				className={styles.button}

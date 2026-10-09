@@ -33,12 +33,12 @@
 	border-radius: var(--farik-radius-control);
 	background: var(--farik-color-surface);
 	color: var(--farik-color-ink);
-	visibility: hidden;
+	display: none;
 }
 
 .wrap:hover .tip:not([data-shut]),
 .tip[data-open] {
-	visibility: visible;
+	display: block;
 }
 
 .tip > * {
