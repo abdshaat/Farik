@@ -58,6 +58,9 @@ pub struct SellerMessageRecord {
     pub state: MessageState,
     /// Farik's sentence about the last try that failed, while the message waits.
     pub why: Option<String>,
+    /// When that try failed: the `recorded_at` of the latest `seller_message.failed`, while the
+    /// message waits.
+    pub failed_at: Option<DateTime<Utc>>,
     /// The send, once it is sent.
     pub sent: Option<SellerMessageSentBody>,
     /// When it was sent.
@@ -161,6 +164,7 @@ pub fn seller_mail(log: &EventLog) -> Result<SellerMail, StoreError> {
                         drafted_at: at,
                         state: MessageState::Waiting,
                         why: None,
+                        failed_at: None,
                         sent: None,
                         sent_at: None,
                     });
@@ -169,12 +173,14 @@ pub fn seller_mail(log: &EventLog) -> Result<SellerMail, StoreError> {
             EventBody::SellerMessageFailed(body) if is_unattended(event) => {
                 if let Some(record) = waiting(&mut mail, body.message.get()) {
                     record.why = Some(body.why.to_string());
+                    record.failed_at = Some(at);
                 }
             }
             EventBody::SellerMessageSent(body) if is_unattended(event) => {
                 if let Some(record) = waiting(&mut mail, body.message.get()) {
                     record.state = MessageState::Sent;
                     record.why = None;
+                    record.failed_at = None;
                     record.sent = Some(body.clone());
                     record.sent_at = Some(at);
                 }
@@ -486,6 +492,55 @@ mod tests {
             mail.messages[0].drafted.subject.as_str(),
             "Quote for 500 printed pie boxes"
         );
+    }
+
+    #[test]
+    fn keeps_when_the_latest_try_failed() {
+        let board = Board::new("folds-seller-failed-at");
+        draft(&board, 1, 1, "quote_request", None);
+        let failed = |minute: u32, why: &str| {
+            unattended(
+                &board,
+                minute,
+                "seller_message.failed",
+                json!({ "message": 1, "why": why }),
+            );
+        };
+        assert!(
+            seller_mail(&board.log).expect("folds").messages[0]
+                .failed_at
+                .is_none(),
+            "no try has failed"
+        );
+        // The latest try that failed is the one the message tells.
+        failed(10, "the mail server could not be reached; try again");
+        failed(
+            12,
+            "the mailbox did not accept its sign-in; connect it again",
+        );
+        let mail = seller_mail(&board.log).expect("folds");
+        assert_eq!(mail.messages[0].failed_at, Some(at(10, 12)));
+        assert_eq!(
+            mail.messages[0].why.as_deref(),
+            Some("the mailbox did not accept its sign-in; connect it again")
+        );
+        // A failure a session records is not the mailbox's word, and sets no time.
+        board.session(
+            at(10, 13),
+            None,
+            "ivo",
+            "session-1",
+            "seller_message.failed",
+            json!({ "message": 1, "why": "an agent says so" }),
+        );
+        assert_eq!(
+            seller_mail(&board.log).expect("folds").messages[0].failed_at,
+            Some(at(10, 12))
+        );
+        // Sent, it has failed no more.
+        unattended(&board, 14, "seller_message.sent", sent_body(1));
+        let mail = seller_mail(&board.log).expect("folds");
+        assert!(mail.messages[0].failed_at.is_none() && mail.messages[0].why.is_none());
     }
 
     #[test]

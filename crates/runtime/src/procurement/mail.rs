@@ -555,6 +555,9 @@ pub fn seller_messages_list(deps: &ToolDeps) -> Result<Value, StoreError> {
             if let Some(why) = &record.why {
                 row["why"] = json!(why);
             }
+            if let Some(at) = record.failed_at {
+                row["failed_at"] = json!(time(at));
+            }
             row
         })
         .collect();

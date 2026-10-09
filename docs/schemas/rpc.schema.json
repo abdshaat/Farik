@@ -3708,7 +3708,7 @@
       }
     },
     "sellerMessagesListResult": {
-      "description": "Every message the Procurement Specialist drafted to a seller, oldest first (docs/SPEC.md 6.10; ADR 0039): message, its number; state, waiting, sent, discarded or closed (an order's message whose order was decided without it); seller, to, subject and body (the agent's words, untrusted; for a sent message the subject and the text the owner sent, with what Farik added); domain, the address's domain in its ASCII form; new_domain, whether no message sent before went to that domain; purpose; purchase_order, the order an order's message or a follow-up is about; task_id and agent_id; drafted_at; sent_at and edited, once sent; why, Farik's sentence about the last try that failed while the message waits. sent_today counts the messages sent on the UTC day, orders' included, and cap is the most Farik sends in one.",
+      "description": "Every message the Procurement Specialist drafted to a seller, oldest first (docs/SPEC.md 6.10; ADR 0039): message, its number; state, waiting, sent, discarded or closed (an order's message whose order was decided without it); seller, to, subject and body (the agent's words, untrusted; for a sent message the subject and the text the owner sent, with what Farik added); domain, the address's domain in its ASCII form; new_domain, whether no message sent before went to that domain; purpose; purchase_order, the order an order's message or a follow-up is about; task_id and agent_id; drafted_at; sent_at and edited, once sent; why, Farik's sentence about the last try that failed while the message waits, and failed_at, when that try failed. sent_today counts the messages sent on the UTC day, orders' included, and cap is the most Farik sends in one.",
       "type": "object",
       "additionalProperties": false,
       "required": ["messages", "sent_today", "cap"],
@@ -3735,7 +3735,8 @@
               "drafted_at": { "type": "string", "format": "date-time" },
               "sent_at": { "type": "string", "format": "date-time" },
               "edited": { "type": "boolean" },
-              "why": { "type": "string" }
+              "why": { "type": "string" },
+              "failed_at": { "type": "string", "format": "date-time" }
             }
           }
         },

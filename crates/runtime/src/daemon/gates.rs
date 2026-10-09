@@ -4681,6 +4681,37 @@ pub(super) mod tests {
         assert_eq!(listed["messages"][0]["domain"], "pieboxpros.test");
         assert_eq!(listed["messages"][0]["new_domain"], true);
         assert_eq!(listed["messages"][0]["body"], "Please quote 500 boxes.");
+        assert!(
+            listed["messages"][0].get("failed_at").is_none(),
+            "no try has failed"
+        );
+
+        // A try that failed says when, the latest one, beside why.
+        for (minutes, why) in [
+            (5, "the mail server could not be reached; try again"),
+            (
+                7,
+                "the mailbox did not accept its sign-in; connect it again",
+            ),
+        ] {
+            project.record_at(
+                crate::tools::fixtures::at() + chrono::Duration::minutes(minutes),
+                "",
+                "seller_message.failed",
+                &json!({ "message": quote, "why": why }),
+            );
+        }
+        let failed = query(
+            &harness.daemon,
+            "seller_messages.list",
+            &json!({}),
+            "sellerMessagesListResult",
+        );
+        assert_eq!(
+            failed["messages"][0]["why"],
+            "the mailbox did not accept its sign-in; connect it again"
+        );
+        assert_eq!(failed["messages"][0]["failed_at"], "2026-09-22T12:07:00Z");
 
         order_drafted(&harness, "Acme", false);
         let email = draft(json!({
