@@ -194,7 +194,7 @@ Tests:
 - `Switch` `it('shows no info button without info')`.
 - `Choice` `it('shows one info button by the legend, outside every option')` — the button is not inside any `label` element, and each radio's name is its option label alone.
 
-- [ ] `feat(ui): let a switch or a choice carry an info button`
+- [x] `feat(ui): let a switch or a choice carry an info button`
 
 ### Task 3: service logos
 

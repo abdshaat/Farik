@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import styles from "./Choice.module.css";
+import { InfoTip } from "./InfoTip.tsx";
 
 export function Choice<V extends string>({
 	name,
@@ -8,6 +9,7 @@ export function Choice<V extends string>({
 	value,
 	onChange,
 	error,
+	info,
 }: {
 	name: string;
 	legend: string;
@@ -25,6 +27,8 @@ export function Choice<V extends string>({
 	onChange: (value: V) => void;
 	/** Why the choice is refused, said under it and tied to the group. */
 	error?: string;
+	/** A note on the whole group, kept behind an info button by the legend. */
+	info?: ReactNode;
 }) {
 	return (
 		<fieldset
@@ -32,6 +36,7 @@ export function Choice<V extends string>({
 			aria-describedby={error ? `${name}-error` : undefined}
 		>
 			<legend className={styles.legend}>{legend}</legend>
+			{info ? <InfoTip id={`${name}-info`}>{info}</InfoTip> : null}
 			{options.map((o) => (
 				<Fragment key={o.value}>
 					<label className={styles.card}>

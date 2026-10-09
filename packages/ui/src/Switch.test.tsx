@@ -23,4 +23,32 @@ describe("Switch", () => {
 		expect(onChange).toHaveBeenLastCalledWith(false);
 		await expectNoAxeViolations(container);
 	});
+
+	it("shows an info button beside its label when given info", () => {
+		render(
+			<Switch
+				id="s"
+				label="Notify me"
+				checked={false}
+				onChange={() => {}}
+				info="Only on weekdays."
+			/>,
+		);
+		expect(
+			screen.getByRole("button", { name: "More about this" }),
+		).toBeTruthy();
+		expect(document.getElementById("s-info")?.textContent).toBe(
+			"Only on weekdays.",
+		);
+		expect(screen.getByRole("switch", { name: "Notify me" })).toBeTruthy();
+	});
+
+	it("shows no info button without info", () => {
+		render(
+			<Switch id="s" label="Notify me" checked={false} onChange={() => {}} />,
+		);
+		expect(
+			screen.queryByRole("button", { name: "More about this" }),
+		).toBeNull();
+	});
 });
