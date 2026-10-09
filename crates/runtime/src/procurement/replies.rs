@@ -974,6 +974,58 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    async fn a_reply_goes_to_the_message_it_names() {
+        let story = Story::new("names").await;
+        // Two quote requests to Dana, each with a `Message-ID` of its own.
+        for subject in ["First", "Second"] {
+            let message = story.draft(subject, BODY);
+            story.send(message, subject, BODY).await.expect("sent");
+        }
+        let sent_ids: Vec<(u64, String)> = story
+            .events(&[EventKind::SellerMessageSent])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::SellerMessageSent(body) => {
+                    Some((body.message.get(), body.message_id.to_string()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sent_ids.len(), 2);
+        assert_ne!(sent_ids[0].1, sent_ids[1].1, "each message has its own id");
+        // Dana answers the first and then the second: the earlier message is not passed over for
+        // the latest one sent to her.
+        story.fixture.deliver(
+            BUYING.address,
+            &answer(&sent_ids[0].1, "r1@pieboxpros.test", "Re: First").build(),
+        );
+        story.fixture.deliver(
+            BUYING.address,
+            &answer(&sent_ids[1].1, "r2@pieboxpros.test", "Re: Second").build(),
+        );
+        let deps = &story.harness.project.deps;
+        assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 2);
+        let listed = seller_replies_list(deps).expect("the list");
+        let rows: Vec<(u64, &str, &str)> = listed["replies"]
+            .as_array()
+            .expect("replies")
+            .iter()
+            .map(|row| {
+                (
+                    row["message"].as_u64().expect("a message"),
+                    row["sent_subject"].as_str().expect("a subject"),
+                    row["subject"].as_str().expect("a subject"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [(1, "First", "Re: First"), (2, "Second", "Re: Second")]
+        );
+    }
+
     /// The words a reply that cannot be kept leaves in the ledger and the refusal.
     const COULD_NOT_KEEP: &str =
         "Farik could not keep a reply from the mailbox; it tries again in 15 minutes.";
