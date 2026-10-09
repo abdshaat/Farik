@@ -700,7 +700,7 @@ fn descriptors() -> Vec<Tool> {
     let schemas = [
         (
             "product_recalls",
-            "Search the United States Consumer Product Safety Commission's recalls of products. The search is a plain text match on the one field you choose, not a meaning search: try the product's type, then its name, then its maker's name. Answers the newest 50 recalls, with more set when there are others.",
+            "Search the United States Consumer Product Safety Commission's recalls of products. The search is a plain text match on the one field you choose, not a meaning search: try the product's name, then its type, then its maker's name in the title. Answers the newest 50 recalls, with more set when there are others.",
             json!({
                 "type": "object",
                 "properties": {
@@ -1104,6 +1104,15 @@ mod tests {
         let tools = client.list_all_tools().await.expect("a list");
         let names: Vec<String> = tools.iter().map(|tool| tool.name.to_string()).collect();
         assert_eq!(names, tool_names());
+        // The model reads this at every call, so it gives the order the skill, the spec and the
+        // plan give: the name, then the type, then the maker's name.
+        let description = tools[0].description.as_deref().expect("a description");
+        assert!(
+            description.contains(
+                "try the product's name, then its type, then its maker's name in the title"
+            ),
+            "{description}"
+        );
         for tool in &tools {
             assert_eq!(
                 tool.input_schema.get("type"),
