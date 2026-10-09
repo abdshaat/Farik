@@ -1,17 +1,18 @@
-# Phase 7, step 11f: Production on the pages and the command line
+# Phase 11, step 05f: Production on the pages and the command line
 
-Status: draft. Its readiness review runs once step 11e has landed.
-Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
+Status: draft. Its readiness review runs once step 05e has landed.
+Branch: `phase/11-ecosystem` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 4.2, 6.9, 7 (F9, F12); F9
-Depends on: step 11 (the approved mockups `DevOpsCard`, `Production`, `TodayIncident`, `Incident`, `DeployPanel`, `PhoneIncident`, `PhoneProduction`); steps 11b to 11e (`Team::production`, `production.status`, `incidents.list`, `incident.get`, the four incident commands, the deploy events); phase 6 (merged in #19)
+Depends on: step 05 (the approved mockups `DevOpsCard`, `Production`, `TodayIncident`, `Incident`, `DeployPanel`, `PhoneIncident`, `PhoneProduction`); steps 05b to 05e (`Team::production`, `production.status`, `incidents.list`, `incident.get`, the four incident commands, the deploy events); phase 6 (merged in #19)
 Readiness confirmed by: not yet run
 Amended 2026-10-07 by step 11's readiness review and the founder's answer to it ("On this computer only"; ADR 0045, 3; step 11b's header): "Your production" reads and saves the settings through `production.get` and the command `production_set`, never `team.get`'s `production` or `team.save`, says "Kept on this computer, never in the files that go with your project.", and `saves_the_settings_through_the_team_file` becomes `saves_the_settings_on_this_computer`; this step's readiness review re-plans Task 1 to it.
+Moved 2026-10-09 by ADR 0049 (project plan revision 41; the founder: "DevOps later, rest after Cloud"): phase 7 step 11f until then (its file was `step-11f-production-pages.md` in phase 7's folder). The DevOps Engineer is built in the Ecosystem phase, phase 11, after its own steps 01 to 04: phase 7's steps 11 to 11f are steps 05 to 05f here, and 12 to 12e are 06 to 06e. The text below names them by their new numbers, and phase 7's other steps as phase 7's; the dated lines above, and the founder's words, keep the numbers of their day. Phase 7 step 10h, ask or auto, is phase 9 step 01; step 13, the kit check, is phase 9 step 02 and has no DevOps task, so this phase checks the DevOps Engineer's kit itself; the phases after phase 8 moved up by one.
 
-Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 11 (see step 11's header). Every screen here is built from step 11's approved boards; no new screen is drawn.
+Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 05 (see step 05's header). Every screen here is built from step 05's approved boards; no new screen is drawn.
 
 ## Goal
 
-A non-technical user sees and runs production from the browser: Settings has "Your production", where the user picks the platform the DevOps Engineer is connected to, names the service, gives the health address and the settling period, and reads that Farik watches only while the computer is on; the DevOps Engineer's card says what the watch last saw and when, so a stopped watch is visible; Today puts an open incident first, with its steps as they happen and "Stop", "Restart", "Roll back" and "Mark as fixed"; each incident has a page; and a deploy task shows its deploy where other tasks show their changes. `farik production` and `farik incident` do the same at the command line. Out of scope: the platforms' own setup copy (step 12's kits).
+A non-technical user sees and runs production from the browser: Settings has "Your production", where the user picks the platform the DevOps Engineer is connected to, names the service, gives the health address and the settling period, and reads that Farik watches only while the computer is on; the DevOps Engineer's card says what the watch last saw and when, so a stopped watch is visible; Today puts an open incident first, with its steps as they happen and "Stop", "Restart", "Roll back" and "Mark as fixed"; each incident has a page; and a deploy task shows its deploy where other tasks show their changes. `farik production` and `farik incident` do the same at the command line. Out of scope: the platforms' own setup copy (step 06's kits).
 
 ## Decisions
 
@@ -42,7 +43,7 @@ docs/SPEC.md, docs/plans/project-plan.md                                        
 
 ## Interfaces
 
-Consumes: `team.get`, `team.save`, `production.status` (11c), `incidents.list`, `incident.get`, `Command::{IncidentStop, IncidentRestart, IncidentRollBack, IncidentResolve}` (11d), the deploy events (11b to 11e); `useQuery`, `useConnection`, `saidAll`, `HowToOpen`, `here_or_sent`, `CliIo` (on main).
+Consumes: `team.get`, `team.save`, `production.status` (05c), `incidents.list`, `incident.get`, `Command::{IncidentStop, IncidentRestart, IncidentRollBack, IncidentResolve}` (05d), the deploy events (05b to 05e); `useQuery`, `useConnection`, `saidAll`, `HowToOpen`, `here_or_sent`, `CliIo` (on main).
 
 Produces:
 
@@ -102,7 +103,7 @@ pub fn incident(io: &mut CliIo<'_>, command: IncidentCommands) -> i32;        //
 
 ### Task 6: Spec and plan
 
-`docs/SPEC.md` 4.2 (where production shows in the working loop), 6.9 (the pages and commands as built), 7 (F9's and F12's lines name them); the revision line. Project plan row 11f; row 11 says step 11's row is done.
+`docs/SPEC.md` 4.2 (where production shows in the working loop), 6.9 (the pages and commands as built), 7 (F9's and F12's lines name them); the revision line. Project plan row 05f; row 05 says step 05's row is done.
 
 - [ ] `docs(spec): record production on the pages`
 
@@ -113,7 +114,7 @@ cargo xtask check --integration
 # expected: xtask check: ok (with pnpm check)
 ```
 
-No platform is driven before step 12, so the founder's check of these screens against a real service is step 12's Verification (Vercel): set production in Settings, watch the card change, break a deploy, and use the incident's row and page, at phone width too. Until then the component tests above are the evidence.
+No platform is driven before step 06, so the founder's check of these screens against a real service is step 06's Verification (Vercel): set production in Settings, watch the card change, break a deploy, and use the incident's row and page, at phone width too. Until then the component tests above are the evidence.
 
 ## Execution notes
 

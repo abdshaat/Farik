@@ -1,10 +1,11 @@
-# Phase 7, step 14: Milestones 0 and 1 in the web UI
+# Phase 9, step 03: Milestones 0 and 1 in the web UI
 
 Status: draft; moved from phase 6 step 16 by the project plan's revision 26 (ADR 0029), on the founder's decision of 2026-10-01 that the runs test the fully equipped team once, on Claude. It was step 12 until revision 27 split step 01 and added a sign-in step. It is re-planned when the steps before it are planned, when this runbook is re-planned for the equipped team and reviewed for readiness again. Before the move: phase 6's steps 01 to 15 landed; renumbered from step 15 by revision 25 (ADR 0028); readiness finding B1 decided, the founder choosing the policy (ADR 0028), built in phase 6 step 15. The text below is phase 6's, unchanged.
-Branch: `phase/7-role-kits`
+Branch: `phase/9-milestones`
 Spec: `docs/SPEC.md` section 11 (Milestones 0 and 1), F17; the flow it exercises is 4.1, 5.2 to 5.9, 5.14, and 5.16
-Depends on: phase 6, merged (its step 15, sprints gather ready work, is what holds both requests in the Backlog until S1 opens); steps 01 to 13 of this phase, landed, the kit check (step 13) among them. A start gate applies: stage 1 does not begin until `cargo xtask check --integration` passes on the phase branch. The start-gate sha is the phase branch head when stage 1 begins, and it is recorded.
+Depends on: phase 6, merged (its step 15, sprints gather ready work, is what holds both requests in the Backlog until S1 opens); phase 7, merged, and steps 01 and 02 of this phase, landed, the kit check (step 02) among them. A start gate applies: stage 1 does not begin until `cargo xtask check --integration` passes on the phase branch. The start-gate sha is the phase branch head when stage 1 begins, and it is recorded.
 Readiness confirmed by: fresh-session reviewer, 2026-10-01, for phase 6's team, not ready → findings folded in; to be reviewed again when phase 7 is planned
+Moved 2026-10-09 by ADR 0049 (project plan revision 41; the founder: "DevOps later, rest after Cloud"): phase 7 step 14 until then (its file was `step-14-milestones.md` in phase 7's folder), now phase 9 step 03, after Farik Cloud (phase 8), ask or auto (step 01) and the kit check (step 02, phase 7 step 13 until then). The team it tests has no DevOps Engineer, which is phase 11's. It is still re-planned for the equipped team, and reviewed for readiness again, when the steps before it are planned.
 
 This step writes no product code. It is a runbook, like phase 3's step 18 and phase 4's step 08, and it keeps their roles:
 - **[A]** is the agent preparing and recording the run.

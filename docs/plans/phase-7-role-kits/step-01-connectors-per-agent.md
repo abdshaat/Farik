@@ -69,7 +69,7 @@ Security:
 - **8.6's no-sandbox residuals** gain three routes to a key, beside the Claude Code process's environment: running the launcher (the token in `daemon.json` reaches the launch route), calling the route directly, and reading a connector process's `/proc/<pid>/environ`. In sandbox mode none applies: the container sees neither `daemon.json`, `mcp.json` nor the host's `/proc`.
 - **Risk: `headersHelper`'s 10-second limit.** A macOS keychain prompt can take longer, which fails the connection with Claude Code's own message. Accepted; the Advanced copy says to allow Farik "Always".
 
-Note for the engines phase (phase 9), not decided here: Claude Code hands MCP results to the model directly, so a governed gateway that proxies connectors, wraps each result and moves the governor out of the `PreToolUse` hook is a candidate for phase 9 (research notes, 2026-10-01). Nothing in the project plan, an ADR or the spec records it yet; phase 9's brainstorm decides.
+Note for the engines phase (phase 10), not decided here: Claude Code hands MCP results to the model directly, so a governed gateway that proxies connectors, wraps each result and moves the governor out of the `PreToolUse` hook is a candidate for phase 10 (research notes, 2026-10-01). Nothing in the project plan, an ADR or the spec records it yet; phase 10's brainstorm decides.
 
 ADR 0030 records the launcher, the definition hash, per-agent keys with the file fallback, and connecting in step 01. It is written in Task 2's commit, because each binds later steps.
 

@@ -1,16 +1,17 @@
-# Phase 7, step 12c: Railway and Fly.io, through Farik's own servers
+# Phase 11, step 06c: Railway and Fly.io, through Farik's own servers
 
-Status: draft. Its readiness review runs once step 12b has landed.
-Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
+Status: draft. Its readiness review runs once step 06b has landed.
+Branch: `phase/11-ecosystem` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.7, 6.9, 8.6; F9
-Depends on: step 12 (`call_tool`, `ADAPTERS`, `Connection`); step 10g (`FARIK_CONNECTORS` as `[osv, fx, recalls, ebay]`, the offline pin through the built binary); step 07 (`farik_runtime::osv`, the pattern; ADR 0038); step 11f (`Production.tsx`); phase 6 (merged in #19)
+Depends on: step 06 (`call_tool`, `ADAPTERS`, `Connection`); phase 7 step 10g (`FARIK_CONNECTORS` as `[osv, fx, recalls, ebay]`, the offline pin through the built binary); phase 7 step 07 (`farik_runtime::osv`, the pattern; ADR 0038); step 05f (`Production.tsx`); phase 6 (merged in #19)
 Readiness confirmed by: not yet run
+Moved 2026-10-09 by ADR 0049 (project plan revision 41; the founder: "DevOps later, rest after Cloud"): phase 7 step 12c until then (its file was `step-12c-railway-and-fly.md` in phase 7's folder). The DevOps Engineer is built in the Ecosystem phase, phase 11, after its own steps 01 to 04: phase 7's steps 11 to 11f are steps 05 to 05f here, and 12 to 12e are 06 to 06e. The text below names them by their new numbers, and phase 7's other steps as phase 7's; the dated lines above, and the founder's words, keep the numbers of their day. Phase 7 step 10h, ask or auto, is phase 9 step 01; step 13, the kit check, is phase 9 step 02 and has no DevOps task, so this phase checks the DevOps Engineer's kit itself; the phases after phase 8 moved up by one.
 
-Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 12 (see step 12's header).
+Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 06 (see step 06's header).
 
 ## Goal
 
-A team on Railway or on Fly.io connects it to the DevOps Engineer with one pasted key that reaches only that project's environment (Railway) or that app (Fly.io). Neither platform has an official server a kit can run that reads deployments and logs and can restart or roll back, so each is a small server of Farik's own, shipped in the Farik binary as `osv` is: the agent reads deployments and logs through it, and Farik deploys, restarts and rolls back through its other tools, which the agent is never offered. Fly.io deploys images, not commits, so the production settings gain the image's name, with `{commit}` where the commit goes, which steps 12d and 12e use too. Out of scope: Kubernetes (12d); AWS (12e).
+A team on Railway or on Fly.io connects it to the DevOps Engineer with one pasted key that reaches only that project's environment (Railway) or that app (Fly.io). Neither platform has an official server a kit can run that reads deployments and logs and can restart or roll back, so each is a small server of Farik's own, shipped in the Farik binary as `osv` is: the agent reads deployments and logs through it, and Farik deploys, restarts and rolls back through its other tools, which the agent is never offered. Fly.io deploys images, not commits, so the production settings gain the image's name, with `{commit}` where the commit goes, which steps 06d and 06e use too. Out of scope: Kubernetes (06d); AWS (06e).
 
 ## Decisions
 
@@ -24,7 +25,7 @@ A team on Railway or on Fly.io connects it to the DevOps Engineer with one paste
 - **The image name.** `production` gains `image`, a reference with `{commit}` exactly once (e.g. `registry.fly.io/my-app:{commit}`), at most 300 characters (`image_template_invalid` otherwise), optional; `Production.image: Option<String>` and `Production::image_for(commit) -> Option<String>`. `Production.tsx` shows the field always, labelled "Image name, with {commit} where the commit goes" and "Only for platforms that run images: Fly.io, AWS and Kubernetes". Farik never builds an image: the user's pipeline pushes one per commit; an image that does not exist fails the rollout, which the watch sees.
 - **The adapters** (`platforms/railway.rs`, `platforms/fly.rs`) call their server's tools through `call_tool`, as Vercel's does. Railway: `production.service` is the service's id; `deployments` and `live` from `deployments` (`SUCCESS` is `Live` for the newest such, older ones `Superseded`; `FAILED`, `CRASHED` are `Failed`; the rest `Building`); `deploy` `deploy_commit`; `restart` `restart` of the live deployment; `roll_back` `roll_back` to `to`. Fly.io: `production.service` is the app's name and `production.image` is required (`Refused` naming the field otherwise); a deployment is the image the machines run, its `id` the image and its `version` the commit Farik recorded with it, so `live` is `Live` when every machine is `started` on one image and `Building` otherwise; `deploy(commit)` is `set_image(image_for(commit))`; `restart` is `restart`; `roll_back(to)` is `set_image(to.id)`. `error_rate` is `None` on both.
 - **The copy.** Railway: title "Railway"; about "Railway runs your app's services from your code, each in its own environment."; why "So the DevOps Engineer can read your service's deployments and logs, and Farik can deploy, restart or roll back the service when a planned deploy or an incident calls for it. The agent itself only reads."; setup "In your Railway project's settings, open ‘Tokens’ and create one for your production environment, then paste it here. It reaches only that environment. Turn off the service's automatic deploys from your branch, so that only planned deploys reach production. In Farik's Settings, the service name is the service's ID." Fly.io: title "Fly.io"; about "Fly.io runs your app on machines close to your users, from an image your build makes."; why "So the DevOps Engineer can read your app's machines and logs, and Farik can move them to the image of your planned work, restart them, or move them back when a planned deploy or an incident calls for it. The agent itself only reads."; setup "Your build must push an image for every commit, named by the commit. In the Fly.io dashboard, open your app, then ‘Tokens’, and create a deploy key; paste it here. It reaches only this app. In Farik's Settings, the service name is the app's name and the image name is like registry.fly.io/my-app:{commit}." Both say nothing of "MCP", "OAuth" or "token" outside the quoted labels.
-- **Pins.** Each is pinned offline through the built binary, `crates/cli/tests/railway_server.rs` and `fly_server.rs`, as `osv_server.rs` is; the live run skips them with its line (step 10d).
+- **Pins.** Each is pinned offline through the built binary, `crates/cli/tests/railway_server.rs` and `fly_server.rs`, as `osv_server.rs` is; the live run skips them with its line (phase 7 step 10d).
 
 ## File map
 
@@ -42,7 +43,7 @@ docs/SPEC.md, docs/design/role-kits.md, docs/plans/project-plan.md   modifies (T
 
 ## Interfaces
 
-Consumes: `call_tool`, `ADAPTERS`, `Connection` (12); `osv::serve_stdio` as the pattern, `FARIK_CONNECTORS`, `is_farik_connector`, `CliIo`, `ConnectorCommands` (on this branch); `Production`, `Production.tsx` (11b, 11f).
+Consumes: `call_tool`, `ADAPTERS`, `Connection` (06); `osv::serve_stdio` as the pattern, `FARIK_CONNECTORS`, `is_farik_connector`, `CliIo`, `ConnectorCommands` (on this branch); `Production`, `Production.tsx` (05b, 05f).
 
 Produces:
 
@@ -117,7 +118,7 @@ Tests against a local GraphQL fixture whose address is passed to the function.
 
 ### Task 7: Spec and plan
 
-`docs/SPEC.md` 6.7 ("Farik's own connectors" names `railway` and `fly`, their addresses, tools, limits and checks), 6.9's kit paragraph (both, the keys' reach, Farik's tools denied to the agent, the image name); the revision line. `docs/design/role-kits.md`, `docs/design/devops-engineer.md`. Project plan row 12c.
+`docs/SPEC.md` 6.7 ("Farik's own connectors" names `railway` and `fly`, their addresses, tools, limits and checks), 6.9's kit paragraph (both, the keys' reach, Farik's tools denied to the agent, the image name); the revision line. `docs/design/role-kits.md`, `docs/design/devops-engineer.md`. Project plan row 06c.
 
 - [ ] `docs(spec): record Railway and Fly.io in the DevOps Engineer's kit`
 

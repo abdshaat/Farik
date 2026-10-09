@@ -1,16 +1,17 @@
-# Phase 7, step 12d: Kubernetes, and a key kept as a file
+# Phase 11, step 06d: Kubernetes, and a key kept as a file
 
-Status: draft. Its readiness review runs once step 12c has landed.
-Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
+Status: draft. Its readiness review runs once step 06c has landed.
+Branch: `phase/11-ecosystem` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.7, 6.9, 8.2, 8.6; F9
-Depends on: step 12c (`Production.image`, `image_for`); step 12 (`call_tool`, `ADAPTERS`, `Connection`); step 11 (the approved `ConnectorFileKey` board); step 01 (the launcher, `LaunchSpec`, `POST /connector/launch`, `farik connect`); steps 05 and 05b (the kit format, `spec_sha256`, `ConnectorAdd`, `KitConnect`); phase 6 (merged in #19)
+Depends on: step 06c (`Production.image`, `image_for`); step 06 (`call_tool`, `ADAPTERS`, `Connection`); step 05 (the approved `ConnectorFileKey` board); phase 7 step 01 (the launcher, `LaunchSpec`, `POST /connector/launch`, `farik connect`); phase 7 steps 05 and 05b (the kit format, `spec_sha256`, `ConnectorAdd`, `KitConnect`); phase 6 (merged in #19)
 Readiness confirmed by: not yet run
+Moved 2026-10-09 by ADR 0049 (project plan revision 41; the founder: "DevOps later, rest after Cloud"): phase 7 step 12d until then (its file was `step-12d-kubernetes.md` in phase 7's folder). The DevOps Engineer is built in the Ecosystem phase, phase 11, after its own steps 01 to 04: phase 7's steps 11 to 11f are steps 05 to 05f here, and 12 to 12e are 06 to 06e. The text below names them by their new numbers, and phase 7's other steps as phase 7's; the dated lines above, and the founder's words, keep the numbers of their day. Phase 7 step 10h, ask or auto, is phase 9 step 01; step 13, the kit check, is phase 9 step 02 and has no DevOps task, so this phase checks the DevOps Engineer's kit itself; the phases after phase 8 moved up by one.
 
-Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 12 (see step 12's header).
+Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 06 (see step 06's header).
 
 ## Goal
 
-A team whose service runs on any Kubernetes cluster connects it to the DevOps Engineer by pasting, or choosing, a sign-in file for a service account limited to one namespace. The agent reads the namespace's deployments, pods, their logs and events through a pinned community server, the official choice being none; Farik moves the deployment to the image of the integrated commit, restarts its rollout, and moves it back to the last healthy image through the same server. A kit's connector may now name a key that is a whole file: Farik keeps it in the key store like any key, writes it into the server's own folder when the server starts, and gives the server its path. Out of scope: AWS's EKS, which signs in through AWS (12e).
+A team whose service runs on any Kubernetes cluster connects it to the DevOps Engineer by pasting, or choosing, a sign-in file for a service account limited to one namespace. The agent reads the namespace's deployments, pods, their logs and events through a pinned community server, the official choice being none; Farik moves the deployment to the image of the integrated commit, restarts its rollout, and moves it back to the last healthy image through the same server. A kit's connector may now name a key that is a whole file: Farik keeps it in the key store like any key, writes it into the server's own folder when the server starts, and gives the server its path. Out of scope: AWS's EKS, which signs in through AWS (06e).
 
 ## Decisions
 
@@ -18,7 +19,7 @@ A team whose service runs on any Kubernetes cluster connects it to the DevOps En
 - **A key kept as a file** (ADR 0046, Task 1). A kit connector's new field `file_keys` names credential keys whose value is a file's text. For each, at every listing (`list_tools`), call (`call_tool`) and launch (`POST /connector/launch` and `farik connector run`), the value is written to `<the server's folder>/<key in lower case>`, 0600, in the 0700 folder made fresh for that start (ADR 0030), and the variable is set to that file's path, not the text. A file key's value is at most 64 KiB of UTF-8 with no NUL (`file_key_too_large`, `file_key_not_text`), checked where keys are read (the web form, `farik connect`) before anything is kept. `file_keys` must be a subset of `credential_keys` (`file_key_unknown`), is `stdio` only (`file_key_not_stdio`), and is in `spec_sha256` when present, so every hash kept before stands (ADR 0036's rule for new fields). A store that refuses so large a value (Windows' credential manager keeps at most 2,560 bytes) fails the connect with the store's own sentence; the user then uses a file without an embedded certificate bundle, as the setup copy says. Rejected: a path to the file as the key (the file would sit outside the key store, readable by anything the user runs); the server's own `--kubeconfig` flag (one path, in `args`, for every user).
 - **The screens** (the approved `ConnectorFileKey`): `ConnectorAdd`'s key form shows a file key as "Choose the file" and a box to paste it into, never a one-line field, which would drop its line breaks. `farik connect` takes `--key-file <KEY>=<path>`, which reads the file, for a file key, and refuses `--key-file` for any other.
 - **What each tag is**, from the README (read 2026-10-05). `network`: `namespaces_list`, `events_list`, `pods_list_in_namespace`, `pods_get`, `pods_log`, `pods_top`, `resources_list`, `resources_get` (8). `denied`: `pods_exec` and `pods_run` (a shell or a pod in production, which spec 6.9 forbids), `pods_delete`, `resources_create_or_update` (Farik's), `resources_delete`, `resources_scale` (scaling is the human's), `pods_list` (every namespace), `nodes_log`, `nodes_stats_summary`, `nodes_top`, `projects_list`, `configuration_contexts_list`, `targets_list`, `configuration_view` (it shows the sign-in file) (14). Any other tool of the live listing (`helm_*` and the other toolsets when on) is `denied` unlabelled.
-- **The adapter** (`platforms/kubernetes.rs`), through `call_tool`. `production.service` is `<namespace>/<deployment>`, or `<namespace>/<deployment>/<container>` when the pod has more than one container; `production.image` is required. Shared with step 12e's EKS in `platforms/k8s_deployment.rs`, pure functions over the deployment object:
+- **The adapter** (`platforms/kubernetes.rs`), through `call_tool`. `production.service` is `<namespace>/<deployment>`, or `<namespace>/<deployment>/<container>` when the pod has more than one container; `production.image` is required. Shared with step 06e's EKS in `platforms/k8s_deployment.rs`, pure functions over the deployment object:
   - `live`: `resources_get { apiVersion: "apps/v1", kind: "Deployment", namespace, name }`; `Live` when `status.observedGeneration` equals `metadata.generation` and `updatedReplicas`, `availableReplicas` and `replicas` are equal; `Failed` when its `Progressing` condition is `False` with `ProgressDeadlineExceeded`; else `Building`; its `id` the container's image and its `version` the commit whose `image_for` it is, else the image;
   - `deployments`: the live one alone, since Farik's own records hold the history;
   - `deploy(commit)`: the object read, its container's image set to `image_for(commit)`, sent with `resources_create_or_update` keeping `metadata.resourceVersion`, so a change made since the read is refused rather than overwritten;
@@ -45,7 +46,7 @@ docs/SPEC.md, docs/design/role-kits.md, docs/plans/project-plan.md   modifies (T
 
 ## Interfaces
 
-Consumes: `CustomServer`, `spec_sha256`, `custom_server` (core); `parse_kit`, `KitConnector` (roles); `list_tools`, `call_tool`, `launch_spec`, `LaunchSpec`, `working_folder`, `KEPT_ENV`, `launch_answer` (runtime); `ConnectorCommands`, `ConnectorAdd`, `KitConnect`; `Production::image_for` (12c).
+Consumes: `CustomServer`, `spec_sha256`, `custom_server` (core); `parse_kit`, `KitConnector` (roles); `list_tools`, `call_tool`, `launch_spec`, `LaunchSpec`, `working_folder`, `KEPT_ENV`, `launch_answer` (runtime); `ConnectorCommands`, `ConnectorAdd`, `KitConnect`; `Production::image_for` (06c).
 
 Produces:
 
@@ -65,7 +66,7 @@ pub fn platform(connection: Connection, production: &Production) -> Result<Arc<d
 
 ### Task 1: ADR 0046
 
-Files: `docs/decisions/0046-fixed-settings-and-file-keys-in-a-kit-server.md` (the next free number after step 11's 0045; if taken by then, the next free one, with steps 12d and 12e's references changed in the same commit). Decides both fields a kit's server may now carry: `file_keys` (this step) and `env`, fixed non-secret variables (step 12e): what each is, its limits, its place in `spec_sha256`, and that neither lets a team file add a variable or a file a kit did not ship (ADR 0036's trust holds: a kit entry matches the kit whole). Rejected for each as above and in step 12e.
+Files: `docs/decisions/0046-fixed-settings-and-file-keys-in-a-kit-server.md` (the next free number after step 05's 0045; if taken by then, the next free one, with steps 06d and 06e's references changed in the same commit). Decides both fields a kit's server may now carry: `file_keys` (this step) and `env`, fixed non-secret variables (step 06e): what each is, its limits, its place in `spec_sha256`, and that neither lets a team file add a variable or a file a kit did not ship (ADR 0036's trust holds: a kit entry matches the kit whole). Rejected for each as above and in step 06e.
 
 - [ ] `docs(decisions): let a kit's server take fixed settings and a key kept as a file`
 
@@ -119,7 +120,7 @@ Files: `docs/decisions/0046-fixed-settings-and-file-keys-in-a-kit-server.md` (th
 
 ### Task 8: Spec and plan
 
-`docs/SPEC.md` 6.7 (`file_keys`), 8.2 (the launcher writes a file key), 6.9's kit paragraph (Kubernetes); the revision line. `docs/design/role-kits.md`, `docs/design/devops-engineer.md`. Project plan row 12d.
+`docs/SPEC.md` 6.7 (`file_keys`), 8.2 (the launcher writes a file key), 6.9's kit paragraph (Kubernetes); the revision line. `docs/design/role-kits.md`, `docs/design/devops-engineer.md`. Project plan row 06d.
 
 - [ ] `docs(spec): record Kubernetes and file keys`
 

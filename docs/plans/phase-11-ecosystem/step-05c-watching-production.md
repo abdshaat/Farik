@@ -1,26 +1,27 @@
-# Phase 7, step 11c: Watching production
+# Phase 11, step 05c: Watching production
 
-Status: draft. Its readiness review runs once step 11b has landed.
-Branch: `phase/7-role-kits` (the phase branch; steps do not get their own)
+Status: draft. Its readiness review runs once step 05b has landed.
+Branch: `phase/11-ecosystem` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.9, 8.1, 8.5; F9
-Depends on: step 11b (`Platform`, `PlatformSource`, `Team::production`, the three `deployment.*` kinds, `DeployWork`); phase 6 (merged in #19)
+Depends on: step 05b (`Platform`, `PlatformSource`, `Team::production`, the three `deployment.*` kinds, `DeployWork`); phase 6 (merged in #19)
 Readiness confirmed by: not yet run
+Moved 2026-10-09 by ADR 0049 (project plan revision 41; the founder: "DevOps later, rest after Cloud"): phase 7 step 11c until then (its file was `step-11c-watching-production.md` in phase 7's folder). The DevOps Engineer is built in the Ecosystem phase, phase 11, after its own steps 01 to 04: phase 7's steps 11 to 11f are steps 05 to 05f here, and 12 to 12e are 06 to 06e. The text below names them by their new numbers, and phase 7's other steps as phase 7's; the dated lines above, and the founder's words, keep the numbers of their day. Phase 7 step 10h, ask or auto, is phase 9 step 01; step 13, the kit check, is phase 9 step 02 and has no DevOps task, so this phase checks the DevOps Engineer's kit itself; the phases after phase 8 moved up by one.
 
-Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 11 (see step 11's header); ADR 0045, 4 and 5, are this step's.
+Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Split from row 05 (see step 05's header); ADR 0045, 4 and 5, are this step's.
 
 ## Goal
 
-While `farik serve` or `farik run` drives a project whose team has production settings and an active DevOps Engineer, Farik checks production once a minute, with no model and no session: the health address answers `2xx`, the platform reports a deployment live, and, where the platform offers one and the team set a threshold, the error rate is under it. It records `health.changed` only when the answer changes. It follows each deploy `farik_deploy` started: a deploy that goes live and stays healthy for the settling period is recorded `deployment.succeeded` and its deploy task moves to `verifying`; one the platform fails, one that goes unhealthy while settling, and one still building after 30 minutes are recorded `deployment.failed`. The time of the last check is kept, so the card of step 11f can show a stopped watch. Out of scope: incidents (11d); the pages (11f).
+While `farik serve` or `farik run` drives a project whose team has production settings and an active DevOps Engineer, Farik checks production once a minute, with no model and no session: the health address answers `2xx`, the platform reports a deployment live, and, where the platform offers one and the team set a threshold, the error rate is under it. It records `health.changed` only when the answer changes. It follows each deploy `farik_deploy` started: a deploy that goes live and stays healthy for the settling period is recorded `deployment.succeeded` and its deploy task moves to `verifying`; one the platform fails, one that goes unhealthy while settling, and one still building after 30 minutes are recorded `deployment.failed`. The time of the last check is kept, so the card of step 05f can show a stopped watch. Out of scope: incidents (05d); the pages (05f).
 
 ## Decisions
 
 - **Its own task, not a rule** (ADR 0045, 4). A tick runs one session to its end (`orchestrator.rs:417`, `rules.rs:68`), so a rule would not run while a session does. `run_watch` is a task `start` (`crates/cli/src/start.rs`) spawns beside the tick loop for every driving process, `farik serve` and `farik run`, and aborts when the driver finishes. It sleeps with the injected `Sleeper` until the next whole minute after the previous tick began, so a slow check does not drift the cadence, and ticks once at start. It runs while the team is paused, since it starts nothing; it appends events through the same log and projections as every other writer, and notifies the daemon's `wakes()` after anything it records, so an idle tick loop looks again.
-- **When it ticks.** Only when `team.production()` is set, an active DevOps Engineer has the named connector in its `mcp_servers`, and the daemon's `platforms()` (step 11b) answers a platform. Otherwise the tick records nothing and `WatchStatus` says why in a sentence: "No production settings yet", "No active DevOps Engineer has <connector> connected", or the platform's error ("Farik cannot drive <connector> yet").
+- **When it ticks.** Only when `team.production()` is set, an active DevOps Engineer has the named connector in its `mcp_servers`, and the daemon's `platforms()` (step 05b) answers a platform. Otherwise the tick records nothing and `WatchStatus` says why in a sentence: "No production settings yet", "No active DevOps Engineer has <connector> connected", or the platform's error ("Farik cannot drive <connector> yet").
 - **The health address** is read by `HealthProbe`; the shipped `HttpProbe` sends one `GET` with `reqwest` (already a dependency), follows no redirect, gives up after 10 seconds, reads at most 64 KiB of the body and drops it, sends `User-Agent: farik-watch/<version>`, and uses the environment's proxy settings, since the address is the user's own service. `2xx` is healthy; anything else, a timeout or a refused connection is not, with the status or the error's kind as the detail. The body is never kept, logged or shown.
 - **A check** is three answers: the probe, `platform.live()` (a deployment `Live`), and `platform.error_rate(since the previous tick)` when the team set `error_rate_percent`. `judge` is healthy when the probe passed, a deployment is live, and the rate, when there is one, is at most the threshold; else unhealthy with the first reason in that order (`health_url`, `platform`, `error_rate`). When the platform cannot be read (`NotConnected`, `Failed`), the check is judged on the probe alone and `WatchStatus` says the platform did not answer.
 - **Two in a row** (ADR 0045, 4). Healthy to unhealthy needs two consecutive unhealthy checks; unhealthy to healthy needs one healthy check. `health.changed { healthy, why?, detail?, live? }` is recorded on a change, and on the first check after Farik starts when the log holds no `health.changed` yet, which makes the first live deployment the first one Farik recorded as healthy (`live` is `{ deployment_id, version }` of the deployment that serves production when healthy). The carried state starts from the newest `health.changed` in the log, so a restart of Farik records no change of its own.
 - **Following a deploy.** Each tick reads `platform.deployments()` once and, for every `deployment.started` with no outcome yet, finds its `deployment_id`: `Failed` records `deployment.failed { why: platform, detail }` (the platform's words, at most 500 characters); `Building` 30 minutes after `deployment.started` records `deployment.failed { why: timed_out }`; `Live` starts its settling at the first tick that saw it live. While settling, the service turning unhealthy by the rule above records `deployment.failed { why: unhealthy }`; healthy on every tick for `settling_minutes` records `deployment.succeeded { healthy_minutes }`. A deployment the platform no longer lists counts as `Failed` with "the platform no longer lists it". Settling lives in memory: a restart of Farik starts a deploy's settling again from the next tick that sees it live, which waits longer, never shorter.
-- **Moving the deploy task.** After `deployment.succeeded`, the watch asks the governor for `in_progress -> verifying` for the deploy task on its envelope, as its assignee (`TransitionActor::Assignee`, `filed_by_farik: true`, the way rule 7 asks `assigned -> in_progress`); a refusal is recorded and left on the board, as 5.2 says for such moves. After `deployment.failed` the task stays `in_progress`, and rule 6's next session for it may deploy again, which asks the human (step 11b); step 11d replaces this with an incident.
+- **Moving the deploy task.** After `deployment.succeeded`, the watch asks the governor for `in_progress -> verifying` for the deploy task on its envelope, as its assignee (`TransitionActor::Assignee`, `filed_by_farik: true`, the way rule 7 asks `assigned -> in_progress`); a refusal is recorded and left on the board, as 5.2 says for such moves. After `deployment.failed` the task stays `in_progress`, and rule 6's next session for it may deploy again, which asks the human (step 05b); step 05d replaces this with an incident.
 - **The status.** `DaemonState` gains `watch_status: Mutex<WatchStatus>`, set at every tick; the query `production.status {}` answers it with what the log adds: `{ watching, why?, last_check_at?, healthy?, live?, deploying? }`, `deploying` being `{ started, commit, holds, live_since?, healthy_minutes }` for a deploy being followed. Nothing is recorded per tick (spec 6.9: a change of state, not every tick).
 - **Pure where it can be.** The judging, the two-in-a-row rule and the settling are `farik_core::production`, given times and answers and doing no I/O; the watch in `farik-runtime` gathers the answers and records.
 
@@ -38,7 +39,7 @@ docs/SPEC.md, docs/plans/project-plan.md                     modifies (Task 6)
 
 ## Interfaces
 
-Consumes: `Platform`, `PlatformSource`, `DaemonState::platforms`, `Deployment`, `DeploymentState`, `Team::production`, `deployment.started`, `deployment.succeeded`, `deployment.failed` (step 11b); `Sleeper`, `Clock`, `Transitions::request`, `TransitionAsk`, `DaemonState::wakes` (runtime, on main).
+Consumes: `Platform`, `PlatformSource`, `DaemonState::platforms`, `Deployment`, `DeploymentState`, `Team::production`, `deployment.started`, `deployment.succeeded`, `deployment.failed` (step 05b); `Sleeper`, `Clock`, `Transitions::request`, `TransitionAsk`, `DaemonState::wakes` (runtime, on main).
 
 Produces:
 
@@ -114,7 +115,7 @@ Files: `watch.rs`; tests with `FakePlatform`, a fake probe and a fixed clock.
 
 ### Task 6: Spec and plan
 
-`docs/SPEC.md` 6.9's Watching as built (the cadence, the three answers, two in a row, the address's limits, following a deploy, the 30 minutes), 8.1 (the watch beside the tick loop), 8.5 (`health.changed`); the revision line. Project plan row 11c.
+`docs/SPEC.md` 6.9's Watching as built (the cadence, the three answers, two in a row, the address's limits, following a deploy, the 30 minutes), 8.1 (the watch beside the tick loop), 8.5 (`health.changed`); the revision line. Project plan row 05c.
 
 - [ ] `docs(spec): record the production watch`
 
@@ -125,7 +126,7 @@ cargo xtask check --integration
 # expected: xtask check: ok (with pnpm check)
 ```
 
-No live check: no platform is driven before step 12; step 12's live run watches a real one.
+No live check: no platform is driven before step 06; step 06's live run watches a real one.
 
 ## Execution notes
 

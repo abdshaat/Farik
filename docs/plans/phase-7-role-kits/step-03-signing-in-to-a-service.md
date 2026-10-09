@@ -7,6 +7,7 @@ Depends on: step 01 of this phase (committed; the custom connector, `ConnectorEn
 Readiness: fresh-session Opus reviewer, 2026-10-02: not ready, 4 Blocking, all folded; no second round (ADR 0032)
 Mockups approved by: the founder, 2026-10-02 (SignInDone, PhoneSignIn, and the revised AgentEdit and ConnectorAdd)
 Amended 2026-10-08 by ADR 0048 (the founder: "Lets set up the infra repository as well as the cloud hosting, landing page, etc. in phase 8"): Farik Cloud is a new phase 8, after this phase and before the web launch, now phase 12. Where a dated note below says phase 11 for Farik Cloud, read phase 8: phase 11's steps 01, 01b, 01d, 01c, 01e and 01f are phase 8 steps 02 to 07, and the founder's live checks are phase 8 step 07's. Where it says phase 15, read phase 16; the phases after phase 7 moved up by one.
+Amended 2026-10-09 by ADR 0049 (the founder: "Lets stop this phase after completing step 10g. We have to start the next phase"; "DevOps later, rest after Cloud"): this phase ends at step 10g, and a phase, Ask or auto and the milestones, follows Farik Cloud as phase 9, so the phases after phase 8 moved up by one more. Where the line above says phase 12 for the web launch, read phase 13, and where it says phase 16, read phase 17.
 
 ## Goal
 
@@ -82,7 +83,7 @@ What a non-technical user sees:
   - `sign_in_not_offered` shows step 01's key fields, unchanged. `sign_in_not_supported` says "<host> doesn't let Farik sign in by itself yet. If <host> gives you a key, paste it below." over the key fields; `sign_in_failed` shows its sentence over them the same way.
 - **The agent page's row** of a signed-in server says "Signed in to <host>". A lapsed one says "<host> ended Farik's sign-in. Sign in again to use it", with "Sign in again", which opens `ConnectorAdd` filled in from the team file at the sign-in.
 
-ADR 0033 records who runs the sign-in, where the grant is kept, the registration order, the redirect, refresh and revocation. Its consequences say the loopback redirect assumes the browser and the daemon share a machine, which ADR 0021 guarantees (the daemon serves only `127.0.0.1`), and that phase 12's hosted web launch needs another redirect. It is written in Task 2's commit.
+ADR 0033 records who runs the sign-in, where the grant is kept, the registration order, the redirect, refresh and revocation. Its consequences say the loopback redirect assumes the browser and the daemon share a machine, which ADR 0021 guarantees (the daemon serves only `127.0.0.1`), and that phase 13's hosted web launch needs another redirect. It is written in Task 2's commit.
 
 For the founder, made by this plan and open to the founder's reversal:
 - **O1, CIMD.** Not built here. It needs a document at an `https` address Farik owns, listing its redirect URIs. Every service checked that offers CIMD also offers DCR. Each DCR sign-in leaves a client at the service (#65752 shows Notion users hitting this); revoking on replace limits it, CIMD ends it. Recommendation: add it with the site of the web launch (phase 11, ADR 0017), before DCR is removed from the specification. (Amended 2026-10-06 by ADR 0043: the document sits at an address of Farik's, so it is phase 15's, with Farik's own apps. And by ADR 0044: phase 11's brainstorm decides whether it comes with Farik Cloud's site.)
