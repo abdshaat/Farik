@@ -288,11 +288,10 @@ pub(crate) fn prepare(
         order: ask.order,
     };
     let mut sending = crate::locked(&SENDING);
-    if sending.iter().any(|held| {
-        held.root == claim.root
-            && (held.message == claim.message
-                || (claim.order.is_some() && held.order == claim.order))
-    }) {
+    if sending
+        .iter()
+        .any(|held| held.root == claim.root && held.message == claim.message)
+    {
         return Err(refusal(
             "seller_message_sent",
             "This message is being sent.",
@@ -874,6 +873,33 @@ mod tests {
         let text = story.out("2.sent.txt");
         assert!(text.contains("Corner Bakery"), "{text}");
         assert!(!text.contains("AI assistant"), "{text}");
+
+        // A change to the body alone, or to the subject alone, is an edit; none is not.
+        let edited_of = |message: u64| {
+            story
+                .events(&[EventKind::SellerMessageSent])
+                .iter()
+                .find_map(|event| match &event.body {
+                    EventBody::SellerMessageSent(body) if body.message.get() == message => {
+                        Some(body.edited)
+                    }
+                    _ => None,
+                })
+                .expect("a send")
+        };
+        assert!(!edited_of(2), "sent as drafted");
+        let third = story.draft(SUBJECT, BODY);
+        story
+            .send(third, SUBJECT, "Quote 500, please.")
+            .await
+            .expect("sent");
+        assert!(edited_of(third), "a body changed alone");
+        let fourth = story.draft(SUBJECT, BODY);
+        story
+            .send(fourth, "Quote please", BODY)
+            .await
+            .expect("sent");
+        assert!(edited_of(fourth), "a subject changed alone");
     }
 
     #[tokio::test]
