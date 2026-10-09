@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { sentCommand } from "../test/gate.ts";
+import { bodyOf, refusedBy } from "../test/schema.ts";
 import {
 	FOLLOW_UP,
 	KNOWN,
@@ -94,12 +95,16 @@ describe("Today, messages to sellers", () => {
 				},
 			},
 		});
+		expect(refusedBy("sellerMessageSendBody", bodyOf(sent))).toEqual([]);
 		await s.reply(sent, { said: "Sent to Pie Box Pros.", events: [90] });
 		fireEvent.click(row.getByRole("button", { name: "Discard" }));
 		const discarded = await sentCommand(s, 2);
 		expect(discarded.params).toEqual({
 			command: { command: "seller_message_discard", body: { message: 2 } },
 		});
+		expect(refusedBy("sellerMessageDiscardBody", bodyOf(discarded))).toEqual(
+			[],
+		);
 		// A refusal is said in words.
 		await s.reply(discarded, {
 			error: { kind: "refused", detail: "seller_message_sent: sent already" },
@@ -130,6 +135,7 @@ describe("Today, messages to sellers", () => {
 				},
 			},
 		});
+		expect(refusedBy("sellerMessageSendBody", bodyOf(sent))).toEqual([]);
 	});
 
 	it("no_mailbox_or_the_cap_means_no_send", async () => {
@@ -213,6 +219,7 @@ describe("Today, replies from sellers", () => {
 		expect(sent.params).toEqual({
 			command: { command: "seller_reply_dismiss", body: { reply: 1 } },
 		});
+		expect(refusedBy("sellerReplyDismissBody", bodyOf(sent))).toEqual([]);
 	});
 });
 

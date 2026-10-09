@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sentCommand } from "../../test/gate.ts";
+import { bodyOf, refusedBy } from "../../test/schema.ts";
 import {
 	MARKUP,
 	MESSAGE,
@@ -76,6 +77,7 @@ describe("a reply from a seller, read", () => {
 		expect(dismissed.params).toEqual({
 			command: { command: "seller_reply_dismiss", body: { reply: 1 } },
 		});
+		expect(refusedBy("sellerReplyDismissBody", bodyOf(dismissed))).toEqual([]);
 	});
 
 	it("a_refused_request_dismisses_nothing", async () => {

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../../strings/en.ts";
 import { sentCommand } from "../../test/gate.ts";
 import { ORDER_ROW, todayWithOrders } from "../../test/orders.ts";
+import { bodyOf, refusedBy } from "../../test/schema.ts";
 import { todayWithMail } from "../../test/sellerMail.ts";
 
 /** Today with the order waiting; its row's own button opened. */
@@ -215,6 +216,7 @@ describe("a purchase order that can be emailed", () => {
 				},
 			},
 		});
+		expect(refusedBy("purchaseOrderSendBody", bodyOf(failed))).toEqual([]);
 		await s.reply(failed, {
 			error: { kind: "failed", detail: "seller_message_failed: busy" },
 		});
@@ -234,6 +236,7 @@ describe("a purchase order that can be emailed", () => {
 			(sent.params as { command: { body: { note?: string } } }).command.body
 				.note,
 		).toBe("Thanks");
+		expect(refusedBy("purchaseOrderSendBody", bodyOf(sent))).toEqual([]);
 		await s.reply(sent, { said: "Sent PO-12.", events: [91, 92, 93] });
 		await waitFor(() => expect(s.calls("request.file")).toHaveLength(1));
 		expect(s.calls("request.file")[0]?.params.text).toBe(

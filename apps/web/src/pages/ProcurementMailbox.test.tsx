@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import { refusedBy } from "../test/schema.ts";
 import { NO_MAILBOX, TEAM } from "../test/sellerMail.ts";
 
 afterEach(() => {
@@ -100,6 +101,13 @@ describe("the procurement mailbox page", () => {
 			signature: "",
 			disclose_ai: true,
 		});
+		// What the daemon reads: the schema of the method's params, nested servers included.
+		expect(
+			refusedBy(
+				"procurementMailboxConnectRequest",
+				(frame as { params: Record<string, unknown> }).params,
+			),
+		).toEqual([]);
 		// A refusal is said in Farik's words and the password is gone from the field.
 		await s.fail(
 			frame,

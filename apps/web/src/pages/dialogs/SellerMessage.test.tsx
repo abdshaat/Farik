@@ -2,6 +2,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../../strings/en.ts";
 import { sentCommand } from "../../test/gate.ts";
+import { bodyOf, refusedBy } from "../../test/schema.ts";
 import { KNOWN, todayWithMail } from "../../test/sellerMail.ts";
 
 afterEach(() => {
@@ -50,6 +51,7 @@ describe("a message to a seller, edited", () => {
 				},
 			},
 		});
+		expect(refusedBy("sellerMessageSendBody", bodyOf(sent))).toEqual([]);
 		await s.reply(sent, { said: "Sent to Pie Box Pros.", events: [90] });
 		await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
