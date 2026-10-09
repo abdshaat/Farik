@@ -1,10 +1,10 @@
 # Standalone: logos and info buttons on the agent page
 
-Status: draft
+Status: ready
 Branch: `feat/agent-page-logos` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` section 6.7 (role kits' setup copy), F9 (the agent page)
 Depends on: phase 7 (merged in #22)
-Readiness confirmed by: <name>, <date> (one round, against `docs/standards/workflow.md` stage 2)
+Readiness confirmed by: a fresh Opus 5.5 session, 2026-10-09 (one round, against `docs/standards/workflow.md` stage 2)
 
 ## Goal
 
@@ -19,6 +19,8 @@ The founder asked on 2026-10-09, before phase 8: on the agent page (`/team/<agen
 - The info button is a new `@farik/ui` component, `InfoTip`. Its text stays in the DOM (hidden with CSS, not `hidden`), tied to the button by `aria-describedby`, shown on `:hover` and `:focus-within`, toggled by click (touch), closed by Escape. Rejected: the native `title` attribute (no touch, no keyboard, unstyled); `<details>` (pushes layout, not a tip).
 - `Switch` and `Choice` gain an optional `info?: ReactNode`, rendered as an `InfoTip` after the label (Switch) or the legend (Choice). An `InfoTip` never goes inside a `Choice` option card, because a button inside a radio's label is a nested control; the effort options lose their descriptions and one `InfoTip` on the legend explains all three.
 - Visible: headings, labels, the service's short line, statuses that ask for action (Connect again, Sign in again, the Playwright-off warning, kitAtLaunch, kitGone), counts, buttons. Behind ⓘ: every string named `*Note`, `*Lead`, `why`, and the custom connector's how-it-starts and tool list. Field hints under a text box (`agentTalksHint`, `sitesAddHint`) stay visible, shortened, because they say what to type there.
+- An `InfoTip` on a heading is the heading's next sibling, never inside `<h2>`/`<h3>`; the lead spans now inside headings (`connectorsLead`, `kitLead`, `connectorsYoursLead`, `skillsLead`) are removed from them, so each heading's accessible name is its title alone (orders.test.tsx:68, sites.test.tsx:52 and :64, team.test.tsx:989 find headings by name).
+- `InfoTip` ids are unique on the page: `kit-${service.name}-info`, `gone-${name}-info`, `custom-${server.name}-info`, `tier-${tier}-info` (Switch's own `${id}-info`), and `<string key>-info` for every other one (for example `agentPauseNote-info`).
 - Copy style (founder: "sacrifice grammar for less text"): fragments, no "So the <role>", read-only said as "Read-only.". `about` (visible) at most 6 words; `why` (behind ⓘ) at most 20 words. Pinned by a test, not by a loader rule, because a kit file from elsewhere is not the founder's copy.
 - Rewording copy does not ask anyone to connect again: `SetupCopy` is outside the hashed entry (`KitConnector::Server`, `crates/roles/src/kit.rs:38`; `matches_kit` compares `entry` only).
 - Plans for work outside a phase live at `docs/plans/standalone/<name>.md`; this step adds that row to `docs/standards/code.md`'s Documents table, the route `code.md` gives for a missing row.
@@ -149,7 +151,7 @@ docs/SPEC.md, docs/design/role-kits.md, docs/standards/code.md  modifies: Task 7
 
 ## Interfaces
 
-Consumes: `KitService`, `McpServer` (`apps/web/src/pages/Team.tsx`, on main); `Switch`, `Choice`, `uiStrings` (`@farik/ui`, on main); `load_kit(role: Role) -> Result<Kit, KitError>` and `Role` (`crates/roles`, on main).
+Consumes: `KitService` (`apps/web/src/pages/Team.tsx`, on main), `McpServer` (`apps/web/src/pages/setup/TeamSetup.tsx`, on main); `Switch`, `Choice`, `uiStrings` (`@farik/ui`, on main); `load_kit(role: Role) -> Result<Kit, KitError>` and `Role` (`crates/roles`, on main).
 
 Produces:
 
@@ -168,7 +170,7 @@ export function ServiceLogo(props: { name: string }): JSX.Element;
 
 ### Task 1: InfoTip
 
-Files: created `packages/ui/src/InfoTip.tsx`, `InfoTip.module.css`, `InfoTip.test.tsx`; modified `index.ts`, `strings.ts`
+Files: created `packages/ui/src/InfoTip.tsx`, `InfoTip.module.css`, `InfoTip.test.tsx`; modified `index.ts`, `strings.ts`. `InfoTip.module.css` uses tokens only and its first rule sets a `var(--farik-type-*-family)` font-family (`tokens-only.test.ts`).
 Produces: `InfoTip`
 Consumes: nothing
 
@@ -196,12 +198,12 @@ Tests:
 
 ### Task 3: service logos
 
-Files: created `apps/web/src/assets/services/*.svg` (from the source table), `service-logo.ts`, `service-logo.test.ts`, `ServiceLogo.tsx`
+Files: created `apps/web/src/assets/services/*.{svg,png}` (exactly the 24 files of the source table, one file per name), `service-logo.ts`, `service-logo.test.ts`, `ServiceLogo.tsx`
 Produces: `serviceLogo`, `ServiceLogo`
 
 Tests:
 
-- `it('has a logo for every connector a shipped kit offers')` — reads every `crates/roles/roles/*/kit.yaml` (node `fs`, path from `import.meta.dirname`), takes each line matching `/^  - name: ([a-z0-9-]+)$/m`, and asserts `serviceLogo(name)` is not plug's URL for each; the list is non-empty.
+- `it('has a logo for every connector a shipped kit offers')` — reads every `crates/roles/roles/*/kit.yaml` (node `fs`, path from `import.meta.dirname`), takes each line matching `/^  - name: ([a-z0-9-]+)$/gm` with `matchAll`, and asserts `serviceLogo(name)` is not plug's URL for each; the list is non-empty.
 - `it('falls back to the plug for a name it does not know')` — `serviceLogo("airtable")` equals `serviceLogo("plug")`.
 - `it('has a logo for the built-in Playwright')` — `serviceLogo("playwright")` is not plug's URL.
 
@@ -214,9 +216,9 @@ Consumes: Tasks 1 to 3
 
 Tests:
 
-- `it('shows each kit service with its logo, title and short line, its reason behind info')` — in the Product Manager's kit row for Notion: an `img` whose `src` is `serviceLogo("notion")`, the text of `about`, a button "More about this" whose tip holds `why`; `why` is not inside the row's visible paragraph.
-- `it('shows the plug for a connector you added')` — the "Added by you" row's `img` src is `serviceLogo("plug")`; its tool list sits inside a tooltip.
-- `it('shows Playwright with its logo, a short line and the rest behind info')` — the switch row has `serviceLogo("playwright")`, the text `connectorPlaywrightShort`, and a tooltip holding `connectorPlaywrightNote`.
+- `it('shows each kit service with its logo, title and short line, its reason behind info')` — in the Product Manager's kit row for Notion: an `img` whose `getAttribute("src")` equals `serviceLogo("notion")`, the text of `about`, a button "More about this" whose tip holds `why`; no element of the row outside its `role="tooltip"` element contains `why`'s text.
+- `it('shows the plug for a connector you added')` — the "Added by you" row's `img` `getAttribute("src")` equals `serviceLogo("plug")`; its tool list sits inside a tooltip.
+- `it('shows Playwright with its logo, a short line and the rest behind info')` — the switch row has an `img` whose `getAttribute("src")` equals `serviceLogo("playwright")`, the text `connectorPlaywrightShort`, and a tooltip holding `connectorPlaywrightNote`.
 
 - [ ] `feat(web): show service logos and hide connector details behind info`
 
@@ -241,11 +243,13 @@ Tests:
 
 - `shipped_kit_copy_is_short` — for every `Role` with a shipped `kit.yaml`, `load_kit(role)`'s every `KitConnector::Server`, `copy.about` has at most 6 words and `copy.why` at most 20 (split on whitespace).
 
+The existing tests in `kit.rs` that pin the old `why` text (kit.rs:1611, 1675, 1742, 1799, 1866, 1945, 2020, 3540, 3853, 3932, 3982, 4064) are updated to the new copy in the same commit; what each asserts besides the words stays.
+
 - [ ] `feat(roles): say each kit service in a few plain words`
 
 ### Task 7: docs
 
-Files: modified `docs/SPEC.md` 6.7 (a paragraph "Service logos and info buttons (added in 0.79; standalone plan agent-page-logos)": bundled logos by kit name, plug fallback, never fetched; `about` is the row's visible line, at most 6 words, `why` sits behind ⓘ, at most 20; every note on the agent page behind ⓘ), `docs/design/role-kits.md` line 80 ("a one-line reason each" → a logo and a few words each, the reason behind ⓘ), `docs/standards/code.md` (Documents row: "Plan outside a phase | `docs/plans/standalone/<name-kebab>.md`, from the step template | `docs/plans/standalone/agent-page-logos.md`"), this plan's checkboxes.
+Files: modified `docs/SPEC.md` 6.7 (a paragraph "Service logos and info buttons (added in 0.79; standalone plan agent-page-logos)": bundled logos by kit name, plug fallback, never fetched; `about` is the row's visible line, at most 6 words, `why` sits behind ⓘ, at most 20; every note on the agent page behind ⓘ; and a "Revision 0.79 (2026-10-09)" sentence in the header at `docs/SPEC.md:3`, as every revision has), `docs/design/role-kits.md` line 80 ("a one-line reason each" → a logo and a few words each, the reason behind ⓘ), `docs/standards/code.md` (Documents row: "Plan outside a phase | `docs/plans/standalone/<name-kebab>.md`, from the step template | `docs/plans/standalone/agent-page-logos.md`"), this plan's checkboxes.
 
 - [ ] `docs: record service logos and info buttons on the agent page`
 
