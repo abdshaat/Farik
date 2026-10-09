@@ -1,7 +1,7 @@
 //! The procurement mailbox over IMAP and SMTP (`docs/SPEC.md` 6.6, 6.10; phase 7 step 10f): the
 //! settings the owner connects, the providers Farik knows, and a login to both servers over TLS
 //! whose certificate is always checked. The password is a [`Secret`] and is kept in the OS
-//! keychain, never in these settings, an event, a refusal or the log. Phase 14's receipts intake
+//! keychain, never in these settings, an event, a refusal or the log. Phase 15's receipts intake
 //! reuses this module.
 
 use std::future::Future;

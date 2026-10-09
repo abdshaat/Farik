@@ -2066,7 +2066,7 @@ mod tests {
             !refusal(&quote).is_empty(),
             "a quote request naming an order"
         );
-        // Only the procurement mailbox exists before phase 14's receipts.
+        // Only the procurement mailbox exists before phase 15's receipts.
         for kind in [EventKind::MailboxConnected, EventKind::MailboxDisconnected] {
             let mut wire = an_event_wire(kind);
             wire["body"]["purpose"] = json!("receipts");
@@ -2161,7 +2161,7 @@ mod tests {
         let mut declined = an_event_wire(EventKind::DataPipelineDeclined);
         declined["body"]["request"] = json!("FRK-9");
         assert!(!refusal(&declined).is_empty(), "a decline with one");
-        // Two deciders: the Product Manager and the owner. `auto` is step 10h's.
+        // Two deciders: the Product Manager and the owner. `auto` is phase 9 step 01's.
         for kind in [
             EventKind::DataPipelineApproved,
             EventKind::DataPipelineDeclined,
@@ -2753,7 +2753,7 @@ mod tests {
         };
         let scheduled = EventKind::SocialPostScheduled;
         let requested = EventKind::SocialPostRequested;
-        // Who approved a post: the plan or the owner, and nothing else yet (step 10h adds auto).
+        // Who approved a post: the plan or the owner, and nothing else yet (phase 9 step 01 adds auto).
         bad(scheduled, &|body| {
             body["approved_by"] = json!("auto");
         });

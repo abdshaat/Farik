@@ -1492,7 +1492,7 @@
     "dataPipelineDecidedBy": {
       "type": "string",
       "enum": ["product_manager", "human"],
-      "description": "Who decided a request: the Product Manager, in the session that was asked to, or the owner. Under auto (phase 7 step 10h) a third word joins them."
+      "description": "Who decided a request: the Product Manager, in the session that was asked to, or the owner. Under auto (phase 9 step 01) a third word joins them."
     },
     "dataPipelineRequestedBody": {
       "title": "Data Pipeline Requested Body",
@@ -1549,7 +1549,7 @@
     "mailboxPurpose": {
       "type": "string",
       "enum": ["procurement"],
-      "description": "What a mailbox is for. Only the Procurement Specialist's before phase 14, whose receipts intake adds a second."
+      "description": "What a mailbox is for. Only the Procurement Specialist's before phase 15, whose receipts intake adds a second."
     },
     "sellerMessageNumber": {
       "type": "integer",
