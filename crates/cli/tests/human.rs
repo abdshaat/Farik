@@ -2354,21 +2354,22 @@ fn farik_renewal_lists_and_dismisses() {
     );
 }
 
-/// Message `number` that `theo` drafted on `task` for `seller`, its draft kept as the tool keeps it.
+/// Message `number` that `theo` drafted on `task` for `seller` with `purpose` (and about `order`,
+/// when it names one), its draft kept as the tool keeps it.
 fn message_drafted(
     repository: &farik_store::git::fixtures::TempRepo,
     task: &str,
     number: u64,
     body: &str,
+    purpose: &str,
     order: Option<u64>,
 ) {
     let mut drafted = json!({
         "message": number, "seller": "Pie Box Pros", "to": "sales@pieboxpros.test",
-        "subject": "Quote for 500 printed pie boxes", "purpose": "quote_request",
+        "subject": "Quote for 500 printed pie boxes", "purpose": purpose,
         "sha256": "9f2b0c1d5e7a4b3c8d6e1f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c"
     });
     if let Some(order) = order {
-        drafted["purpose"] = json!("purchase_order");
         drafted["purchase_order"] = json!(order);
     }
     record_as(
@@ -2397,10 +2398,27 @@ fn farik_procurement_lists_sends_and_discards() {
         &task,
         1,
         "Hello,\nWhat would 500 boxes cost?\u{1b}[31m",
+        "quote_request",
         None,
     );
-    message_drafted(&repository, &task, 2, "About your order.", Some(7));
-    message_drafted(&repository, &task, 3, "Never mind.", None);
+    message_drafted(
+        &repository,
+        &task,
+        2,
+        "About your order.",
+        "purchase_order",
+        Some(7),
+    );
+    message_drafted(&repository, &task, 3, "Never mind.", "quote_request", None);
+    // A follow-up question about a placed order carries the order, and is no order's message.
+    message_drafted(
+        &repository,
+        &task,
+        4,
+        "Has it shipped?",
+        "question",
+        Some(7),
+    );
     record(
         &repository,
         &task,
@@ -2427,7 +2445,7 @@ fn farik_procurement_lists_sends_and_discards() {
     let machine = run(&repository.path, &["--json", "procurement", "messages"]);
     assert_eq!(machine.code, 0, "{}", machine.err);
     let wire: Value = serde_json::from_str(machine.out.trim()).expect("one JSON object alone");
-    assert_eq!(wire["messages"].as_array().map(Vec::len), Some(3), "{wire}");
+    assert_eq!(wire["messages"].as_array().map(Vec::len), Some(4), "{wire}");
     assert!(
         !listed.out.contains("Never mind."),
         "a discarded message does not wait"
@@ -2493,6 +2511,17 @@ fn farik_procurement_lists_sends_and_discards() {
         gone.err
     );
     assert_eq!(driver.commands().len(), 2, "nothing else was sent");
+    // A follow-up question is sent from the command line as drafted, though it names an order.
+    let follow_up = run(&repository.path, &["procurement", "send", "4"]);
+    assert_eq!(follow_up.code, 0, "{}", follow_up.err);
+    assert_eq!(
+        driver.commands()[2],
+        Command::SellerMessageSend {
+            message: 4,
+            subject: "Quote for 500 printed pie boxes".to_string(),
+            body: "Has it shipped?".to_string(),
+        }
+    );
 
     // Reading the mailbox, like connecting it, is the web app's while another process drives.
     let checked = run(&repository.path, &["procurement", "check"]);

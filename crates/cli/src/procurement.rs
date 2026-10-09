@@ -329,7 +329,8 @@ pub fn messages(project: &Project, io: &CliIo<'_>) -> Result<Report, String> {
     })
 }
 
-/// The message `number` as `seller_messages.list` has it, waiting and not an order's.
+/// The message `number` as `seller_messages.list` has it, waiting and not an order's (a message
+/// whose purpose is `purchase_order`; a follow-up question about a placed order is not one).
 ///
 /// # Errors
 ///
@@ -345,7 +346,7 @@ pub fn waiting(project: &Project, io: &CliIo<'_>, number: u64) -> Result<Value, 
         .find(|row| row["message"].as_u64() == Some(number))
         .cloned()
         .ok_or_else(|| format!("message {number} is not in this project"))?;
-    if row.get("purchase_order").is_some() {
+    if row["purpose"] == "purchase_order" {
         return Err(format!(
             "message {number} carries an order: send it from the web app, where you see it beside \
              its order"
