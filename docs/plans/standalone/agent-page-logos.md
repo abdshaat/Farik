@@ -251,7 +251,7 @@ The existing tests in `kit.rs` that pin the old `why` text (kit.rs:1611, 1675, 1
 
 Files: modified `docs/SPEC.md` 6.7 (a paragraph "Service logos and info buttons (added in 0.79; standalone plan agent-page-logos)": bundled logos by kit name, plug fallback, never fetched; `about` is the row's visible line, at most 6 words, `why` sits behind ⓘ, at most 20; every note on the agent page behind ⓘ; and a "Revision 0.79 (2026-10-09)" sentence in the header at `docs/SPEC.md:3`, as every revision has), `docs/design/role-kits.md` line 80 ("a one-line reason each" → a logo and a few words each, the reason behind ⓘ), `docs/standards/code.md` (Documents row: "Plan outside a phase | `docs/plans/standalone/<name-kebab>.md`, from the step template | `docs/plans/standalone/agent-page-logos.md`"), this plan's checkboxes.
 
-- [ ] `docs: record service logos and info buttons on the agent page`
+- [x] `docs: record service logos and info buttons on the agent page`
 
 ## Verification
 
