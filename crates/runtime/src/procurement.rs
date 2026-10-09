@@ -829,11 +829,22 @@ pub(crate) fn record_unattended(
     body: EventBody,
     task: Option<TaskId>,
 ) -> Result<u64, ToolError> {
+    record_unattended_at(deps, body, task, deps.clock.now())
+}
+
+/// [`record_unattended`], stamped `at` and not with the time of the record: a reply is filed in the
+/// month `at` names, and must be found there.
+pub(crate) fn record_unattended_at(
+    deps: &ToolDeps,
+    body: EventBody,
+    task: Option<TaskId>,
+    at: DateTime<Utc>,
+) -> Result<u64, ToolError> {
     let ids = EventIds {
         task_id: task,
         ..deps.ids.clone()
     };
-    let event = new_event(body, deps.clock.now(), ids).map_err(|error| ToolError::Failed {
+    let event = new_event(body, at, ids).map_err(|error| ToolError::Failed {
         detail: format!("the event cannot be stamped: {error:?}"),
     })?;
     let appended = deps.log.append(&event).map_err(|error| ToolError::Failed {

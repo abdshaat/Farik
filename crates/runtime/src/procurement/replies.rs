@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use super::{
     MAIL, MailboxRefusal, Mailer, mail_dir, mail_failed, mailbox_ledger, mailbox_settings,
-    record_unattended, store_refusal,
+    record_unattended, record_unattended_at, store_refusal,
 };
 use crate::daemon::DaemonState;
 use crate::mailbox::{
@@ -177,7 +177,10 @@ fn keep_reply(
         let _ = std::fs::remove_dir_all(&folder);
         return Err(mail_failed(error));
     }
-    if let Err(error) = record_unattended(deps, EventBody::SellerReplyReceived(body), None) {
+    // Stamped `now`, the time its folder is named from, so that the month it is found in is the
+    // month it was kept in, whenever the record is made.
+    if let Err(error) = record_unattended_at(deps, EventBody::SellerReplyReceived(body), None, now)
+    {
         let _ = std::fs::remove_dir_all(&folder);
         return Err(mail_failed(error));
     }
@@ -1075,6 +1078,72 @@ mod tests {
             state["restarted_at"],
             json!(now),
             "the agent\u{2019}s page says the provider renumbered the mailbox"
+        );
+    }
+
+    /// A clock that reads one second later each time it is read, from `start`.
+    struct Ticking {
+        start: chrono::DateTime<chrono::Utc>,
+        reads: std::sync::atomic::AtomicI64,
+    }
+
+    impl farik_protocol::clock::Clock for Ticking {
+        fn now(&self) -> chrono::DateTime<chrono::Utc> {
+            let read = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.start + Duration::seconds(read)
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    async fn a_reply_kept_as_the_month_ends_keeps_its_text_and_files() {
+        let story = Story::new("month-end").await;
+        let (_, id) = sent(&story).await;
+        let pdf = b"%PDF-1.7 the quote".to_vec();
+        story.fixture.deliver(
+            BUYING.address,
+            &Mime {
+                attachments: vec![("quote.pdf", "application/pdf", pdf.clone())],
+                ..answer(&id, "r1@pieboxpros.test", "Re: Quote")
+            }
+            .build(),
+        );
+        // The check starts in the last second of October and records a second later, in November.
+        let base = &story.harness.project.deps;
+        let deps = crate::tools::ToolDeps {
+            log: Arc::clone(&base.log),
+            projections: Arc::clone(&base.projections),
+            files: Arc::clone(&base.files),
+            transitions: Arc::clone(&base.transitions),
+            git: story.harness.project.repo.adapter(),
+            clock: Arc::new(Ticking {
+                start: chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 10, 31, 23, 59, 59)
+                    .single()
+                    .expect("a time"),
+                reads: std::sync::atomic::AtomicI64::new(0),
+            }),
+            ids: base.ids.clone(),
+            kits: Arc::clone(&base.kits),
+        };
+        assert_eq!(check_now(&deps, &mailer(&story)).await.expect("checked"), 1);
+        let listed = seller_replies_list(&deps).expect("the list");
+        let row = &listed["replies"][0];
+        assert!(
+            row["text"]
+                .as_str()
+                .expect("text")
+                .contains("500 boxes are 0.38 each."),
+            "the reply\u{2019}s text is found: {row}"
+        );
+        let file = reply_attachment(&deps, 1, 1).expect("its file is found");
+        assert_eq!(file["media_type"], "application/pdf");
+        // It was received, and kept, in the month the check began.
+        assert!(
+            row["received_at"]
+                .as_str()
+                .expect("a time")
+                .starts_with("2026-10-31T23:59:59"),
+            "{row}"
         );
     }
 
