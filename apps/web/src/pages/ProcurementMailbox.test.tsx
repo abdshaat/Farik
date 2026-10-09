@@ -122,5 +122,7 @@ describe("the procurement mailbox page", () => {
 		).toBe("");
 		expect(document.body.textContent).not.toContain("pw-from-the-owner");
 		expect(document.body.textContent).not.toContain("535");
+		// The password was sent the once: a refusal does not send it again.
+		expect(s.calls("procurement_mailbox.connect")).toHaveLength(1);
 	});
 });

@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../../strings/en.ts";
 import { sentCommand } from "../../test/gate.ts";
@@ -6,6 +6,8 @@ import { showsWhatItHides } from "../../test/hidden.ts";
 import { bodyOf, refusedBy } from "../../test/schema.ts";
 import {
 	KNOWN,
+	MAILBOX,
+	NO_MAILBOX,
 	todayWithMail,
 	WRITTEN_MAILBOX,
 	WRITTEN_MESSAGE,
@@ -16,8 +18,11 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-async function edited(message: object = KNOWN) {
-	const { s } = await todayWithMail({ messages: [message] });
+async function edited(message: object = KNOWN, mailbox?: object) {
+	const { s } = await todayWithMail({
+		messages: [message],
+		...(mailbox ? { mailbox } : {}),
+	});
 	fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
 	const dialog = await screen.findByRole("dialog", {
 		name: "Edit the message to Pie Box Pros",
@@ -77,6 +82,26 @@ describe("a message to a seller, edited", () => {
 		expect(within(dialog).getByRole("alert").textContent).toContain(
 			"The server\\u{202e} was busy",
 		);
+	});
+
+	it("the_cap_or_no_mailbox_leaves_the_dialog_no_send", async () => {
+		// At the day's cap the dialog says so, and offers no Send.
+		const capped = await edited(KNOWN, { ...MAILBOX, sent_today: 50 });
+		expect(within(capped.dialog).getByText(en.sellerCap)).toBeTruthy();
+		expect(
+			within(capped.dialog).queryByRole("button", { name: "Send" }),
+		).toBeNull();
+		fireEvent.click(
+			within(capped.dialog).getByRole("button", { name: "Close" }),
+		);
+		await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		cleanup();
+		// With no mailbox it says to connect one, and offers no Send.
+		const none = await edited(KNOWN, NO_MAILBOX);
+		expect(within(none.dialog).getByText(en.sellerNoMailbox)).toBeTruthy();
+		expect(
+			within(none.dialog).queryByRole("button", { name: "Send" }),
+		).toBeNull();
 	});
 
 	it("close_sends_nothing", async () => {

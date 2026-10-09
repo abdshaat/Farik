@@ -73,6 +73,11 @@ export const FOLLOW_UP = {
 	purchase_order: 10,
 };
 
+/** A message that is not waiting, in each of the other states: Today lists none. */
+export const SENT_MESSAGES = ["sent", "discarded", "closed"].map(
+	(state, index) => ({ ...KNOWN, message: 20 + index, state }),
+);
+
 /** A character that reorders what is around it: shown, it would hide what the text says. */
 const HIDE = "\u202e";
 

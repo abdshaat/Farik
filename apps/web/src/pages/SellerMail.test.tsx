@@ -16,6 +16,7 @@ import {
 	ORDER_ROW,
 	ORDERS_MESSAGE,
 	REPLY,
+	SENT_MESSAGES,
 	todayWithMail,
 	WRITTEN_MAILBOX,
 	WRITTEN_MESSAGE,
@@ -39,8 +40,9 @@ afterEach(() => {
 describe("Today, messages to sellers", () => {
 	it("shows_each_message_whole", async () => {
 		const { container } = await todayWithMail({
-			messages: [MESSAGE, KNOWN, ORDERS_MESSAGE, FOLLOW_UP],
+			messages: [MESSAGE, KNOWN, ORDERS_MESSAGE, FOLLOW_UP, ...SENT_MESSAGES],
 		});
+		// A message sent, discarded or closed is not waiting, and is not counted or listed.
 		const section = await screen.findByRole("region", {
 			name: "Messages to sellers (3)",
 		});
@@ -271,8 +273,9 @@ describe("Today, replies from sellers", () => {
 	it("a_reply_offers_comparison_or_follow_up", async () => {
 		await todayWithMail({
 			messages: [MESSAGE, ORDERS_MESSAGE],
-			replies: [REPLY, ORDER_REPLY],
+			replies: [REPLY, ORDER_REPLY, { ...REPLY, reply: 3, dismissed: true }],
 		});
+		// A reply dismissed already is not listed or counted.
 		const section = await screen.findByRole("region", {
 			name: "Replies from sellers (2)",
 		});
@@ -293,6 +296,35 @@ describe("Today, replies from sellers", () => {
 			second.getByRole("button", { name: en.ordersFollowUp }),
 		).toBeTruthy();
 		expect(second.queryByRole("button", { name: en.replyCompare })).toBeNull();
+	});
+
+	it("a_follow_up_is_asked_for_and_the_reply_dismissed", async () => {
+		const { s } = await todayWithMail({
+			messages: [MESSAGE, ORDERS_MESSAGE],
+			replies: [ORDER_REPLY],
+		});
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.ordersFollowUp }),
+		);
+		// The request is the order's follow-up, not a comparison of replies.
+		const asking = await screen.findByRole("dialog", {
+			name: "Ask Ivo to follow up PO-12?",
+		});
+		expect(
+			(within(asking).getByLabelText(/Your request/) as HTMLTextAreaElement)
+				.value,
+		).toBe(
+			"Follow up on PO-12 from Packaging Express: where is it, and when will it come?",
+		);
+		fireEvent.click(
+			within(asking).getByRole("button", { name: "Send to the team" }),
+		);
+		await waitFor(() => expect(s.calls("request.file")).toHaveLength(1));
+		await s.reply(s.calls("request.file")[0] as never, { task_id: "FRK-40" });
+		const dismissed = await sentCommand(s);
+		expect(dismissed.params).toEqual({
+			command: { command: "seller_reply_dismiss", body: { reply: 2 } },
+		});
 	});
 
 	it("every_text_of_a_reply_shows_what_it_hides", async () => {
@@ -335,14 +367,58 @@ describe("an order's press", () => {
 	it("approve_and_send_shows_the_order_s_email", async () => {
 		await todayWithMail({ waiting: waitingOrder(SEND) });
 		const list = await screen.findByRole("list", { name: en.waitingList });
-		expect(
+		fireEvent.click(
 			await within(list).findByRole("button", {
 				name: "Approve and send to Pie Box Pros",
 			}),
-		).toBeTruthy();
+		);
 		expect(
 			within(list).getByRole("button", { name: en.orderApprove }),
 		).toBeTruthy();
+		const dialog = await screen.findByRole("dialog", {
+			name: "Approve PO-12 and send it to Pie Box Pros?",
+		});
+		// The press says what it does, and that Farik pays nothing.
+		expect(
+			within(dialog).getByText(
+				"Farik emails this order to Pie Box Pros from your procurement mailbox when you press Approve and send. You pay Pie Box Pros yourself; Farik never pays.",
+			),
+		).toBeTruthy();
+		// From is the owner's mailbox; To is the seller's address, its domain in bold.
+		const from = within(dialog).getByText(en.sellerFromLabel).parentElement;
+		expect(from?.textContent).toBe(
+			`${en.sellerFromLabel} Sam Ortiz buying@cornerbakery.test`,
+		);
+		const to = within(dialog).getByText(en.sellerToLabel).parentElement;
+		expect(to?.querySelector("code")?.textContent).toBe(
+			"orders@pieboxpros.test",
+		);
+		expect(to?.querySelector("code strong")?.textContent).toBe(
+			"pieboxpros.test",
+		);
+		// The words are the agent's draft, and what Farik adds is shown with them.
+		expect(
+			(within(dialog).getByLabelText("Subject") as HTMLInputElement).value,
+		).toBe("Order PO-12");
+		expect(
+			(within(dialog).getByLabelText("Message") as HTMLTextAreaElement).value,
+		).toBe("Please find our order attached.");
+		expect(within(dialog).getByText(en.sellerAdds)).toBeTruthy();
+		expect(dialog.querySelector("pre")?.textContent).toBe(
+			"Sam Ortiz\nCorner Bakery\n\nWritten with an AI assistant and sent by Sam Ortiz after reading it.",
+		);
+	});
+
+	it("approve_and_send_goes_at_fewer_than_fifty_a_day", async () => {
+		await todayWithMail({
+			waiting: waitingOrder(SEND),
+			mailbox: { ...MAILBOX, sent_today: 50 },
+		});
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		await within(list).findByRole("button", { name: en.orderApprove });
+		expect(
+			within(list).queryByRole("button", { name: /Approve and send/ }),
+		).toBeNull();
 	});
 
 	it("approve_and_send_needs_the_email_and_a_mailbox", async () => {
