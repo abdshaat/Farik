@@ -398,21 +398,23 @@ pub(crate) struct ReadRepliesInput {
 /// The most bytes of one reply's words an answer repeats.
 const REPLY_CAP_BYTES: usize = 80 * 1024;
 
-/// Where the seller tools read: the Procurement Specialist's implement session of a task and its
-/// chat.
+/// Where the seller tools read: the Procurement Specialist's implement session of its own task and
+/// its chat.
 fn where_it_reads(call: &Call<'_>) -> Result<(), ToolError> {
-    let in_its_task =
-        call.context.purpose == SessionPurpose::Implement && call.context.task_id.is_some();
-    if call.role() == Role::ProcurementSpecialist
-        && (in_its_task || call.context.purpose == SessionPurpose::Chat)
-    {
+    let refuse = |_: &str| {
+        refused(
+            "seller_mail_refused",
+            "only the Procurement Specialist reads its messages to sellers and their replies, in \
+             the implement session of its own task and in its chat",
+        )
+    };
+    if call.role() != Role::ProcurementSpecialist {
+        return Err(refuse(""));
+    }
+    if call.context.purpose == SessionPurpose::Chat {
         return Ok(());
     }
-    Err(refused(
-        "seller_mail_refused",
-        "only the Procurement Specialist reads its messages to sellers and their replies, in the \
-         implement session of its task and in its chat",
-    ))
+    in_its_own_implement_session(call, "its messages to sellers", &refuse)
 }
 
 /// `farik_read_seller_messages`: every message of the project, oldest first, with its state, why
@@ -421,7 +423,7 @@ fn where_it_reads(call: &Call<'_>) -> Result<(), ToolError> {
 ///
 /// # Errors
 ///
-/// `seller_mail_refused` outside the role's implement session and chat; `Failed` when the log
+/// `seller_mail_refused` outside the role's own implement session and chat; `Failed` when the log
 /// cannot be read.
 pub(super) fn read_seller_messages(call: &Call<'_>) -> Result<Value, ToolError> {
     where_it_reads(call)?;
@@ -467,7 +469,7 @@ pub(super) fn read_seller_messages(call: &Call<'_>) -> Result<Value, ToolError> 
 ///
 /// # Errors
 ///
-/// `seller_mail_refused` outside the role's implement session and chat; `Failed` when the log
+/// `seller_mail_refused` outside the role's own implement session and chat; `Failed` when the log
 /// cannot be read.
 pub(super) fn read_seller_replies(
     call: &Call<'_>,
@@ -835,8 +837,11 @@ mod tests {
             let mut chat = project.context("proc", None);
             chat.purpose = SessionPurpose::Chat;
             run(&chat, tool, json!({})).expect("a chat reads");
-            // An implement session about no task does not.
+            // An implement session about no task does not, nor one about a task that is another
+            // Procurement Specialist's.
             let reason = refusal_of(project.call("proc", None, tool, json!({})));
+            assert!(reason.starts_with("seller_mail_refused: "), "{reason}");
+            let reason = refusal_of(project.call("proc", Some("FRK-3"), tool, json!({})));
             assert!(reason.starts_with("seller_mail_refused: "), "{reason}");
         }
     }
