@@ -865,6 +865,53 @@ mod tests {
         );
         // The agent's tool discards nothing either: the function is not offered, and refuses.
         assert!(discard_message(&harness.project.deps, 12345).is_err());
+
+        // With a mailbox connected (its settings and its password; no server is reached to refuse a
+        // field), the subject the owner sends is checked as the draft's was: a control character the
+        // schema lets through is refused, and nothing is recorded.
+        let keys = std::sync::Arc::new(crate::connectors::MemoryConnectorSecrets::default());
+        assert!(harness.daemon.set_connector_secrets(keys.clone()));
+        let at = harness
+            .daemon
+            .mailbox_at(harness.project.deps.files.root())
+            .expect("the project's id");
+        keys.save(&at, &secret(BUYING.password)).expect("saved");
+        let server = |port| crate::mailbox::Server {
+            host: "localhost".to_string(),
+            port,
+            security: crate::mailbox::Security::Tls,
+        };
+        let settings = crate::mailbox::MailboxSettings {
+            address: BUYING.address.to_string(),
+            name: "Sam Ortiz".to_string(),
+            provider: crate::mailbox::Provider::Other,
+            imap: server(993),
+            smtp: server(465),
+            username: BUYING.login.to_string(),
+            folder: "INBOX".to_string(),
+            signature: String::new(),
+            disclose_ai: true,
+        };
+        std::fs::write(
+            harness.procurement_folder().join("mail/mailbox.json"),
+            serde_json::to_string(&settings).expect("settings"),
+        )
+        .expect("kept");
+        let waiting = draft(quote());
+        let bell = orchestrator
+            .handle(Command::SellerMessageSend {
+                message: waiting,
+                subject: "Bell\u{7}".to_string(),
+                body: BODY.to_string(),
+            })
+            .await
+            .expect_err("a control character in the subject");
+        assert!(
+            reason(bell).starts_with("seller_message_field_invalid: "),
+            "the subject is checked when it is sent"
+        );
+        assert!(harness.events(&[EventKind::SellerMessageSent]).is_empty());
+        assert!(harness.events(&[EventKind::SellerMessageFailed]).is_empty());
     }
 
     /// An order of Ivo's, as `purchase_order.drafted` records it.
