@@ -149,15 +149,15 @@ Each chosen by ADR 0020's order and ADR 0035's routes, researched 2026-10-05. On
 |---|---|---|---|---|---|
 | `fx` | one currency | Farik's own over Frankfurter `v2` | none | 3 `network` | 10d |
 | `exa` | finding makers, sellers and price pages | official, `https://mcp.exa.ai/mcp` | none (free, rate-limited) | `web_search_exa` `network`, `web_fetch_exa` `denied` (it fetches on Exa's servers and follows redirects, out of the approved-sites check's sight; its search results can show the agent text from any site, which its setup says) | 10d |
-| `serpapi` | Google Shopping, Amazon, eBay and Walmart prices | official, `https://mcp.serpapi.com/mcp` | key, as a bearer header | `search` `external_effect`, allowance 50 a sprint; 2 `denied` | 10d |
+| `serpapi` | Google Shopping, Amazon and Walmart prices (eBay is read through `ebay` alone) | official, `https://mcp.serpapi.com/mcp` | key, as a bearer header | `search` `external_effect`, allowance 50 a sprint; 2 `denied` | 10d |
 | `brex` | what the company already spends with a seller | official, `https://api.brex.com/mcp` | 1, read-only scopes | 11 `network`, 32 `denied` | 10d |
 | `aws-pricing` | AWS list prices, for a software team | official, `uvx awslabs.aws-pricing-mcp-server==1.1.1` | key, pricing reads only; needs `uv` | 6 `network`, 3 `denied` | 10d |
 | `recalls` | US product recalls; a vehicle's recalls, complaints, ratings; VIN decoding | Farik's own over CPSC, NHTSA and vPIC | none | 5 `network` | 10g |
-| `ebay` | live eBay listings and asking prices | Farik's own over eBay's Browse API | key (App ID and Cert ID), 5,000 searches a day | 2 `network` | 10g |
+| `ebay` | live eBay listings and asking prices; reads through eBay's API only; no seller's username | Farik's own over eBay's Browse API | key (App ID and Cert ID), 5,000 searches a day | 2 `network` | 10g |
 
 Rejected, each with its reason:
 - **Amazon's buyer API** (the Creators API, since PA-API 5.0 closed on 2026-05-15): it needs an Associates account with ten qualifying sales in thirty days. Amazon's prices come through SerpApi.
-- **eBay's official server** (`@ebay/npm-public-api-mcp` 1.1.0): it calls any eBay API, writes included; Farik's own `ebay` reads search only. eBay's terms forbid agents to buy since 2026-02-20.
+- **eBay's official server** (`@ebay/npm-public-api-mcp` 1.1.0): it calls any eBay API, writes included; Farik's own `ebay` reads search only. eBay's User Agreement (posted 2026-01-20, in force 2026-02-20) bars "LLM-driven bots… to access our Services for any purpose, except with the prior express permission of eBay", so Farik reads eBay through its API alone.
 - **Supplier directories** (Alibaba, Made-in-China, Global Sources, ThomasNet, IndiaMART): no buyer API, and their terms forbid scraping. Makers are found by web search and contacted by mail.
 - **Keepa**, **Edmunds**, **Kelley Blue Book**, **CarGurus**, **Copart**, **Manheim**: paid, partner-only, or no public API.
 - **Ramp**: its tool list is generated at run time and includes card checkout.

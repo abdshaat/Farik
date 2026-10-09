@@ -37,10 +37,16 @@
 //! the second time `aws-pricing` takes to list: the first downloads Python and the package.
 //!
 //! A connector Farik runs itself (`command: farik`: the Architect's OSV, the Marketing
-//! Specialist's Google Ads and the Procurement Specialist's `fx`) is skipped, with a line naming
-//! its pin: the offline test `crates/cli/tests/{file}_server.rs`, `{file}` the connector's name
-//! with each `-` made `_`, since its tools are Farik's own and change only with a Farik release.
-//! The comparison is also proven by `pin_drift`'s tests and `fixture_mcp.rs`.
+//! Specialist's Google Ads and the Procurement Specialist's `fx`, `recalls` and `ebay`) is
+//! skipped, with a line naming its pin: the offline test `crates/cli/tests/{file}_server.rs`,
+//! `{file}` the connector's name with each `-` made `_`, since its tools are Farik's own and
+//! change only with a Farik release. The comparison is also proven by `pin_drift`'s tests and
+//! `fixture_mcp.rs`.
+//!
+//! What `recalls` and `ebay` answer is first seen by `live_farik_servers_answer`, which calls each
+//! of their tools once at the real hosts, by hand, with `FARIK_LIVE_TESTS=1`. `recalls` needs no
+//! key; `ebay` takes the founder's own developer keys from `FARIK_KIT_EBAY_EBAY_CLIENT_ID` and
+//! `FARIK_KIT_EBAY_EBAY_CLIENT_SECRET`, and a missing one is a panic naming it.
 
 use std::collections::BTreeMap;
 
