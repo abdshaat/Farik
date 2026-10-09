@@ -350,6 +350,7 @@ pub fn seller_replies_list(deps: &ToolDeps) -> Result<Value, StoreError> {
             let mut row = json!({
                 "reply": record.reply,
                 "message": message.message,
+                "task_id": message.task_id,
                 "seller": message.drafted.seller.as_str(),
                 "sent_subject": message.drafted.subject.as_str(),
                 "from": received.from.as_str(),
@@ -782,6 +783,7 @@ mod tests {
         let row = &listed["replies"][0];
         assert_eq!(row["reply"], 1);
         assert_eq!(row["message"], message);
+        assert_eq!(row["task_id"], "FRK-1");
         assert_eq!(row["seller"], "Pie Box Pros");
         assert_eq!(row["sent_subject"], SUBJECT);
         assert_eq!(row["from"], "Dana Reyes <sales@pieboxpros.test>");

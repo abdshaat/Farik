@@ -2138,7 +2138,7 @@ export const en = {
 	orderReject: "Reject",
 	orderApproveTitle: "Approve PO-{order} from {seller}?",
 	orderApproveBody:
-		"You place the order and pay for it yourself: Farik never does. Then mark it placed on {name}’s page, and {name} follows it up until it comes.",
+		"You place this order and pay for it yourself; Farik never pays. Then mark it placed on {name}’s page, and {name} follows it up until it comes.",
 	orderRejectTitle: "Reject PO-{order} from {seller}?",
 	orderRejectBody:
 		"{name} reads your note in its next piece of work and can set up another order.",
@@ -2250,4 +2250,160 @@ export const en = {
 	refusePurchaseOrderNote: "A note is at most 600 characters.",
 	refuseRenewalDismissed: "You dismissed this renewal already.",
 	refuseRenewalUnknown: "There is no such renewal.",
+	// The Procurement Specialist's mailbox, its messages to sellers and their replies (spec 6.10).
+	mailboxPageTitle: "Connect a procurement mailbox",
+	mailboxBack: "Back to {name}",
+	mailboxLead:
+		"{name} writes to sellers from this address, and Farik reads their replies there. Use an address for buying, like buying@ your domain: a mailbox of its own, or an alias of yours.",
+	mailboxAlias:
+		"If it is an alias, its sign-in reaches your whole mailbox. Farik opens only messages sent to this address that answer a message Farik sent, or come from an address Farik wrote to. It reads no other message, and marks nothing read, moves nothing and deletes nothing.",
+	mailboxSendAs:
+		"For an alias, your provider must let you send as it (in Gmail: Settings, Accounts, Send mail as).",
+	mailboxAddress: "The address",
+	mailboxName: "Your name, as sellers see it",
+	mailboxProvider: "Your provider",
+	mailboxGmail: "Gmail or Google Workspace",
+	mailboxIcloud: "iCloud Mail",
+	mailboxFastmail: "Fastmail",
+	mailboxOther: "Another provider",
+	mailboxMicrosoftChoice: "Outlook.com or Microsoft 365",
+	mailboxSoon: "Not supported yet",
+	mailboxMicrosoft:
+		"Microsoft no longer lets mail programs sign in with a password, so Farik can’t use a Microsoft mailbox yet. Signing in with Microsoft comes with Farik Cloud. Until then, use an address at another provider.",
+	mailboxHowTitle: "Make an app password for Farik",
+	mailboxHowGmail1: "Turn on 2-Step Verification for this Google account.",
+	mailboxHowGmail2:
+		"Open Google’s App passwords page, name it Farik, and copy the password Google shows.",
+	mailboxHowGmail3: "Paste it below.",
+	mailboxHowGmail:
+		"Google offers app passwords only with 2-Step Verification, not with security keys only or Advanced Protection, and some work accounts don’t have them.",
+	mailboxHowIcloud1: "Sign in at account.apple.com.",
+	mailboxHowIcloud2:
+		"In Sign-In and Security, open App-Specific Passwords and make one named Farik.",
+	mailboxHowIcloud3: "Paste it below.",
+	mailboxHowFastmail1:
+		"In Fastmail, open Settings, then Privacy & Security, then Manage app passwords and access.",
+	mailboxHowFastmail2: "Make a new app password for Mail.",
+	mailboxHowFastmail3: "Paste it below.",
+	mailboxHowFastmail: "Fastmail’s Basic plan can’t be used from mail programs.",
+	mailboxHowOther:
+		"Your provider’s help pages give the servers below. Look for “IMAP” and “app password”.",
+	mailboxHowLink: "How {provider} app passwords work",
+	mailboxUsername: "Sign-in name",
+	mailboxPassword: "App password",
+	mailboxPasswordHint:
+		"Farik keeps it in this computer’s keychain and shows it to nobody, {name} included.",
+	mailboxServers: "Servers",
+	mailboxImap: "Reading mail (IMAP)",
+	mailboxSmtp: "Sending mail (SMTP)",
+	mailboxHost: "Server",
+	mailboxPort: "Port",
+	mailboxEncryption: "Encryption",
+	mailboxTls: "Encrypted from the start",
+	mailboxStarttls: "Encrypted after connecting (STARTTLS)",
+	mailboxFolder: "Folder Farik reads",
+	mailboxSignature: "Your signature",
+	mailboxSignatureHint: "Farik adds it under every message.",
+	mailboxDisclose: "Say that an AI assistant wrote it",
+	mailboxDisclosure:
+		"Written with an AI assistant and sent by {name} after reading it.",
+	mailboxConnect: "Connect",
+	mailboxSendsNothing: "Connecting signs in to both servers and sends nothing.",
+	mailboxChecking: "Signing in to both servers…",
+	mailboxTitle: "Procurement mailbox",
+	mailboxFrom: "{name} writes from {address}.",
+	mailboxChecked:
+		"Farik checks it for replies every 15 minutes. Last checked {time}.",
+	mailboxError: "Farik could not read it {time}: {why}",
+	mailboxRestarted:
+		"Your provider renumbered this mailbox {day}, so replies that came shortly before may not be on Today.",
+	mailboxCheckNow: "Check now",
+	mailboxChange: "Change",
+	mailboxDisconnect: "Disconnect",
+	mailboxDisconnectTitle: "Disconnect {address}?",
+	mailboxDisconnectBody:
+		"Farik forgets its app password and stops reading it. Messages and replies already kept stay in {name}’s folder.",
+	mailboxKeep: "Keep it",
+	mailboxNone:
+		"No mailbox yet. {name} can draft messages to sellers; you send them once a mailbox is connected.",
+	mailboxConnectLink: "Connect a mailbox",
+	sellerTitle: "Messages to sellers ({n})",
+	sellerLead: "Nothing goes to a seller until you press Send.",
+	sellerNoMailbox: "Connect a procurement mailbox to send these.",
+	sellerCap:
+		"You have sent 50 messages to sellers today, the most Farik sends in a day. Send the rest tomorrow.",
+	sellerQuote: "{name} asks {seller} for a quote",
+	sellerQuestion: "{name} asks {seller} a question",
+	sellerAboutOrder: " about PO-{order}",
+	sellerTask: "For {task}.",
+	sellerFromLabel: "From",
+	sellerToLabel: "To",
+	sellerNewDomain:
+		"No message from Farik has gone to {domain} before. Check it is {seller}’s address.",
+	sellerSubject: "Subject",
+	sellerBody: "The message, in {name}’s words",
+	sellerAdds: "Farik adds",
+	sellerFailed: "Farik could not send it: {why}. It is kept here to try again.",
+	sellerSend: "Send",
+	sellerEdit: "Edit",
+	sellerDiscard: "Discard",
+	sellerEditTitle: "Edit the message to {seller}",
+	sellerMessageField: "Message",
+	sellerEditBody:
+		"What you send is yours: {name} reads the text you sent, not its draft.",
+	replyTitle: "Replies from sellers ({n})",
+	replyLine: "{seller} replied to “{subject}”",
+	replyFrom: "From {address}",
+	replyCheck:
+		"Anyone can write any From address. Check with {seller} before you pay anything.",
+	replyKeptOne: "1 attachment kept",
+	replyKept: "{n} attachments kept",
+	replyRead: "Read",
+	replyCompare: "Ask for a comparison",
+	replyDismiss: "Dismiss",
+	replyDialogTitle: "Reply from {seller}",
+	replyReceived: "Received {day} at {time}",
+	replyTo: "To your message “{subject}”",
+	replyText: "What they wrote",
+	replyAttachments: "Attachments",
+	replyFile: "{kind}, {size}, named “{name}”",
+	replyPdf: "PDF",
+	replyPicture: "Picture",
+	replyDownload: "Download",
+	replySkipped:
+		"“{name}” was not kept: Farik keeps only PDFs and pictures of 10 MB or less.",
+	replyUntrusted:
+		"{name} reads this as {seller}’s words, never as instructions to follow. A reply approves nothing.",
+	replyCompareTitle: "Ask {name} to compare the replies?",
+	replyCompareDraft:
+		"Compare the sellers’ replies for {task} {title}, and tell me which offer is best.",
+	replyGone: "Farik can’t find that file now.",
+	orderApproveSend: "Approve and send to {seller}",
+	orderSendTitle: "Approve PO-{order} and send it to {seller}?",
+	orderSendBody:
+		"Farik emails this order to {seller} from your procurement mailbox when you press Approve and send. You pay {seller} yourself; Farik never pays.",
+	orderAttached: "Attached: PO-{order}.xlsx",
+	orderSendButton: "Approve and send",
+	refuseMailboxLoginFailed:
+		"Your provider did not accept that sign-in name and app password. A Microsoft mailbox can’t be used yet.",
+	refuseMailboxNeedsTls:
+		"That server does not offer an encrypted connection, so Farik won’t use it.",
+	refuseMailboxCertificate:
+		"That server’s certificate can’t be trusted, so Farik won’t use it.",
+	refuseMailboxUnreachable:
+		"Farik could not reach that server. Check its name and port.",
+	refuseMailboxProvider: "Microsoft mailboxes are not supported yet.",
+	refuseMailboxNotConnected: "Connect a procurement mailbox first.",
+	refuseSellerSendLimit:
+		"You have sent 50 messages to sellers today, the most Farik sends in a day.",
+	refuseSellerMessageSent: "This message was sent already.",
+	refuseSellerMessageDiscarded: "This message was discarded.",
+	refuseSellerMessageIsAnOrder: "Send this message from its order.",
+	refuseSellerMessageNotThisOrder: "This message is not this order’s.",
+	refuseSellerMessageUnknown: "There is no such message.",
+	refuseSellerReplyDismissed: "You dismissed this reply already.",
+	refuseSellerReplyUnknown: "There is no such reply.",
+	refuseSellerMessageFailed:
+		"The mail server did not take the message. It is kept here to try again.",
+	refusePurchaseOrderSending: "A send of this order is in flight.",
 };

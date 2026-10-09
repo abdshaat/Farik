@@ -11,6 +11,7 @@ import { MarketingPlan } from "../pages/MarketingPlan.tsx";
 import { NotFound } from "../pages/NotFound.tsx";
 import { PlanEditor } from "../pages/PlanEditor.tsx";
 import { PlanPage } from "../pages/PlanPage.tsx";
+import { ProcurementMailbox } from "../pages/ProcurementMailbox.tsx";
 import { Questions } from "../pages/Questions.tsx";
 import { RequestFiled } from "../pages/RequestFiled.tsx";
 import { Settings } from "../pages/Settings.tsx";
@@ -76,6 +77,7 @@ export function App() {
 				<Route path="/tasks/:id/help" element={<HelpNeeded />} />
 				<Route path="/team" element={<Team />} />
 				<Route path="/team/:id" element={<AgentEdit />} />
+				<Route path="/team/:id/mailbox" element={<ProcurementMailbox />} />
 				<Route
 					path="/settings"
 					element={<Settings theme={theme} onTheme={setTheme} />}

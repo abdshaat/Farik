@@ -54,6 +54,10 @@ export type MethodName =
 	| "connector.sign_in_cancel"
 	| "social_post.media"
 	| "purchase_order.file"
+	| "seller_reply.attachment"
+	| "procurement_mailbox.connect"
+	| "procurement_mailbox.disconnect"
+	| "procurement_mailbox.check"
 	| "marketing_budget.raise";
 export type Status = "connecting" | "open" | "closed";
 

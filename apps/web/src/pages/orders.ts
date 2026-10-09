@@ -6,6 +6,7 @@
 
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
+import type { OrderSend } from "./sellerMail.ts";
 
 const DAY_MS = 86_400_000;
 
@@ -37,6 +38,8 @@ export type OrderAsk = {
 	why: string;
 	at: string;
 	expiresAt: string;
+	/** The order's email to the seller, when a mailbox can send it (6.10, ADR 0039). */
+	send?: OrderSend;
 };
 
 /** What the latest follow-up learned, or what the owner corrected it to. */

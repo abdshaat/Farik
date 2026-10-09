@@ -14,6 +14,7 @@ import {
 	type OrderAsk,
 	periodWords,
 } from "./orders.ts";
+import type { Mailbox } from "./sellerMail.ts";
 import type { Agent } from "./setup/TeamSetup.tsx";
 import styles from "./Today.module.css";
 
@@ -141,7 +142,13 @@ export function PurchaseOrderRow({
 	const name = agent?.displayName ?? item.agentId ?? "";
 	const titleId = `waiting-order-${item.order}`;
 	const whyId = `${titleId}-why`;
-	const [dialog, setDialog] = useState<"approve" | "reject">();
+	const [dialog, setDialog] = useState<"approve" | "reject" | "send">();
+	const { data: mailbox } = useQuery<Mailbox>("procurement_mailbox.get", {});
+	// With the order's email drafted and a mailbox connected, the owner may send it from here.
+	const sendable =
+		item.send !== undefined &&
+		mailbox?.connected === true &&
+		mailbox.sentToday < mailbox.cap;
 	const seller = visibly(item.seller);
 	const host = item.host ?? "";
 	const address = item.url === "" ? undefined : item.url;
@@ -267,7 +274,15 @@ export function PurchaseOrderRow({
 			</div>
 			{/* The group names the order, so that each row's "Approve" is told from the others. */}
 			<fieldset className={styles.decide} aria-labelledby={titleId}>
-				<Button kind="primary" onClick={() => setDialog("approve")}>
+				{sendable && (
+					<Button kind="primary" onClick={() => setDialog("send")}>
+						{t("orderApproveSend", { seller })}
+					</Button>
+				)}
+				<Button
+					kind={sendable ? "secondary" : "primary"}
+					onClick={() => setDialog("approve")}
+				>
 					{t("orderApprove")}
 				</Button>
 				<Button onClick={() => setDialog("reject")}>{t("orderReject")}</Button>
@@ -277,7 +292,10 @@ export function PurchaseOrderRow({
 					order={item.order}
 					seller={item.seller}
 					agent={name}
-					approve={dialog === "approve"}
+					approve={dialog !== "reject"}
+					{...(dialog === "send" && item.send
+						? { send: item.send, mailbox }
+						: {})}
 					onClose={() => setDialog(undefined)}
 				/>
 			)}

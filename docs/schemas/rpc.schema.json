@@ -3762,7 +3762,7 @@
       }
     },
     "sellerRepliesListResult": {
-      "description": "Every reply Farik read in the procurement mailbox, oldest first (docs/SPEC.md 6.10, 8.6): reply, its number; message, the message of Farik's it answers, with seller and sent_subject, what Farik sent (the subject shown is never the reply's own); from, subject, text, date and attachments, what the seller wrote (untrusted; text is at most 64 KiB, and each attachment has its index counted from 1, the name the seller gave it as text, kept, media_type and bytes when kept); received_at; order, set for a reply to an order's message or a follow-up; and dismissed, whether the owner dismissed it.",
+      "description": "Every reply Farik read in the procurement mailbox, oldest first (docs/SPEC.md 6.10, 8.6): reply, its number; message, the message of Farik's it answers, with task_id, the message's task, and seller and sent_subject, what Farik sent (the subject shown is never the reply's own); from, subject, text, date and attachments, what the seller wrote (untrusted; text is at most 64 KiB, and each attachment has its index counted from 1, the name the seller gave it as text, kept, media_type and bytes when kept); received_at; order, set for a reply to an order's message or a follow-up; and dismissed, whether the owner dismissed it.",
       "type": "object",
       "additionalProperties": false,
       "required": ["replies"],
@@ -3772,11 +3772,12 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["reply", "message", "seller", "sent_subject", "from", "subject", "text", "received_at", "attachments", "dismissed"],
+            "required": ["reply", "message", "task_id", "seller", "sent_subject", "from", "subject", "text", "received_at", "attachments", "dismissed"],
             "properties": {
               "reply": { "type": "integer", "minimum": 1 },
               "message": { "type": "integer", "minimum": 1 },
               "seller": { "type": "string" },
+              "task_id": { "type": "string" },
               "sent_subject": { "type": "string" },
               "from": { "type": "string" },
               "subject": { "type": "string" },

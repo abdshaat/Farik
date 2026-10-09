@@ -18,6 +18,7 @@ import { SkillRead } from "./dialogs/SkillRead.tsx";
 import { SkillReview } from "./dialogs/SkillReview.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
 import { KitConnect } from "./KitConnect.tsx";
+import { MailboxSection } from "./Mailbox.tsx";
 import { OrdersSection } from "./Orders.tsx";
 import styles from "./pages.module.css";
 import { useAdvanced } from "./Settings.tsx";
@@ -423,6 +424,9 @@ function Editor({
 					))}
 				</select>
 			</div>
+			{saved.role === "procurement_specialist" && (
+				<MailboxSection id={saved.id} name={name} />
+			)}
 			{/* The Procurement Specialist's orders come before the sites it reads, and both before what it may do. */}
 			{saved.role === "procurement_specialist" && (
 				<OrdersSection

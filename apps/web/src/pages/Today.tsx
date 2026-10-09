@@ -34,6 +34,7 @@ import {
 	type PostMedia,
 } from "./PostGoingOut.tsx";
 import { RenewalsSection } from "./Renewals.tsx";
+import { SellerMailSections } from "./SellerMail.tsx";
 import { type Agent, roleName, type Team } from "./setup/TeamSetup.tsx";
 import type { RoleKit } from "./Team.tsx";
 import styles from "./Today.module.css";
@@ -315,6 +316,10 @@ export function Today() {
 					)}
 				</section>
 			)}
+			<SellerMailSections
+				agents={agents}
+				pm={pm?.displayName ?? uiStrings.roleName.product_manager}
+			/>
 			<RenewalsSection
 				agent={
 					agents.find(
