@@ -6,6 +6,7 @@ import { sentCommand } from "../../test/gate.ts";
 import { showsWhatItHides } from "../../test/hidden.ts";
 import { bodyOf, refusedBy } from "../../test/schema.ts";
 import {
+	FAILED_AT,
 	KNOWN,
 	MAILBOX,
 	NO_MAILBOX,
@@ -147,9 +148,10 @@ describe("a message to a seller, edited", () => {
 		const { s, dialog } = await edited({
 			...KNOWN,
 			why: "The server was busy",
+			failed_at: FAILED_AT,
 		});
 		expect(within(dialog).getByRole("alert").textContent).toBe(
-			"Farik could not send it: The server was busy. It is kept here to try again.",
+			"Farik could not send it at 08:14: The server was busy. It is kept here to try again.",
 		);
 		fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
 		const sent = await sentCommand(s);

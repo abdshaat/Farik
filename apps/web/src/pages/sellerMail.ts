@@ -41,6 +41,8 @@ export type SellerMessageItem = {
 	purchaseOrder?: number;
 	/** Farik's sentence about the last try that failed. */
 	why?: string;
+	/** When that try failed. */
+	failedAt?: string;
 };
 
 /** An order's message as its `waiting.list` row carries it. */
@@ -99,6 +101,13 @@ export function timeWords(when: string, now: Date = new Date()): string {
 	const at = t("timeAt", { time: clock(time) });
 	return day === t("postToday") ? at : `${day} ${at}`;
 }
+
+/** "Farik could not send it at 10:14: <why>. …"; with no time known, without the time. */
+export const failedWords = (why: string, failedAt: string | undefined) =>
+	t("sellerFailed", { time: failedAt ? timeWords(failedAt) : "", why }).replace(
+		" :",
+		":",
+	);
 
 /** The most characters of a subject and of a message that the daemon takes. */
 const MOST_SUBJECT = 200;

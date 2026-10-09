@@ -73,6 +73,9 @@ export const FOLLOW_UP = {
 	purchase_order: 10,
 };
 
+/** When the latest try to send a message failed: this morning, as the daemon words it. */
+export const FAILED_AT = at(26, 8, 14);
+
 /** A message that is not waiting, in each of the other states: Today lists none. */
 export const SENT_MESSAGES = ["sent", "discarded", "closed"].map(
 	(state, index) => ({ ...KNOWN, message: 20 + index, state }),
@@ -89,6 +92,7 @@ export const WRITTEN_MESSAGE = {
 	subject: `Quote${HIDE} for pie boxes`,
 	body: `Hello${HIDE},\n\nCould you quote 500 printed pie boxes?`,
 	why: `The server${HIDE} was busy`,
+	failed_at: FAILED_AT,
 };
 
 /** The mailbox of a user whose name holds a hidden character. */

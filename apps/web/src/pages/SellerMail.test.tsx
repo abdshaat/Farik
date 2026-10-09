@@ -6,6 +6,7 @@ import { sentCommand } from "../test/gate.ts";
 import { showsWhatItHides } from "../test/hidden.ts";
 import { bodyOf, refusedBy } from "../test/schema.ts";
 import {
+	FAILED_AT,
 	FOLLOW_UP,
 	KNOWN,
 	MAILBOX,
@@ -269,11 +270,29 @@ describe("Today, messages to sellers", () => {
 
 	it("a_failed_try_is_said_on_the_row", async () => {
 		await todayWithMail({
-			messages: [{ ...KNOWN, why: `The server refused it ${MARKUP}` }],
+			messages: [
+				{
+					...KNOWN,
+					why: `The server refused it ${MARKUP}`,
+					failed_at: FAILED_AT,
+				},
+			],
 		});
 		const alert = await screen.findByRole("alert");
+		// The sentence says when the try failed, and the server's words are text.
 		expect(alert.textContent).toBe(
-			"Farik could not send it: The server refused it <b>not bold</b>. It is kept here to try again.",
+			"Farik could not send it at 08:14: The server refused it <b>not bold</b>. It is kept here to try again.",
+		);
+	});
+});
+
+describe("Today, a failed try without its time", () => {
+	it("a_failed_try_with_no_time_still_reads_as_a_sentence", async () => {
+		await todayWithMail({
+			messages: [{ ...KNOWN, why: "The server was busy" }],
+		});
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			"Farik could not send it: The server was busy. It is kept here to try again.",
 		);
 	});
 });

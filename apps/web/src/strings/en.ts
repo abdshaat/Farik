@@ -2344,7 +2344,8 @@ export const en = {
 	sellerSubject: "Subject",
 	sellerBody: "The message, in {name}’s words",
 	sellerAdds: "Farik adds",
-	sellerFailed: "Farik could not send it: {why}. It is kept here to try again.",
+	sellerFailed:
+		"Farik could not send it {time}: {why}. It is kept here to try again.",
 	sellerSubjectLong: "The subject can be 200 characters at most.",
 	sellerMessageLong: "The message can be 8,000 characters at most.",
 	timeAt: "at {time}",

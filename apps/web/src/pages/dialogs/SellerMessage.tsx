@@ -3,7 +3,7 @@ import { useState } from "react";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
 import type { Mailbox } from "../sellerMail.ts";
-import { adds as addsOf, emailFault } from "../sellerMail.ts";
+import { adds as addsOf, emailFault, failedWords } from "../sellerMail.ts";
 import { isScript, ScriptWarning } from "./SiteRequest.tsx";
 import { useCommand } from "./StartSprint.tsx";
 import { visibly } from "./ToolApproval.tsx";
@@ -105,6 +105,7 @@ export function SellerMessage({
 		subject: string;
 		body: string;
 		why?: string | undefined;
+		failedAt?: string | undefined;
 	};
 	agent: string;
 	mailbox: Mailbox | undefined;
@@ -168,7 +169,7 @@ export function SellerMessage({
 					{t("sellerEditBody", { name: agent })}
 				</p>
 				{item.why && (
-					<p role="alert">{t("sellerFailed", { why: visibly(item.why) })}</p>
+					<p role="alert">{failedWords(visibly(item.why), item.failedAt)}</p>
 				)}
 				{!mailbox?.connected && <p>{t("sellerNoMailbox")}</p>}
 				{capped && <p>{t("sellerCap")}</p>}

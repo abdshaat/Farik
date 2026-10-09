@@ -8,10 +8,11 @@ import { SellerMessage, SendFields } from "./dialogs/SellerMessage.tsx";
 import { FromLine, SellerReply } from "./dialogs/SellerReply.tsx";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
-import type {
-	Mailbox,
-	SellerMessageItem,
-	SellerReplyItem,
+import {
+	failedWords,
+	type Mailbox,
+	type SellerMessageItem,
+	type SellerReplyItem,
 } from "./sellerMail.ts";
 import type { Agent } from "./setup/TeamSetup.tsx";
 import styles from "./Today.module.css";
@@ -177,7 +178,7 @@ function SellerMessageRow({
 					{visibly(item.body)}
 				</fieldset>
 				{item.why && (
-					<p role="alert">{t("sellerFailed", { why: visibly(item.why) })}</p>
+					<p role="alert">{failedWords(visibly(item.why), item.failedAt)}</p>
 				)}
 				{refusal && <p role="alert">{refusal}</p>}
 			</div>
