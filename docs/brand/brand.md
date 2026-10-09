@@ -127,14 +127,14 @@ These use pixel art:
 - the logo and the wordmark;
 - the characters and avatars;
 - large display headings;
-- the office scene (phase 14);
+- the office scene (phase 15);
 - small decorative touches, such as the blinking block cursor and the frame corners.
 
 The rest of the interface is clean and flat: forms, tables, the board, the channel, and dialogs. The kit shows this mix. Its panels are flat cards with monospace section labels, and its "brand core" icons are simple filled glyphs on dark tiles.
 
 ## Environment
 
-The office scene is a warm pixel-art room: wooden desks, plants, hanging lamps, a window, and a kanban board on the wall with the columns To do, In progress, Review and Done. The team sits at one long table. It is the desktop app's scene (phase 14), and the web app uses a still crop of it on the first-run screen.
+The office scene is a warm pixel-art room: wooden desks, plants, hanging lamps, a window, and a kanban board on the wall with the columns To do, In progress, Review and Done. The team sits at one long table. It is the desktop app's scene (phase 15), and the web app uses a still crop of it on the first-run screen.
 
 ## Files
 
@@ -152,4 +152,4 @@ The 256 px square avatars of head and shoulders (`<key>-256.png`, ten of them) w
 The kit's rule that the wordmark is always Clay Coral gives way to the supplied file: the wordmark is Soft Sand on dark surfaces. The README's images (`docs/brand/readme/`: the banner, the team, and the avatars) are composed from these files.
 
 Still wanted:
-1. **For phase 14 only:** the office scene as layered pieces, and the characters' walking frames.
+1. **For phase 15 only:** the office scene as layered pieces, and the characters' walking frames.

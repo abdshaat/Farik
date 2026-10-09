@@ -1,6 +1,6 @@
 # The DevOps Engineer
 
-Status: approved by the founder on 2026-09-30, in conversation. It is the design input to phase 7 steps 11 and 12 (phase 9 steps 06 and 07 until ADR 0029, phase 7 steps 09 and 10 until revision 27). ADR 0027 records the decision, and spec 0.32 (section 6.9) carries its rules.
+Status: approved by the founder on 2026-09-30, in conversation. It is the design input to phase 11 steps 05 to 06e (phase 7 steps 11 to 12e until ADR 0049, phase 9 steps 06 and 07 until ADR 0029, phase 7 steps 09 and 10 until revision 27). ADR 0027 records the decision, and spec 0.32 (section 6.9) carries its rules.
 
 ## Why
 
@@ -35,7 +35,7 @@ Skills, first cut: `deployment-checklists`, `reading-production-logs`, `incident
 
 ## Planned deploys
 
-A deployment is a deploy task, a contract whose `change` is `deploy` (a value phase 7 step 11 adds to the field), planned into a sprint like any other. Starting the sprint is the human's approval of its deploys.
+A deployment is a deploy task, a contract whose `change` is `deploy` (a value phase 11 step 05 adds to the field), planned into a sprint like any other. Starting the sprint is the human's approval of its deploys.
 
 The deploy task depends on the tasks whose work it ships. It is assigned once they are all integrated. Its session may call `farik_deploy`, which takes no version: Farik deploys the commit the integration branch held after the last of those integrations, to the service the production settings kept on this computer name (ADR 0045) (corrected 2026-10-07 by phase 7 step 11b's readiness review: this line said the default branch, and the service the connector names).
 
@@ -73,7 +73,7 @@ The human may stop any step. A stopped incident waits on Today.
 
 ## Safety
 
-The three Farik tools are `external_effect` (spec 5.6). Their pre-approval comes only from the human's start of a sprint, for the first deploy of each deploy task in it, and from an open incident, for one restart and one rollback. A call that cannot run (outside its task's session, with no production settings, while a deploy runs, or before the work it ships is in) is refused without asking. Any other deploy uses a grant the human gave on Today, or, when the team acts on its own (ADR 0041), runs and is listed under "Done on its own"; otherwise it asks the human. Acting on its own never lifts an incident's restart or rollback (step 11d) (corrected 2026-10-07 by phase 7 step 11b's readiness review: this line said every other call asks the human).
+The three Farik tools are `external_effect` (spec 5.6). Their pre-approval comes only from the human's start of a sprint, for the first deploy of each deploy task in it, and from an open incident, for one restart and one rollback. A call that cannot run (outside its task's session, with no production settings, while a deploy runs, or before the work it ships is in) is refused without asking. Any other deploy uses a grant the human gave on Today, or, when the team acts on its own (ADR 0041), runs and is listed under "Done on its own"; otherwise it asks the human. Acting on its own never lifts an incident's restart or rollback (phase 11 step 05d) (corrected 2026-10-07 by phase 7 step 11b's readiness review: this line said every other call asks the human).
 
 The agent never calls a platform's write tool. The kit tags the platform's read tools (status, deployments, logs, metrics) `network`, and every other tool `denied`. Farik's own three tools call the platform's write tools with arguments Farik chooses: the service from the connection, the version from the log. The agent cannot name a different version or service, because the tools take neither.
 
@@ -114,15 +114,15 @@ On the hosted service, Farik runs everything in the cloud, the watching included
 
 ## Steps
 
-- Phase 7 step 11, the role and its flow. It covers:
+- Phase 11 step 05, the role and its flow (phase 7 step 11 until ADR 0049; its plan splits it into steps 05 to 05f). It covers:
   - the role, its rules and its mockups;
   - the deploy task;
   - the three Farik tools, over a fake platform;
   - the watch tick;
   - the incident flow and its events;
   - the pages: the DevOps Engineer's card, incidents on Today, and a project's production settings (health URL, settling period, error threshold).
-- Phase 7 step 12, the kit: its skills and its four connectors, each chosen, pinned, tagged, and with its setup copy checked in the web app.
-- Phase 7 step 13, the kit check, gains a DevOps task: a planned deploy of a test project, then a deliberately broken deploy. The check sees the restart, the rollback, the fix, the review and the redeploy.
+- Phase 11 step 06, the kit (phase 7 step 12 until ADR 0049; its plan splits it into steps 06 to 06e): its skills and its four connectors, each chosen, pinned, tagged, and with its setup copy checked in the web app.
+- The kit check's DevOps task: a planned deploy of a test project, then a deliberately broken deploy. The check sees the restart, the rollback, the fix, the review and the redeploy. It was phase 7 step 13's; since ADR 0049 the kit check, phase 9 step 02, comes before the DevOps Engineer and has no DevOps task, and phase 11 checks the DevOps Engineer's kit itself, on each engine and provider then added.
 
 ## Tests
 
