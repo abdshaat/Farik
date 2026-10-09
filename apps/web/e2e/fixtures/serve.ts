@@ -17,6 +17,8 @@ import { tmpdir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
+import { test } from "@playwright/test";
+import { FOLDERS } from "./cleanup-reporter.ts";
 
 // Both built by `cargo xtask check --integration`: farik by its cargo tests, the server by its build step.
 const target = resolve(import.meta.dirname, "../../../../target/debug");
@@ -112,7 +114,8 @@ export function gitProject(
  * `farik-e2e-serve` on a free port. By default on a new project with its team, sandboxing off.
  * With `project: false` it starts in an empty folder, for the first-run wizard: `HOME` is `home`,
  * which holds Farik's state folder too, the fake `claude` and `docker` come first on `PATH`, no
- * key is in the environment, and the key is kept in a file, never the keychain.
+ * key is in the environment, and the key is kept in a file, never the keychain. A team with a
+ * Designer runs in Docker's sandbox, and its first `docker info` answers after 8 seconds.
  */
 export async function startServe(o: {
 	transcripts: string[];
@@ -133,6 +136,7 @@ export async function startServe(o: {
 	stop(): Promise<void>;
 }> {
 	const project = mkdtempSync(join(tmpdir(), "farik-e2e-project-"));
+	const made = [project, env.XDG_CONFIG_HOME];
 	const args: string[] = [];
 	const docker = o.project !== false && o.team?.endsWith("-designer") === true;
 	let serveEnv: NodeJS.ProcessEnv = env;
@@ -143,9 +147,11 @@ export async function startServe(o: {
 			XDG_CONFIG_HOME: _config,
 			...rest
 		} = process.env;
+		const home = o.home ?? mkdtempSync(join(tmpdir(), "farik-e2e-home-"));
+		if (!o.home) made.push(home);
 		serveEnv = {
 			...rest,
-			HOME: o.home ?? mkdtempSync(join(tmpdir(), "farik-e2e-home-")),
+			HOME: home,
 			PATH: `${resolve(import.meta.dirname, "fake-bin")}:${process.env.PATH}`,
 		};
 		args.push("--no-keychain");
@@ -153,7 +159,20 @@ export async function startServe(o: {
 		setUp(project, o.setupPending === true, docker);
 		if (o.team) writeTeam(project, docker, o.sprints === true);
 		// The Designer has no browser without Docker's sandbox (D3), so its team runs in it.
-		if (docker) args.push("--sandbox-image", SANDBOX_IMAGE);
+		if (docker) {
+			args.push("--sandbox-image", SANDBOX_IMAGE);
+			// Today must not wait for Docker: the first `info` answers after 8 seconds.
+			const asked = mkdtempSync(join(tmpdir(), "farik-e2e-docker-"));
+			made.push(asked);
+			serveEnv = {
+				...env,
+				PATH: `${resolve(import.meta.dirname, "slow-docker")}:${process.env.PATH}`,
+				FARIK_E2E_DOCKER: execFileSync("sh", ["-c", "command -v docker"], {
+					encoding: "utf8",
+				}).trim(),
+				FARIK_E2E_INFO_ASKED: join(asked, "asked"),
+			};
+		}
 	}
 
 	const port = await freePort();
@@ -180,6 +199,9 @@ export async function startServe(o: {
 			await exited;
 			clearTimeout(settled);
 			if (docker) removeContainers(project);
+			// The folders go once the server has exited, and only if the test passed: the
+			// reporter reads this, and a failed test keeps them for its event log.
+			await test.info().attach(FOLDERS, { body: JSON.stringify(made) });
 		},
 	};
 }

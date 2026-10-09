@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use super::paths::{GlobError, PathRefusal, check_allowed_paths, check_protected_paths};
 use super::team_rules::TeamRules;
-use crate::contract::Role;
+use crate::contract::{Role, TaskId};
+use crate::team::canonical_json;
 
 /// A capability tier of `docs/SPEC.md` section 5.6, attached to a role and overridable per
 /// agent. Serialised in `snake_case`, as on the wire.
@@ -48,7 +49,9 @@ pub fn default_tiers(role: Role) -> &'static [PermissionTier] {
             T::Network,
             T::GitLocal,
         ],
-        Role::ProductManager => &[T::Read, T::Network],
+        Role::ProductManager | Role::FinanceSpecialist | Role::ProcurementSpecialist => {
+            &[T::Read, T::Network]
+        }
         Role::MarketingSpecialist => &[T::Read, T::Network, T::WriteWorkspace, T::GitLocal],
         Role::ScrumMaster | Role::Human => &[T::Read],
     }
@@ -151,22 +154,73 @@ pub enum ToolRefusal {
 pub enum ConnectorTag {
     /// Reaches only the preview and changes nothing outside the sandbox.
     Network,
-    /// Changes state outside the sandbox; denied until phase 8.
+    /// Changes state outside the sandbox; runs once for each call the human allows.
     ExternalEffect,
     /// Never offered and always refused.
     Denied,
 }
 
-/// A connector a session was given: its server's name, the one origin its calls may name, and
-/// each tool's tag.
+/// A connector a session was given: its server's name, the one origin its calls may name when it
+/// is confined to the preview, and each tool's tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionConnector {
     /// The server's name, as in `mcp__<server>__<tool>`.
     pub server: String,
-    /// The preview's origin, `http://localhost:<port>`.
-    pub origin: String,
+    /// The preview's origin, `http://localhost:<port>`, for a connector confined to the preview;
+    /// `None` for a user's server, whose `network` tools may name any `url`.
+    pub origin: Option<String>,
     /// Every tool the connector's pinned list tags.
     pub tools: std::collections::BTreeMap<String, ConnectorTag>,
+    /// For each `external_effect` tool with one, how many calls the agent makes each period
+    /// without asking (ADR 0037), by the bare tool name.
+    pub allowances: std::collections::BTreeMap<String, u32>,
+    /// The `external_effect` tools the kit marks as approved by the owner's marketing plan (ADR
+    /// 0042), by the bare tool name: only a kit's entry of Farik's own connector has any.
+    pub plan_tools: std::collections::BTreeSet<String>,
+}
+
+/// The most calls an allowance may be: what the schema and the daemon hold it to.
+pub const MAX_ALLOWANCE: u32 = 1000;
+
+/// What let a connector call run (`evaluate_connector_call`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConnectorPass {
+    /// The tool's tag.
+    pub tag: ConnectorTag,
+    /// The seq of the human's grant this call uses up, when a grant allowed it.
+    pub approval: Option<u64>,
+    /// The allowance the call ran inside, when that allowed it and no grant did.
+    pub allowance: Option<u32>,
+    /// Whether the active marketing plan approved the call: a tool the kit marks, called while
+    /// a plan is active, never asked (ADR 0042).
+    pub plan_approved: bool,
+}
+
+/// The largest input, in bytes of its compact JSON, that the human is asked to allow: anything
+/// longer is too long to show, so it is refused without asking.
+pub const MAX_APPROVAL_INPUT: usize = 64 * 1024;
+
+/// The sha256, in lower-case hex, of `canonical_json(input)`: what binds a human's grant to the
+/// one input they saw, whatever order its keys arrive in.
+#[must_use]
+pub fn input_sha256(input: &serde_json::Value) -> String {
+    crate::team::sha256_hex(&canonical_json(input))
+}
+
+/// What a human's grant of one `external_effect` call is bound to (ADR 0031): the asking agent,
+/// the task, the server, the tool and the input's `input_sha256`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalKey {
+    /// The agent that asked.
+    pub agent_id: String,
+    /// The task it asked about.
+    pub task_id: TaskId,
+    /// The connector's server.
+    pub server: String,
+    /// The bare tool name.
+    pub tool: String,
+    /// `input_sha256` of the call's input.
+    pub input_sha256: String,
 }
 
 /// Why a connector call is refused.
@@ -176,8 +230,16 @@ pub enum ConnectorRefusal {
     ConnectorNotInSession,
     /// The connector's pinned list does not tag the tool.
     ToolNotTagged,
-    /// The tool is tagged `denied`, or `external_effect`, which is denied until phase 8.
+    /// The tool is tagged `denied`.
     ToolDenied,
+    /// The tool is tagged `external_effect` and the human has not allowed this call: it waits.
+    ApprovalNeeded,
+    /// The tool is tagged `external_effect` and its input is over `MAX_APPROVAL_INPUT`, too long
+    /// to show the human, so it is refused without asking.
+    InputTooLarge,
+    /// The tool is marked as approved by the marketing plan and no plan is active: it runs only
+    /// inside a plan the owner approved, and is never asked.
+    NoActivePlan,
     /// A `url` field names something other than the preview.
     UrlOutsidePreview {
         /// The field's value: the string, or the JSON of a value that is not one.
@@ -186,30 +248,77 @@ pub enum ConnectorRefusal {
 }
 
 /// Decides one connector call (`docs/SPEC.md` sections 5.6 and 8.6): the session must have the
-/// connector, the tool must be tagged `network`, and every field named `url`, at any depth of the
-/// input, must be a string naming the preview: its origin exactly, or followed by `/`, `?` or `#`.
-/// `tool` is the bare tool name, without `mcp__<server>__`.
+/// connector, the tool must be tagged `network` or `external_effect`, and, for a connector with an
+/// origin, every field named `url`, at any depth of the input, must be a string naming the
+/// preview: its origin exactly, or followed by `/`, `?` or `#`. An `external_effect` call also
+/// needs `granted`, the seq of the human's open grant for exactly this call, which the caller
+/// looks up by `ApprovalKey`; it is returned beside the tag, so the call's record can use it up.
+/// Failing that, a tool with an allowance runs while `used`, the agent's calls to it this period
+/// before this one, is under it (ADR 0037): the grant is for exactly this call, so it comes
+/// first. A `network` call ignores both. The tag governs whatever the agent's tiers. A tool the
+/// connector marks as approved by the marketing plan (`plan_tools`) runs only while a plan is
+/// active (`active_plan`), as the plan's own call, and neither a grant nor an allowance applies to
+/// it. `tool` is the bare tool name, without `mcp__<server>__`.
 ///
 /// # Errors
 ///
-/// `ConnectorNotInSession`, then `ToolNotTagged`, then `ToolDenied` for a `denied` or an
-/// `external_effect` tool, then `UrlOutsidePreview` with the first `url` found outside it.
+/// `ConnectorNotInSession`, then `ToolNotTagged`, then `ToolDenied` for a `denied` tool, then
+/// `UrlOutsidePreview` with the first `url` found outside the origin, then, for an
+/// `external_effect` tool, `InputTooLarge` for an input over `MAX_APPROVAL_INPUT`, grant or not,
+/// then `NoActivePlan` for a marked tool while no plan is active, grant or not, and
+/// `ApprovalNeeded` without a grant or an allowance with a place left.
 pub fn evaluate_connector_call(
     tool: &str,
     input: &serde_json::Value,
     connector: Option<&SessionConnector>,
-) -> Result<ConnectorTag, ConnectorRefusal> {
+    granted: Option<u64>,
+    used: u32,
+    active_plan: bool,
+) -> Result<ConnectorPass, ConnectorRefusal> {
     let connector = connector.ok_or(ConnectorRefusal::ConnectorNotInSession)?;
-    match connector.tools.get(tool) {
-        None => Err(ConnectorRefusal::ToolNotTagged),
-        Some(ConnectorTag::Denied | ConnectorTag::ExternalEffect) => {
-            Err(ConnectorRefusal::ToolDenied)
-        }
-        Some(ConnectorTag::Network) => {
-            check_urls(input, &connector.origin)?;
-            Ok(ConnectorTag::Network)
-        }
+    let tag = match connector.tools.get(tool) {
+        None => return Err(ConnectorRefusal::ToolNotTagged),
+        Some(ConnectorTag::Denied) => return Err(ConnectorRefusal::ToolDenied),
+        Some(tag) => *tag,
+    };
+    if let Some(origin) = &connector.origin {
+        check_urls(input, origin)?;
     }
+    let pass = |approval, allowance| ConnectorPass {
+        tag,
+        approval,
+        allowance,
+        plan_approved: false,
+    };
+    if tag == ConnectorTag::Network {
+        return Ok(pass(None, None));
+    }
+    if canonical_json(input).len() > MAX_APPROVAL_INPUT {
+        return Err(ConnectorRefusal::InputTooLarge);
+    }
+    // The owner's plan approves a marked call, so nothing else does: no grant, no allowance, and
+    // without a plan no asking, since the plan is what the owner approved (ADR 0042).
+    if connector.plan_tools.contains(tool) {
+        return if active_plan {
+            Ok(ConnectorPass {
+                tag,
+                approval: None,
+                allowance: None,
+                plan_approved: true,
+            })
+        } else {
+            Err(ConnectorRefusal::NoActivePlan)
+        };
+    }
+    if let Some(approval) = granted {
+        return Ok(pass(Some(approval), None));
+    }
+    connector
+        .allowances
+        .get(tool)
+        .filter(|allowed| used < **allowed)
+        .map(|allowed| pass(None, Some(*allowed)))
+        .ok_or(ConnectorRefusal::ApprovalNeeded)
 }
 
 fn check_urls(value: &serde_json::Value, origin: &str) -> Result<(), ConnectorRefusal> {
@@ -241,9 +350,9 @@ fn check_urls(value: &serde_json::Value, origin: &str) -> Result<(), ConnectorRe
 ///
 /// # Errors
 ///
-/// `DesignPlanNotApproved` for a Designer's `write_workspace`, `execute`, `git_local` or
-/// `git_remote` call while the plan is not approved: nothing to push without a commit, and the safe
-/// side all the same.
+/// `DesignPlanNotApproved` for a Designer's `write_workspace`, `execute`, `git_local`,
+/// `git_remote` or `external_effect` call while the plan is not approved: nothing to push without
+/// a commit, nothing to change outside before the plan, and the safe side all the same.
 pub fn check_design_plan(
     role: Role,
     tier: PermissionTier,
@@ -255,6 +364,7 @@ pub fn check_design_plan(
             | PermissionTier::Execute
             | PermissionTier::GitLocal
             | PermissionTier::GitRemote
+            | PermissionTier::ExternalEffect
     );
     if role == Role::UiUxDesigner && writes && !approved {
         return Err(ToolRefusal::DesignPlanNotApproved);
@@ -441,10 +551,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        AgentGrants, ApprovedCall, CommandRefusal, ConnectorRefusal as Refused, ConnectorTag,
-        PermissionTier as T, SessionConnector, ToolCallContext, ToolCallRequest, ToolDescriptor,
-        ToolRefusal, check_design_plan, default_tiers, evaluate_command, evaluate_connector_call,
-        evaluate_tool_call,
+        AgentGrants, ApprovedCall, CommandRefusal, ConnectorPass, ConnectorRefusal as Refused,
+        ConnectorTag, MAX_APPROVAL_INPUT, PermissionTier as T, SessionConnector, ToolCallContext,
+        ToolCallRequest, ToolDescriptor, ToolRefusal, check_design_plan, default_tiers,
+        evaluate_command, evaluate_connector_call, evaluate_tool_call, input_sha256,
     };
     use crate::contract::Role;
     use crate::governor::team_rules::TeamRules;
@@ -453,10 +563,21 @@ mod tests {
         items.iter().map(|item| (*item).to_string()).collect()
     }
 
+    /// The decision as it was before allowances: nothing used, so no allowance applies.
+    fn decide(
+        tool: &str,
+        input: &serde_json::Value,
+        connector: Option<&SessionConnector>,
+        granted: Option<u64>,
+    ) -> Result<(ConnectorTag, Option<u64>), Refused> {
+        evaluate_connector_call(tool, input, connector, granted, 0, false)
+            .map(|pass| (pass.tag, pass.approval))
+    }
+
     fn playwright() -> SessionConnector {
         SessionConnector {
             server: "playwright".to_string(),
-            origin: "http://localhost:4400".to_string(),
+            origin: Some("http://localhost:4400".to_string()),
             tools: [
                 ("browser_navigate", ConnectorTag::Network),
                 ("browser_click", ConnectorTag::Network),
@@ -466,30 +587,60 @@ mod tests {
             .into_iter()
             .map(|(tool, tag)| (tool.to_string(), tag))
             .collect(),
+            allowances: std::collections::BTreeMap::new(),
+            plan_tools: std::collections::BTreeSet::new(),
         }
     }
 
     #[test]
-    fn evaluates_connector_calls() {
-        let connector = playwright();
-        let navigate = |input: serde_json::Value| {
-            evaluate_connector_call("browser_navigate", &input, Some(&connector))
+    fn a_network_tool_runs_with_no_origin() {
+        let github = SessionConnector {
+            origin: None,
+            ..playwright()
         };
+        for url in [
+            "https://api.github.com/search?q=x",
+            "http://evil.test/",
+            "/x",
+        ] {
+            assert_eq!(
+                decide(
+                    "browser_navigate",
+                    &json!({ "url": url, "then": [{ "url": url }] }),
+                    Some(&github),
+                    None
+                ),
+                Ok((ConnectorTag::Network, None)),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_preview_connector_still_checks_urls() {
+        let connector = playwright();
+        let navigate =
+            |input: serde_json::Value| decide("browser_navigate", &input, Some(&connector), None);
         assert_eq!(
             navigate(json!({ "url": "http://localhost:4400/x" })),
-            Ok(ConnectorTag::Network)
+            Ok((ConnectorTag::Network, None))
         );
         assert_eq!(
             navigate(json!({ "url": "http://localhost:4400" })),
-            Ok(ConnectorTag::Network)
+            Ok((ConnectorTag::Network, None))
         );
         assert_eq!(
             navigate(json!({ "url": "http://localhost:4400?q=1#top" })),
-            Ok(ConnectorTag::Network)
+            Ok((ConnectorTag::Network, None))
         );
         assert_eq!(
-            evaluate_connector_call("browser_click", &json!({ "ref": "e3" }), Some(&connector)),
-            Ok(ConnectorTag::Network),
+            decide(
+                "browser_click",
+                &json!({ "ref": "e3" }),
+                Some(&connector),
+                None
+            ),
+            Ok((ConnectorTag::Network, None)),
             "a call with no url is judged by its tag alone"
         );
         // F2: only the preview's origin, exactly, followed by nothing or by `/`, `?` or `#`.
@@ -528,25 +679,393 @@ mod tests {
             "a url that is not a string"
         );
         assert_eq!(
-            evaluate_connector_call("browser_evaluate", &json!({}), Some(&connector)),
+            decide("browser_evaluate", &json!({}), Some(&connector), None),
             Err(Refused::ToolDenied)
         );
         assert_eq!(
-            evaluate_connector_call("browser_install", &json!({}), Some(&connector)),
+            decide("browser_install", &json!({}), Some(&connector), None),
             Err(Refused::ToolNotTagged)
         );
         assert_eq!(
-            evaluate_connector_call(
+            decide(
                 "browser_navigate",
                 &json!({ "url": "http://localhost:4400/" }),
+                None,
                 None
             ),
             Err(Refused::ConnectorNotInSession)
         );
+    }
+
+    fn github() -> SessionConnector {
+        SessionConnector {
+            server: "github".to_string(),
+            origin: None,
+            tools: [
+                ("search_issues", ConnectorTag::Network),
+                ("create_issue", ConnectorTag::ExternalEffect),
+                ("delete_repository", ConnectorTag::Denied),
+            ]
+            .into_iter()
+            .map(|(tool, tag)| (tool.to_string(), tag))
+            .collect(),
+            allowances: std::collections::BTreeMap::new(),
+            plan_tools: std::collections::BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn external_effect_without_a_grant_needs_approval() {
         assert_eq!(
-            evaluate_connector_call("browser_send_email", &json!({}), Some(&connector)),
-            Err(Refused::ToolDenied),
-            "external_effect is denied until phase 8"
+            decide(
+                "create_issue",
+                &json!({ "title": "x" }),
+                Some(&github()),
+                None
+            ),
+            Err(Refused::ApprovalNeeded)
+        );
+    }
+
+    #[test]
+    fn external_effect_with_a_grant_runs_and_names_it() {
+        assert_eq!(
+            decide(
+                "create_issue",
+                &json!({ "title": "x" }),
+                Some(&github()),
+                Some(7)
+            ),
+            Ok((ConnectorTag::ExternalEffect, Some(7)))
+        );
+    }
+
+    #[test]
+    fn denied_is_refused_even_with_a_grant() {
+        assert_eq!(
+            decide("delete_repository", &json!({}), Some(&github()), Some(7)),
+            Err(Refused::ToolDenied)
+        );
+    }
+
+    #[test]
+    fn a_large_input_is_refused_not_asked() {
+        // `{"b":"…"}` is 8 bytes around the string.
+        let sized = |bytes: usize| json!({ "b": "x".repeat(bytes - 8) });
+        assert_eq!(
+            sized(MAX_APPROVAL_INPUT).to_string().len(),
+            MAX_APPROVAL_INPUT
+        );
+        for granted in [None, Some(7)] {
+            assert_eq!(
+                decide(
+                    "create_issue",
+                    &sized(MAX_APPROVAL_INPUT + 1),
+                    Some(&github()),
+                    granted
+                ),
+                Err(Refused::InputTooLarge),
+                "{granted:?}"
+            );
+        }
+        assert_eq!(
+            decide(
+                "create_issue",
+                &sized(MAX_APPROVAL_INPUT),
+                Some(&github()),
+                None
+            ),
+            Err(Refused::ApprovalNeeded),
+            "64 KiB exactly is still asked about"
+        );
+        assert_eq!(
+            decide(
+                "search_issues",
+                &sized(MAX_APPROVAL_INPUT + 1),
+                Some(&github()),
+                None
+            ),
+            Ok((ConnectorTag::Network, None)),
+            "the limit is the ask's, not a network call's"
+        );
+    }
+
+    #[test]
+    fn the_approval_key_ignores_key_order() {
+        let ordered: serde_json::Value = serde_json::from_str(r#"{"a":1,"b":2}"#).expect("json");
+        let reversed: serde_json::Value = serde_json::from_str(r#"{"b":2,"a":1}"#).expect("json");
+        // sha256 of the bytes `{"a":1,"b":2}`.
+        let expected = "43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777";
+        assert_eq!(input_sha256(&ordered), expected);
+        assert_eq!(input_sha256(&reversed), expected);
+        assert_ne!(input_sha256(&json!({ "a": 1, "b": 3 })), expected);
+    }
+
+    fn with_allowance(calls: u32) -> SessionConnector {
+        SessionConnector {
+            allowances: [("create_issue".to_string(), calls)].into(),
+            ..github()
+        }
+    }
+
+    #[test]
+    fn runs_a_call_inside_the_allowance() {
+        assert_eq!(
+            evaluate_connector_call(
+                "create_issue",
+                &json!({}),
+                Some(&with_allowance(20)),
+                None,
+                19,
+                false
+            ),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::ExternalEffect,
+                approval: None,
+                allowance: Some(20),
+                plan_approved: false
+            })
+        );
+    }
+
+    #[test]
+    fn asks_for_the_call_beyond_it() {
+        for used in [20, 21] {
+            assert_eq!(
+                evaluate_connector_call(
+                    "create_issue",
+                    &json!({}),
+                    Some(&with_allowance(20)),
+                    None,
+                    used,
+                    false
+                ),
+                Err(Refused::ApprovalNeeded),
+                "{used}"
+            );
+        }
+    }
+
+    #[test]
+    fn asks_at_any_count_for_a_tool_without_one() {
+        assert_eq!(
+            evaluate_connector_call("create_issue", &json!({}), Some(&github()), None, 0, false),
+            Err(Refused::ApprovalNeeded)
+        );
+    }
+
+    #[test]
+    fn asks_every_time_at_zero() {
+        assert_eq!(
+            evaluate_connector_call(
+                "create_issue",
+                &json!({}),
+                Some(&with_allowance(0)),
+                None,
+                0,
+                false
+            ),
+            Err(Refused::ApprovalNeeded)
+        );
+    }
+
+    #[test]
+    fn uses_a_grant_before_the_allowance() {
+        assert_eq!(
+            evaluate_connector_call(
+                "create_issue",
+                &json!({}),
+                Some(&with_allowance(20)),
+                Some(7),
+                0,
+                false
+            ),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::ExternalEffect,
+                approval: Some(7),
+                allowance: None,
+                plan_approved: false
+            })
+        );
+    }
+
+    #[test]
+    fn refuses_a_large_input_inside_the_allowance() {
+        let big = json!({ "b": "x".repeat(MAX_APPROVAL_INPUT) });
+        assert_eq!(
+            evaluate_connector_call(
+                "create_issue",
+                &big,
+                Some(&with_allowance(20)),
+                None,
+                0,
+                false
+            ),
+            Err(Refused::InputTooLarge)
+        );
+    }
+
+    #[test]
+    fn a_network_call_ignores_the_allowance() {
+        let connector = SessionConnector {
+            allowances: [("search_issues".to_string(), 5)].into(),
+            ..github()
+        };
+        assert_eq!(
+            evaluate_connector_call(
+                "search_issues",
+                &json!({}),
+                Some(&connector),
+                None,
+                0,
+                false
+            ),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::Network,
+                approval: None,
+                allowance: None,
+                plan_approved: false
+            })
+        );
+    }
+
+    /// GitHub's `create_issue` marked as approved by the marketing plan, and given an allowance
+    /// and a grant's chance beside it, so that each is shown not to matter.
+    fn with_plan_mark() -> SessionConnector {
+        SessionConnector {
+            plan_tools: ["create_issue".to_string()].into(),
+            allowances: [("create_issue".to_string(), 5)].into(),
+            ..github()
+        }
+    }
+
+    #[test]
+    fn a_plan_marked_call_runs_only_inside_a_plan() {
+        let connector = with_plan_mark();
+        let call = |input: &serde_json::Value, granted, used, active| {
+            evaluate_connector_call(
+                "create_issue",
+                input,
+                Some(&connector),
+                granted,
+                used,
+                active,
+            )
+        };
+        // Inside a plan it passes as the plan's: no grant, no allowance, whatever was on offer.
+        for (granted, used) in [(None, 0), (Some(7), 0), (None, 99)] {
+            assert_eq!(
+                call(&json!({}), granted, used, true),
+                Ok(ConnectorPass {
+                    tag: ConnectorTag::ExternalEffect,
+                    approval: None,
+                    allowance: None,
+                    plan_approved: true
+                }),
+                "{granted:?} {used}"
+            );
+        }
+        // Without a plan it is refused, never asked, even with a grant or an allowance left.
+        for (granted, used) in [(None, 0), (Some(7), 0), (None, 99)] {
+            assert_eq!(
+                call(&json!({}), granted, used, false),
+                Err(Refused::NoActivePlan),
+                "{granted:?} {used}"
+            );
+        }
+        // An input too long to show is still refused first, plan or none.
+        let big = json!({ "b": "x".repeat(MAX_APPROVAL_INPUT) });
+        for active in [true, false] {
+            assert_eq!(
+                call(&big, None, 0, active),
+                Err(Refused::InputTooLarge),
+                "{active}"
+            );
+        }
+        // An unmarked external_effect call is as it was, an active plan or not.
+        for active in [true, false] {
+            assert_eq!(
+                evaluate_connector_call(
+                    "create_issue",
+                    &json!({}),
+                    Some(&with_allowance(5)),
+                    None,
+                    0,
+                    active
+                ),
+                Ok(ConnectorPass {
+                    tag: ConnectorTag::ExternalEffect,
+                    approval: None,
+                    allowance: Some(5),
+                    plan_approved: false
+                }),
+                "{active}"
+            );
+            assert_eq!(
+                evaluate_connector_call(
+                    "create_issue",
+                    &json!({}),
+                    Some(&github()),
+                    None,
+                    0,
+                    active
+                ),
+                Err(Refused::ApprovalNeeded),
+                "{active}"
+            );
+        }
+        // A network tool of the same connector is not held to the plan.
+        assert_eq!(
+            evaluate_connector_call(
+                "search_issues",
+                &json!({}),
+                Some(&connector),
+                None,
+                0,
+                false
+            )
+            .map(|pass| pass.plan_approved),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn a_network_tool_ignores_grants() {
+        for granted in [None, Some(7)] {
+            assert_eq!(
+                decide("search_issues", &json!({}), Some(&github()), granted),
+                Ok((ConnectorTag::Network, None)),
+                "{granted:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_preview_connectors_external_effect_checks_urls_before_asking() {
+        let connector = playwright();
+        assert_eq!(
+            decide(
+                "browser_send_email",
+                &json!({ "url": "http://evil.test/" }),
+                Some(&connector),
+                Some(7)
+            ),
+            Err(Refused::UrlOutsidePreview {
+                url: "http://evil.test/".to_string()
+            }),
+            "a grant does not take a preview connector's call outside the preview"
+        );
+    }
+
+    #[test]
+    fn a_designers_external_effect_waits_for_the_plan() {
+        assert_eq!(
+            check_design_plan(Role::UiUxDesigner, T::ExternalEffect, false),
+            Err(ToolRefusal::DesignPlanNotApproved)
+        );
+        assert_eq!(
+            check_design_plan(Role::UiUxDesigner, T::ExternalEffect, true),
+            Ok(())
         );
     }
 
@@ -626,6 +1145,22 @@ mod tests {
     }
 
     #[test]
+    fn finance_reads_and_researches_only() {
+        assert_eq!(
+            default_tiers(Role::FinanceSpecialist),
+            [T::Read, T::Network].as_slice()
+        );
+    }
+
+    #[test]
+    fn procurement_reads_and_researches_only() {
+        assert_eq!(
+            default_tiers(Role::ProcurementSpecialist),
+            [T::Read, T::Network].as_slice()
+        );
+    }
+
+    #[test]
     fn grants_git_remote_and_external_effect_to_nobody_by_default() {
         for role in [
             Role::ProductManager,
@@ -634,6 +1169,8 @@ mod tests {
             Role::SoftwareDeveloper,
             Role::MarketingSpecialist,
             Role::UiUxDesigner,
+            Role::FinanceSpecialist,
+            Role::ProcurementSpecialist,
             Role::Human,
         ] {
             let tiers = default_tiers(role);

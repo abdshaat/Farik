@@ -2,7 +2,10 @@
 
 Date: 2026-09-30
 Status: accepted
-Amended 2026-10-01 by ADR 0029: the role kits are phase 7, so the role and its flow are phase 7 step 09, its connectors step 10 and the kit check step 11; the step references below are updated.
+Amended 2026-10-01 by ADR 0029: the role kits are phase 7, so the role and its flow are phase 7 step 09, its connectors step 10 and the kit check step 11; the step references below are updated. Renumbered 2026-10-01 by the project plan's revision 27, which split phase 7 step 01 and added a sign-in step: steps 11, 12 and 13.
+Amended 2026-10-05 by the founder (answering the DevOps plans' O1 to O3): Farik's `farik_deploy`, `farik_restart` and `farik_roll_back` reach each platform by whichever official path works there, the platform's own server where it can deploy (Vercel, AWS, Kubernetes), the platform's own API with the same key (Render, Netlify), or Farik's own small server (Railway, Fly); a platform whose narrowest key reaches a whole account or team is accepted, with setup copy that says so; and an incident's first restart is made by Farik at once, with no model and no session, the DevOps Engineer's session investigating after (phase 7 steps 11d, 12, 12b and 12c).
+Amended 2026-10-08 by ADR 0048 (the founder: "Lets set up the infra repository as well as the cloud hosting, landing page, etc. in phase 8"): a phase, Farik Cloud, follows the role kits as phase 8, so the phases after phase 7 moved up by one (Engines and providers 9, Ecosystem 10, Proof of concept 11, Web launch 12, Business workspaces 13, Desktop 14, Native mobile 15, Premium 16); the numbers below are the old ones.
+Amended 2026-10-09 by ADR 0049 (the founder: "Lets stop this phase after completing step 10g. We have to start the next phase"; "DevOps later, rest after Cloud"): phase 7 ends at step 10g, and the DevOps Engineer, phase 7 steps 11 to 12e, moves to the Ecosystem phase, now phase 11, as its steps 05 to 06e, after that phase's own steps 01 to 04 (11 to 11f are 05 to 05f, 12 to 12e are 06 to 06e); ADRs 0045 and 0046 stay reserved for its plans. The kit check, now phase 9 step 02, gains no DevOps task: the Ecosystem phase checks the DevOps Engineer's kit on each engine and provider that Engines and providers, now phase 10, has added by then. A phase, Ask or auto and the milestones, follows Farik Cloud as phase 9, so the phases after phase 8 moved up by one (Engines and providers 10, Ecosystem 11, Proof of concept 12, Web launch 13, Business workspaces 14, Desktop 15, Native mobile 16, Premium 17); the numbers below are the old ones.
 
 ## Context
 
@@ -43,7 +46,7 @@ The three Farik tools are `external_effect`, approved by the human's start of a 
 
 The agent never calls a platform's write tools. Farik's `farik_deploy`, `farik_restart` and `farik_roll_back` do, with arguments Farik chooses; the platform's read tools are `network`, and everything else is `denied`.
 
-The role and its incident flow are phase 7 step 09; its four platform connectors are phase 7 step 10; the kit check becomes step 11 and gains a DevOps task (phase 9 steps 06, 07 and 08 until ADR 0029).
+The role and its incident flow are phase 7 step 11; its four platform connectors are phase 7 step 12; the kit check becomes step 13 and gains a DevOps task (phase 9 steps 06, 07 and 08 until ADR 0029, phase 7 steps 09, 10 and 11 until revision 27).
 
 ## Consequences
 

@@ -21,4 +21,222 @@ describe("mapping", () => {
 			body: { input, output: '{"exit_code":0}' },
 		});
 	});
+
+	it("keeps_the_names_a_user_gave_tools_keys_and_headers", () => {
+		// A connector's tools, keys and headers are named by the user or the server, not the wire.
+		const camel = {
+			agent: "theo",
+			server: {
+				credentialKeys: ["API_KEY"],
+				headers: { Authorization: "Bearer {API_KEY}" },
+			},
+			keys: { API_KEY: "v" },
+			tags: { list_bases: "network", listBases: "denied" },
+		};
+		expect(toSnake(camel)).toEqual({
+			agent: "theo",
+			server: {
+				credential_keys: ["API_KEY"],
+				headers: { Authorization: "Bearer {API_KEY}" },
+			},
+			keys: { API_KEY: "v" },
+			tags: { list_bases: "network", listBases: "denied" },
+		});
+		const wire = {
+			stored_in: "file",
+			tools: { list_bases: "network" },
+			team: {
+				agents: [
+					{
+						mcp_servers: [
+							{
+								tools: { list_bases: "network", "describe-table": "denied" },
+								headers: { "X-Api-Key": "{API_KEY}" },
+							},
+						],
+					},
+				],
+			},
+		};
+		expect(toCamel(wire)).toEqual({
+			storedIn: "file",
+			tools: { list_bases: "network" },
+			team: {
+				agents: [
+					{
+						mcpServers: [
+							{
+								tools: { list_bases: "network", "describe-table": "denied" },
+								headers: { "X-Api-Key": "{API_KEY}" },
+							},
+						],
+					},
+				],
+			},
+		});
+		// A list of tools is still a list of wire objects.
+		expect(toCamel({ tools: [{ name: "a_b", is_x: true }] })).toEqual({
+			tools: [{ name: "a_b", isX: true }],
+		});
+	});
+
+	it("keeps_the_tool_names_inside_allowances_as_given", () => {
+		// A connector's allowances are named by the tools the service chose (ADR 0037).
+		const wire = {
+			agent: "kai",
+			server: "higgsfield",
+			allowances: { generate_image: 30, generate_video: 5 },
+		};
+		const camel = {
+			agent: "kai",
+			server: "higgsfield",
+			allowances: { generate_image: 30, generate_video: 5 },
+		};
+		expect(toSnake(camel)).toEqual(wire);
+		expect(toCamel(wire)).toEqual(camel);
+		// `team.get`'s kit row lists them as objects, whose own keys are the wire's.
+		expect(
+			toCamel({
+				allowances: [{ tool: "generate_image", calls: 20, what: "images" }],
+			}),
+		).toEqual({
+			allowances: [{ tool: "generate_image", calls: 20, what: "images" }],
+		});
+	});
+
+	it("maps_the_sign_in_calls_and_keeps_the_scopes_as_given", () => {
+		// What `connector.sign_in` takes, and what it and `team.get` answer (ADR 0033).
+		const camel = {
+			agent: "theo",
+			server: {
+				name: "notion",
+				oauth: {
+					clientId: "abc",
+					callbackPort: 33418,
+					scopes: ["read", "offline_access"],
+				},
+			},
+			attempt: "0123",
+		};
+		const wire = {
+			agent: "theo",
+			server: {
+				name: "notion",
+				oauth: {
+					client_id: "abc",
+					callback_port: 33418,
+					scopes: ["read", "offline_access"],
+				},
+			},
+			attempt: "0123",
+		};
+		expect(toSnake(camel)).toEqual(wire);
+		expect(toCamel(wire)).toEqual(camel);
+		expect(
+			toCamel({
+				attempt: "0123",
+				authorize_url: "https://auth.example/authorize",
+				issuer: "https://auth.example",
+			}),
+		).toEqual({
+			attempt: "0123",
+			authorizeUrl: "https://auth.example/authorize",
+			issuer: "https://auth.example",
+		});
+		expect(
+			toCamel({
+				connectors: [
+					{ server: "notion", auth: "oauth", revokes: true, stored_in: "file" },
+				],
+			}),
+		).toEqual({
+			connectors: [
+				{ server: "notion", auth: "oauth", revokes: true, storedIn: "file" },
+			],
+		});
+	});
+
+	it("mapping_names_the_new_fields", () => {
+		// A registered app's sign-in (step 03b): what `connector.sign_in` answers and `team.get` rows say.
+		const wire = {
+			attempt: "0123",
+			authorize_url: "https://github.com/login/device",
+			issuer: "https://github.com/login/oauth",
+			provider: "GitHub",
+			user_code: "WDJB-MJHT",
+			install_url: "https://github.com/apps/farik/installations/new",
+		};
+		const camel = {
+			attempt: "0123",
+			authorizeUrl: "https://github.com/login/device",
+			issuer: "https://github.com/login/oauth",
+			provider: "GitHub",
+			userCode: "WDJB-MJHT",
+			installUrl: "https://github.com/apps/farik/installations/new",
+		};
+		expect(toCamel(wire)).toEqual(camel);
+		expect(toSnake(camel)).toEqual(wire);
+		const row = {
+			server: "github",
+			provider: "GitHub",
+			settings_url: "https://github.com/settings/apps/authorizations",
+		};
+		expect(toCamel({ connectors: [row] })).toEqual({
+			connectors: [
+				{
+					server: "github",
+					provider: "GitHub",
+					settingsUrl: "https://github.com/settings/apps/authorizations",
+				},
+			],
+		});
+		expect(toSnake({ connectors: [toCamel(row)] })).toEqual({
+			connectors: [row],
+		});
+	});
+
+	it("mapping_keeps_skill_file_paths", () => {
+		const files = { "SKILL.md": "a", "references/api_notes.md": "b" };
+		expect(toSnake({ body: { files } })).toEqual({ body: { files } });
+		expect(toCamel({ files })).toEqual({ files });
+	});
+	it("keeps_a_kit_services_tool_labels_as_the_kit_gave_them", () => {
+		// `labels` names tools, which the service chose (`API-post-search`), like `tools` does.
+		const wire = {
+			kits: [
+				{
+					role: "product_manager",
+					connectors: [
+						{
+							name: "notion",
+							key_page: "https://notion.example/keys",
+							credential_keys: ["NOTION_KEY"],
+							labels: {
+								"API-post-search": "search pages",
+								list_all: "list pages",
+							},
+						},
+					],
+				},
+			],
+		};
+		expect(toCamel(wire)).toEqual({
+			kits: [
+				{
+					role: "product_manager",
+					connectors: [
+						{
+							name: "notion",
+							keyPage: "https://notion.example/keys",
+							credentialKeys: ["NOTION_KEY"],
+							labels: {
+								"API-post-search": "search pages",
+								list_all: "list pages",
+							},
+						},
+					],
+				},
+			],
+		});
+	});
 });

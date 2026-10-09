@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://farik.dev/schemas/kit.schema.json",
+  "title": "FarikKit",
+  "description": "What a role's kit is: the skills it carries and the services it may be connected to, stored as roles/<role_id>/kit.yaml beside role.yaml. farik-roles loads it and refuses what this schema cannot say, each at its field with a code: kit_role_mismatch, kit_skill_missing, kit_skill_in_role, kit_connector_twice, key_page_missing, label_not_a_tool, package_not_pinned, container_not_builtin, image_not_pinned, allowance_not_external, copy_word_refused, and every refusal the team file gives the same entry. See docs/SPEC.md 6.7 and ADR 0036.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "role",
+    "skills",
+    "connectors"
+  ],
+  "properties": {
+    "role": {
+      "type": "string",
+      "enum": [
+        "product_manager",
+        "scrum_master",
+        "architect",
+        "software_developer",
+        "marketing_specialist",
+        "ui_ux_designer",
+        "finance_specialist",
+        "procurement_specialist"
+      ],
+      "description": "The role, equal to its folder's name."
+    },
+    "skills": {
+      "type": "array",
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+        "maxLength": 64
+      },
+      "description": "The kit's skills, each a folder skills/<name>/ with a SKILL.md beside this file. They load on demand (ADR 0034), and a role.yaml skill is not named here."
+    },
+    "connectors": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/connector"
+      }
+    }
+  },
+  "$defs": {
+    "connectorTag": {
+      "type": "string",
+      "enum": [
+        "network",
+        "external_effect",
+        "denied"
+      ],
+      "description": "A tool's label (spec 5.6): network, it only reads; external_effect, it changes something outside the sandbox or spends credits and asks the human; denied, never offered. There is no read: that tier is the project's files."
+    },
+    "connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "transport",
+        "tools"
+      ],
+      "description": "One service the role may be connected to. stdio and http take the team file's fields and the setup copy (title, about, why, setup, all required); container is a server Farik runs in Docker itself (image, module_root and args, all required) and has no copy. The loader refuses a missing or foreign field per transport (kit_field_missing, kit_field_not_allowed), which typify cannot read from a conditional schema.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,39}$",
+          "description": "The connector's name on an agent, and its tools' mcp__<name>__ prefix."
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "stdio",
+            "http",
+            "container"
+          ]
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "args": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "description": "stdio: the arguments, a package named at an exact version when the command runs one (package_not_pinned). container: the arguments after the image's entrypoint."
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https?://",
+          "maxLength": 2048
+        },
+        "headers": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "credential_keys": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          }
+        },
+        "oauth": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "callback_port": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 65535
+            },
+            "scopes": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "string",
+                "pattern": "^[\\x21\\x23-\\x5B\\x5D-\\x7E]{1,200}$"
+              }
+            }
+          }
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "The service, as the user knows it."
+        },
+        "about": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "What the service is."
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "Why the role wants it."
+        },
+        "setup": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600,
+          "description": "What the user does. A service's own label may be quoted here (‘…’, “…” or \"…\", one line, at most 60 characters) and nowhere else."
+        },
+        "key_page": {
+          "type": "string",
+          "pattern": "^https://",
+          "maxLength": 2048,
+          "description": "Where the key is made. Required when credential_keys is not empty (key_page_missing)."
+        },
+        "labels": {
+          "type": "object",
+          "maxProperties": 256,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "description": "A tool to what it does in the user's words. A key that is not a tool is label_not_a_tool."
+        },
+        "tools": {
+          "type": "object",
+          "maxProperties": 256,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/connectorTag"
+          },
+          "description": "Every tool the pinned server lists, each tagged. A tool with no tag is an error."
+        },
+        "allowances": {
+          "type": "object",
+          "maxProperties": 256,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/allowance"
+          },
+          "description": "A tool tagged external_effect to the calls per sprint a user may pre-approve (allowance_not_external otherwise). Step 05b reads it."
+        },
+        "plan_approved": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "description": "Tools the owner's approved marketing plan approves: each tagged external_effect (plan_mark_not_external), none with an allowance (plan_mark_with_allowance), and only on Farik's own connector, farik connector <name> (plan_mark_not_farik), since only Farik's own server can be trusted to check the plan (ADR 0038, ADR 0042). Not part of the team entry or its hash."
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "container only: the image, pinned by digest (image_not_pinned)."
+        },
+        "module_root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "container only: where the image keeps its Node modules."
+        }
+      }
+    },
+    "allowance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calls",
+        "what"
+      ],
+      "properties": {
+        "calls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "what": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "A plural noun, such as images."
+        }
+      }
+    }
+  }
+}

@@ -37,7 +37,16 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::DocumentPathsOnly => {
             "Only the developer changes code, and this plan lets someone else change it."
         }
+        ReadinessRule::MarketingPathsOwned => {
+            "Only the Marketing Specialist changes the brand kit and the marketing plans, and this plan lets someone else."
+        }
         ReadinessRule::NoFarikPaths => "The plan reaches into Farik's own files.",
+        ReadinessRule::PrivateFolderTask => {
+            "A task in a private folder works only there: no commands, no tests, no text searched in a workbook or a note, and no parent epic."
+        }
+        ReadinessRule::PrivateFolderReviewer => {
+            "A task in a private folder is reviewed by the Product Manager alone, and this plan names someone else."
+        }
         ReadinessRule::BudgetWithinTeamMax => {
             "The plan costs more than your team allows for one task."
         }
@@ -61,7 +70,7 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 21] = [
+    const EVERY_RULE: [ReadinessRule; 24] = [
         IntentPresent,
         SummaryPresent,
         CriteriaPresent,
@@ -75,7 +84,10 @@ mod tests {
         NewTestsRequiredByRule,
         AllowedPathsWithinCeiling,
         DocumentPathsOnly,
+        MarketingPathsOwned,
         NoFarikPaths,
+        PrivateFolderTask,
+        PrivateFolderReviewer,
         BudgetWithinTeamMax,
         NoParentForEpic,
         ParentInProgress,
@@ -101,7 +113,10 @@ mod tests {
             | NewTestsRequiredByRule
             | AllowedPathsWithinCeiling
             | DocumentPathsOnly
+            | MarketingPathsOwned
             | NoFarikPaths
+            | PrivateFolderTask
+            | PrivateFolderReviewer
             | BudgetWithinTeamMax
             | NoParentForEpic
             | ParentInProgress
@@ -110,6 +125,17 @@ mod tests {
             | JudgmentRecorded
             | JudgmentAnswers => {}
         }
+    }
+
+    /// The rule holds the Finance Specialist's tasks and the Procurement Specialist's alike, so its
+    /// plain words name neither.
+    #[test]
+    fn the_private_folder_sentence_names_no_role() {
+        let plain = plain_readiness(PrivateFolderTask).to_lowercase();
+        for role in ["finance", "procurement"] {
+            assert!(!plain.contains(role), "{plain}");
+        }
+        assert!(plain.contains("private folder"), "{plain}");
     }
 
     #[test]

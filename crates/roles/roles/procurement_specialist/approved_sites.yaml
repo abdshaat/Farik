@@ -1,0 +1,144 @@
+# Farik's approved sites (ADR 0039, spec 6.10): long-established shops across the categories a small
+# business buys in, each by its primary domain, which every team's Procurement Specialist may read
+# from its first task without asking. Public data, not a secret. The first version, compiled on
+# 2026-10-07; the launch review (phase 13 step 01) finalizes it. A regional domain is a host of its
+# own, and a site is matched exactly: a host and its www. twin, never its other subdomains.
+sites:
+  - host: amazon.com
+    shop: "Amazon"
+    category: general_marketplace
+  - host: ebay.com
+    shop: "eBay"
+    category: general_marketplace
+  - host: walmart.com
+    shop: "Walmart"
+    category: general_marketplace
+  - host: costco.com
+    shop: "Costco"
+    category: general_marketplace
+  - host: samsclub.com
+    shop: "Sam's Club"
+    category: general_marketplace
+  - host: etsy.com
+    shop: "Etsy"
+    category: general_marketplace
+  - host: staples.com
+    shop: "Staples"
+    category: office_supplies
+  - host: officedepot.com
+    shop: "Office Depot"
+    category: office_supplies
+  - host: quill.com
+    shop: "Quill"
+    category: office_supplies
+  - host: grainger.com
+    shop: "Grainger"
+    category: industrial_supplies
+  - host: mcmaster.com
+    shop: "McMaster-Carr"
+    category: industrial_supplies
+  - host: fastenal.com
+    shop: "Fastenal"
+    category: industrial_supplies
+  - host: mscdirect.com
+    shop: "MSC Industrial Supply"
+    category: industrial_supplies
+  - host: globalindustrial.com
+    shop: "Global Industrial"
+    category: industrial_supplies
+  - host: homedepot.com
+    shop: "The Home Depot"
+    category: industrial_supplies
+  - host: lowes.com
+    shop: "Lowe's"
+    category: industrial_supplies
+  - host: uline.com
+    shop: "Uline"
+    category: packaging_and_shipping
+  - host: papermart.com
+    shop: "Paper Mart"
+    category: packaging_and_shipping
+  - host: ups.com
+    shop: "UPS"
+    category: packaging_and_shipping
+  - host: fedex.com
+    shop: "FedEx"
+    category: packaging_and_shipping
+  - host: store.usps.com
+    shop: "USPS Postal Store"
+    category: packaging_and_shipping
+  - host: digikey.com
+    shop: "DigiKey"
+    category: electronic_components
+  - host: mouser.com
+    shop: "Mouser Electronics"
+    category: electronic_components
+  - host: arrow.com
+    shop: "Arrow Electronics"
+    category: electronic_components
+  - host: newark.com
+    shop: "Newark"
+    category: electronic_components
+  - host: adafruit.com
+    shop: "Adafruit"
+    category: electronic_components
+  - host: sparkfun.com
+    shop: "SparkFun"
+    category: electronic_components
+  - host: cdw.com
+    shop: "CDW"
+    category: computers_and_it
+  - host: insight.com
+    shop: "Insight"
+    category: computers_and_it
+  - host: bhphotovideo.com
+    shop: "B&H Photo Video"
+    category: computers_and_it
+  - host: bestbuy.com
+    shop: "Best Buy"
+    category: computers_and_it
+  - host: apple.com
+    shop: "Apple"
+    category: computers_and_it
+  - host: dell.com
+    shop: "Dell"
+    category: computers_and_it
+  - host: lenovo.com
+    shop: "Lenovo"
+    category: computers_and_it
+  - host: ikea.com
+    shop: "IKEA"
+    category: furniture
+  - host: wayfair.com
+    shop: "Wayfair"
+    category: furniture
+  - host: nationalbusinessfurniture.com
+    shop: "National Business Furniture"
+    category: furniture
+  - host: webstaurantstore.com
+    shop: "WebstaurantStore"
+    category: food_service
+  - host: katom.com
+    shop: "KaTom Restaurant Supply"
+    category: food_service
+  - host: centralrestaurant.com
+    shop: "Central Restaurant Products"
+    category: food_service
+  - host: vistaprint.com
+    shop: "Vistaprint"
+    category: printing
+  - host: moo.com
+    shop: "MOO"
+    category: printing
+  - host: 4imprint.com
+    shop: "4imprint"
+    category: printing
+  - host: aws.amazon.com
+    shop: "AWS Marketplace"
+    category: software
+  - host: marketplace.microsoft.com
+    shop: "Microsoft Marketplace"
+    category: software
+  - host: marketplace.atlassian.com
+    shop: "Atlassian Marketplace"
+    category: software

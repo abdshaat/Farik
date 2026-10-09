@@ -1,0 +1,206 @@
+# The Procurement Specialist's kit (ADR 0039; phase 7 steps 10d and 10e): the fourteen skills of its
+# work, loaded on demand (step 10e added the thirteenth, `requesting-a-data-pipeline`, and step 10f the fourteenth, `contacting-sellers`), and five
+# services, none of which can buy: the role recommends and the founder decides (ADR 0039). `fx` is
+# Farik's own server over Frankfurter, started by `farik connector fx` (ADR 0038). Exa is searched
+# and never asked for a page: its `web_fetch_exa` fetches on Exa's own servers and follows a
+# redirect to another site, out of the approved-sites check's sight (spec 8.6), so it is `denied`;
+# its search results carry text from any site, which the copy says. SerpApi takes a key, and its
+# `search` spends the user's searches, so it has an allowance; its two on-screen versions are
+# `denied`. Brex is signed in to by route 1 with read scopes only. AWS Pricing is the first
+# third-party `stdio` package in a shipped kit; it needs `uv`, and its three tools that read or
+# write a folder on the user's computer are `denied`. Tool lists were read on 2026-10-07 and
+# 2026-10-08 (the plan's Execution notes); the live pin test lists the four third-party ones, and
+# `fx`'s pin is the offline test `fx_server_lists_the_kits_tools`. Step 10g adds the role's two
+# servers of Farik's own. Its one skill in every prompt, `sourcing-a-product`, is the role's own
+# (ADR 0011); no kit skill repeats its loop or its section on the sites it may read.
+role: procurement_specialist
+skills:
+  - defining-the-need
+  - finding-sellers-and-makers
+  - comparing-offers
+  - reading-terms-and-pricing
+  - checking-a-seller
+  - checking-product-safety
+  - estimating-landed-cost
+  - checking-a-used-vehicle
+  - keeping-the-vendor-register
+  - reviewing-renewals
+  - writing-purchase-orders
+  - using-procurement-sources
+  - requesting-a-data-pipeline
+  - contacting-sellers
+connectors:
+  - name: fx
+    transport: stdio
+    command: farik
+    args: [connector, fx]
+    title: Exchange rates
+    about: "Frankfurter publishes the reference exchange rates of central banks, free and with no account."
+    why: "So the Procurement Specialist compares prices in one currency, with the rate and its date beside each. It only reads."
+    setup: "Nothing to set up: Farik looks rates up in Frankfurter itself, with no account. Farik sends Frankfurter only currency codes and a date."
+    labels:
+      latest_rates: "latest exchange rates"
+      rate_on: "an exchange rate on a day"
+      list_currencies: "list currencies"
+    tools:
+      latest_rates: network
+      rate_on: network
+      list_currencies: network
+  - name: exa
+    transport: http
+    url: https://mcp.exa.ai/mcp
+    title: Exa web search
+    about: "Exa searches the web for assistants that research, and answers with text from the pages it finds."
+    why: "So the Procurement Specialist can find makers, sellers and their price pages for anything you need to buy. It only reads."
+    setup: "Nothing to set up: Exa answers a limited number of searches free, with no account. What your agent searches for goes to Exa as written. Exa's results carry text from the pages it finds on any site, so your agent may read text from sites you have not approved; it still opens pages only on the sites you approved, and sends those other sites nothing."
+    labels:
+      web_search_exa: "search the web"
+    tools:
+      web_search_exa: network
+      web_fetch_exa: denied
+  - name: serpapi
+    transport: http
+    url: https://mcp.serpapi.com/mcp
+    headers:
+      Authorization: "Bearer {SERPAPI_KEY}"
+    credential_keys: [SERPAPI_KEY]
+    key_page: https://serpapi.com/manage-api-key
+    title: Shopping prices
+    about: "SerpApi reads shopping results from Google Shopping, Amazon, eBay and Walmart."
+    why: "So the Procurement Specialist can compare what a product costs across the big shops in one search. Each search uses one of your SerpApi searches, so Farik counts them."
+    setup: "Make a free SerpApi account, which includes 250 searches a month and at most 50 in an hour, then copy your private key from its ‘Api Key’ page and paste it here. What your agent searches for goes to SerpApi as written. Some of SerpApi's searches open a picture or page address on SerpApi's own servers. Farik only lets your agent give it addresses on sites you approved, but SerpApi may follow a link from there to another site."
+    allowances:
+      search: { calls: 50, what: "shopping searches" }
+    labels:
+      search: "search shops"
+    tools:
+      search: external_effect
+      search_table: denied
+      search_dashboard: denied
+  - name: brex
+    transport: http
+    url: https://api.brex.com/mcp
+    oauth: { scopes: [offline_access, vendors.readonly, expenses.card.readonly, departments.readonly] }
+    title: Brex
+    about: "Brex holds your company's cards, bills and the vendors you pay."
+    why: "So the Procurement Specialist can see what you already pay a vendor, and charges that repeat every month that nobody listed. It only reads."
+    setup: "First, an account admin or card admin in Brex accepts the Developer API agreement under ‘Settings’, then ‘Developer’. Then sign in with your Brex account and allow Farik to read your vendors, card spending and departments; Farik asks for reading only."
+    labels:
+      list_vendors: "list vendors"
+      get_vendor_by_id: "read a vendor"
+      list_bills: "list bills"
+      get_bill_by_id: "read a bill"
+      list_merchants: "list merchants"
+      list_merchant_categories: "list merchant types"
+      list_expense_categories: "list spending categories"
+      query_expense_analytics: "ask about spending"
+      list_expenses: "list card charges"
+      get_expense_by_id: "read a card charge"
+      list_departments: "list departments"
+    tools:
+      list_vendors: network
+      get_vendor_by_id: network
+      list_bills: network
+      get_bill_by_id: network
+      list_merchants: network
+      list_merchant_categories: network
+      list_expense_categories: network
+      query_expense_analytics: network
+      list_expenses: network
+      get_expense_by_id: network
+      list_departments: network
+      update_expense_memo: denied
+      upload_card_expense_receipt_from_urls: denied
+      replace_attendees_for_card_expense: denied
+      assign_limit_for_card_expenses: denied
+      submit_feedback: denied
+      get_user_myself: denied
+      get_user_by_id: denied
+      list_users_by_name_or_email: denied
+      list_users: denied
+      list_titles: denied
+      list_roles: denied
+      list_cards: denied
+      get_card_by_id: denied
+      list_my_limits: denied
+      list_business_accounts: denied
+      get_business_account: denied
+      list_banking_transactions: denied
+      get_banking_transaction: denied
+      get_reward_points: denied
+      list_trips: denied
+      list_bookings: denied
+      list_group_events: denied
+      list_cost_centers: denied
+      list_locations: denied
+      list_legal_entities: denied
+      get_expense_policy: denied
+      get_active_integration: denied
+      list_accounting_records: denied
+      list_gl_accounts: denied
+      get_reimbursement_payout_date: denied
+      start_expense_download: denied
+      get_expense_download_result: denied
+  - name: aws-pricing
+    transport: stdio
+    command: uvx
+    args: ["awslabs.aws-pricing-mcp-server==1.1.1"]
+    credential_keys: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]
+    key_page: "https://console.aws.amazon.com/iam/home#/users"
+    title: AWS prices
+    about: "AWS publishes the price of every one of its services, by region and by plan."
+    why: "So the Procurement Specialist can price an AWS option exactly before anyone buys it. It only reads public prices."
+    setup: "This needs the free program uv on your computer (docs.astral.sh/uv). In your AWS account, make a user that may only read prices: give it a policy allowing pricing:GetProducts, pricing:DescribeServices, pricing:GetAttributeValues, pricing:ListPriceLists and pricing:GetPriceListFileUrl, and nothing else. Make a key for it, then paste the ‘Access key’ and the ‘Secret access key’ here. Reading prices costs nothing."
+    labels:
+      get_pricing: "read a service's prices"
+      get_pricing_service_codes: "list AWS services"
+      get_pricing_service_attributes: "list what a price depends on"
+      get_pricing_attribute_values: "list the options for a price"
+      get_price_list_urls: "find a full price list"
+      get_bedrock_patterns: "read AI service pricing patterns"
+    tools:
+      get_pricing: network
+      get_pricing_service_codes: network
+      get_pricing_service_attributes: network
+      get_pricing_attribute_values: network
+      get_price_list_urls: network
+      get_bedrock_patterns: network
+      analyze_cdk_project: denied
+      analyze_terraform_project: denied
+      generate_cost_report: denied
+  - name: recalls
+    transport: stdio
+    command: farik
+    args: [connector, recalls]
+    title: Safety recalls
+    about: "US product and vehicle safety agencies publish every recall, complaint and crash rating."
+    why: "So the Procurement Specialist never recommends a product or a car with an open recall, and can check a used car's VIN. It only reads."
+    setup: "Nothing to set up: Farik reads the CPSC's and NHTSA's public lists itself, with no account. It covers products and vehicles sold in the United States. What your agent looks up goes to them as written."
+    labels:
+      product_recalls: "look up product recalls"
+      vehicle_recalls: "look up a car's recalls"
+      vehicle_complaints: "read a car's complaints"
+      vehicle_safety_ratings: "read a car's crash ratings"
+      decode_vin: "decode a VIN"
+    tools:
+      product_recalls: network
+      vehicle_recalls: network
+      vehicle_complaints: network
+      vehicle_safety_ratings: network
+      decode_vin: network
+  - name: ebay
+    transport: stdio
+    command: farik
+    args: [connector, ebay]
+    credential_keys: [EBAY_CLIENT_ID, EBAY_CLIENT_SECRET]
+    key_page: https://developer.ebay.com/my/keys
+    title: eBay listings
+    about: "eBay's listing search shows what sellers ask for new and used goods right now."
+    why: "So the Procurement Specialist can see real asking prices, and how well rated each seller is, for anything sold on eBay. It only reads; it can never bid or buy."
+    setup: "Make a free eBay developer account and create an application. Before its production keys work, eBay asks how you handle account deletions: choose ‘Not persisting eBay data’, since Farik never keeps an eBay member's name. Then paste the ‘App ID (Client ID)’ and ‘Cert ID (Client Secret)’ from its production keys. Farik only searches and reads listings; eBay allows 5,000 searches a day. What your agent searches for goes to eBay as written."
+    labels:
+      search_items: "search eBay listings"
+      get_item: "read an eBay listing"
+    tools:
+      search_items: network
+      get_item: network

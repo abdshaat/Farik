@@ -56,3 +56,18 @@
 .value {
 	font-weight: 600;
 }
+
+/* On a phone each thing made stacks: who and where, the count, when. */
+.made {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+
+.made li + li {
+	margin-top: var(--farik-space-3);
+}
+
+.made p {
+	margin: 0;
+}

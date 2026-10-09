@@ -20,7 +20,7 @@ use farik_core::governor::done::{
 use farik_core::governor::escalation::EscalationReason;
 use farik_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
-    Rejection, WorkState, waits_for_a_sprint,
+    FolderWork, Rejection, WorkState, waits_for_a_sprint,
 };
 use farik_core::governor::readiness::{
     JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext,
@@ -31,7 +31,9 @@ use farik_core::governor::transition::{
     TransitionRefusal, TransitionRequest, evaluate_transition,
 };
 use farik_core::governor::transition_table::{GateId, TransitionActor};
-use farik_core::team::{AgentStatus, HumanAcceptsContracts, JudgmentRequired, Team};
+use farik_core::team::{
+    AgentStatus, HumanAcceptsContracts, JudgmentRequired, Team, private_folder, task_private_folder,
+};
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
     BlockerWire, ContractEvaluatedBody, ContractEvaluatedBodyGate, ContractJudgedBody,
@@ -40,7 +42,8 @@ use farik_protocol::event::{
     RejectionWire, TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
     TransitionActorWire, TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
 };
-use farik_store::files::{FilesError, ProjectFiles};
+use farik_store::baseline::{changes_since_baseline, folder_in};
+use farik_store::files::{FilesError, ProjectFiles, Sandbox};
 pub use farik_store::git::integration_branch;
 pub(crate) use farik_store::waiting::{is_move_into, last_move_into, review_passed};
 use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection};
@@ -49,6 +52,7 @@ use crate::channel::{ChannelError, post_system};
 use crate::cost::{CostError, budget_state, extra_tries};
 use crate::preview::PreviewFactory;
 use crate::tools::design::{DesignReview, ReviewState, design_review};
+use crate::tools::sheets::private_path;
 
 /// The governor's door: everything a transition is judged on and recorded in.
 pub struct Transitions {
@@ -64,6 +68,8 @@ pub struct Transitions {
     requests: Mutex<()>,
     /// What says whether a preview can run here, once the driver sets it (D4).
     previews: OnceLock<Arc<dyn PreviewFactory>>,
+    /// The project's sandbox setting, once the driver sets it.
+    sandbox: OnceLock<Sandbox>,
 }
 
 /// What the requester brings to a transition, and nothing else: every other fact is read from the
@@ -99,6 +105,10 @@ pub struct TransitionAsk {
     /// Whether the human's resolve grants more tries (ADR 0024): the attempt it starts is counted,
     /// so the move increments the iteration.
     pub grants_tries: bool,
+    /// The workbooks a task in a private folder names when it asks for `verifying`, as paths in
+    /// the folder (6.6): it has no commit to show its work, and the gate reads these from the
+    /// folder.
+    pub workbooks: Option<Vec<String>>,
 }
 
 /// The governor's answer, which is recorded either way.
@@ -214,6 +224,7 @@ impl Transitions {
             ids,
             requests: Mutex::new(()),
             previews: OnceLock::new(),
+            sandbox: OnceLock::new(),
         }
     }
 
@@ -221,6 +232,22 @@ impl Transitions {
     /// may be assigned (D4); the first set holds.
     pub fn set_previews(&self, previews: Arc<dyn PreviewFactory>) {
         let _ = self.previews.set(previews);
+    }
+
+    /// Sets the project's sandbox setting, which says whether sessions run in Docker's sandbox;
+    /// the first set holds.
+    pub fn set_sandbox(&self, sandbox: Sandbox) {
+        let _ = self.sandbox.set(sandbox);
+    }
+
+    /// Whether sessions run in Docker's sandbox: the project's sandbox setting is `docker`. False
+    /// in no-sandbox mode, where an agent's command runs on the host as the user, and until the
+    /// driver has set it. It is the setting and never Docker's answer, which can take as long as a
+    /// daemon likes and would hold up the page's other requests: with the setting `docker` and no
+    /// daemon, a session does not start, so no command runs outside the sandbox either way.
+    #[must_use]
+    pub fn sandboxed(&self) -> bool {
+        self.sandbox.get() == Some(&Sandbox::Docker)
     }
 
     /// Whether the team's Designer can have its browser. Until the driver has said what runs
@@ -272,7 +299,13 @@ impl Transitions {
         }
         match decided {
             Ok(decision) => {
-                self.record_move(request, ask, context.contract, &decision)?;
+                self.record_move(
+                    request,
+                    ask,
+                    context.contract,
+                    context.work.folder.as_ref(),
+                    &decision,
+                )?;
                 Ok(TransitionOutcome::Moved(decision))
             }
             Err(refusal) => {
@@ -290,12 +323,15 @@ impl Transitions {
         }
     }
 
-    /// Writes the moved contract, then records the move and any escalation it raises.
+    /// Writes the moved contract, then records the move and any escalation it raises. A move that
+    /// integrates nothing, a task in a private folder reaching `accepted` (6.6), records the files
+    /// the task changed in `folder`, so that its page keeps them whatever later tasks change.
     fn record_move(
         &self,
         request: &TransitionRequest,
         ask: &TransitionAsk,
         mut contract: TaskContract,
+        folder: Option<&FolderWork>,
         decision: &TransitionDecision,
     ) -> Result<(), TransitionError> {
         contract.status = decision.to;
@@ -332,6 +368,9 @@ impl Transitions {
                 reasons: rejection.reasons.clone(),
             }),
             reason: ask.reason.clone(),
+            changed: folder
+                .filter(|_| effects.contains(&TransitionEffect::NothingToIntegrate))
+                .map(|work| work.changed.clone()),
         };
         self.append(request, ask, EventBody::TaskTransitioned(body))?;
         let mut escalation = None;
@@ -476,17 +515,22 @@ impl Transitions {
         let (budget, open_sprint, sprint_left, readiness) =
             self.readiness_parts(&board, row, &history, team, &contract, now)?;
 
-        let (work, changed_paths) = self.work(&contract, team)?;
+        let named = ask.workbooks.as_deref().unwrap_or_default();
+        let (work, changed_paths) = self.work(&contract, team, named)?;
 
-        let assignment = assignment(
+        let mut assignment = assignment(
             ask,
             team,
             &board,
             row,
             (open_sprint, sprint_left),
             dependency_states(&contract, &board),
-            self.designer_browser(team),
+            || self.designer_browser(team),
         );
+        if let Some(assignment) = assignment.as_mut() {
+            assignment.private_folder_busy =
+                private_folder_busy(&self.files, &board, row, assignment.assignee_role)?;
+        }
 
         let review = self.review_of(team, &contract, &changed_paths, &history).1;
         let (results, completion_note, review_note) = evidence_since_work_began(&history);
@@ -560,7 +604,7 @@ impl Transitions {
             ..EventQuery::default()
         })?;
         let contract = self.files.read_contract(task_id)?;
-        let (_, changed_paths) = self.work(&contract, team)?;
+        let (_, changed_paths) = self.work(&contract, team, &[])?;
         Ok(self.review_of(team, &contract, &changed_paths, &history))
     }
 
@@ -580,7 +624,7 @@ impl Transitions {
         );
         (
             ui_change,
-            design_review(team, ui_change, history, self.designer_browser(team)),
+            design_review(team, ui_change, history, || self.designer_browser(team)),
         )
     }
 
@@ -660,12 +704,17 @@ impl Transitions {
     /// What the task's branch holds, read from git only when its worktree
     /// `.farik/local/worktrees/<id>` exists; otherwise no commits, not clean, and no paths, which
     /// refuses `verifying` truthfully. The integration branch is resolved only then, so that no git
-    /// error can arise for a task with no worktree.
+    /// error can arise for a task with no worktree. A task in a private folder has no branch: what
+    /// it did is read from its folder (`folder_work`).
     fn work(
         &self,
         contract: &TaskContract,
         team: &Team,
+        named: &[String],
     ) -> Result<(WorkState, Vec<String>), TransitionError> {
+        if let Some(folder) = task_private_folder(contract) {
+            return self.folder_work(folder, contract, named);
+        }
         let worktree = self
             .files
             .root()
@@ -679,8 +728,50 @@ impl Transitions {
         let work = WorkState {
             commits: self.git.commit_count(&base, &branch)?,
             worktree_clean: self.git.is_clean(&worktree)?,
+            // A task with a worktree does not work in a private folder.
+            folder: None,
         };
         Ok((work, self.git.changed_paths(&base, &branch)?))
+    }
+
+    /// What a task in the private `folder` has done there (6.6): the workbooks it `named`, which of
+    /// them are not files in the folder, and what changed in the folder since the copy taken when
+    /// the task was assigned, which is also the task's diff, each path under the folder.
+    fn folder_work(
+        &self,
+        folder: &str,
+        contract: &TaskContract,
+        named: &[String],
+    ) -> Result<(WorkState, Vec<String>), TransitionError> {
+        let root = self.files.root();
+        let files = |error: farik_store::StoreError| TransitionError::Files {
+            detail: error.to_string(),
+        };
+        let changed: Vec<String> =
+            changes_since_baseline(&folder_in(root, folder).map_err(files)?, &contract.id)
+                .map_err(files)?
+                .into_iter()
+                .map(|change| change.path)
+                .collect();
+        let missing = named
+            .iter()
+            .filter(|path| !private_path(root, folder, path).is_ok_and(|file| file.is_file()))
+            .cloned()
+            .collect();
+        let paths = changed
+            .iter()
+            .map(|path| format!("{folder}/{path}"))
+            .collect();
+        let work = WorkState {
+            commits: 0,
+            worktree_clean: false,
+            folder: Some(FolderWork {
+                named: named.to_vec(),
+                missing,
+                changed,
+            }),
+        };
+        Ok((work, paths))
     }
 
     /// The epic above a task: its status, its paths, and what is left of its budget once its own
@@ -1020,6 +1111,7 @@ fn effect_wire(effect: TransitionEffect) -> TaskTransitionedBodyEffectsItem {
         TransitionEffect::RaiseEscalation(_) => TaskTransitionedBodyEffectsItem::RaiseEscalation,
         TransitionEffect::ResetBlocker => TaskTransitionedBodyEffectsItem::ResetBlocker,
         TransitionEffect::StampBlockedAt => TaskTransitionedBodyEffectsItem::StampBlockedAt,
+        TransitionEffect::NothingToIntegrate => TaskTransitionedBodyEffectsItem::NothingToIntegrate,
     }
 }
 
@@ -1073,8 +1165,10 @@ fn dependency_states(contract: &TaskContract, board: &[TaskProjection]) -> Vec<D
 
 /// The pair an assignment would name, from the ask's ids and the team's roles, when the ask names
 /// an assignee, with the sprint `row` and its epic are in, beside the open sprint and what is left
-/// of its budget, and whether the team's Designer can have its browser. `requested_by` is the
-/// governor's to set from the request's actor.
+/// of its budget, and whether the team's Designer can have its browser, which only an assignment
+/// to a Designer asks (`designer_browser` is called for that alone: it may ask Docker, and the
+/// governor reads the answer for a Designer only). `requested_by` is the governor's to set from
+/// the request's actor.
 fn assignment(
     ask: &TransitionAsk,
     team: &Team,
@@ -1082,9 +1176,10 @@ fn assignment(
     row: &TaskProjection,
     (open_sprint, sprint_left_usd): (Option<String>, f64),
     dependencies: Vec<DependencyState>,
-    designer_browser: DesignerBrowser,
+    designer_browser: impl FnOnce() -> DesignerBrowser,
 ) -> Option<AssignmentInput> {
     let assignee_id = ask.assignee_id.as_deref()?;
+    let assignee_role = role_in(team, assignee_id);
     let (reviewer_id, reviewer_role) = match ask.reviewer_id.as_deref() {
         Some(reviewer) => (reviewer.to_string(), role_in(team, reviewer)),
         // The human reviews an epic the Product Manager broke down (5.16 item 4), and has no agent
@@ -1095,7 +1190,7 @@ fn assignment(
         requested_by: AssignmentRequester::ScrumMaster,
         has_active_scrum_master: team.has_active(Role::ScrumMaster),
         assignee_id: assignee_id.to_string(),
-        assignee_role: role_in(team, assignee_id),
+        assignee_role,
         reviewer_id,
         reviewer_role,
         assignee_open_tasks: open_tasks(team, open_sprint.as_deref(), board, assignee_id),
@@ -1111,8 +1206,49 @@ fn assignment(
         }),
         plan_in_sprints: team.plans_in_sprints(),
         dependencies,
-        designer_browser,
+        designer_browser: if assignee_role == Role::UiUxDesigner {
+            designer_browser()
+        } else {
+            DesignerBrowser::Ready
+        },
+        // Filled by `context`, which reads the contracts of the tasks that might hold the folder.
+        private_folder_busy: false,
+        skips_sprints: row.skips_sprints,
     })
+}
+
+/// Whether another task holds the private folder `assignee_role` works in (6.6): one assigned to
+/// an agent, whose own contract names a role with that folder, in any status but `accepted` and
+/// `cancelled`. The task's role is the one that holds the folder, not its agent's current one, so
+/// an agent no longer on the team does not free it. It is not `open_tasks`, which counts one
+/// agent's tasks and leaves out those waiting for a sprint: a task in the Backlog that was
+/// assigned still has its copy of the folder, and holds it.
+///
+/// # Errors
+///
+/// `Files` when a contract that might hold the folder cannot be read; a task with no contract file
+/// holds nothing.
+fn private_folder_busy(
+    files: &ProjectFiles,
+    board: &[TaskProjection],
+    row: &TaskProjection,
+    assignee_role: Role,
+) -> Result<bool, TransitionError> {
+    let Some(folder) = private_folder(assignee_role) else {
+        return Ok(false);
+    };
+    for other in board.iter().filter(|other| {
+        other.task_id != row.task_id
+            && other.assignee_id.is_some()
+            && !matches!(other.status, TaskStatus::Accepted | TaskStatus::Cancelled)
+    }) {
+        match files.read_contract(&other.task_id) {
+            Ok(contract) if task_private_folder(&contract) == Some(folder) => return Ok(true),
+            Ok(_) | Err(FilesError::NotFound { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(false)
 }
 
 /// The status the board gives a task, if the board has it.
@@ -1398,7 +1534,9 @@ mod tests {
     use farik_store::{EventLog, IN_MEMORY, Projections, open_event_log, open_projections};
     use serde_json::{Value, json};
 
-    use super::{TransitionAsk, TransitionOutcome, Transitions, reviewed_by_the_human};
+    use super::{
+        TransitionAsk, TransitionOutcome, Transitions, refusal_details, reviewed_by_the_human,
+    };
 
     fn at(hour: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 9, 22, hour, 0, 0)
@@ -1805,6 +1943,459 @@ mod tests {
         // No sprint is open, so none bounds it, whatever the day has left.
         let left = assignment.remaining_sprint_budget_usd;
         assert!(left.is_infinite() && left > 0.0, "{left}");
+    }
+
+    /// Two Finance Specialists, `fin-1` and `fin-2`, and `maya`, each allowed two tasks.
+    fn a_finance_team() -> Team {
+        a_team(|wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+            for id in ["fin-1", "fin-2"] {
+                wire["agents"]
+                    .as_array_mut()
+                    .expect("a list of agents")
+                    .push(an_agent_wire(id, "finance_specialist"));
+            }
+        })
+    }
+
+    /// `wire` made a Finance Specialist's task in its folder, reviewed by the Product Manager and
+    /// ended by its books.
+    fn as_a_finance_task(wire: &mut Value) {
+        wire["assignee_role"] = json!("finance_specialist");
+        wire["reviewer_role"] = json!("product_manager");
+        wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+        wire["exit_criteria"] = json!([{
+            "id": "C1",
+            "text": "The books exist.",
+            "satisfies": ["R1"],
+            "verification": { "method": "artifact", "path": "books.xlsx" }
+        }]);
+    }
+
+    /// Files `task` as a Finance Specialist's task in its folder, reviewed by the Product Manager,
+    /// `ready`; and, when `held` names a status, assigned to `fin-1` and moved on to it.
+    fn a_finance_task(project: &Project, task: &str, held: Option<&str>) {
+        project.file(task, as_a_finance_task);
+        project.created(task, "ready");
+        let Some(held) = held else { return };
+        let people = json!({ "assignee": "fin-1", "reviewer": "maya" });
+        project.moved(task, "ready", "assigned", &people, at(10));
+        if held != "assigned" {
+            project.moved(task, "assigned", held, &people, at(10));
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_second_finance_task_waits() {
+        let request = a_request(
+            "FRK-2",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+        let second = assigning("fin-2", "maya");
+        // Whatever the first task is doing short of being over, it holds the folder, though the
+        // limit is two and the second is to go to another agent.
+        for held in [
+            "assigned",
+            "in_progress",
+            "verifying",
+            "rejected",
+            "blocked",
+            "escalated",
+        ] {
+            let project = Project::new(&format!("folder-busy-{held}"), a_finance_team(), at(12));
+            a_finance_task(&project, "FRK-1", Some(held));
+            a_finance_task(&project, "FRK-2", None);
+            let assignment = project
+                .context(&request, &second)
+                .assignment
+                .expect("an assignment");
+            assert!(assignment.private_folder_busy, "{held}");
+            assert_eq!(assignment.assignee_open_tasks, 0, "{held}");
+            let TransitionOutcome::Refused(refusal) = project.ask(&request, &second) else {
+                panic!("{held}: the second task was assigned");
+            };
+            assert!(
+                refusal_details(&refusal)
+                    .iter()
+                    .any(|reason| reason.starts_with("private_folder_busy:")),
+                "{held}: {refusal:?}"
+            );
+        }
+        // Over, it holds nothing, and the second is assigned.
+        for ended in ["accepted", "cancelled"] {
+            let project = Project::new(&format!("folder-free-{ended}"), a_finance_team(), at(12));
+            a_finance_task(&project, "FRK-1", Some(ended));
+            a_finance_task(&project, "FRK-2", None);
+            let assignment = project
+                .context(&request, &second)
+                .assignment
+                .expect("an assignment");
+            assert!(!assignment.private_folder_busy, "{ended}");
+            assert!(
+                matches!(project.ask(&request, &second), TransitionOutcome::Moved(_)),
+                "{ended}"
+            );
+        }
+        // Another folder's, or none, is not held by it: a Developer's open task, and the task
+        // asked about itself.
+        let project = Project::new("folder-other", a_finance_team(), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "ready");
+        project.moved(
+            "FRK-1",
+            "ready",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+            at(10),
+        );
+        a_finance_task(&project, "FRK-2", None);
+        let assignment = project
+            .context(&request, &second)
+            .assignment
+            .expect("an assignment");
+        assert!(!assignment.private_folder_busy);
+        let own = a_request(
+            "FRK-2",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+        a_finance_task(&project, "FRK-3", Some("in_progress"));
+        assert!(
+            project
+                .context(&own, &second)
+                .assignment
+                .expect("an assignment")
+                .private_folder_busy
+        );
+        let mine = a_request(
+            "FRK-3",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+        assert!(
+            !project
+                .context(&mine, &assigning("fin-1", "maya"))
+                .assignment
+                .expect("an assignment")
+                .private_folder_busy,
+            "a task is not kept out of the folder by itself"
+        );
+    }
+
+    /// `a_finance_team`, with two Procurement Specialists, `proc-1` and `proc-2`, as well.
+    fn a_procurement_team() -> Team {
+        a_team(|wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+            for (id, role) in [
+                ("fin-1", "finance_specialist"),
+                ("proc-1", "procurement_specialist"),
+                ("proc-2", "procurement_specialist"),
+            ] {
+                wire["agents"]
+                    .as_array_mut()
+                    .expect("a list of agents")
+                    .push(an_agent_wire(id, role));
+            }
+        })
+    }
+
+    /// `wire` made a Procurement Specialist's task in its folder, reviewed by the Product Manager
+    /// and ended by a comparison written as a note.
+    fn as_a_procurement_task(wire: &mut Value) {
+        wire["assignee_role"] = json!("procurement_specialist");
+        wire["reviewer_role"] = json!("product_manager");
+        wire["allowed_paths"] = json!([".farik/local/procurement/**"]);
+        wire["exit_criteria"] = json!([{
+            "id": "C1",
+            "text": "The comparison is written.",
+            "satisfies": ["R1"],
+            "verification": { "method": "artifact", "path": "evaluations/email-sending.md" }
+        }]);
+    }
+
+    /// Files `task` as a Procurement Specialist's task in its folder, `ready`; and, when `held`
+    /// names a status, assigned to `proc-1` and moved on to it.
+    fn a_procurement_task(project: &Project, task: &str, held: Option<&str>) {
+        project.file(task, as_a_procurement_task);
+        project.created(task, "ready");
+        let Some(held) = held else { return };
+        let people = json!({ "assignee": "proc-1", "reviewer": "maya" });
+        project.moved(task, "ready", "assigned", &people, at(10));
+        if held != "assigned" {
+            project.moved(task, "assigned", held, &people, at(10));
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_folders_do_not_wait_for_each_other() {
+        let request = a_request(
+            "FRK-2",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+        let second = assigning("proc-1", "maya");
+        let busy = |project: &Project| {
+            project
+                .context(&request, &second)
+                .assignment
+                .expect("an assignment")
+                .private_folder_busy
+        };
+        // Finance work in any status does not hold the procurement folder, and the other way
+        // round (a guard: the busy check is per folder).
+        for held in ["in_progress", "verifying", "blocked"] {
+            let project = Project::new(
+                &format!("folders-apart-{held}"),
+                a_procurement_team(),
+                at(12),
+            );
+            a_finance_task(&project, "FRK-1", Some(held));
+            a_procurement_task(&project, "FRK-2", None);
+            assert!(!busy(&project), "{held}");
+            assert!(
+                matches!(project.ask(&request, &second), TransitionOutcome::Moved(_)),
+                "{held}"
+            );
+            let project = Project::new(
+                &format!("folders-apart-b-{held}"),
+                a_procurement_team(),
+                at(12),
+            );
+            a_procurement_task(&project, "FRK-1", Some(held));
+            a_finance_task(&project, "FRK-2", None);
+            let to_finance = project
+                .context(&request, &assigning("fin-1", "maya"))
+                .assignment
+                .expect("an assignment");
+            assert!(!to_finance.private_folder_busy, "{held}");
+        }
+        // A second procurement task waits for the first in any status short of the end, under a
+        // limit of two, which leaves the agent holding the first room for it.
+        for held in [
+            "assigned",
+            "in_progress",
+            "verifying",
+            "rejected",
+            "blocked",
+            "escalated",
+        ] {
+            let project = Project::new(&format!("proc-busy-{held}"), a_procurement_team(), at(12));
+            a_procurement_task(&project, "FRK-1", Some(held));
+            a_procurement_task(&project, "FRK-2", None);
+            let assignment = project
+                .context(&request, &second)
+                .assignment
+                .expect("an assignment");
+            assert!(assignment.private_folder_busy, "{held}");
+            assert_eq!(assignment.assignee_open_tasks, 1, "{held}");
+            assert_eq!(assignment.wip_limit, 2, "{held}");
+            let TransitionOutcome::Refused(refusal) = project.ask(&request, &second) else {
+                panic!("{held}: the second task was assigned");
+            };
+            assert!(
+                refusal_details(&refusal)
+                    .iter()
+                    .any(|reason| reason.starts_with("private_folder_busy:")),
+                "{held}: {refusal:?}"
+            );
+        }
+        // Over, the first holds nothing.
+        for ended in ["accepted", "cancelled"] {
+            let project = Project::new(&format!("proc-free-{ended}"), a_procurement_team(), at(12));
+            a_procurement_task(&project, "FRK-1", Some(ended));
+            a_procurement_task(&project, "FRK-2", None);
+            assert!(!busy(&project), "{ended}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_procurement_task_ends_at_accepted() {
+        let project = Project::new("procurement-accepted", a_procurement_team(), at(12));
+        a_procurement_task(&project, "FRK-1", Some("in_progress"));
+        let folder = project.repo.path.join(".farik/local/procurement");
+        std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
+        std::fs::write(folder.join("vendors.xlsx"), "register").expect("written");
+        std::fs::write(folder.join("evaluations/old.md"), "an old comparison").expect("written");
+        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        // Assignment's copy holds the notes as well as the workbooks (a guard: it copies all).
+        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        assert!(folder.join(".history/FRK-1/vendors.xlsx").is_file());
+        assert!(folder.join(".history/FRK-1/evaluations/old.md").is_file());
+        // The task writes its comparison and edits the register.
+        std::fs::write(folder.join("evaluations/email-sending.md"), "# Email").expect("written");
+        std::fs::write(folder.join("vendors.xlsx"), "register, edited").expect("written");
+        project.record(
+            "FRK-1",
+            "criterion.recorded",
+            &json!({
+                "criterion_id": "C1",
+                "passed": true,
+                "evidence": "the comparison is in the folder",
+                "run_by": "assignee",
+                "recorded_by": "proc-1"
+            }),
+            at(10),
+        );
+        let verifying = a_request(
+            "FRK-1",
+            TaskStatus::Verifying,
+            TransitionActor::Assignee,
+            Some("proc-1"),
+        );
+        let naming = |files: &[&str]| TransitionAsk {
+            workbooks: Some(files.iter().map(ToString::to_string).collect()),
+            ..TransitionAsk::default()
+        };
+
+        // A note that is not there is refused, by name; the note and the register are enough.
+        let TransitionOutcome::Refused(refusal) =
+            project.ask(&verifying, &naming(&["evaluations/absent.md"]))
+        else {
+            panic!("a note that is not in the folder");
+        };
+        assert!(
+            refusal_details(&refusal)
+                .iter()
+                .any(|reason| reason == "evaluations/absent.md is not in your folder"),
+            "{refusal:?}"
+        );
+        let outcome = project.ask(
+            &verifying,
+            &naming(&["vendors.xlsx", "evaluations/email-sending.md"]),
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+
+        // A task that depends on it, and an agent to give it to, wait for it.
+        a_procurement_task(&project, "FRK-2", None);
+        project.file("FRK-2", |wire| {
+            as_a_procurement_task(wire);
+            wire["dependencies"] = json!(["FRK-1"]);
+        });
+        let assigning_second = || {
+            let request = a_request(
+                "FRK-2",
+                TaskStatus::Assigned,
+                TransitionActor::ProductManager,
+                Some("maya"),
+            );
+            project.context(&request, &assigning("proc-2", "maya"))
+        };
+        assert!(
+            !assigning_second()
+                .assignment
+                .expect("an assignment")
+                .dependencies[0]
+                .integrated
+        );
+
+        // Accepted, it is finished: nothing is integrated, and its dependant may be assigned.
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "proc-1");
+        note(&project, "FRK-1", "review", "maya");
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let TransitionOutcome::Moved(decision) = outcome else {
+            panic!("the comparison is in the folder: {outcome:?}");
+        };
+        assert_eq!(
+            decision.effects,
+            [farik_core::governor::transition::TransitionEffect::NothingToIntegrate]
+        );
+        let after = assigning_second().assignment.expect("an assignment");
+        assert!(after.dependencies[0].integrated, "{after:?}");
+        assert!(!after.private_folder_busy);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_task_holds_the_folder_by_its_role_not_by_its_agent() {
+        // FRK-1's agent is no longer on the team, so the team gives it no role; the task's copy of
+        // the folder and its work are still there, and it is the task's own role that holds them.
+        let project = Project::new("folder-agent-left", a_finance_team(), at(12));
+        a_finance_task(&project, "FRK-1", None);
+        let people = json!({ "assignee": "fin-gone", "reviewer": "maya" });
+        project.moved("FRK-1", "ready", "assigned", &people, at(10));
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(10));
+        a_finance_task(&project, "FRK-2", None);
+        let request = a_request(
+            "FRK-2",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+
+        let assignment = project
+            .context(&request, &assigning("fin-2", "maya"))
+            .assignment
+            .expect("an assignment");
+
+        assert!(assignment.private_folder_busy);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_task_waiting_in_the_backlog_still_holds_the_folder() {
+        // FRK-1 was in progress when its sprint ended and was left in the Backlog with its agent.
+        // It waits and fills no one's limit, but its copy of the folder is kept, so FRK-2, in the
+        // next sprint, still waits for the folder.
+        let project = Project::new(
+            "folder-backlog",
+            a_team(|wire| {
+                wire["policy"]["wip_limit_per_agent"] = json!(2);
+                wire["policy"]["plan_in_sprints"] = json!(true);
+                for id in ["fin-1", "fin-2"] {
+                    wire["agents"]
+                        .as_array_mut()
+                        .expect("a list of agents")
+                        .push(an_agent_wire(id, "finance_specialist"));
+                }
+            }),
+            at(12),
+        );
+        a_finance_task(&project, "FRK-1", Some("in_progress"));
+        a_finance_task(&project, "FRK-2", None);
+        project.open_sprint("S1", 100.0, &["FRK-1"]);
+        project.append_wire(&json!({
+            "seq": 1,
+            "recorded_at": at(11).to_rfc3339(),
+            "team_id": "farik",
+            "project_id": "farik",
+            "kind": "sprint.ended",
+            "body": { "sprint_id": "S1", "ended_by": "human", "left": ["FRK-1"], "backlog": true },
+        }));
+        project.open_sprint("S2", 100.0, &["FRK-2"]);
+        let request = a_request(
+            "FRK-2",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+
+        let assignment = project
+            .context(&request, &assigning("fin-2", "maya"))
+            .assignment
+            .expect("an assignment");
+
+        // The Backlog's task fills no limit, and holds the folder all the same.
+        assert!(
+            project
+                .projections
+                .board()
+                .expect("the board")
+                .iter()
+                .any(|row| { row.task_id.as_str() == "FRK-1" && row.left_for_the_backlog })
+        );
+        assert!(assignment.private_folder_busy);
     }
 
     #[test]
@@ -2414,6 +3005,33 @@ mod tests {
         assert_eq!(row.status, TaskStatus::Assigned);
         assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
         assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn assigns_a_developer_without_asking_whether_the_designer_has_its_browser() {
+        // `UnaskedPreviews` panics when asked whether a preview can run: the answer is the
+        // Designer's alone, and asking Docker for it would hold up the lock every transition's
+        // judgment takes.
+        let project = Project::new("assign-developer-unasked", a_team(|_| {}), at(12));
+        project
+            .transitions
+            .set_previews(Arc::new(crate::preview::fixtures::UnaskedPreviews));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "ready");
+        let outcome = project.ask(
+            &a_request(
+                "FRK-1",
+                TaskStatus::Assigned,
+                TransitionActor::ProductManager,
+                Some("maya"),
+            ),
+            &assigning("dev-a", "dev-b"),
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
     }
 
     #[test]
@@ -3623,6 +4241,222 @@ mod tests {
         );
 
         accepted(&project, "FRK-1", "result", None);
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_accepted_finance_task_unblocks_its_dependants() {
+        let project = Project::new("folder-accepted", a_finance_team(), at(12));
+        a_finance_task(&project, "FRK-1", Some("in_progress"));
+        // The books are in the folder, and the task has no branch, no commit and no worktree.
+        let folder = project.repo.path.join(".farik/local/finance");
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "fin-1");
+        note(&project, "FRK-1", "review", "maya");
+        project.moved(
+            "FRK-1",
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "fin-1", "reviewer": "maya" }),
+            at(11),
+        );
+        // A task that depends on it, and an agent to give it to.
+        a_finance_task(&project, "FRK-2", None);
+        project.file("FRK-2", |wire| {
+            wire["assignee_role"] = json!("finance_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["dependencies"] = json!(["FRK-1"]);
+        });
+        let assigning_second = || {
+            let request = a_request(
+                "FRK-2",
+                TaskStatus::Assigned,
+                TransitionActor::ProductManager,
+                Some("maya"),
+            );
+            project.context(&request, &assigning("fin-2", "maya"))
+        };
+        let before = assigning_second().assignment.expect("an assignment");
+        assert!(!before.dependencies[0].integrated);
+
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+
+        let TransitionOutcome::Moved(decision) = outcome else {
+            panic!("the books are in the folder: {outcome:?}");
+        };
+        assert_eq!(
+            decision.effects,
+            [farik_core::governor::transition::TransitionEffect::NothingToIntegrate]
+        );
+        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        assert_eq!(
+            moved_body(moves.last().expect("a move")).effects,
+            [TaskTransitionedBodyEffectsItem::NothingToIntegrate]
+        );
+        let row = project
+            .projections
+            .task(&"FRK-1".parse().expect("a task id"))
+            .expect("the board reads")
+            .expect("a row");
+        assert_eq!(row.status, TaskStatus::Accepted);
+        assert!(!row.awaiting_integration);
+        // It counts as integrated, holds the folder no longer, and its dependant may be assigned.
+        let after = assigning_second().assignment.expect("an assignment");
+        assert!(after.dependencies[0].integrated, "{after:?}");
+        assert!(!after.private_folder_busy);
+        assert!(matches!(
+            project.ask(
+                &a_request(
+                    "FRK-2",
+                    TaskStatus::Assigned,
+                    TransitionActor::ProductManager,
+                    Some("maya"),
+                ),
+                &assigning("fin-2", "maya"),
+            ),
+            TransitionOutcome::Moved(_)
+        ));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_acceptance_carries_the_changed_files() {
+        let project = Project::new("folder-accepted-changed", a_finance_team(), at(12));
+        a_finance_task(&project, "FRK-1", Some("in_progress"));
+        let folder = project.repo.path.join(".farik/local/finance");
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+        std::fs::write(folder.join("old.xlsx"), "an old one").expect("written");
+        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        // The task edited the books and left the old workbook alone.
+        std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "fin-1");
+        note(&project, "FRK-1", "review", "maya");
+        project.record(
+            "FRK-1",
+            "criterion.recorded",
+            &json!({
+                "criterion_id": "C1",
+                "passed": true,
+                "evidence": "the books are in the folder",
+                "run_by": "assignee",
+                "recorded_by": "fin-1"
+            }),
+            at(10),
+        );
+        // The move into `verifying` goes through the governor, as it does in a run, so that
+        // `record_move` writes it: the files are named, and the move carries none of them.
+        let verifying = project.ask(
+            &a_request(
+                "FRK-1",
+                TaskStatus::Verifying,
+                TransitionActor::Assignee,
+                Some("fin-1"),
+            ),
+            &TransitionAsk {
+                workbooks: Some(vec!["books.xlsx".to_string()]),
+                ..TransitionAsk::default()
+            },
+        );
+        assert!(
+            matches!(verifying, TransitionOutcome::Moved(_)),
+            "{verifying:?}"
+        );
+
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let (accepted, earlier) = moves.split_last().expect("the moves");
+        assert_eq!(
+            moved_body(accepted).changed,
+            Some(vec!["books.xlsx".to_string()])
+        );
+        // The move into `verifying` is among the earlier ones, and says nothing of the files.
+        assert!(
+            earlier
+                .iter()
+                .any(|moved| moved_body(moved).to == TaskStatusWire::Verifying),
+            "the governor's move into verifying is on the page's history"
+        );
+        for earlier in earlier {
+            assert_eq!(moved_body(earlier).changed, None);
+        }
+        // A task with a worktree changes no folder, and its acceptance says nothing of one.
+        let project = Project::new("worktree-accepted-changed", a_team(|_| {}), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "dev-a");
+        note(&project, "FRK-1", "review", "dev-b");
+        project.moved("FRK-1", "in_progress", "verifying", &people, at(11));
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        assert_eq!(moved_body(moves.last().expect("a move")).changed, None);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn holds_a_finance_tasks_changes_to_its_allowed_paths() {
+        // The folder's changes are the Definition of Done's diff (5.4): a task allowed the books
+        // alone is refused acceptance for a forecast it added, and accepted for the books.
+        let project = Project::new("folder-allowed", a_finance_team(), at(12));
+        a_finance_task(&project, "FRK-1", Some("in_progress"));
+        project.file("FRK-1", |wire| {
+            as_a_finance_task(wire);
+            wire["allowed_paths"] = json!([".farik/local/finance/books.xlsx"]);
+        });
+        let folder = project.repo.path.join(".farik/local/finance");
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
+        std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "fin-1");
+        note(&project, "FRK-1", "review", "maya");
+        project.moved(
+            "FRK-1",
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "fin-1", "reviewer": "maya" }),
+            at(11),
+        );
+
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+
+        let TransitionOutcome::Refused(refusal) = outcome else {
+            panic!("a forecast outside the allowed paths: {outcome:?}");
+        };
+        let details = super::refusal_details(&refusal);
+        assert!(
+            details.iter().any(|detail| detail.contains(
+                "the diff changes .farik/local/finance/forecast.xlsx outside the contract's \
+                 allowed paths .farik/local/finance/books.xlsx"
+            )),
+            "{details:?}"
+        );
+        // Without the forecast, the books alone are within what it may change.
+        std::fs::remove_file(folder.join("forecast.xlsx")).expect("removed");
         let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),

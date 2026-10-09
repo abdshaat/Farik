@@ -4,13 +4,18 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::paths::{GlobError, PathRefusal, check_allowed_paths, reaches_the_farik_directory};
+use super::paths::{
+    GlobError, PathRefusal, check_allowed_paths, reaches_the_farik_directory,
+    reaches_the_marketing_directory,
+};
 use super::team_rules::TeamRules;
 use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
 };
 use crate::generated::task_contract::FarikTaskContractKind as Kind;
-use crate::team::changes_code;
+use crate::team::{
+    changes_code, plain_role, private_file_fault, private_folder, task_private_folder,
+};
 use crate::text::listed;
 
 /// Builders for readiness contexts and typed contracts, usable by every crate's tests.
@@ -48,8 +53,18 @@ pub enum ReadinessRule {
     /// A task not assigned to the Software Developer keeps every allowed path within the team's
     /// document paths: only the Developer changes code.
     DocumentPathsOnly,
+    /// While the team has an active Marketing Specialist, no other role's task names a path that
+    /// could reach `docs/marketing/`, which the Marketing Specialist owns.
+    MarketingPathsOwned,
     /// No allowed path reaches under `.farik/`, whose files change only through Farik's tools.
     NoFarikPaths,
+    /// A task for a role with a private folder works only there: every allowed path lies within
+    /// the folder, no criterion is a `command` or a `test`, an `artifact` criterion names a
+    /// workbook in the folder and searches no text, and the task has no parent epic.
+    PrivateFolderTask,
+    /// A task for a role with a private folder is reviewed by the Product Manager alone: the
+    /// folder is its role's and the Product Manager's, as the reviewer, and no other role's.
+    PrivateFolderReviewer,
     /// A task's budget does not exceed the team's cap on a task; an epic is bounded by the
     /// sprint budget instead.
     BudgetWithinTeamMax,
@@ -133,7 +148,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 19] = [
+const CHECKS: [Check; 22] = [
     intent_present,
     summary_present,
     criteria_present,
@@ -147,7 +162,10 @@ const CHECKS: [Check; 19] = [
     new_tests_required_by_rule,
     allowed_paths_within_ceiling,
     document_paths_only,
+    marketing_paths_owned,
     no_farik_paths,
+    private_folder_task,
+    private_folder_reviewer,
     budget_within_team_max,
     no_parent_for_epic,
     parent_in_progress,
@@ -436,11 +454,14 @@ fn required_criteria_present(
         .iter()
         .map(|criterion| Verification::from(&criterion.verification).method())
         .collect();
+    // A task in a private folder has no worktree to run a command or a test in.
+    let in_a_folder = task_private_folder(contract).is_some();
     let missing: Vec<&str> = context
         .rules
         .required_criteria
         .iter()
         .map(String::as_str)
+        .filter(|method| !(in_a_folder && matches!(*method, "command" | "test")))
         .filter(|method| !methods.contains(method))
         .collect();
     if missing.is_empty() {
@@ -529,7 +550,8 @@ fn allowed_paths_within_ceiling(
     contract: &TaskContract,
     context: &ReadinessContext,
 ) -> Option<ReadinessFailure> {
-    if context.rules.allowed_paths_ceiling.is_empty() {
+    // A task in a private folder is held to its folder by `private_folder_task` instead.
+    if context.rules.allowed_paths_ceiling.is_empty() || task_private_folder(contract).is_some() {
         return None;
     }
     let outside = paths_outside(
@@ -562,7 +584,10 @@ fn document_paths_only(
     contract: &TaskContract,
     context: &ReadinessContext,
 ) -> Option<ReadinessFailure> {
-    if contract.kind != Kind::Task || changes_code(contract.assignee_role) {
+    if contract.kind != Kind::Task
+        || changes_code(contract.assignee_role)
+        || task_private_folder(contract).is_some()
+    {
         return None;
     }
     let documents = &context.rules.document_paths;
@@ -597,11 +622,47 @@ fn document_paths_only(
     ))
 }
 
+/// While the team has an active Marketing Specialist, another role's task may not name a path that
+/// could reach `docs/marketing/` (5.3, ADR 0042): the brand kit and the marketing plans are the
+/// Marketing Specialist's, and everyone else reads them. An epic names a ceiling and is not held.
+fn marketing_paths_owned(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    if contract.kind != Kind::Task
+        || contract.assignee_role == Role::MarketingSpecialist
+        || context
+            .active_agents_by_role
+            .get(&Role::MarketingSpecialist)
+            .is_none_or(|count| *count == 0)
+    {
+        return None;
+    }
+    let reaching: Vec<&str> = contract
+        .allowed_paths
+        .iter()
+        .map(String::as_str)
+        .filter(|path| reaches_the_marketing_directory(path))
+        .collect();
+    if reaching.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::MarketingPathsOwned,
+        format!(
+            "allowed paths {} could reach docs/marketing/, which the Marketing Specialist owns; \
+             name narrower paths or give the task to the Marketing Specialist",
+            reaching.join(", ")
+        ),
+    ))
+}
+
 /// No allowed path reaches under `.farik/` (5.3), whatever the role or kind: a contract, a
 /// decision, a notebook, or the retro changes only through Farik's tools, never through a commit.
 /// A path with a backslash is refused outright: the glob engine reads `\` as an escape, so a
 /// glob such as `.f\arik/**` reads its first segment as `.f`, missing the directory it in fact
-/// matches once escaped.
+/// matches once escaped. The one exception is a task in a private folder (6.6), which may name
+/// paths within its own folder.
 fn no_farik_paths(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
     let backslashed: Vec<&str> = contract
         .allowed_paths
@@ -609,11 +670,14 @@ fn no_farik_paths(contract: &TaskContract, _: &ReadinessContext) -> Option<Readi
         .map(String::as_str)
         .filter(|path| path.contains('\\'))
         .collect();
+    // A task in a private folder may name the folder, which lies under `.farik/local/`.
+    let folder = task_private_folder(contract);
     let reaching: Vec<&str> = contract
         .allowed_paths
         .iter()
         .map(String::as_str)
         .filter(|path| !path.contains('\\') && reaches_the_farik_directory(path))
+        .filter(|path| !folder.is_some_and(|folder| is_within_the_folder(path, folder)))
         .collect();
     if backslashed.is_empty() && reaching.is_empty() {
         return None;
@@ -632,6 +696,128 @@ fn no_farik_paths(contract: &TaskContract, _: &ReadinessContext) -> Option<Readi
         ));
     }
     Some(failure(ReadinessRule::NoFarikPaths, reasons.join("; ")))
+}
+
+/// Whether an allowed path stays within a private folder, by the ceiling's containment: the folder,
+/// a path below it, or a glob whose literal prefix is below it.
+fn is_within_the_folder(path: &str, folder: &str) -> bool {
+    is_within_any(path, &[folder.to_string()])
+}
+
+/// A task for a role with a private folder works only there (5.3, 6.6, 6.10): its allowed paths
+/// lie within the folder, it has no `command` or `test` criterion, since it has no worktree to run
+/// one in, its `artifact` criteria name files as the folder holds them (workbooks, and notes in the
+/// procurement folder) and search no text, since a workbook is not text and a note is checked for
+/// existence alone, and it has no parent epic, whose paths could not name `.farik/`.
+fn private_folder_task(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
+    let folder = task_private_folder(contract)?;
+    let mut reasons = Vec::new();
+    let outside: Vec<&str> = contract
+        .allowed_paths
+        .iter()
+        .map(String::as_str)
+        .filter(|path| !is_within_the_folder(path, folder))
+        .collect();
+    if !outside.is_empty() {
+        reasons.push(format!(
+            "allowed paths {} lie outside {folder}; name {folder}/** or a file in it",
+            outside.join(", ")
+        ));
+    }
+    let runs = criterion_ids(contract, |verification, _| {
+        matches!(
+            verification,
+            Verification::Command { .. } | Verification::Test { .. }
+        )
+    });
+    if !runs.is_empty() {
+        reasons.push(format!(
+            "{} {} a command or a test, and there is no worktree to run one in; use artifact, \
+             review and human criteria",
+            listed("criterion", "criteria", &runs),
+            if runs.len() == 1 { "is" } else { "are" }
+        ));
+    }
+    let searches = criterion_ids(
+        contract,
+        |verification, _| matches!(verification, Verification::Artifact { must_contain, .. } if !must_contain.is_empty()),
+    );
+    if !searches.is_empty() {
+        reasons.push(format!(
+            "{} {} a workbook for text, and a workbook is not text; drop must_contain",
+            listed("criterion", "criteria", &searches),
+            if searches.len() == 1 {
+                "searches"
+            } else {
+                "search"
+            }
+        ));
+    }
+    for criterion in &contract.exit_criteria {
+        let Verification::Artifact { path, .. } = Verification::from(&criterion.verification)
+        else {
+            continue;
+        };
+        let why = if path.starts_with(".farik/") {
+            let example = if private_folder(Role::ProcurementSpecialist) == Some(folder) {
+                "vendors.xlsx"
+            } else {
+                "books.xlsx"
+            };
+            Some(format!(
+                "is relative to the project, and a path here is relative to {folder}; write \
+                 {example}"
+            ))
+        } else {
+            private_file_fault(folder, &path)
+        };
+        if let Some(why) = why {
+            reasons.push(format!(
+                "criterion {} names {path}, which {why}",
+                criterion.id.as_str()
+            ));
+        }
+    }
+    if let Some(parent) = &contract.parent {
+        reasons.push(format!(
+            "it has a parent epic, {}, whose paths cannot name .farik/, so no task under one is \
+             within the folder",
+            parent.as_str()
+        ));
+    }
+    if reasons.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::PrivateFolderTask,
+        format!(
+            "a task for the {} works only in its private folder {folder}: {}",
+            plain_role(contract.assignee_role),
+            reasons.join("; ")
+        ),
+    ))
+}
+
+/// A task that works in a role's private folder is reviewed by the Product Manager alone (5.3, 6.6,
+/// 6.10; the founder's decision of 2026-10-07), so that each folder stays its own role's and, as
+/// the reviewer, the Product Manager's: the reviewer's session reads the folder's files, and no
+/// other role's does.
+fn private_folder_reviewer(
+    contract: &TaskContract,
+    _: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    let folder = task_private_folder(contract)?;
+    (contract.reviewer_role != Role::ProductManager).then(|| {
+        failure(
+            ReadinessRule::PrivateFolderReviewer,
+            format!(
+                "a task in the private folder {folder} is reviewed by the Product Manager alone, \
+                 and this one names the {} as its reviewer; name product_manager as its \
+                 reviewer_role",
+                plain_role(contract.reviewer_role)
+            ),
+        )
+    })
 }
 
 fn budget_within_team_max(
@@ -772,7 +958,8 @@ mod tests {
         JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext, ReadinessRule as R,
         TeamRules, evaluate_readiness,
     };
-    use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
+    use crate::contract::fixtures::a_contract_wire;
+    use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire, validate_contract};
     use crate::generated::task_contract::FarikTaskContractKind as Kind;
 
     fn failed_rules(contract: &TaskContract, context: &ReadinessContext) -> Vec<R> {
@@ -1100,20 +1287,23 @@ mod tests {
             for role in [Role::SoftwareDeveloper, Role::Architect] {
                 let mut task = a_task_for(role, &["docs/x.md", path]);
                 assert!(
-                    failed_rules(&task, &a_ready_context()).contains(&R::NoFarikPaths),
+                    failed_rules(&task, &a_context_without_marketing()).contains(&R::NoFarikPaths),
                     "{path} for {role:?}"
                 );
                 task.kind = Kind::Epic;
                 assert!(
-                    failed_rules(&task, &a_ready_context()).contains(&R::NoFarikPaths),
+                    failed_rules(&task, &a_context_without_marketing()).contains(&R::NoFarikPaths),
                     "{path} for an epic"
                 );
             }
         }
         let task = a_task_for(Role::Architect, &["**/*.md"]);
-        assert_eq!(failed_rules(&task, &a_ready_context()), [R::NoFarikPaths]);
+        assert_eq!(
+            failed_rules(&task, &a_context_without_marketing()),
+            [R::NoFarikPaths]
+        );
         assert!(
-            message_of(&task, &a_ready_context(), R::NoFarikPaths).contains("**/*.md"),
+            message_of(&task, &a_context_without_marketing(), R::NoFarikPaths).contains("**/*.md"),
             "the message names the path"
         );
         for path in [
@@ -1127,7 +1317,7 @@ mod tests {
         ] {
             let task = a_task_for(Role::SoftwareDeveloper, &[path]);
             assert_eq!(
-                evaluate_readiness(&task, &a_ready_context()),
+                evaluate_readiness(&task, &a_context_without_marketing()),
                 Ok(()),
                 "{path}"
             );
@@ -1138,7 +1328,7 @@ mod tests {
     fn keeps_a_ceiling_with_a_file_filter_exact() {
         let mut contract = a_contract();
         contract.allowed_paths = vec!["docs/**".to_string()];
-        let mut context = a_ready_context();
+        let mut context = a_context_without_marketing();
         context.rules.allowed_paths_ceiling = vec!["docs/**/*.md".to_string()];
         assert_eq!(
             failed_rules(&contract, &context),
@@ -1154,7 +1344,7 @@ mod tests {
         for path in ["docs*/**", "docs?/x", "docs{,rc}/**", "docs[x]/**"] {
             let mut contract = a_contract();
             contract.allowed_paths = vec![path.to_string()];
-            let mut context = a_ready_context();
+            let mut context = a_context_without_marketing();
             context.rules.allowed_paths_ceiling = vec!["docs/**".to_string()];
             assert_eq!(
                 failed_rules(&contract, &context),
@@ -1163,7 +1353,7 @@ mod tests {
             );
             let task = a_task_for(Role::Architect, &[path]);
             assert_eq!(
-                failed_rules(&task, &a_ready_context()),
+                failed_rules(&task, &a_context_without_marketing()),
                 [R::DocumentPathsOnly],
                 "{path} against the document paths"
             );
@@ -1171,11 +1361,453 @@ mod tests {
         for path in ["docs", "docs/**", "docs/*.md"] {
             let task = a_task_for(Role::Architect, &[path]);
             assert_eq!(
-                evaluate_readiness(&task, &a_ready_context()),
+                evaluate_readiness(&task, &a_context_without_marketing()),
                 Ok(()),
                 "{path}"
             );
         }
+    }
+
+    /// The ready context with no Marketing Specialist, for the tests of the rules about paths
+    /// that name `docs/` or everything: `marketing_paths_owned` would hold those paths too.
+    fn a_context_without_marketing() -> ReadinessContext {
+        let mut context = a_ready_context();
+        context
+            .active_agents_by_role
+            .remove(&Role::MarketingSpecialist);
+        context
+    }
+
+    #[test]
+    fn another_role_may_not_name_the_marketing_folder() {
+        let failed = |task: &TaskContract, context: &ReadinessContext| -> Vec<R> {
+            match evaluate_readiness(task, context) {
+                Ok(()) => Vec::new(),
+                Err(failures) => failures.iter().map(|failure| failure.rule).collect(),
+            }
+        };
+        // `a_ready_context()` has one active Marketing Specialist.
+        let mut with_marketing = a_task_for(Role::ProductManager, &["docs/adr/**", "docs/**"]);
+        with_marketing.reviewer_role = Role::Architect;
+        assert_eq!(
+            failed(&with_marketing, &a_ready_context()),
+            [R::MarketingPathsOwned]
+        );
+        let message = message_of(&with_marketing, &a_ready_context(), R::MarketingPathsOwned);
+        assert_eq!(
+            message,
+            "allowed paths docs/** could reach docs/marketing/, which the Marketing Specialist \
+             owns; name narrower paths or give the task to the Marketing Specialist"
+        );
+        // The same task passes once nobody on the team is a Marketing Specialist, or one is paused.
+        for count in [None, Some(0)] {
+            let mut context = a_ready_context();
+            context
+                .active_agents_by_role
+                .remove(&Role::MarketingSpecialist);
+            if let Some(count) = count {
+                context
+                    .active_agents_by_role
+                    .insert(Role::MarketingSpecialist, count);
+            }
+            assert_eq!(
+                evaluate_readiness(&with_marketing, &context),
+                Ok(()),
+                "{count:?}"
+            );
+        }
+        // Any other role is held, and a narrower path passes.
+        for role in [Role::Architect, Role::SoftwareDeveloper] {
+            let task = a_task_for(role, &["docs/**"]);
+            assert_eq!(
+                failed(&task, &a_ready_context()),
+                [R::MarketingPathsOwned],
+                "{role:?}"
+            );
+            let task = a_task_for(role, &["docs/adr/**"]);
+            assert_eq!(failed(&task, &a_ready_context()), [], "{role:?}");
+        }
+        // The Marketing Specialist's own task may name its folder.
+        let own = a_task_for(
+            Role::MarketingSpecialist,
+            &["docs/marketing/**", "CHANGELOG.md"],
+        );
+        assert_eq!(evaluate_readiness(&own, &a_ready_context()), Ok(()));
+        // An epic is not held: it names the ceiling its tasks fall within.
+        let mut epic = a_task_for(Role::Architect, &["docs/**"]);
+        epic.kind = Kind::Epic;
+        assert!(!failed(&epic, &a_ready_context()).contains(&R::MarketingPathsOwned));
+    }
+
+    /// A task for the Finance Specialist, reviewed by the Product Manager, allowed `paths`, with
+    /// exactly `criteria` (wire values).
+    fn a_finance_task(paths: &[&str], criteria: serde_json::Value) -> TaskContract {
+        let mut wire = a_contract_wire();
+        wire["assignee_role"] = json!("finance_specialist");
+        wire["reviewer_role"] = json!("product_manager");
+        wire["allowed_paths"] = json!(paths);
+        wire["exit_criteria"] = criteria;
+        validate_contract(&wire).expect("a schema-valid contract")
+    }
+
+    /// The criteria of a finance task that is ready: its books exist, a reviewer reads them, and
+    /// the user agrees.
+    fn the_books_criteria() -> serde_json::Value {
+        json!([
+            { "id": "C1", "text": "The books exist.",
+              "verification": { "method": "artifact", "path": "books.xlsx" } },
+            { "id": "C2", "text": "Every number names its source.",
+              "verification": { "method": "review", "rubric": ["Does every number name its source?"] } },
+            { "id": "C3", "text": "The books look right to the user.",
+              "verification": { "method": "human", "question": "Do the books look right?" } }
+        ])
+    }
+
+    #[test]
+    fn a_finance_task_is_ready_in_its_folder() {
+        let task = a_finance_task(&[".farik/local/finance/**"], the_books_criteria());
+        assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
+        // A path to one file in the folder, and the folder itself, are within it too.
+        let task = a_finance_task(
+            &[".farik/local/finance/books.xlsx", ".farik/local/finance"],
+            the_books_criteria(),
+        );
+        assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
+    }
+
+    /// A task for the Procurement Specialist, reviewed by the Product Manager, allowed `paths`,
+    /// with exactly `criteria` (wire values).
+    fn a_procurement_task(paths: &[&str], criteria: serde_json::Value) -> TaskContract {
+        let mut wire = a_contract_wire();
+        wire["assignee_role"] = json!("procurement_specialist");
+        wire["reviewer_role"] = json!("product_manager");
+        wire["allowed_paths"] = json!(paths);
+        wire["exit_criteria"] = criteria;
+        validate_contract(&wire).expect("a schema-valid contract")
+    }
+
+    #[test]
+    fn a_procurement_task_is_ready_without_a_branch() {
+        let evaluation = json!([
+            { "id": "C1", "text": "The comparison is written.",
+              "verification": { "method": "artifact", "path": "evaluations/email-sending.md" } },
+            { "id": "C2", "text": "Every price names its source.",
+              "verification": { "method": "review", "rubric": ["Does every price name its source?"] } },
+            { "id": "C3", "text": "The recommendation is clear to the founder.",
+              "verification": { "method": "human", "question": "Is the recommendation clear?" } }
+        ]);
+        let folder = &[".farik/local/procurement/**"];
+        let task = a_procurement_task(folder, evaluation.clone());
+        assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
+        // The register is a workbook in the folder, and a note may sit a folder down.
+        let both = a_procurement_task(
+            folder,
+            json!([
+                evaluation[0].clone(), evaluation[1].clone(), evaluation[2].clone(),
+                { "id": "C4", "text": "The register is kept.",
+                  "verification": { "method": "artifact", "path": "vendors.xlsx" } }
+            ]),
+        );
+        assert_eq!(evaluate_readiness(&both, &a_ready_context()), Ok(()));
+        // A command criterion has no worktree to run in.
+        let runs = a_procurement_task(
+            folder,
+            json!([
+                evaluation[0].clone(), evaluation[1].clone(), evaluation[2].clone(),
+                { "id": "C4", "text": "It builds.",
+                  "verification": { "method": "command", "command": "make", "expect": { "exit_code": 0 } } }
+            ]),
+        );
+        let context = a_context_without_marketing();
+        assert_eq!(failed_rules(&runs, &context), [R::PrivateFolderTask]);
+        assert!(
+            message_of(&runs, &context, R::PrivateFolderTask)
+                .contains("criterion C4 is a command or a test")
+        );
+        // A note is not searched for text, as a workbook is not.
+        let searched = a_procurement_task(
+            folder,
+            json!([
+                { "id": "C1", "text": "The comparison names a seller.",
+                  "verification": { "method": "artifact", "path": "evaluations/email-sending.md",
+                                    "must_contain": ["seller"] } },
+                evaluation[1].clone(), evaluation[2].clone()
+            ]),
+        );
+        assert_eq!(failed_rules(&searched, &context), [R::PrivateFolderTask]);
+        // The finance folder is not its own.
+        let finance = a_procurement_task(&[".farik/local/finance/**"], evaluation.clone());
+        assert_eq!(
+            failed_rules(&finance, &context),
+            [R::NoFarikPaths, R::PrivateFolderTask]
+        );
+        assert!(
+            message_of(&finance, &context, R::PrivateFolderTask).contains(
+                "allowed paths .farik/local/finance/** lie outside .farik/local/procurement"
+            ),
+        );
+        // A path that is neither a workbook nor a note, and one that starts at the project.
+        for (path, said) in [
+            ("evaluations/x.txt", "is not a workbook or a note"),
+            (
+                ".farik/local/procurement/vendors.xlsx",
+                "is relative to the project",
+            ),
+        ] {
+            let task = a_procurement_task(
+                folder,
+                json!([
+                    { "id": "C1", "text": "It exists.",
+                      "verification": { "method": "artifact", "path": path } },
+                    evaluation[1].clone(), evaluation[2].clone()
+                ]),
+            );
+            assert_eq!(
+                failed_rules(&task, &context),
+                [R::PrivateFolderTask],
+                "{path}"
+            );
+            let message = message_of(&task, &context, R::PrivateFolderTask);
+            assert!(message.contains(said), "{path}: {message}");
+        }
+    }
+
+    /// The founder's decision of 2026-10-07 ("Only the Product Manager"): a task that works in a
+    /// role's private folder is reviewed by the Product Manager, whatever the role, so that each
+    /// folder stays its own role's and, as the reviewer, the Product Manager's.
+    #[test]
+    fn a_private_folder_task_is_reviewed_by_the_product_manager() {
+        // Both folders' roles are on the team, so that a reviewer of either is available and the
+        // new rule is the only one that can refuse.
+        let mut context = a_ready_context();
+        for role in [Role::FinanceSpecialist, Role::ProcurementSpecialist] {
+            context.active_agents_by_role.insert(role, 1);
+        }
+        let books = a_finance_task(&[".farik/local/finance/**"], the_books_criteria());
+        let comparison = a_procurement_task(
+            &[".farik/local/procurement/**"],
+            json!([
+                { "id": "C1", "text": "The comparison is written.",
+                  "verification": { "method": "artifact", "path": "evaluations/email-sending.md" } },
+                { "id": "C2", "text": "Every price names its source.",
+                  "verification": { "method": "review", "rubric": ["Does every price name its source?"] } },
+                { "id": "C3", "text": "The recommendation is clear to the founder.",
+                  "verification": { "method": "human", "question": "Is the recommendation clear?" } }
+            ]),
+        );
+        // The Product Manager is accepted, for each folder.
+        assert_eq!(evaluate_readiness(&books, &context), Ok(()));
+        assert_eq!(evaluate_readiness(&comparison, &context), Ok(()));
+        // The other folder's role is refused, and so is any other role that could be available.
+        for (task, reviewer, folder) in [
+            (&books, Role::ProcurementSpecialist, ".farik/local/finance"),
+            (
+                &comparison,
+                Role::FinanceSpecialist,
+                ".farik/local/procurement",
+            ),
+            (&books, Role::Architect, ".farik/local/finance"),
+            (
+                &comparison,
+                Role::SoftwareDeveloper,
+                ".farik/local/procurement",
+            ),
+        ] {
+            let mut task = task.clone();
+            task.reviewer_role = reviewer;
+            assert_eq!(
+                failed_rules(&task, &context),
+                [R::PrivateFolderReviewer],
+                "{reviewer}"
+            );
+            let message = message_of(&task, &context, R::PrivateFolderReviewer);
+            assert!(
+                message.contains(folder) && message.contains("product_manager"),
+                "{reviewer}: {message}"
+            );
+        }
+        // An epic assigned to such a role works in no folder, and is not held to the rule.
+        let mut epic = books.clone();
+        epic.kind = Kind::Epic;
+        epic.reviewer_role = Role::Human;
+        assert!(!failed_rules(&epic, &context).contains(&R::PrivateFolderReviewer));
+    }
+
+    #[test]
+    fn a_finance_task_may_not_run_or_test() {
+        let books = || the_books_criteria()[0].clone();
+        let with =
+            |extra: serde_json::Value| json!([books(), the_books_criteria()[1].clone(), extra]);
+        let folder = &[".farik/local/finance/**"];
+        // Each case: the task, and what its message says. Each fails this rule alone.
+        let cases = [
+            (
+                a_finance_task(
+                    folder,
+                    with(json!({ "id": "C4", "text": "The books build.",
+                        "verification": { "method": "command", "command": "make books",
+                                          "expect": { "exit_code": 0 } } })),
+                ),
+                "criterion C4 is a command or a test",
+            ),
+            (
+                a_finance_task(
+                    folder,
+                    with(json!({ "id": "C4", "text": "The checks pass.",
+                        "verification": { "method": "test", "command": "make check" } })),
+                ),
+                "criterion C4 is a command or a test",
+            ),
+            (
+                a_finance_task(
+                    folder,
+                    json!([
+                        { "id": "C1", "text": "The books say total.",
+                          "verification": { "method": "artifact", "path": "books.xlsx",
+                                            "must_contain": ["total"] } },
+                        the_books_criteria()[1].clone()
+                    ]),
+                ),
+                "criterion C1 searches a workbook for text",
+            ),
+            (
+                a_finance_task(
+                    folder,
+                    json!([
+                        { "id": "C1", "text": "The books exist.",
+                          "verification": { "method": "artifact",
+                                            "path": ".farik/local/finance/books.xlsx" } },
+                        the_books_criteria()[1].clone()
+                    ]),
+                ),
+                "criterion C1 names .farik/local/finance/books.xlsx",
+            ),
+            (
+                a_finance_task(
+                    folder,
+                    json!([
+                        { "id": "C1", "text": "The notes exist.",
+                          "verification": { "method": "artifact", "path": "notes.txt" } },
+                        the_books_criteria()[1].clone()
+                    ]),
+                ),
+                "criterion C1 names notes.txt",
+            ),
+            (
+                a_finance_task(&["src/**"], the_books_criteria()),
+                "allowed paths src/** lie outside .farik/local/finance",
+            ),
+            (
+                a_finance_task(
+                    &[
+                        ".farik/local/finance/**",
+                        ".farik/local/financeX/**",
+                        "docs/**",
+                    ],
+                    the_books_criteria(),
+                ),
+                "allowed paths .farik/local/financeX/**, docs/** lie outside .farik/local/finance",
+            ),
+        ];
+        for (task, said) in cases {
+            let context = a_context_without_marketing();
+            let failed = failed_rules(&task, &context);
+            // `.farik/local/financeX/**` is also under `.farik/`.
+            let wanted: &[R] = if said.contains("financeX") {
+                &[R::NoFarikPaths, R::PrivateFolderTask]
+            } else {
+                &[R::PrivateFolderTask]
+            };
+            assert_eq!(failed, wanted, "{said}");
+            let message = message_of(&task, &context, R::PrivateFolderTask);
+            assert!(message.contains(said), "{said}: {message}");
+        }
+        // A parent epic is refused: an epic's paths cannot name `.farik/`, so no task under one is
+        // within the folder.
+        let mut under_an_epic = a_finance_task(folder, the_books_criteria());
+        under_an_epic.parent = Some("FRK-3".parse().expect("a task id"));
+        let mut context = a_context_without_marketing();
+        context.parent = Some(ParentState {
+            status: TaskStatus::InProgress,
+            allowed_paths: vec!["**".to_string()],
+            remaining_budget_usd: 50.0,
+        });
+        assert_eq!(
+            failed_rules(&under_an_epic, &context),
+            [R::PrivateFolderTask]
+        );
+        assert!(
+            message_of(&under_an_epic, &context, R::PrivateFolderTask)
+                .contains("it has a parent epic, FRK-3"),
+        );
+    }
+
+    #[test]
+    fn a_team_requiring_tests_still_readies_a_finance_task() {
+        let task = a_finance_task(&[".farik/local/finance/**"], the_books_criteria());
+        let mut context = a_ready_context();
+        context.rules.required_criteria = vec!["command".to_string(), "test".to_string()];
+        context.rules.require_new_tests = true;
+        assert_eq!(evaluate_readiness(&task, &context), Ok(()));
+        // The exemption is for those two methods alone: a team that asks for a human or a review
+        // criterion, or any other, still gets that.
+        context.rules.required_criteria = vec!["command".to_string(), "review".to_string()];
+        assert_eq!(evaluate_readiness(&task, &context), Ok(()));
+        let artifact_only = a_finance_task(
+            &[".farik/local/finance/**"],
+            json!([the_books_criteria()[0].clone()]),
+        );
+        assert_eq!(
+            failed_rules(&artifact_only, &context),
+            [R::RequiredCriteriaPresent]
+        );
+        assert_eq!(
+            message_of(&artifact_only, &context, R::RequiredCriteriaPresent),
+            "the team rules require a criterion with method review and the contract has none"
+        );
+    }
+
+    #[test]
+    fn the_ceiling_does_not_hold_the_folder() {
+        let task = a_finance_task(&[".farik/local/finance/**"], the_books_criteria());
+        let mut context = a_ready_context();
+        context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
+        assert_eq!(evaluate_readiness(&task, &context), Ok(()));
+        // Nor do the document paths: a finance task's paths are not documents.
+        context.rules.document_paths = vec!["docs/**".to_string()];
+        assert_eq!(evaluate_readiness(&task, &context), Ok(()));
+        // Another role's task is held to both.
+        let developers = a_task_for(Role::SoftwareDeveloper, &["docs/**"]);
+        assert_eq!(
+            failed_rules(&developers, &a_context_without_marketing_under_a_ceiling()),
+            [R::AllowedPathsWithinCeiling]
+        );
+    }
+
+    fn a_context_without_marketing_under_a_ceiling() -> ReadinessContext {
+        let mut context = a_context_without_marketing();
+        context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
+        context
+    }
+
+    #[test]
+    fn another_roles_task_still_may_not_name_farik() {
+        // The folder is a finance task's own: a Developer's, an Architect's and a Marketing
+        // Specialist's task naming it, or an epic whose assignee role is finance, is refused.
+        for role in [
+            Role::SoftwareDeveloper,
+            Role::Architect,
+            Role::MarketingSpecialist,
+        ] {
+            let task = a_task_for(role, &[".farik/local/finance/**"]);
+            assert!(
+                failed_rules(&task, &a_context_without_marketing()).contains(&R::NoFarikPaths),
+                "{role:?}"
+            );
+        }
+        let mut epic = a_finance_task(&[".farik/local/finance/**"], the_books_criteria());
+        epic.kind = Kind::Epic;
+        assert!(failed_rules(&epic, &a_ready_context()).contains(&R::NoFarikPaths));
     }
 
     /// A task for `role`, reviewed by the Product Manager so that any role may be the assignee,

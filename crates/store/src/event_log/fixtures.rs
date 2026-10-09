@@ -21,6 +21,24 @@ pub fn refuse_appends_of(log: &EventLog, kind: EventKind) {
         .expect("the trigger is made");
 }
 
+/// Makes every later projection of an event fail, as a database whose projection tables can no
+/// longer be written would, while the log goes on taking every append: how a test shows what a
+/// caller does with an event that was recorded and not projected.
+///
+/// # Panics
+///
+/// When the database will not take the triggers, which is the fixture failing rather than the code.
+pub fn refuse_projecting(log: &EventLog) {
+    log.connection()
+        .execute_batch(
+            "CREATE TRIGGER refuse_projecting_insert BEFORE INSERT ON projection_cursor
+             BEGIN SELECT RAISE(ABORT, 'this log refuses to project'); END;
+             CREATE TRIGGER refuse_projecting_update BEFORE UPDATE ON projection_cursor
+             BEGIN SELECT RAISE(ABORT, 'this log refuses to project'); END;",
+        )
+        .expect("the triggers are made");
+}
+
 /// Appends a row of `kind` for `agent_id` whose body no reader accepts, so that a read that
 /// reaches it fails: how a test shows that a query never reads that far back.
 ///

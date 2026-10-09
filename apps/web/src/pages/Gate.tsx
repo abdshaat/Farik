@@ -45,7 +45,14 @@ export const approvesPlan = (e: HistoryEvent) =>
 /** The try in progress, of all the task gets, as `task.tries` works them out. */
 export type Tries = { try: number; of: number };
 type Check = { criterionId: string; text: string; passed: boolean };
-type Diff = { diff: string; files: string[]; added: number; removed: number };
+type Diff = {
+	diff: string;
+	files: string[];
+	added: number;
+	removed: number;
+	/** A task in its role's private folder: no diff, only the names of what changed. */
+	privateFolder?: boolean;
+};
 type Waiting = { taskId: string; kind: string };
 
 export const dollars = (n: number) => `$${n.toFixed(2)}`;
@@ -246,15 +253,32 @@ export function Gate() {
 				</ul>
 			</section>
 			<div className={styles.section}>
-				<button
-					type="button"
-					className={gate.toggle}
-					aria-expanded={showDiff}
-					onClick={() => setShowDiff((open) => !open)}
-				>
-					{`${t(showDiff ? "gateHideChanges" : "gateSeeChanges")} · ${t(diff.files.length === 1 ? "gateSizeOne" : "gateSize", { n: String(diff.files.length), added: String(diff.added), removed: String(diff.removed) })}`}
-				</button>
-				{showDiff && <DiffView diff={diff.diff} label={t("gateChanges")} />}
+				{diff.privateFolder ? (
+					<>
+						<p>
+							{t("privateChanges", {
+								role: roleWord(contract.assigneeRole as Agent["role"]),
+							})}
+						</p>
+						<ul>
+							{diff.files.map((file) => (
+								<li key={file}>{file}</li>
+							))}
+						</ul>
+					</>
+				) : (
+					<>
+						<button
+							type="button"
+							className={gate.toggle}
+							aria-expanded={showDiff}
+							onClick={() => setShowDiff((open) => !open)}
+						>
+							{`${t(showDiff ? "gateHideChanges" : "gateSeeChanges")} · ${t(diff.files.length === 1 ? "gateSizeOne" : "gateSize", { n: String(diff.files.length), added: String(diff.added), removed: String(diff.removed) })}`}
+						</button>
+						{showDiff && <DiffView diff={diff.diff} label={t("gateChanges")} />}
+					</>
+				)}
 			</div>
 			<section className={styles.section} aria-labelledby="about">
 				<h2 id="about">{t("gateAbout")}</h2>

@@ -10,6 +10,7 @@ use crate::generated::task_contract::FarikTaskContractKind as Kind;
 use crate::governor::done::{CriterionResult, RunBy};
 use crate::governor::task_status::is_terminal;
 use crate::governor::transition_table::TransitionActor;
+use crate::team::{private_folder, task_private_folder};
 use crate::text::{distinct, listed};
 
 /// What a gate says: nothing when it passes, or every reason it does not, in the order the rules
@@ -74,6 +75,10 @@ pub enum DesignerBrowser {
 
 /// Everything the assignment gate needs from the world.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent facts the gate reads, each a yes or no about the world"
+)]
 pub struct AssignmentInput {
     /// Who asked.
     pub requested_by: AssignmentRequester,
@@ -112,6 +117,15 @@ pub struct AssignmentInput {
     pub dependencies: Vec<DependencyState>,
     /// Whether a UI/UX Designer assignee could open the app; read for no other role.
     pub designer_browser: DesignerBrowser,
+    /// Whether another task holds the private folder the assignee's role works in: one that is
+    /// assigned, to any agent of a role with that folder, and neither `accepted` nor `cancelled`.
+    /// A task sent back, blocked or escalated still holds it, since `rejected -> in_progress` and
+    /// `blocked -> in_progress` pass no assignment gate. `false` for a role with no folder.
+    pub private_folder_busy: bool,
+    /// Whether the task skips the sprint queue: the request the owner files to raise a marketing
+    /// plan's budget (ADR 0042, ADR 0028's exception). It is worked on at once, in no sprint,
+    /// under the policy or not, and the sprint's budget does not pay for it.
+    pub skips_sprints: bool,
 }
 
 /// A row of the board as the sprint policy reads it (ADR 0028).
@@ -129,14 +143,18 @@ pub struct SprintHold<'a> {
     pub sprint: Option<&'a str>,
     /// Whether a sprint ended early left the task for the Backlog.
     pub left_for_the_backlog: bool,
+    /// Whether the task skips the sprint queue (see `AssignmentInput::skips_sprints`).
+    pub skips_sprints: bool,
 }
 
 /// Whether a task waits for a sprint to plan it: under the policy, a task outside the open sprint
 /// that is `ready` or that a sprint left for the Backlog. Work under way when the policy was
-/// switched on is not held, and an epic never is: its breakdown is preparation.
+/// switched on is not held, and an epic never is: its breakdown is preparation. Nor is a task that
+/// skips sprints, the owner's request to raise a marketing plan's budget.
 #[must_use]
 pub fn waits_for_a_sprint(hold: &SprintHold<'_>) -> bool {
     hold.plan_in_sprints
+        && !hold.skips_sprints
         && hold.kind == Kind::Task
         && outside(hold)
         && (hold.status == TaskStatus::Ready || hold.left_for_the_backlog)
@@ -169,6 +187,10 @@ fn outside(hold: &SprintHold<'_>) -> bool {
 /// task that does not wait for a sprint, read as `ready` with no mark: one in the open sprint.
 #[must_use]
 pub fn in_the_open_sprint(kind: Kind, input: &AssignmentInput) -> bool {
+    // A raise of a marketing plan's budget is worked on at once, whatever sprint is open (ADR 0042).
+    if input.skips_sprints {
+        return true;
+    }
     if input.plan_in_sprints {
         return !waits_for_a_sprint(&SprintHold {
             plan_in_sprints: true,
@@ -177,6 +199,7 @@ pub fn in_the_open_sprint(kind: Kind, input: &AssignmentInput) -> bool {
             status: TaskStatus::Ready,
             sprint: input.task_sprint.as_deref(),
             left_for_the_backlog: false,
+            skips_sprints: input.skips_sprints,
         });
     }
     let Some(open) = &input.open_sprint else {
@@ -196,6 +219,9 @@ pub fn fits_the_open_sprint(contract: &TaskContract, input: &AssignmentInput) ->
 /// Whether the open sprint's budget lets the row be assigned. Under the policy only a row in the
 /// open sprint is paid from it: an epic's breakdown outside it is preparation.
 fn the_sprint_pays(contract: &TaskContract, input: &AssignmentInput) -> bool {
+    if input.skips_sprints {
+        return true;
+    }
     let in_it = input.task_sprint.is_some() && input.task_sprint == input.open_sprint;
     (input.plan_in_sprints && !in_it)
         || fits_within(
@@ -207,7 +233,8 @@ fn the_sprint_pays(contract: &TaskContract, input: &AssignmentInput) -> bool {
 /// The `Assignment` gate of `ready -> assigned` (`docs/SPEC.md` sections 5.2, 5.14, 5.16): who may
 /// ask, whether the pair of agents fits the contract, whether the agent has room, whether the
 /// sprint can pay for it, whether a UI/UX Designer can open the app (`preview_not_set`,
-/// `designer_needs_sandbox`), and whether every dependency is accepted and integrated.
+/// `designer_needs_sandbox`), whether another task holds the assignee's private folder
+/// (`private_folder_busy`), and whether every dependency is accepted and integrated.
 ///
 /// # Errors
 ///
@@ -289,6 +316,7 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
             )
         });
     }
+    reasons.extend(without_the_folder(input));
     if !in_the_open_sprint(contract.kind, input) {
         let open = input.open_sprint.as_deref().unwrap_or_default();
         reasons.push(if input.plan_in_sprints {
@@ -314,6 +342,18 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
     reasons.extend(without_a_browser(input));
     reasons.extend(unready_dependencies(contract, input));
     verdict(reasons)
+}
+
+/// Why the task cannot be assigned while another holds the assignee's private folder, if it
+/// cannot (6.6): one piece of work touches the folder at a time.
+fn without_the_folder(input: &AssignmentInput) -> Option<String> {
+    input.private_folder_busy.then(|| {
+        format!(
+            "private_folder_busy: another task holds {}, and one piece of work touches it at a \
+             time; this one waits until that task is accepted or cancelled",
+            private_folder(input.assignee_role).unwrap_or("the assignee's private folder")
+        )
+    })
 }
 
 /// Why a UI/UX Designer cannot be assigned for want of its browser (D3, D4), if it cannot.
@@ -394,20 +434,39 @@ fn unready_dependencies(contract: &TaskContract, input: &AssignmentInput) -> Vec
         .collect()
 }
 
-/// The state of the task's branch when the assignee declares it done.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// What a task in a private folder (`docs/SPEC.md` 6.6) has done there when the assignee declares
+/// it done: the workbooks it names, which of them are not in the folder, and what changed in the
+/// folder since the copy taken when the task was assigned.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FolderWork {
+    /// The workbooks the assignee named, as paths in the folder.
+    pub named: Vec<String>,
+    /// Those of them that are not files in the folder.
+    pub missing: Vec<String>,
+    /// The files in the folder that differ from, are new to, or are gone from the task's copy, as
+    /// paths in the folder, `.history/` left out.
+    pub changed: Vec<String>,
+}
+
+/// The state of the task's work when the assignee declares it done: its branch, or for a task in a
+/// private folder, which has no branch, its folder.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WorkState {
     /// How many commits the task branch carries.
     pub commits: u32,
     /// Whether the worktree has no uncommitted change.
     pub worktree_clean: bool,
+    /// What the task did in its private folder, for a task that works in one; the runtime reads
+    /// it, and a task in a folder with none read counts as having named nothing.
+    pub folder: Option<FolderWork>,
 }
 
 /// The `CriteriaRecorded` gate of `in_progress -> verifying` for a task (`docs/SPEC.md` section
 /// 5.2): every exit criterion the assignee can run has a result from its own run, and the branch
 /// has at least one commit and a clean worktree. A `human` criterion is exempt, because the human
 /// answers it, and so is a `review` one, which 5.3 gives to the reviewer; the Definition of Done
-/// checks both.
+/// checks both. A task in a private folder has no branch and no commit: it names the workbooks it
+/// wrote, and each must be a file in its folder.
 ///
 /// # Errors
 ///
@@ -442,13 +501,35 @@ pub fn check_criteria_recorded(
             listed("criterion", "criteria", &missing)
         ));
     }
-    if work.commits == 0 {
-        reasons.push("the task branch has no commit on it".to_string());
-    }
-    if !work.worktree_clean {
-        reasons.push("the worktree has changes that are not committed".to_string());
+    if task_private_folder(contract).is_some() {
+        reasons.extend(unnamed_workbooks(work.folder.as_ref()));
+    } else {
+        if work.commits == 0 {
+            reasons.push("the task branch has no commit on it".to_string());
+        }
+        if !work.worktree_clean {
+            reasons.push("the worktree has changes that are not committed".to_string());
+        }
     }
     verdict(reasons)
+}
+
+/// Why a task in a private folder has not named workbooks it wrote, if it has not: it named none
+/// (or the runtime read no folder, which is the same to the gate), or it named files that are not
+/// in the folder.
+fn unnamed_workbooks(folder: Option<&FolderWork>) -> Vec<String> {
+    match folder {
+        Some(folder) if !folder.named.is_empty() => folder
+            .missing
+            .iter()
+            .map(|path| format!("{path} is not in your folder"))
+            .collect(),
+        _ => vec![
+            "name the workbooks you wrote: ask for verifying again with `workbooks` listing each \
+             one"
+            .to_string(),
+        ],
+    }
 }
 
 /// One task under an epic, as the runtime found it.
@@ -1083,10 +1164,11 @@ mod tests {
         ContractWriteOutcome, ContractWriteRefusal, DependencyState, DesignerBrowser,
         FIELDS_AFTER_FREEZE, FIELDS_ALWAYS_WRITABLE, FIELDS_FIXED_AT_CREATION,
         FIELDS_OF_THE_CONTENT, FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES,
-        FIELDS_THE_STORE_OWNS, ParentEpic, Rejection, SprintHold, WorkState, check_assignment,
-        check_blocker_resolved, check_blocker_written, check_child_creation, check_children_done,
-        check_contract_write, check_criteria_recorded, check_human_triage, check_product_doc_write,
-        check_rejection_reasons, fits_the_open_sprint, in_the_backlog, waits_for_a_sprint,
+        FIELDS_THE_STORE_OWNS, FolderWork, ParentEpic, Rejection, SprintHold, WorkState,
+        check_assignment, check_blocker_resolved, check_blocker_written, check_child_creation,
+        check_children_done, check_contract_write, check_criteria_recorded, check_human_triage,
+        check_product_doc_write, check_rejection_reasons, fits_the_open_sprint, in_the_backlog,
+        in_the_open_sprint, waits_for_a_sprint,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::ExitCriterionVerificationVariant0Expect;
@@ -1113,6 +1195,8 @@ mod tests {
             plan_in_sprints: false,
             dependencies: Vec::new(),
             designer_browser: DesignerBrowser::Ready,
+            private_folder_busy: false,
+            skips_sprints: false,
         }
     }
 
@@ -1455,6 +1539,7 @@ mod tests {
             status,
             sprint: None,
             left_for_the_backlog: false,
+            skips_sprints: false,
         }
     }
 
@@ -1495,6 +1580,48 @@ mod tests {
                 };
                 assert!(!waits_for_a_sprint(&off), "{status:?}");
             }
+        }
+    }
+
+    #[test]
+    fn a_raise_never_waits_for_a_sprint() {
+        // Under the policy a raise neither waits nor is in the Backlog, in any status it can be
+        // in, whether a sprint is open or not and whether or not it carries the Backlog's mark.
+        for open_sprint in [None, Some("S1")] {
+            for left_for_the_backlog in [false, true] {
+                for status in [
+                    TaskStatus::Ready,
+                    TaskStatus::Assigned,
+                    TaskStatus::InProgress,
+                    TaskStatus::Rejected,
+                ] {
+                    let raise = SprintHold {
+                        skips_sprints: true,
+                        open_sprint,
+                        left_for_the_backlog,
+                        ..a_hold(status)
+                    };
+                    assert!(!waits_for_a_sprint(&raise), "{status:?} {open_sprint:?}");
+                    assert!(!in_the_backlog(&raise), "{status:?} {open_sprint:?}");
+                }
+            }
+        }
+        // Assigned while another sprint is open, with the policy and without it, and with that
+        // sprint's budget spent; without the mark the same task is held.
+        for plan_in_sprints in [true, false] {
+            let mut input = an_assignment();
+            input.plan_in_sprints = plan_in_sprints;
+            input.open_sprint = Some("S2".to_string());
+            input.remaining_sprint_budget_usd = 0.0;
+            input.skips_sprints = true;
+            assert!(in_the_open_sprint(Kind::Task, &input), "{plan_in_sprints}");
+            assert!(
+                fits_the_open_sprint(&a_contract(), &input),
+                "the sprint's budget does not pay for it ({plan_in_sprints})"
+            );
+            input.skips_sprints = false;
+            assert!(!in_the_open_sprint(Kind::Task, &input), "{plan_in_sprints}");
+            assert!(!fits_the_open_sprint(&a_contract(), &input));
         }
     }
 
@@ -1847,14 +1974,132 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_second_piece_of_work_in_a_private_folder() {
+        let mut task = a_contract();
+        task.assignee_role = Role::FinanceSpecialist;
+        task.reviewer_role = Role::ProductManager;
+        let mut input = an_assignment();
+        input.assignee_role = Role::FinanceSpecialist;
+        input.reviewer_role = Role::ProductManager;
+        input.reviewer_id = "pm-1".to_string();
+        input.wip_limit = 5;
+        assert_eq!(check_assignment(&task, &input), Ok(()));
+        // Whatever the agent's room: one piece of work touches the folder at a time (6.6).
+        input.private_folder_busy = true;
+        assert_eq!(
+            reasons(check_assignment(&task, &input)),
+            [
+                "private_folder_busy: another task holds .farik/local/finance, and one piece of work \
+              touches it at a time; this one waits until that task is accepted or cancelled"
+            ]
+        );
+        input.wip_limit = 0;
+        assert_eq!(reasons(check_assignment(&task, &input)).len(), 2);
+    }
+
+    #[test]
     fn declares_done_when_the_assignee_ran_every_criterion_and_committed() {
         let work = WorkState {
             commits: 1,
             worktree_clean: true,
+            folder: None,
         };
         assert_eq!(
             check_criteria_recorded(&a_contract(), &[an_assignee_result("C1")], &work),
             Ok(())
+        );
+    }
+
+    /// A task of the Finance Specialist's whose one criterion is the workbook `books.xlsx`.
+    fn a_finance_task() -> TaskContract {
+        let mut contract = a_contract();
+        contract.assignee_role = Role::FinanceSpecialist;
+        contract.allowed_paths = vec![".farik/local/finance/**".to_string()];
+        contract.exit_criteria[0].verification = VerificationWire::Variant2 {
+            method: json!("artifact"),
+            must_contain: Vec::new(),
+            path: "books.xlsx".to_string(),
+        };
+        contract
+    }
+
+    fn in_a_folder(named: &[&str], missing: &[&str]) -> WorkState {
+        let paths = |list: &[&str]| list.iter().map(|path| (*path).to_string()).collect();
+        WorkState {
+            commits: 0,
+            worktree_clean: false,
+            folder: Some(FolderWork {
+                named: paths(named),
+                missing: paths(missing),
+                changed: paths(named),
+            }),
+        }
+    }
+
+    #[test]
+    fn a_finance_task_verifies_by_its_workbooks() {
+        // No commit and no clean worktree: it has neither, only the workbooks it names.
+        let task = a_finance_task();
+        let results = [an_assignee_result("C1")];
+        assert_eq!(
+            check_criteria_recorded(&task, &results, &in_a_folder(&["books.xlsx"], &[])),
+            Ok(())
+        );
+        assert_eq!(
+            check_criteria_recorded(
+                &task,
+                &results,
+                &in_a_folder(&["books.xlsx", "forecast.xlsx"], &[])
+            ),
+            Ok(())
+        );
+        // It names none: the gate says what to do.
+        assert_eq!(
+            reasons(check_criteria_recorded(
+                &task,
+                &results,
+                &in_a_folder(&[], &[])
+            )),
+            [
+                "name the workbooks you wrote: ask for verifying again with `workbooks` listing each one"
+            ]
+        );
+        // A runtime that did not read the folder says the same, rather than letting it through.
+        assert_eq!(
+            reasons(check_criteria_recorded(
+                &task,
+                &results,
+                &WorkState::default()
+            )),
+            [
+                "name the workbooks you wrote: ask for verifying again with `workbooks` listing each one"
+            ]
+        );
+        // Each one it names that is not in its folder is its own reason, beside the rest.
+        assert_eq!(
+            reasons(check_criteria_recorded(
+                &task,
+                &[],
+                &in_a_folder(&["books.xlsx"], &["forecast.xlsx", "2026/pricing.xlsx"])
+            )),
+            [
+                "the assignee recorded no run with evidence for criterion C1",
+                "forecast.xlsx is not in your folder",
+                "2026/pricing.xlsx is not in your folder"
+            ]
+        );
+        // The folder is for the finance task alone: a Developer's still needs its commit and its
+        // clean worktree, whatever the work says of a folder.
+        assert_eq!(
+            reasons(check_criteria_recorded(
+                &a_contract(),
+                &[an_assignee_result("C1")],
+                &in_a_folder(&["books.xlsx"], &[])
+            )),
+            [
+                "the task branch has no commit on it",
+                "the worktree has changes that are not committed"
+            ]
         );
     }
 
@@ -1863,6 +2108,7 @@ mod tests {
         let work = WorkState {
             commits: 1,
             worktree_clean: true,
+            folder: None,
         };
         assert_eq!(
             reasons(check_criteria_recorded(&a_contract(), &[], &work)),
@@ -1904,6 +2150,7 @@ mod tests {
         let work = WorkState {
             commits: 1,
             worktree_clean: true,
+            folder: None,
         };
         let mut failed = an_assignee_result("C1");
         failed.passed = false;
@@ -1923,6 +2170,7 @@ mod tests {
         let work = WorkState {
             commits: 1,
             worktree_clean: true,
+            folder: None,
         };
         assert_eq!(check_criteria_recorded(&contract, &[], &work), Ok(()));
     }
@@ -1938,6 +2186,7 @@ mod tests {
         let work = WorkState {
             commits: 1,
             worktree_clean: true,
+            folder: None,
         };
         assert_eq!(check_criteria_recorded(&contract, &[], &work), Ok(()));
         // Only those two are exempt: a command is the assignee's to run, as a test is.
@@ -1983,7 +2232,8 @@ mod tests {
                 &results,
                 &WorkState {
                     commits: 0,
-                    worktree_clean: true
+                    worktree_clean: true,
+                    folder: None,
                 }
             )),
             ["the task branch has no commit on it"]
@@ -1994,7 +2244,8 @@ mod tests {
                 &results,
                 &WorkState {
                     commits: 2,
-                    worktree_clean: false
+                    worktree_clean: false,
+                    folder: None,
                 }
             )),
             ["the worktree has changes that are not committed"]
@@ -2006,7 +2257,8 @@ mod tests {
                 &[],
                 &WorkState {
                     commits: 0,
-                    worktree_clean: false
+                    worktree_clean: false,
+                    folder: None,
                 }
             )),
             [

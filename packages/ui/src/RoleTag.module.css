@@ -32,3 +32,11 @@
 .uiUxDesigner {
 	background: var(--farik-color-role-ui-ux-designer);
 }
+
+.financeSpecialist {
+	background: var(--farik-color-role-finance-specialist);
+}
+
+.procurementSpecialist {
+	background: var(--farik-color-role-procurement-specialist);
+}

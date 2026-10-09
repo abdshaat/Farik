@@ -44,7 +44,21 @@ export type MethodName =
 	| "template.save"
 	| "template.apply"
 	| "template.rename"
-	| "template.delete";
+	| "template.delete"
+	| "connector.tools"
+	| "connector.connect"
+	| "connector.allowances"
+	| "connector.disconnect"
+	| "connector.sign_in"
+	| "connector.sign_in_status"
+	| "connector.sign_in_cancel"
+	| "social_post.media"
+	| "purchase_order.file"
+	| "seller_reply.attachment"
+	| "procurement_mailbox.connect"
+	| "procurement_mailbox.disconnect"
+	| "procurement_mailbox.check"
+	| "marketing_budget.raise";
 export type Status = "connecting" | "open" | "closed";
 
 /** The part of the browser `WebSocket` the client uses. */

@@ -7,6 +7,8 @@ const roleShort: Record<Role, string> = {
 	software_developer: "DEV",
 	marketing_specialist: "MKT",
 	ui_ux_designer: "UX",
+	finance_specialist: "FIN",
+	procurement_specialist: "PROC",
 };
 
 const roleName: Record<Role, string> = {
@@ -16,6 +18,8 @@ const roleName: Record<Role, string> = {
 	software_developer: "Developer",
 	marketing_specialist: "Marketing Specialist",
 	ui_ux_designer: "UI/UX Designer",
+	finance_specialist: "Finance Specialist",
+	procurement_specialist: "Procurement Specialist",
 };
 
 export const uiStrings = {

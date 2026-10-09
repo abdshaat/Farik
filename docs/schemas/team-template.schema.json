@@ -131,7 +131,9 @@
         "architect",
         "software_developer",
         "marketing_specialist",
-        "ui_ux_designer"
+        "ui_ux_designer",
+        "finance_specialist",
+        "procurement_specialist"
       ],
       "description": "The role an agent is instantiated from. `human` is a role a contract may name as a reviewer, never a role an agent holds."
     },

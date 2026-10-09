@@ -53,6 +53,30 @@ pub(crate) fn with_the_designer(wire: &mut Value) {
     agents.push(an_agent_wire("ada", "architect"));
 }
 
+/// Adds the Marketing Specialist `kai` to a team's wire.
+pub(crate) fn with_the_marketing_specialist(wire: &mut Value) {
+    wire["agents"]
+        .as_array_mut()
+        .expect("a list of agents")
+        .push(an_agent_wire("kai", "marketing_specialist"));
+}
+
+/// Adds the Finance Specialist `fin` to a team's wire.
+pub(crate) fn with_the_finance_specialist(wire: &mut Value) {
+    wire["agents"]
+        .as_array_mut()
+        .expect("a list of agents")
+        .push(an_agent_wire("fin", "finance_specialist"));
+}
+
+/// Adds the Procurement Specialist `proc` to a team's wire.
+pub(crate) fn with_the_procurement_specialist(wire: &mut Value) {
+    wire["agents"]
+        .as_array_mut()
+        .expect("a list of agents")
+        .push(an_agent_wire("proc", "procurement_specialist"));
+}
+
 /// The Designer `iris` and the Architect `ada` added, both with the Playwright connector on,
 /// and a preview set.
 pub(crate) fn browsing(wire: &mut Value) {
@@ -67,10 +91,71 @@ pub(crate) fn browsing(wire: &mut Value) {
     });
 }
 
+/// The Software Developer's kit for a test: its skills `(name, body)`, each in a folder of one
+/// `SKILL.md`, and, when `search` is given, the service `github` (a program started on the host,
+/// one key) with `search` tagged so and `create_issue` and `delete_repo` as they are in
+/// `a_kit_server`.
+pub(crate) fn a_developer_kit(skills: &[(&str, &str)], search: Option<&str>) -> farik_roles::Kit {
+    let connectors: Vec<Value> = search
+        .map(|tag| {
+            json!({
+                "name": "github", "transport": "stdio", "command": "github-mcp",
+                "args": ["stdio"], "credential_keys": ["API_KEY"],
+                "title": "GitHub", "about": "Where the code lives.",
+                "why": "Lets the Developer read issues.",
+                "setup": "Make a key on GitHub's page and paste it.",
+                "key_page": "https://github.example/keys",
+                "tools": { "search": tag, "create_issue": "external_effect", "delete_repo": "denied" }
+            })
+        })
+        .into_iter()
+        .collect();
+    let texts: Vec<(String, String)> = skills
+        .iter()
+        .map(|(name, body)| {
+            (
+                (*name).to_string(),
+                format!("---\nname: {name}\ndescription: Use when {name}.\n---\n{body}"),
+            )
+        })
+        .collect();
+    let folders: Vec<(&str, Vec<(&str, &str)>)> = texts
+        .iter()
+        .map(|(name, text)| (name.as_str(), vec![("SKILL.md", text.as_str())]))
+        .collect();
+    let folders: Vec<(&str, &[(&str, &str)])> = folders
+        .iter()
+        .map(|(name, files)| (*name, files.as_slice()))
+        .collect();
+    let file = json!({
+        "role": "software_developer",
+        "skills": skills.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+        "connectors": connectors,
+    });
+    farik_roles::parse_fixture_kit(
+        farik_core::contract::Role::SoftwareDeveloper,
+        &file.to_string(),
+        &[],
+        &folders,
+    )
+    .expect("the fixture kit loads")
+}
+
+/// `dev-a`'s entry for the service `github` of `a_developer_kit(_, Some("network"))`, as the team
+/// file holds it once connected.
+pub(crate) fn a_kit_server() -> Value {
+    json!({
+        "name": "github", "source": "kit", "transport": "stdio",
+        "command": "github-mcp", "args": ["stdio"], "credential_keys": ["API_KEY"],
+        "tools": { "search": "network", "create_issue": "external_effect", "delete_repo": "denied" }
+    })
+}
+
 /// A project the tools run on.
 pub(crate) struct TestProject {
     pub(crate) repo: TempRepo,
     pub(crate) deps: Arc<ToolDeps>,
+    kits: Arc<std::sync::Mutex<Vec<farik_roles::Kit>>>,
 }
 
 impl TestProject {
@@ -100,6 +185,8 @@ impl TestProject {
             Arc::clone(&clock),
             ids.clone(),
         ));
+        let kits: Arc<std::sync::Mutex<Vec<farik_roles::Kit>>> = Arc::default();
+        let held = Arc::clone(&kits);
         let deps = Arc::new(ToolDeps {
             log,
             projections,
@@ -108,8 +195,23 @@ impl TestProject {
             git: repo.adapter(),
             clock,
             ids,
+            kits: Arc::new(move |role| {
+                let swapped = held
+                    .lock()
+                    .ok()
+                    .and_then(|kits| kits.iter().find(|kit| kit.role == role).cloned());
+                swapped.map_or_else(|| farik_roles::load_kit(role), Ok)
+            }),
         });
-        Self { repo, deps }
+        Self { repo, deps, kits }
+    }
+
+    /// Swaps in `kit` as its role's kit, for this project alone and from now on.
+    pub(crate) fn set_kit(&self, kit: farik_roles::Kit) {
+        if let Ok(mut kits) = self.kits.lock() {
+            kits.retain(|held| held.role != kit.role);
+            kits.push(kit);
+        }
     }
 
     /// A session of `agent` on `task`, with no executor.
@@ -126,6 +228,7 @@ impl TestProject {
             connectors: Vec::new(),
             preview: None,
             deps: Arc::clone(&self.deps),
+            daemon: std::sync::Weak::new(),
         }
     }
 
@@ -202,6 +305,18 @@ impl TestProject {
         parent: Option<&str>,
         change: impl FnOnce(&mut Value),
     ) {
+        self.filed_raising(task, (status, kind, parent), None, change);
+    }
+
+    /// `filed_with`, the request one that raises the budget of marketing plan `raises`, when one
+    /// is named.
+    pub(crate) fn filed_raising(
+        &self,
+        task: &str,
+        (status, kind, parent): (&str, &str, Option<&str>),
+        raises: Option<&str>,
+        change: impl FnOnce(&mut Value),
+    ) {
         let mut wire = a_contract_wire();
         wire["id"] = json!(task);
         wire["status"] = json!(status);
@@ -224,11 +339,11 @@ impl TestProject {
         if let Some(parent) = parent {
             summary["parent"] = json!(parent);
         }
-        self.record(
-            task,
-            "task.created",
-            &json!({ "summary": summary, "created_by": "human" }),
-        );
+        let mut body = json!({ "summary": summary, "created_by": "human" });
+        if let Some(plan) = raises {
+            body["raises"] = json!(plan);
+        }
+        self.record(task, "task.created", &body);
     }
 
     /// `filed_with` and no change.
@@ -304,6 +419,83 @@ impl TestProject {
         self.record_at(recorded_at, task, "task.transitioned", &body)
     }
 
+    /// Kai's proposal of marketing plan `plan` on `task`, as the tool records it: the protocol's
+    /// fixture plan between `starts_on` and `ends_on` (`YYYY-MM-DD`), with no campaign and no post.
+    pub(crate) fn plan_proposed(
+        &self,
+        task: &str,
+        plan: &str,
+        starts_on: &str,
+        ends_on: &str,
+    ) -> FarikEvent {
+        let mut body =
+            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+        body["plan"] = json!(plan);
+        body["starts_on"] = json!(starts_on);
+        body["ends_on"] = json!(ends_on);
+        body["campaigns"] = json!([]);
+        body["posts"] = json!([]);
+        body["budget"] = json!({ "total": "2000", "google_ads": "0" });
+        self.record_by(Some("kai"), at(), task, "marketing_plan.proposed", &body)
+    }
+
+    /// The owner's approval of `plan` on `task`, with `note` (empty for none): no agent, no
+    /// session.
+    pub(crate) fn plan_approved(&self, task: &str, plan: &str, note: &str) -> FarikEvent {
+        self.record(
+            task,
+            "marketing_plan.approved",
+            &json!({ "plan": plan, "note": note }),
+        )
+    }
+
+    /// A `cost.recorded` of `usd` dollars for `purpose` by `agent` in session `session` on `day`
+    /// (`YYYY-MM-DD`, UTC), with `tokens` input and output, against `task` when one is named.
+    pub(crate) fn spent(
+        &self,
+        agent: &str,
+        task: Option<&str>,
+        session: &str,
+        day: &str,
+        (usd, tokens): (f64, u64),
+    ) -> FarikEvent {
+        let mut wire = json!({
+            "seq": 1,
+            "recorded_at": format!("{day}T10:00:00Z"),
+            "team_id": "farik",
+            "project_id": "farik",
+            "agent_id": agent,
+            "session_id": session,
+            "kind": "cost.recorded",
+            "body": {
+                "purpose": "implement",
+                "model_id": "claude-sonnet-5",
+                "usage": {
+                    "input_tokens": tokens,
+                    "output_tokens": tokens / 10,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0
+                },
+                "cost_usd": usd
+            },
+        });
+        if let Some(task) = task {
+            wire["task_id"] = json!(task);
+        }
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        let appended = self
+            .deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        self.deps.projections.apply(&appended).expect("projects");
+        appended
+    }
+
     /// Appends one event about `task` (or none) and projects it, as a command does.
     pub(crate) fn record(&self, task: &str, kind: &str, body: &Value) -> FarikEvent {
         self.record_at(at(), task, kind, body)
@@ -329,6 +521,29 @@ impl TestProject {
         kind: &str,
         body: &Value,
     ) -> FarikEvent {
+        self.record_in_at(recorded_at, (agent, None), task, kind, body)
+    }
+
+    /// `record`, by `agent` in its session `session` when they are named: how a session records.
+    pub(crate) fn record_in(
+        &self,
+        agent: Option<&str>,
+        session: Option<&str>,
+        task: &str,
+        kind: &str,
+        body: &Value,
+    ) -> FarikEvent {
+        self.record_in_at(at(), (agent, session), task, kind, body)
+    }
+
+    fn record_in_at(
+        &self,
+        recorded_at: DateTime<Utc>,
+        (agent, session): (Option<&str>, Option<&str>),
+        task: &str,
+        kind: &str,
+        body: &Value,
+    ) -> FarikEvent {
         let mut wire = json!({
             "seq": 1,
             "recorded_at": recorded_at.to_rfc3339(),
@@ -343,6 +558,9 @@ impl TestProject {
         if let Some(agent) = agent {
             wire["agent_id"] = json!(agent);
         }
+        if let Some(session) = session {
+            wire["session_id"] = json!(session);
+        }
         let event = event_from_value(&wire).expect("the fixture is schema-valid");
         let appended = self
             .deps
@@ -356,6 +574,30 @@ impl TestProject {
         self.deps.projections.apply(&appended).expect("projects");
         appended
     }
+}
+
+/// Runs `step` on a thread of its own while this one holds `lock`, and answers what it answers once
+/// the lock is let go. Fails unless the step is still waiting 300 milliseconds in and has recorded
+/// nothing meanwhile: how a test shows that a step takes the lock before it reads or records.
+pub(crate) fn waits_for_the_lock<Answer: Send>(
+    lock: &std::sync::Mutex<()>,
+    project: &TestProject,
+    step: impl FnOnce() -> Answer + Send,
+) -> Answer {
+    let held = crate::locked(lock);
+    let before = project.event_count();
+    std::thread::scope(|scope| {
+        let running = scope.spawn(step);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!running.is_finished(), "the step waits for the lock");
+        assert_eq!(
+            project.event_count(),
+            before,
+            "the step records nothing while it waits"
+        );
+        drop(held);
+        running.join().expect("the step ends")
+    })
 }
 
 /// `agent`'s tiers as the team file says now, which a session starting now is given; none for an

@@ -1,6 +1,6 @@
 # The Finance Specialist
 
-Status: approved by the founder on 2026-09-27, in conversation; revised the same day to take receipts from email and read Stripe; and revised again that evening, on the market evaluation's evidence, to record the team's AI spending first, read a dedicated receipts mailbox over IMAP after the web release, and leave a connector to the user's main mailbox unplanned. It is the design input to phase 8 step 02 and phase 12 step 02. ADR 0019 records the decision, and spec 0.21 (sections 1 and 6.6, with exceptions in 5.2, 5.3, 5.4, 5.6, 5.8 and 5.14, and the `finance` purpose in F17) carries its rules.
+Status: approved by the founder on 2026-09-27, in conversation; revised the same day to take receipts from email and read Stripe; and revised again that evening, on the market evaluation's evidence, to record the team's AI spending first, read a dedicated receipts mailbox over IMAP after the web release, and leave a connector to the user's main mailbox unplanned. It is the design input to phase 8 step 02 (now phase 7 steps 09 to 10) and phase 15 step 02. ADR 0019 records the decision, and spec 0.21 (sections 1 and 6.6, with exceptions in 5.2, 5.3, 5.4, 5.6, 5.8 and 5.14, and the `finance` purpose in F17) carries its rules.
 
 ## Why
 
@@ -14,7 +14,7 @@ The founder's answers shaped the design:
 - It reads Stripe, read-only, when the product uses Stripe.
 - It is built in phase 7, after MCP connections exist, because Stripe needs them (phase 8 until ADR 0029 moved it with the plumbing its kit needs).
 
-The market evaluation of 2026-09-27 (`~/farik-research/reports/`, outside the repository) changed the order. The founder accepted three findings: the one finance feature with proven demand inside an agent-team product is AI-spend accounting; reading the user's main mailbox through Google's or Microsoft's mail API needs a restricted-scope verification with a paid yearly assessment, and its label filter is Farik's promise rather than the provider's enforcement; and receipts alone are the wrong source of truth, since every incumbent reconciles against the bank or card statement. So the role ships in two steps. Phase 8 step 02, before the web launch: the role, the books, the AI-spend accounting and forecast, and Stripe. Phase 12 step 02, in the first release after the web release check: receipts from a dedicated receipts mailbox over IMAP, and bank statement reconciliation.
+The market evaluation of 2026-09-27 (`~/farik-research/reports/`, outside the repository) changed the order. The founder accepted three findings: the one finance feature with proven demand inside an agent-team product is AI-spend accounting; reading the user's main mailbox through Google's or Microsoft's mail API needs a restricted-scope verification with a paid yearly assessment, and its label filter is Farik's promise rather than the provider's enforcement; and receipts alone are the wrong source of truth, since every incumbent reconciles against the bank or card statement. So the role ships in two steps. Phase 8 step 02 (now phase 7 steps 09 to 10), before the web launch: the role, the books, the AI-spend accounting and forecast, and Stripe. Phase 15 step 02, in the first release after the web release check: receipts from a dedicated receipts mailbox over IMAP, and bank statement reconciliation.
 
 ## The role
 
@@ -40,7 +40,7 @@ The rest of its setup:
 - **Tiers:** `read` and `network`, the network to research prices. It has no `write_workspace`, `execute`, git, or `external_effect` tier.
 - **Reviewer:** the Product Manager, as for the Marketing Specialist.
 - **Model:** `claude-sonnet-5` at medium effort, the Marketing Specialist's default. The team file can override it.
-- **In the team builder:** it is optional and not among the five suggested. The user adds it with one click. Its avatar is `extra-4` (the character with glasses and the green cardigan), chosen on 2026-09-27; the brand's `characters/extra-4.png` and `avatars/extra-4-256.png` become `finance-specialist.png` in phase 7 step 07, and the character keeps its place among the extras for any other agent.
+- **In the team builder:** it is optional and not among the five suggested. The user adds it with one click. Its avatar is `extra-4` (the character with glasses and the green cardigan), chosen on 2026-09-27; the brand's `characters/extra-4.png` and `avatars/extra-4-256.png` become `finance-specialist.png` in phase 7 step 09, and the character keeps its place among the extras for any other agent.
 
 ## The finance folder
 
@@ -51,9 +51,9 @@ The books live in `.farik/local/finance/`. The folder is on the user's machine, 
   books.xlsx           Expenses, Revenue, Categories, Monthly summary; each row names its receipt file, statement line or Stripe object
   forecast.xlsx        the long-term forecast, the AI spending from phase 7 on
   <name>.xlsx          further workbooks a task asks for, such as pricing.xlsx
-  receipts/<yyyy-mm>/  each receipt filed from the receipts mailbox: its attachment (PDF or image), or the email itself when it has none (phase 12)
-  imports/             bank and card statements the user exports as CSV, the source the books are reconciled against (phase 12)
-  mailbox.json         the receipts mailbox's settings, the approved senders, and the ledger of filed messages (phase 12)
+  receipts/<yyyy-mm>/  each receipt filed from the receipts mailbox: its attachment (PDF or image), or the email itself when it has none (phase 15)
+  imports/             bank and card statements the user exports as CSV, the source the books are reconciled against (phase 15)
+  mailbox.json         the receipts mailbox's settings, the approved senders, and the ledger of filed messages (phase 15)
   .history/            the previous version of each workbook, kept on every overwrite, and under <task-id>/ the copy of every workbook taken when a finance task is assigned, the baseline its reviewer compares against
 ```
 
@@ -62,13 +62,13 @@ The workbooks are `.xlsx`, which Excel, Google Sheets, Numbers and LibreOffice a
 Access:
 - Only a Finance Specialist session and the Product Manager, as the reviewer of a finance task, can read the folder.
 - Every other agent is refused the folder as it is today: it lies outside a task's worktree, and `.farik/local/**` is one of the default protected paths, which also keeps it from a conversation session in the project root.
-- That protection stays for every session. A finance session gets one narrow exception, for `.farik/local/finance/**` alone.
+- That protection stays for every session, with no exception. A finance task's sessions run with the folder as their working directory, which the hook already holds every session to, so they reach the folder and nothing outside it (spec 5.6, 6.6; as built in step 09c).
 
-## Phase 8 step 02: the role, the books, the AI spending, and Stripe
+## Phase 7 step 09: the role, the books, the AI spending, and Stripe
 
 The first deliverable is the accounting of the team's own AI spending, because it needs no connector, no verification programme, and answers the market's top complaint: `farik_read_costs` gives the role the totals Farik already keeps, and the role writes them into `books.xlsx` and `forecast.xlsx` with a forecast of the next sprints and a recommended budget.
 
-Stripe is read through Stripe's official MCP server, configured for this agent the way phase 7 step 01 configures any MCP server. The user signs in to Stripe (OAuth), which they can revoke from Stripe's dashboard; a scheduled run uses a restricted key with read permissions only, tagged for agents as Stripe requires from 2026-10-31. Read-only is locked twice: at Stripe by the key's permissions, and in Farik, where until the kit takes the connection over in phase 9 step 05, its tools are tagged at connection as spec 5.6 says, the read tools read-only and `stripe_api_write` side-effecting, which the role's tiers refuse; in the kit the read tools are `network` and the rest `denied` (`docs/design/role-kits.md`). Either way the harness refuses a write before Stripe would. Stripe's `stripe_analytics` gives revenue metrics the role uses rather than re-deriving them. Stripe is optional: a product that takes no payments through Stripe skips it.
+Stripe is read through Stripe's official MCP server, which the Finance Specialist's kit carries (phase 7 step 10; `docs/design/role-kits.md`), and Digits and Kick, which a business may already keep its books in, are read the same way. The user signs in to Stripe (OAuth, phase 7 step 03), choosing the account and the permissions on Stripe's own page, and can revoke Farik's access from Stripe's dashboard. Read-only is locked twice: at Stripe by the permissions the user grants on Stripe's page, and in Farik, where in the kit the read tools are `network` and every other tool `denied` (`docs/design/role-kits.md`), so the harness refuses a write before Stripe would. Stripe's `stripe_analytics` gives revenue metrics the role uses rather than re-deriving them. `stripe_api_read` reaches customers' details, which the books never carry (spec 8.6 records the risk). Stripe is optional: a product that takes no payments through Stripe skips it.
 
 Three Farik tools, which only this role may call:
 
@@ -86,13 +86,13 @@ The web app's team builder gains the role, with a short setup: the Stripe sign-i
 
 A finance task is an ordinary contract: a month's close, a forecast, a pricing analysis, or the first AI-spend books. It is filed, triaged, made ready, assigned, reviewed and accepted, with these differences.
 
-- **Where its session runs.** The session runs with the finance folder as its working directory, not a git worktree, much as a conversation session runs in the project root. Claude Code's built-in `Read`, `Glob` and `Grep` then work on the folder and nothing outside it. The task's `allowed_paths` are under the folder. Two readiness rules stand in the way today, and each gets one exception for this role, recorded in spec 5.3: the document-paths rule, and the rule that no `allowed_paths` entry reaches under `.farik/` at all (`no_farik_paths`). The task may carry no `command` or `test` criterion, since it has no worktree to run one in; its criteria are `artifact`, `review` and `human`.
-- **No branch and nothing to integrate.** Three more rules take an exception. When the task is assigned, Farik copies every workbook to `.history/<task-id>/`. It reaches `verifying` when every workbook in the `workbooks` list the assignee gives `farik_request_transition` exists (spec 5.2). Its reviewer receives each changed workbook beside that copy in place of a diff (spec 5.4). Once `accepted` it is finished, with nothing to integrate, and it counts as integrated for any task that depends on it (spec 5.14).
-- **One session in the folder at a time.** No sweep starts while a finance task is `in_progress` or `verifying`, and no finance task is assigned while a sweep runs or while another finance task is `in_progress` or `verifying`, whatever the WIP limit and however many Finance Specialists the team has, so the folder changes under one session only, as a worktree does for code.
+- **Where its session runs.** The session runs with the finance folder as its working directory, not a git worktree, much as a conversation session runs in the project root. Claude Code's built-in `Read`, `Glob` and `Grep` then work on the folder and nothing outside it. The task's `allowed_paths` are under the folder. One readiness rule, `private_folder_task` (spec 5.3), takes the place of the document-paths rule and the ceiling for such a task, and `no_farik_paths` accepts entries within the folder and nothing else under `.farik/`. The task may carry no `command` or `test` criterion, since it has no worktree to run one in, and no search of a workbook's text; its criteria are `artifact`, `review` and `human`.
+- **No branch and nothing to integrate.** When the task is assigned, Farik copies every file of the folder but `.history/` to `.history/<task-id>/`, once; the copy is kept, and is the restore point of a cancelled task, whose changes stay in the folder. It reaches `verifying` when every workbook in the `workbooks` list the assignee gives `farik_request_transition` is a file in the folder (spec 5.2). Its reviewer is told which files changed, and reads each beside its copy with `farik_read_sheet` and `baseline: true`, in place of a diff (spec 5.4). Once `accepted` it is finished, with nothing to integrate, and it counts as integrated for any task that depends on it (spec 5.14).
+- **One piece of work in the folder at a time.** A finance task is not assigned while another task holds the folder: one assigned to an agent, in any status but `accepted` and `cancelled`, so one sent back, blocked, escalated or waiting in the Backlog holds it too (spec 5.2). When receipts intake ships (phase 15), no sweep starts while a task holds the folder, and no finance task is assigned while a sweep runs. This is whatever the WIP limit and however many Finance Specialists the team has, so the folder changes under one piece of work only, as a worktree does for code.
 
 The explanation for the human goes in the task's completion note, which already opens with a plain-language summary (spec 5.4).
 
-## Phase 12 step 02: receipts intake
+## Phase 15 step 02: receipts intake
 
 Receipts come from a mailbox that holds nothing else, so the boundary is structural rather than a filter Farik promises to apply, which is how every incumbent (Expensify, Dext, Hubdoc, Kick) takes receipts.
 
@@ -120,16 +120,16 @@ The web app's finance setup gains the mailbox connection and the approved sender
 ## Not planned
 
 - **A connector to the user's main mailbox** through Google's or Microsoft's mail API, filtered by a label or folder, the design of the afternoon of 2026-09-27. It needs Google's restricted-scope verification for `gmail.readonly`, with a paid third-party assessment repeated every year, and Microsoft's publisher verification; its filter is applied after a grant that reaches the whole mailbox; and email read by an agent is the best-documented prompt-injection channel. It is built only if users ask for it once receipts intake has shipped.
-- **Reading a paid ledger** (Kick or Digits expose MCP servers) as an alternative to keeping the books. It is an optional connector in the Finance Specialist's kit (phase 7 step 08), not a replacement for the books.
+- **Reading a paid ledger** (Kick or Digits expose MCP servers) as an alternative to keeping the books. It is an optional connector in the Finance Specialist's kit (phase 7 step 10), not a replacement for the books.
 - **A page that shows the books in the browser.** The workbooks are the view until a step asks for one.
 
-New dependencies, each pinned per the repository's rules and named in the step plans: `rust_xlsxwriter` to write workbooks and `calamine` to read them (phase 7); an IMAP client (phase 12).
+New dependencies, each pinned per the repository's rules and named in the step plans: `rust_xlsxwriter` to write workbooks and `calamine` to read them (phase 7); an IMAP client (phase 15).
 
 ## Tests
 
 The step plans turn each of these into a test that fails first.
 
-Phase 8 step 02:
+Phase 7 step 09:
 - The role loads, and is refused application code.
 - Every finance tool refuses every other role, except `farik_read_sheet` for the Product Manager reviewing a finance task.
 - A path that climbs out of the finance folder, is absolute, or names another part of `.farik/local` is refused.
@@ -142,14 +142,14 @@ Phase 8 step 02:
 - A finance session cannot read the worktrees, the event log, or `settings.json`.
 - Stripe's write tools are refused to the role.
 
-Phase 12 step 02:
+Phase 15 step 02:
 - The connector hands over only unread messages from approved senders, and never any other.
 - The connector has no call that changes the mailbox.
 - A filed message is never handed over again.
 - Email text and a filed attachment reach the agent under the untrusted-content notice.
 - An attachment that is not a PDF or an image, or is over 10 MB, is not filed.
 - A receipt-derived cell comes back as a value.
-- A sweep runs once a day while a process drives the project, never without an active Finance Specialist and a connected mailbox, and never while a finance task is in progress; no finance task is assigned while a sweep runs.
-- A second finance task is not assigned while one is `in_progress` or `verifying`, even under a WIP limit of two or with two Finance Specialists.
+- A sweep runs once a day while a process drives the project, never without an active Finance Specialist and a connected mailbox, and never while a task holds the folder; no finance task is assigned while a sweep runs.
+- A second finance task is not assigned while another task holds the folder (any status but `accepted` and `cancelled`), even under a WIP limit of two or with two Finance Specialists.
 - A sweep with no new messages starts no session and still records its events.
 - A statement line with no receipt and a receipt with no statement line each show in the reconciliation.

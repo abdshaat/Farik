@@ -424,6 +424,7 @@ pub fn tool_deps(repository: &TempRepo) -> Arc<ToolDeps> {
         git: repository.adapter(),
         clock,
         ids,
+        kits: Arc::new(farik_roles::load_kit),
     })
 }
 

@@ -6,12 +6,17 @@ use std::str::FromStr as _;
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::{Role, TaskId, TaskStatus};
+use farik_core::marketing::{CapScope, network_name};
 use farik_core::team::{AgentStatus, Team};
 use farik_protocol::event::{
     EventBody, EventKind, FarikEvent, MessageKind, SessionStartedBodyPurpose,
 };
 
 use crate::files::ProjectFiles;
+use crate::marketing::{
+    PausedWhy, PostMove, PostMoveKind, budgets_reached, campaigns_paused, marketing_plans,
+    post_moves,
+};
 use crate::waiting::name_of;
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
@@ -144,7 +149,7 @@ pub fn activity(
             .iter()
             .find(|item| item.agent_id.as_deref() == Some(id))
         {
-            let line = format!("Waiting on you: {}", item.line);
+            let line = waiting_line(team, id, item);
             all.push(one(
                 ActivityState::Waiting,
                 line,
@@ -165,6 +170,29 @@ pub fn activity(
         ));
     }
     Ok(all)
+}
+
+/// What an agent waiting on the human is doing, in a sentence: for a connector call, a post
+/// outside the plan or a site to read, the question the dialog answers.
+fn waiting_line(team: &Team, agent: &str, item: &crate::waiting::Waiting) -> String {
+    match (&item.approval, &item.post, &item.site) {
+        (Some(ask), _, _) => format!(
+            "Waiting on you: may {} use {}?",
+            name_of(team, agent),
+            ask.server
+        ),
+        (None, Some(ask), _) => format!(
+            "Waiting on you: may {} post on {}?",
+            name_of(team, agent),
+            network_name(ask.channel)
+        ),
+        (None, None, Some(ask)) => format!(
+            "Waiting on you: may {} read {}?",
+            name_of(team, agent),
+            ask.host
+        ),
+        (None, None, None) => format!("Waiting on you: {}", item.line),
+    }
 }
 
 /// The task in progress whose latest design plan `agent` proposed and nobody decided yet, with
@@ -255,7 +283,7 @@ pub struct Moved {
 }
 
 /// What moved after `since`, oldest first: the moves, the integrations, the human's acceptances,
-/// the agents' naps, and the ceremonies' posts.
+/// the agents' naps, the ceremonies' posts, and what happened to the social posts.
 ///
 /// # Errors
 ///
@@ -282,7 +310,7 @@ pub fn moved_since(
         "governor" | "farik" => "Farik".to_string(),
         id => name_of(team, id),
     };
-    Ok(events
+    let mut moved: Vec<(u64, Moved)> = events
         .iter()
         .filter(|event| event.envelope.recorded_at > since)
         .filter_map(|event| {
@@ -330,12 +358,127 @@ pub fn moved_since(
                 ),
                 _ => return None,
             };
-            Some(Moved {
-                at: event.envelope.recorded_at,
-                line,
-            })
+            Some((
+                event.envelope.seq,
+                Moved {
+                    at: event.envelope.recorded_at,
+                    line,
+                },
+            ))
         })
-        .collect())
+        .collect();
+    moved.extend(
+        post_moves(log)?
+            .iter()
+            .filter(|moved| moved.recorded_at > since)
+            .map(|moved| {
+                (
+                    moved.seq,
+                    Moved {
+                        at: moved.recorded_at,
+                        line: post_line(moved, &who),
+                    },
+                )
+            }),
+    );
+    moved.extend(
+        ad_moves(log, &who, since)?
+            .into_iter()
+            .map(|(seq, at, line)| (seq, Moved { at, line })),
+    );
+    moved.sort_by_key(|(seq, _)| *seq);
+    Ok(moved.into_iter().map(|(_, moved)| moved).collect())
+}
+
+/// What Farik did with a marketing plan's ads on its own since `since`, one line each, with the
+/// event's sequence number and time: a budget it paused the ads at, or could not, and a campaign
+/// it paused for the plan's end, for Google Ads' removal, or for a budget reached.
+fn ad_moves(
+    log: &EventLog,
+    who: &impl Fn(&str) -> String,
+    since: DateTime<Utc>,
+) -> Result<Vec<(u64, DateTime<Utc>, String)>, StoreError> {
+    let farik = who("farik");
+    let plans = marketing_plans(log)?;
+    let plan = |id: &str| {
+        plans
+            .iter()
+            .find(|plan| plan.record.id == id)
+            .map_or_else(|| id.to_string(), |plan| plan.proposal.title.clone())
+    };
+    // A campaign by its name in the plan it was made under, else by its key.
+    let campaign = |plan_id: &str, key: &str| {
+        plans
+            .iter()
+            .find(|plan| plan.record.id == plan_id)
+            .and_then(|plan| plan.proposal.campaigns.iter().find(|each| each.key == key))
+            .map_or_else(|| key.to_string(), |each| each.name.clone())
+    };
+    let mut lines = Vec::new();
+    for reached in budgets_reached(log)?.iter().filter(|each| each.at > since) {
+        let title = plan(&reached.plan);
+        let did = if reached.failed.is_some() {
+            "could not pause"
+        } else {
+            "paused"
+        };
+        let line = match &reached.key {
+            Some(key) if reached.scope == CapScope::Campaign => format!(
+                "{farik} {did} {title}'s campaign {} at its budget.",
+                campaign(&reached.plan, key)
+            ),
+            _ => format!("{farik} {did} {title}'s ads at their budget."),
+        };
+        lines.push((reached.seq, reached.at, line));
+    }
+    for paused in campaigns_paused(log)?.iter().filter(|each| each.at > since) {
+        let why = match paused.why {
+            PausedWhy::PlanEnded => "the plan ended",
+            PausedWhy::ConnectionRemoved => "Google Ads was removed",
+            PausedWhy::BudgetReached => "it reached its budget",
+        };
+        lines.push((
+            paused.seq,
+            paused.at,
+            format!(
+                "{farik} paused {}'s campaign {}: {why}.",
+                plan(&paused.plan),
+                campaign(&paused.plan, &paused.key)
+            ),
+        ));
+    }
+    Ok(lines)
+}
+
+/// What happened to a post, in a sentence: "Kai wrote the Instagram post for 13:00." The time is
+/// in the offset the post was written in, with its day when that is not the day it happened.
+fn post_line(moved: &PostMove, who: &impl Fn(&str) -> String) -> String {
+    let network = network_name(moved.channel);
+    let going_out = moved.at;
+    let happened_on = moved
+        .recorded_at
+        .with_timezone(&going_out.timezone())
+        .date_naive();
+    let time = if happened_on == going_out.date_naive() {
+        going_out.format("%H:%M").to_string()
+    } else {
+        going_out.format("%a %-d %b at %H:%M").to_string()
+    };
+    let agent = who(&moved.agent_id);
+    match moved.kind {
+        PostMoveKind::Wrote => format!("{agent} wrote the {network} post for {time}."),
+        PostMoveKind::Allowed => format!("You allowed {agent}'s {network} post for {time}."),
+        PostMoveKind::Sent => format!("Farik handed the {network} post for {time} to Buffer."),
+        PostMoveKind::Failed => format!("Buffer did not take the {network} post for {time}."),
+        PostMoveKind::Missed => format!("The {network} post for {time} did not go out."),
+        PostMoveKind::Stopped => format!("You stopped the {network} post for {time}."),
+        PostMoveKind::Declined => {
+            format!("You did not allow {agent}'s {network} post for {time}.")
+        }
+        PostMoveKind::PlanEnded => {
+            format!("Farik stopped the {network} post for {time}: its plan ended.")
+        }
+    }
 }
 
 /// A status in the words the pages show (`docs/design/web-ui.md`'s lifecycle table).
@@ -382,6 +525,40 @@ mod tests {
             { "id": "theo", "display_name": "Theo", "role": "software_developer", "status": "paused" },
         ]);
         validate_team(&wire).expect("the fixture is a team")
+    }
+
+    #[test]
+    fn an_agent_waiting_on_a_connector_call_is_asked_about_in_one_line() {
+        let board = Board::new("activity-tool-approval");
+        let team = five();
+        board.file("FRK-1", "Login form", |_| {});
+        board.put(
+            at(9, 2),
+            Some("FRK-1"),
+            Some("linus"),
+            "tool_approval.requested",
+            json!({
+                "server": "airtable", "tool": "create_record", "input": "{}",
+                "input_sha256": "0".repeat(64)
+            }),
+        );
+
+        let all = activity(
+            &board.log,
+            &board.projections,
+            &board.files,
+            &team,
+            at(12, 0),
+        )
+        .expect("the store reads");
+
+        let linus = all
+            .iter()
+            .find(|one| one.agent_id == "linus")
+            .expect("Linus");
+        assert_eq!(linus.state, ActivityState::Waiting);
+        assert_eq!(linus.line, "Waiting on you: may Linus use airtable?");
+        assert_eq!(linus.task_id.as_ref().map(|id| id.as_str()), Some("FRK-1"));
     }
 
     #[test]
@@ -718,6 +895,355 @@ mod tests {
                 (at(10, 6), "Mira posted the standup"),
                 (at(10, 6), "You accepted “More photos...”"),
                 (at(10, 6), "FRK-9 was added to the project"),
+            ]
+        );
+    }
+
+    /// Ada, Linus and Kai, the Marketing Specialist.
+    fn with_kai() -> farik_core::team::Team {
+        let mut wire = farik_core::team::fixtures::a_team_wire();
+        wire["agents"] = json!([
+            { "id": "ada", "display_name": "Ada", "role": "product_manager", "status": "active" },
+            { "id": "linus", "display_name": "Linus", "role": "software_developer", "status": "active" },
+            { "id": "kai", "display_name": "Kai", "role": "marketing_specialist", "status": "active" },
+        ]);
+        validate_team(&wire).expect("the fixture is a team")
+    }
+
+    /// A post of Kai's on `channel`, going out at `going_out`.
+    fn a_post(channel: &str, going_out: &str) -> serde_json::Value {
+        json!({
+            "channel": channel, "buffer_channel": "chan-1", "text": "Hello.", "media": [],
+            "at": going_out,
+        })
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "each line of a post's life, side by side"
+    )]
+    fn moved_tells_of_the_posts() {
+        let board = Board::new("moved-posts");
+        let team = with_kai();
+        board.file("FRK-1", "Spring posts", |_| {});
+        let writes = |minute: u32, channel: &str, going_out: &str| {
+            let mut body = a_post(channel, going_out);
+            body["approved_by"] = json!("plan");
+            body["plan"] = json!("MP-1");
+            body["slot"] = json!("post-1");
+            board
+                .session(
+                    at(10, minute),
+                    Some("FRK-1"),
+                    "kai",
+                    "session-1",
+                    "social_post.scheduled",
+                    body,
+                )
+                .envelope
+                .seq
+        };
+        let asks = |minute: u32, channel: &str, going_out: &str| {
+            board
+                .session(
+                    at(10, minute),
+                    Some("FRK-1"),
+                    "kai",
+                    "session-1",
+                    "social_post.requested",
+                    a_post(channel, going_out),
+                )
+                .envelope
+                .seq
+        };
+        let happens = |minute: u32, kind: &str, body: serde_json::Value| {
+            board.put(at(10, minute), None, None, kind, body);
+        };
+        // Before `since`, and not shown.
+        writes(0, "instagram", "2026-09-28T11:00:00Z");
+
+        // One post for later today, in its own offset (the event's day there too).
+        let sent = writes(1, "instagram", "2026-09-28T13:00:00Z");
+        happens(
+            2,
+            "social_post.sent",
+            json!({ "post": sent, "buffer_post": "b-1" }),
+        );
+        // One for a Saturday, and one Buffer would not take.
+        let failed = writes(3, "x", "2026-10-31T09:00:00+01:00");
+        happens(
+            4,
+            "social_post.failed",
+            json!({ "post": failed, "reason": "No." }),
+        );
+        // Missed; and stopped by the owner, on the day after in its offset.
+        let missed = writes(5, "tiktok", "2026-09-28T15:00:00Z");
+        happens(
+            6,
+            "social_post.missed",
+            json!({ "post": missed, "why": "paused" }),
+        );
+        let stopped = writes(7, "linkedin", "2026-09-29T10:30:00+02:00");
+        happens(
+            8,
+            "social_post.stopped",
+            json!({ "post": stopped, "by": "owner" }),
+        );
+        // A request nobody hears of, then allowed by the owner, then stopped with its plan.
+        let allowed = asks(9, "threads", "2026-09-28T17:00:00Z");
+        let mut allowance = a_post("threads", "2026-09-28T17:00:00Z");
+        allowance["post"] = json!(allowed);
+        allowance["approved_by"] = json!("owner");
+        board.put(
+            at(10, 10),
+            Some("FRK-1"),
+            None,
+            "social_post.scheduled",
+            allowance,
+        );
+        happens(
+            11,
+            "social_post.stopped",
+            json!({ "post": allowed, "by": "plan_ended" }),
+        );
+        // A move of the task between the posts' lines keeps its place among them.
+        board.moved(
+            at(10, 12),
+            "FRK-1",
+            ("draft", "refining"),
+            "ada",
+            (None, None),
+        );
+        // A request the owner did not allow.
+        let declined = asks(12, "bluesky", "2026-09-28T18:00:00Z");
+        happens(
+            13,
+            "social_post.stopped",
+            json!({ "post": declined, "by": "declined" }),
+        );
+        // A post an agent says it sent moved nothing, and shows nothing.
+        let forged = writes(14, "facebook", "2026-09-28T19:00:00Z");
+        board.session(
+            at(10, 15),
+            Some("FRK-1"),
+            "kai",
+            "session-1",
+            "social_post.sent",
+            json!({ "post": forged, "buffer_post": "b-9" }),
+        );
+
+        // Late in the evening in UTC, which is already the next day where the post is: the day is
+        // the post's own, so the line does not name it.
+        board.session(
+            at(23, 30),
+            Some("FRK-1"),
+            "kai",
+            "session-1",
+            "social_post.scheduled",
+            {
+                let mut body = a_post("mastodon", "2026-09-29T01:00:00+02:00");
+                body["approved_by"] = json!("plan");
+                body
+            },
+        );
+
+        let moved =
+            moved_since(&board.log, &board.projections, &team, at(10, 0)).expect("the store reads");
+
+        let lines: Vec<(chrono::DateTime<chrono::Utc>, &str)> = moved
+            .iter()
+            .map(|one| (one.at, one.line.as_str()))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                (at(10, 1), "Kai wrote the Instagram post for 13:00."),
+                (
+                    at(10, 2),
+                    "Farik handed the Instagram post for 13:00 to Buffer."
+                ),
+                (at(10, 3), "Kai wrote the X post for Sat 31 Oct at 09:00."),
+                (
+                    at(10, 4),
+                    "Buffer did not take the X post for Sat 31 Oct at 09:00."
+                ),
+                (at(10, 5), "Kai wrote the TikTok post for 15:00."),
+                (at(10, 6), "The TikTok post for 15:00 did not go out."),
+                (
+                    at(10, 7),
+                    "Kai wrote the LinkedIn post for Tue 29 Sep at 10:30."
+                ),
+                (
+                    at(10, 8),
+                    "You stopped the LinkedIn post for Tue 29 Sep at 10:30."
+                ),
+                (at(10, 10), "You allowed Kai's Threads post for 17:00."),
+                (
+                    at(10, 11),
+                    "Farik stopped the Threads post for 17:00: its plan ended."
+                ),
+                (at(10, 12), "Ada moved “Spring posts” to Planning"),
+                (
+                    at(10, 13),
+                    "You did not allow Kai's Bluesky post for 18:00."
+                ),
+                (at(10, 14), "Kai wrote the Facebook post for 19:00."),
+                (at(23, 30), "Kai wrote the Mastodon post for 01:00."),
+            ]
+        );
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "each line of the ads' pauses, side by side"
+    )]
+    fn says_what_moved_with_the_ads() {
+        let board = Board::new("moved-ads");
+        let team = with_kai();
+        board.file("FRK-1", "Autumn push", |_| {});
+        let mut plan = farik_protocol::event::fixtures::a_body_wire(
+            farik_protocol::event::EventKind::MarketingPlanProposed,
+        );
+        plan["plan"] = json!("MP-1");
+        plan["title"] = json!("Autumn at Corner Bakery");
+        plan["campaigns"] = json!([{
+            "key": "bakery", "channel": "google_ads", "name": "Bakery near me", "goal": "Sales",
+            "advertises": "Bread", "budget": "150.00", "starts_on": "2026-09-22",
+            "ends_on": "2026-10-20"
+        }]);
+        board.session(
+            at(8, 0),
+            Some("FRK-1"),
+            "kai",
+            "session-1",
+            "marketing_plan.proposed",
+            plan,
+        );
+        let happens = |minute: u32, kind: &str, body: serde_json::Value| {
+            board.put(at(10, minute), None, None, kind, body);
+        };
+        let reached = |scope: &str, key: Option<&str>, paused: &[&str], failed: Option<&str>| {
+            let mut body = json!({
+                "plan": "MP-1", "scope": scope, "spent": "150.00", "budget": "150.00",
+                "currency": "USD", "paused": paused,
+            });
+            if let Some(key) = key {
+                body["key"] = json!(key);
+            }
+            if let Some(failed) = failed {
+                body["failed"] = json!(failed);
+            }
+            body
+        };
+        let campaign = "customers/1234567890/campaigns/11";
+        // Before `since`, and not shown.
+        board.put(
+            at(9, 0),
+            None,
+            None,
+            "marketing_campaign.paused",
+            json!({ "plan": "MP-1", "key": "bakery", "campaign": campaign, "why": "plan_ended" }),
+        );
+        happens(
+            1,
+            "marketing_budget.reached",
+            reached("plan", None, &[campaign], None),
+        );
+        happens(
+            2,
+            "marketing_budget.reached",
+            reached("campaign", Some("bakery"), &[campaign], None),
+        );
+        // A pause Google refused is not told as one that worked.
+        happens(
+            3,
+            "marketing_budget.reached",
+            reached(
+                "campaign",
+                Some("bakery"),
+                &[],
+                Some("Google answered “No.”"),
+            ),
+        );
+        happens(
+            4,
+            "marketing_budget.reached",
+            reached("plan", None, &[], Some("Google answered “No.”")),
+        );
+        for (minute, why) in [
+            (5, "plan_ended"),
+            (6, "connection_removed"),
+            (7, "budget_reached"),
+        ] {
+            happens(
+                minute,
+                "marketing_campaign.paused",
+                json!({ "plan": "MP-1", "key": "bakery", "campaign": campaign, "why": why }),
+            );
+        }
+        // A campaign whose plan campaign is not in the plan is named by its key.
+        happens(
+            8,
+            "marketing_campaign.paused",
+            json!({ "plan": "MP-1", "key": "gone", "campaign": campaign, "why": "plan_ended" }),
+        );
+        // What an agent's session says it did moved nothing.
+        board.session(
+            at(10, 9),
+            Some("FRK-1"),
+            "kai",
+            "session-1",
+            "marketing_campaign.paused",
+            json!({ "plan": "MP-1", "key": "bakery", "campaign": campaign, "why": "plan_ended" }),
+        );
+
+        let moved =
+            moved_since(&board.log, &board.projections, &team, at(10, 0)).expect("the store reads");
+
+        let lines: Vec<(chrono::DateTime<chrono::Utc>, &str)> = moved
+            .iter()
+            .map(|one| (one.at, one.line.as_str()))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                (
+                    at(10, 1),
+                    "Farik paused Autumn at Corner Bakery's ads at their budget."
+                ),
+                (
+                    at(10, 2),
+                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me at its budget."
+                ),
+                (
+                    at(10, 3),
+                    "Farik could not pause Autumn at Corner Bakery's campaign Bakery near me at its \
+                     budget."
+                ),
+                (
+                    at(10, 4),
+                    "Farik could not pause Autumn at Corner Bakery's ads at their budget."
+                ),
+                (
+                    at(10, 5),
+                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me: the plan ended."
+                ),
+                (
+                    at(10, 6),
+                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me: Google Ads was \
+                     removed."
+                ),
+                (
+                    at(10, 7),
+                    "Farik paused Autumn at Corner Bakery's campaign Bakery near me: it reached its \
+                     budget."
+                ),
+                (
+                    at(10, 8),
+                    "Farik paused Autumn at Corner Bakery's campaign gone: the plan ended."
+                ),
             ]
         );
     }

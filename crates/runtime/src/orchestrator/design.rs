@@ -153,6 +153,7 @@ async fn explore(
             in_reply_to: None,
             thread: None,
             initial_prompt: explore_message(contract, returned.as_deref()),
+            pipeline: None,
         },
     )
     .await?;
@@ -196,6 +197,7 @@ async fn decide(
             in_reply_to: None,
             thread: None,
             initial_prompt: decide_design_plan_message(contract, plan),
+            pipeline: None,
         },
     )
     .await?;

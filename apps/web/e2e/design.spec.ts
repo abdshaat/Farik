@@ -16,6 +16,8 @@ test("a Designer's plan waits for the Product Manager on its task page", async (
 	});
 	try {
 		await page.goto(serve.url);
+		await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
+		await expect(page.getByText("Mira").first()).toBeVisible();
 		await page
 			.getByLabel("What should the team do next?")
 			.fill("Give the sign-in page room on a phone");

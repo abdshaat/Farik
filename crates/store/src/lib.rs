@@ -3,6 +3,8 @@
 
 /// What each agent does, and what moved.
 pub mod activity;
+/// The copy of a private folder a task is judged against.
+pub mod baseline;
 /// A task's diff, and an epic's.
 pub mod diff;
 /// What the store refuses, and why.
@@ -13,18 +15,30 @@ pub mod event_log;
 pub mod files;
 /// The repository Farik works in.
 pub mod git;
+/// The marketing plans the log holds.
+pub mod marketing;
 /// The harness metrics, from the projections.
 pub mod metrics;
 /// The database's shape, as SQL applied in order.
 pub mod migrations;
+/// The data pipelines the log holds.
+pub mod pipelines;
 /// The board, derived from the log.
 pub mod projections;
+/// The purchase orders the log holds.
+pub mod purchase_orders;
 /// Where the files and the log disagree.
 pub mod reconcile;
+/// The renewals Farik flagged for the owner.
+pub mod renewals;
 /// Filing a request, for every caller.
 pub mod requests;
 /// What the repository says it is.
 pub mod scan;
+/// The messages to sellers and the replies the log holds.
+pub mod seller_mail;
+/// The sites the Procurement Specialist may read.
+pub mod sites;
 /// What waits on the human.
 pub mod waiting;
 

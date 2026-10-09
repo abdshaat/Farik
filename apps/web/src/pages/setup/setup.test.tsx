@@ -58,7 +58,12 @@ describe("setup", () => {
 		if (!claude) throw new Error("no Claude row");
 		expect(within(claude).getByText(en.ready).className).toMatch(/pill/);
 		expect(within(docker).getByText(en.notFound).className).not.toMatch(/pill/);
-		expect(screen.getByText(en.noDockerWarning)).toBeTruthy();
+		// The warning names what the command line's does, the connectors' keys among it (8.6).
+		expect(
+			screen.getByText(
+				"Without Docker, a mistaken or tricked agent command can reach any file you can, and the keys you gave your agents’ connectors. Farik reminds you of this every time it starts.",
+			),
+		).toBeTruthy();
 		const onward = screen.getByRole("button", { name: en.continue });
 		expect((onward as HTMLButtonElement).disabled).toBe(true);
 		await expectNoAxeViolations(first.container);

@@ -23,7 +23,21 @@ export type Agent = {
 	status: string;
 	model?: unknown;
 	/** The connectors its sessions get (spec 5.6). */
-	mcpServers?: { name: string; source: string }[];
+	mcpServers?: McpServer[];
+};
+/** An agent's connector as `team.yaml` holds it: a built-in by name, or the user's own (ADR 0030). */
+export type McpServer = {
+	name: string;
+	source: string;
+	transport?: "stdio" | "http";
+	command?: string;
+	args?: string[];
+	url?: string;
+	headers?: Record<string, string>;
+	credentialKeys?: string[];
+	/** Present when the user signs in to the service instead of giving a key (ADR 0033). */
+	oauth?: { clientId?: string; callbackPort?: number; scopes?: string[] };
+	tools?: Record<string, "network" | "external_effect" | "denied">;
 };
 export type Judgment = {
 	required?: "always" | "never";
@@ -61,8 +75,11 @@ export type Library = { criteria: Criterion[] };
 /** What the wizard's screens 5 to 8 build, kept until "Start the team" sends it. */
 export type Draft = {
 	team: Team;
-	/** Every suggested or added agent, whether it is on the team, and its row's own key. */
-	members: { agent: Agent; on: boolean; key: number }[];
+	/**
+	 * Every suggested or added agent, whether it is on the team, its row's own key, and whether it
+	 * is a role Farik does not suggest, offered under "More roles".
+	 */
+	members: { agent: Agent; on: boolean; key: number; more: boolean }[];
 	criteria: Library;
 	/** The two permission questions, unanswered until the user answers them. */
 	answers: { commands?: boolean; push?: boolean };
@@ -96,8 +113,13 @@ type Setup = {
 
 /** The names "Add someone" suggests, in order, each with its picture. */
 const SPARE = ["Noor", "Ivo", "Lena", "Sami", "Rui"];
-/** The pictures added agents draw from: extra-1 is Iris's and extra-4 the Finance Specialist's (F10). */
-const EXTRAS = ["extra-2", "extra-3", "extra-5"];
+/**
+ * The pictures added agents draw from: extra-1 is Iris's, extra-4 the Finance Specialist's and
+ * extra-5 the Procurement Specialist's (F10).
+ */
+const EXTRAS = ["extra-2", "extra-3"];
+/** The roles Farik does not suggest, offered under "More roles" in the order the Team page lists them. */
+const MORE_ROLES = ["finance_specialist", "procurement_specialist"] as const;
 
 /** The team the draft stands for: the agents on it, each with an id from its name. */
 export function teamOf(draft: Draft): Team {
@@ -125,10 +147,15 @@ export function someone(agents: Agent[], like: Agent): Agent {
 		...like,
 		id: slug(name),
 		displayName: name,
-		// Once all three are taken, they are shared again (the team holds seven at most).
+		// The Finance Specialist and the Procurement Specialist have their own pictures. Once both
+		// extras are taken, they are shared again (the team holds seven at most).
 		avatar:
-			EXTRAS.find((key) => !agents.some((a) => a.avatar === key)) ??
-			`extra-${[2, 3, 5][agents.length % 3]}`,
+			like.role === "finance_specialist"
+				? "finance-specialist"
+				: like.role === "procurement_specialist"
+					? "extra-5"
+					: (EXTRAS.find((key) => !agents.some((a) => a.avatar === key)) ??
+						`extra-${[2, 3][agents.length % 2]}`),
 	};
 }
 
@@ -144,8 +171,30 @@ export function unavailableRoles(proposed: Proposed): Agent["role"][] {
  * The draft a start makes from the suggested team: its six; a saved team's agents, each field the
  * template leaves out the role's, with its four answers; or a Product Manager and a Developer,
  * unnamed. A saved team never goes through `template.preview`: setup replaces the starter team.
+ * After them, whatever the start, a row for each role Farik does not suggest that none of them
+ * holds, unticked, to be offered under "More roles", each named from the spare names the rows
+ * above it leave.
  */
 export function draftOf(
+	proposed: Proposed,
+	start: Start,
+	template?: Template,
+): Draft {
+	const draft = teamDraftOf(proposed, start, template);
+	const members = [...draft.members];
+	for (const role of MORE_ROLES) {
+		if (members.some((m) => m.agent.role === role)) continue;
+		const agent = someone(
+			members.map((m) => m.agent),
+			{ id: "", displayName: "", role, status: "active" },
+		);
+		members.push({ agent, on: false, key: members.length, more: true });
+	}
+	return { ...draft, members };
+}
+
+/** `draftOf`'s team rows, before "More roles". */
+function teamDraftOf(
 	proposed: Proposed,
 	start: Start,
 	template?: Template,
@@ -187,6 +236,7 @@ export function draftOf(
 				agent: { ...role(agent.role), ...agent, status: "active" },
 				on: !unavailable.includes(agent.role),
 				key,
+				more: false,
 			})),
 		};
 	}
@@ -197,7 +247,14 @@ export function draftOf(
 				(r, key) => {
 					const agent = role(r);
 					return agent
-						? [{ agent: { ...agent, displayName: "" }, on: true, key }]
+						? [
+								{
+									agent: { ...agent, displayName: "" },
+									on: true,
+									key,
+									more: false,
+								},
+							]
 						: [];
 				},
 			),
@@ -208,6 +265,7 @@ export function draftOf(
 			agent,
 			on: !unavailable.includes(agent.role),
 			key,
+			more: false,
 		})),
 	};
 }
@@ -302,6 +360,8 @@ export function roleName(role: Role): string {
 				software_developer: "roleDeveloper",
 				marketing_specialist: "roleMarketing",
 				ui_ux_designer: "roleDesigner",
+				finance_specialist: "roleFinance",
+				procurement_specialist: "roleProcurement",
 			} as const
 		)[role],
 	);

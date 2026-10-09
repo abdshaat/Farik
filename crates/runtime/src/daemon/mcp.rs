@@ -189,7 +189,7 @@ fn listed(calling: &CallingSession) -> ListToolsResult {
 /// The names `tools/list` answers the session `session_id` with, as its client sees them, or
 /// `None` for a session the daemon does not know: `require_session` and `listed` without HTTP.
 #[cfg(test)]
-pub(crate) fn listed_names(state: &DaemonState, session_id: &str) -> Option<Vec<String>> {
+pub(crate) fn listed_names(state: &Arc<DaemonState>, session_id: &str) -> Option<Vec<String>> {
     let calling = CallingSession {
         context: Arc::new(state.tool_context(session_id)?),
         farik_tools: Arc::new(state.farik_tools(session_id)?),
@@ -477,7 +477,7 @@ mod tests {
             .filter_map(|tool| tool["name"].as_str())
             .collect();
         let mut expected: Vec<&str> = tool_descriptors().iter().map(|tool| tool.name).collect();
-        assert_eq!(expected.len(), 31);
+        assert_eq!(expected.len(), 48);
         expected.push("permission");
         assert_eq!(names, expected);
         for tool in answer["result"]["tools"].as_array().expect("a list") {
@@ -560,6 +560,7 @@ mod tests {
             .expect("the Designer joins");
         daemon.state.register_session(SessionRegistration {
             session_id: "session-iris".to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "iris".to_string(),
             task_id: Some("FRK-1".parse().expect("a task id")),
             cwd: daemon.worktree.clone(),
@@ -572,6 +573,8 @@ mod tests {
             purpose: SessionPurpose::Verify,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
         });
         let mut client = Client::new(&daemon, "session-iris");
         client.initialize().await;

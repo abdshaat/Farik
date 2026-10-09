@@ -6,6 +6,7 @@ import { commandSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import { SaveTemplate } from "./dialogs/SaveTemplate.tsx";
+import { visibly } from "./dialogs/ToolApproval.tsx";
 import { UseTemplate } from "./dialogs/UseTemplate.tsx";
 import styles from "./pages.module.css";
 import {
@@ -24,6 +25,8 @@ const ROLES: Agent["role"][] = [
 	"architect",
 	"ui_ux_designer",
 	"marketing_specialist",
+	"finance_specialist",
+	"procurement_specialist",
 ];
 
 export type Model = { id: string; label: string };
@@ -42,6 +45,49 @@ export type Effective = {
 	tiers: Tier[];
 	baseTiers: Tier[];
 };
+/** A service a role's kit offers, with the copy the page shows while connecting it (ADR 0036). */
+export type KitService = {
+	name: string;
+	title: string;
+	about: string;
+	why: string;
+	setup: string;
+	/** Where the key is made; present when the service takes keys. */
+	keyPage?: string;
+	/** A tool to what it does in the user's words. */
+	labels: Record<string, string>;
+	auth: "keys" | "oauth";
+	credentialKeys: string[];
+	/** What the kit lets the user pre-approve: each spending tool with its default calls each sprint (ADR 0037). */
+	allowances?: { tool: string; calls: number; what: string }[];
+	/** The service signs in through Farik Cloud, which comes with the web launch: this build cannot connect it yet (ADR 0044). */
+	atLaunch?: true;
+};
+/** The services Farik offers one role. */
+export type RoleKit = { role: Agent["role"]; connectors: KitService[] };
+/** A custom connector's state on this computer, as `team.get` answers it. */
+export type ConnectorState = {
+	agent: string;
+	server: string;
+	state:
+		| "connected"
+		| "connect_again"
+		| "sign_in_again"
+		| "store_unavailable"
+		| "not_in_kit";
+	/** Whether the user added it (`custom`) or it is a service of the agent's role's kit (ADR 0036). */
+	source?: "custom" | "kit";
+	/** Whether the user gave keys or signed in to the service (ADR 0033). */
+	auth?: "keys" | "oauth";
+	/** For a sign-in: whether the service can be asked to forget it when it is removed. */
+	revokes?: boolean;
+	/** For a sign-in made with one of Farik's own apps: what the app is called (GitHub), which the page names in place of the address. */
+	provider?: string;
+	/** For the same: the page at the service where the user removes Farik's app. */
+	settingsUrl?: string;
+	/** Where its keys or sign-in are kept, whenever some are. */
+	storedIn?: "keychain" | "file";
+};
 type Holder = { agentId: string; displayName: string; role: Agent["role"] };
 /** Who checks plans under each choice of judge, or null where nobody active holds it. */
 export type Judges = {
@@ -56,13 +102,22 @@ export function useTeam() {
 		team: TeamFile;
 		agents: Effective[];
 		maxAgents: number;
+		connectors?: ConnectorState[];
+		kits?: RoleKit[];
+		sandboxed?: boolean;
 	}>("team.get", {});
 	const { data: models } = useQuery<{ models: Model[] }>("models.list", {});
 	return {
 		team: data?.team,
 		effective: data?.agents ?? [],
+		/** Whether each custom connector runs on this computer (ADR 0030). */
+		connectors: data?.connectors ?? [],
+		/** What Farik offers each role on the team (ADR 0036). */
+		kits: data?.kits ?? [],
 		/** The most agents a team has that are not retired (SPEC F1), as the daemon says. */
 		most: data?.maxAgents,
+		/** Whether sessions run in Docker's sandbox, where no command of an agent reaches a connector's keys. */
+		sandboxed: data?.sandboxed ?? false,
 		models: models?.models ?? [],
 		/** Reads the team again now, rather than on the next event. */
 		again,
@@ -181,8 +236,10 @@ export function Team() {
 							<p className={styles.muted}>
 								{paused
 									? t("agentPaused")
-									: (activity?.activity.find((a) => a.agentId === agent.id)
-											?.line ?? t("agentActive"))}
+									: visibly(
+											activity?.activity.find((a) => a.agentId === agent.id)
+												?.line ?? t("agentActive"),
+										)}
 							</p>
 							<dl className={styles.facts}>
 								<dt>{t("agentModel")}</dt>

@@ -68,6 +68,8 @@ describe("contrast", () => {
 				"role-developer",
 				"role-marketing-specialist",
 				"role-ui-ux-designer",
+				"role-finance-specialist",
+				"role-procurement-specialist",
 				"status-done",
 				"status-working",
 				"status-waiting",
@@ -85,6 +87,47 @@ describe("contrast", () => {
 				).toBeUndefined();
 				seen.set(value, job);
 			}
+		});
+	}
+
+	for (const theme of ["light", "dark"] as ThemeName[]) {
+		it(`finance_has_a_role_colour in the ${theme} theme`, () => {
+			const c = tokens.color[theme];
+			expect(c["role-finance-specialist"]).toBe("#C2C79B");
+			expect(
+				TEXT_PAIRS.some(
+					(p) =>
+						p.foreground === "role-ink" &&
+						p.background === "role-finance-specialist" &&
+						p.minimum === 4.5,
+				),
+			).toBe(true);
+			const ratio = contrastRatio(
+				c["role-ink"] ?? "",
+				c["role-finance-specialist"] ?? "",
+			);
+			expect(ratio).toBeGreaterThanOrEqual(4.5);
+			expect(ratio.toFixed(1)).toBe("10.3");
+		});
+	}
+
+	for (const theme of ["light", "dark"] as ThemeName[]) {
+		it(`procurement_has_a_role_colour in the ${theme} theme`, () => {
+			const c = tokens.color[theme];
+			expect(c["role-procurement-specialist"]).toBe("#A6C3BF");
+			expect(
+				TEXT_PAIRS.some(
+					(p) =>
+						p.foreground === "role-ink" &&
+						p.background === "role-procurement-specialist" &&
+						p.minimum === 4.5,
+				),
+			).toBe(true);
+			const ratio = contrastRatio(
+				c["role-ink"] ?? "",
+				c["role-procurement-specialist"] ?? "",
+			);
+			expect(ratio).toBeGreaterThanOrEqual(4.5);
 		});
 	}
 
@@ -128,6 +171,8 @@ describe("contrast", () => {
 			["role-ink", "role-developer", 4.5],
 			["role-ink", "role-marketing-specialist", 4.5],
 			["role-ink", "role-ui-ux-designer", 4.5],
+			["role-ink", "role-finance-specialist", 4.5],
+			["role-ink", "role-procurement-specialist", 4.5],
 			["ink", "diff-added", 4.5],
 			["ink", "diff-removed", 4.5],
 			["ready-ink", "ready", 4.5],

@@ -15,14 +15,20 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use farik_core::budget::DEFAULT_SESSION_LIMITS;
 use farik_core::governor::permissions::PermissionTier;
+use farik_core::governor::permissions::SessionConnector;
 use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
-use farik_core::team::{Effort, validate_team};
+use farik_core::team::{CustomServer, Effort, custom_server, spec_sha256, validate_team};
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{EventIds, EventKind};
 use farik_runtime::claude::{
-    ClaudeAdapter, ClaudeConfig, ClaudeCredential, allowed_builtins, credential_from_env,
+    ClaudeAdapter, ClaudeConfig, ClaudeCredential, Secret, allowed_builtins, credential_from_env,
+};
+use farik_runtime::connectors::{
+    ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
 };
 use farik_runtime::daemon::{DaemonConfig, DaemonState, SessionRegistration, serve};
+use farik_runtime::session::{McpServerConfig, McpTransport, SessionSkill};
+use farik_runtime::sign_in::OAuthGrant;
 use farik_runtime::transitions::Transitions;
 use farik_runtime::{
     EndReason, RuntimeAdapter, SessionEvent, SessionPurpose, SessionSpec, ToolDeps,
@@ -33,6 +39,10 @@ use farik_store::{EventLog, EventQuery, IN_MEMORY, open_event_log, open_projecti
 use serde_json::{Value, json};
 
 const SECRET: &str = "s3cr3t-farik-live-value";
+/// The key a custom connector is connected with.
+const CONNECTOR_KEY: &str = "fixture-key-value";
+/// The stdio MCP server the custom connector runs (`fixtures/mcp_server.sh`).
+const FIXTURE_SERVER: &str = include_str!("../../runtime/tests/fixtures/mcp_server.sh");
 
 /// The variables of this process's environment a session is given besides its credential.
 const BASE_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];
@@ -122,6 +132,22 @@ struct Project {
 
 impl Project {
     fn new() -> Project {
+        Project::with_team(|_, _| {})
+    }
+
+    /// `new`, with `change` made to the team's wire, given the repository's folder: each custom
+    /// server `dev-a` then has is given to its session, and connected as it is.
+    #[allow(clippy::too_many_lines, reason = "one fixture, built in one place")]
+    fn with_team(change: impl FnOnce(&mut Value, &Path)) -> Project {
+        Project::with_team_signed_in(change, |_| None)
+    }
+
+    /// [`Project::with_team`], each custom server connected with the sign-in `grants` gives it.
+    #[allow(clippy::too_many_lines, reason = "one fixture, built in one place")]
+    fn with_team_signed_in(
+        change: impl FnOnce(&mut Value, &Path),
+        grants: impl Fn(&CustomServer) -> Option<OAuthGrant>,
+    ) -> Project {
         let repo = TempRepo::new("live-claude");
         repo.write("note.txt", "hello live\n");
         repo.write(".env", &format!("FARIK_LIVE_SECRET={SECRET}\n"));
@@ -130,7 +156,14 @@ impl Project {
             an_agent_wire("pm", "product_manager"),
             an_agent_wire("dev-a", "software_developer"),
         ]);
+        change(&mut wire, &repo.path);
         let team = validate_team(&wire).expect("a team");
+        let custom: Vec<CustomServer> = team.agents[1]
+            .mcp_servers
+            .iter()
+            .flatten()
+            .filter_map(custom_server)
+            .collect();
         let tiers: BTreeSet<PermissionTier> = team
             .agents
             .iter()
@@ -166,10 +199,31 @@ impl Project {
             git: repo.adapter(),
             clock,
             ids,
+            kits: Arc::new(farik_roles::load_kit),
         })));
+        // The user's state folder, outside the repository, where each server runs.
+        let state_dir = PathBuf::from(format!("{}-state", repo.path.display()));
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        for server in &custom {
+            let at =
+                SecretAt::of(&state_dir, &repo.path, "dev-a", &server.name).expect("an address");
+            let entry = ConnectorEntry {
+                spec_sha256: spec_sha256(server),
+                keys: server
+                    .credential_keys
+                    .iter()
+                    .map(|key| (key.clone(), Secret::new(CONNECTOR_KEY.to_string())))
+                    .collect(),
+                oauth: grants(server),
+            };
+            store.save(&at, &entry).expect("kept");
+        }
+        state.set_connector_secrets(store);
+        state.set_state_dir(state_dir);
         let session_id = a_session_id();
         state.register_session(SessionRegistration {
             session_id: session_id.clone(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             cwd: repo.path.clone(),
@@ -177,11 +231,22 @@ impl Project {
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: vec![FARIK_TOOL.to_string()],
             tiers: tiers.iter().copied().collect(),
-            connectors: Vec::new(),
+            connectors: custom
+                .iter()
+                .map(|server| SessionConnector {
+                    server: server.name.clone(),
+                    origin: None,
+                    tools: server.tools.clone(),
+                    allowances: std::collections::BTreeMap::new(),
+                    plan_tools: std::collections::BTreeSet::new(),
+                })
+                .collect(),
             preview: None,
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
         });
         Project {
             repo,
@@ -209,6 +274,7 @@ impl Project {
             disallowed_tools: Vec::new(),
             cwd: self.repo.path.clone(),
             limits: DEFAULT_SESSION_LIMITS,
+            skills: Vec::new(),
             initial_prompt: format!(
                 "First, use the Read tool to read note.txt. Second, use the Write tool to create \
                  out.txt containing the word yes. Third, use the Grep tool to search this \
@@ -281,6 +347,7 @@ fn run(
         daemon_file,
         daemon: handle.info.clone(),
         sessions_dir: local.join("sessions"),
+        skills_dir: skills_state(project),
         team_file: project.repo.path.join(".farik/team.yaml"),
         env: BASE_ENV
             .iter()
@@ -418,4 +485,286 @@ fn live_session_reads_is_denied_and_completes() {
         .filter(|tool| !tool.starts_with("mcp__"))
         .collect();
     assert_eq!(builtins, builtin_tools);
+}
+
+#[test]
+#[ignore = "a live Claude Code session needs the founder's credential: FARIK_LIVE_TESTS=1 with \
+            ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand"]
+fn a_live_session_calls_a_custom_connector() {
+    if std::env::var("FARIK_LIVE_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set FARIK_LIVE_TESTS=1 to run a live Claude Code session");
+        return;
+    }
+    let env: BTreeMap<String, String> = std::env::vars().collect();
+    let credential = credential_from_env(&env)
+        .expect("FARIK_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
+    let project = Project::with_team(|wire, root| {
+        let script = root.join(".farik/local/fixture-server.sh");
+        std::fs::create_dir_all(root.join(".farik/local")).expect("the folder");
+        std::fs::write(&script, FIXTURE_SERVER).expect("the server is written");
+        wire["agents"][1]["mcp_servers"] = json!([{
+            "name": "fixture", "source": "custom", "transport": "stdio",
+            "command": "sh", "args": [script.display().to_string()],
+            "credential_keys": ["API_KEY"],
+            "tools": { "search": "network", "delete_repo": "denied" }
+        }]);
+    });
+    let mut spec = project.spec();
+    spec.mcp_servers = vec![McpServerConfig {
+        name: "fixture".to_string(),
+        transport: McpTransport::Launched,
+        headers: BTreeMap::new(),
+    }];
+    spec.disallowed_tools = vec!["mcp__fixture__delete_repo".to_string()];
+    spec.initial_prompt = "First, call the mcp__fixture__search tool with the query hello. \
+                           Second, call the mcp__fixture__delete_repo tool. Then reply with what \
+                           the search returned."
+        .to_string();
+    let run = run(&project, spec, credential, &env);
+    let init = init_tools(&run.stream);
+    assert!(
+        init.iter().any(|tool| tool == "mcp__fixture__search"),
+        "the session has no mcp__fixture__search: {init:?}\n{}",
+        run.farik_mcp_lines()
+    );
+    assert!(
+        !init.iter().any(|tool| tool == "mcp__fixture__delete_repo"),
+        "{init:?}"
+    );
+    assert!(
+        run.events.iter().any(
+            |event| matches!(event, SessionEvent::ToolReturned { tool, output }
+            if tool == "mcp__fixture__search" && output.contains("fixture-found"))
+        ),
+        "{:?}",
+        run.events
+    );
+    let logged = project
+        .log
+        .read(&EventQuery::default())
+        .expect("the log reads");
+    let called = |tool: &str| {
+        logged.iter().any(|event| {
+            event.body.kind() == EventKind::ToolCalled
+                && serde_json::to_value(&event.body)
+                    .is_ok_and(|body| body.to_string().contains(tool))
+        })
+    };
+    assert!(called("mcp__fixture__search"));
+    assert!(!called("mcp__fixture__delete_repo"));
+    // The key went to the server, and to nothing the session can read.
+    assert!(!run.stream.contains(CONNECTOR_KEY));
+}
+
+/// An authorization server and a protected MCP server, as the runtime's tests run them.
+#[path = "../../runtime/tests/support/oauth_fixture.rs"]
+mod oauth_fixture;
+
+#[test]
+#[ignore = "a live Claude Code session needs the founder's credential: FARIK_LIVE_TESTS=1 with \
+            ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand"]
+fn a_live_session_calls_a_signed_in_connector() {
+    if std::env::var("FARIK_LIVE_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set FARIK_LIVE_TESTS=1 to run a live Claude Code session");
+        return;
+    }
+    let env: BTreeMap<String, String> = std::env::vars().collect();
+    let credential = credential_from_env(&env)
+        .expect("FARIK_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
+    // The fixture's server runs on this runtime, kept alive for the whole test.
+    let serving = tokio::runtime::Runtime::new().expect("a runtime");
+    let fixture = serving.block_on(oauth_fixture::Fixture::start());
+    let (access, refresh) = fixture.mint();
+    let granted = access.clone();
+    let url = fixture.mcp_url.clone();
+    let project = Project::with_team_signed_in(
+        |wire, _| {
+            wire["agents"][1]["mcp_servers"] = json!([{
+                "name": "fixture", "source": "custom", "transport": "http",
+                "url": url, "oauth": {}, "tools": { "whoami": "network" }
+            }]);
+        },
+        |_| {
+            let now = Utc::now();
+            Some(OAuthGrant {
+                issuer: fixture.origin.clone(),
+                resource: fixture.mcp_url.clone(),
+                client_id: "client-live".to_string(),
+                token_endpoint: format!("{}/token", fixture.origin),
+                revocation_endpoint: None,
+                access_token: Secret::new(granted.clone()),
+                refresh_token: Some(Secret::new(refresh.clone())),
+                issued_at: now,
+                expires_at: Some(now + chrono::Duration::hours(2)),
+                scopes: Vec::new(),
+                lapsed: false,
+                app: None,
+            })
+        },
+    );
+    let mut spec = project.spec();
+    spec.mcp_servers = vec![McpServerConfig {
+        name: "fixture".to_string(),
+        transport: McpTransport::Helped {
+            url: fixture.mcp_url.clone(),
+        },
+        headers: BTreeMap::new(),
+    }];
+    spec.initial_prompt =
+        "Call the mcp__fixture__whoami tool, then reply with what it returned.".to_string();
+    let run = run(&project, spec, credential, &env);
+    let init = init_tools(&run.stream);
+    assert!(
+        init.iter().any(|tool| tool == "mcp__fixture__whoami"),
+        "the session has no mcp__fixture__whoami: {init:?}\n{}",
+        run.farik_mcp_lines()
+    );
+    assert!(
+        run.events.iter().any(
+            |event| matches!(event, SessionEvent::ToolReturned { tool, output }
+            if tool == "mcp__fixture__whoami" && output.contains("whoami-ok"))
+        ),
+        "{:?}",
+        run.events
+    );
+    // The server was sent the access token, by the headers helper and by nothing else.
+    let sent: Vec<String> = fixture
+        .requests("/mcp")
+        .into_iter()
+        .filter_map(|request| request.authorization)
+        .collect();
+    assert!(
+        sent.iter()
+            .any(|header| *header == format!("Bearer {access}")),
+        "{sent:?}"
+    );
+    // And it reached nothing the session can read.
+    assert!(!run.stream.contains(&access));
+}
+
+/// Where the plugin folders go: outside the repository, as the shipped layout has them
+/// (`<state>/skills/<project id>`). Inside `.farik/local` Claude Code's own deny rule refuses the
+/// read of a skill's reference.
+fn skills_state(project: &Project) -> PathBuf {
+    PathBuf::from(format!("{}-state", project.repo.path.display()))
+        .join("skills")
+        .join("test-project")
+}
+
+/// What the program's `init` line lists as its skills.
+fn init_skills(stream: &str) -> Vec<String> {
+    let init: Value = stream
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|line| line["type"] == "system" && line["subtype"] == "init")
+        .expect("an init line");
+    init["skills"]
+        .as_array()
+        .map(|skills| {
+            skills
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The marker the skill's body holds and the prompt must not.
+const SKILL_BODY_MARKER: &str = "FIXTURE-SKILL-BODY-MARKER";
+
+#[test]
+#[ignore = "a live Claude Code session needs the founder's credential: FARIK_LIVE_TESTS=1 with \
+            ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand; the credential-free equivalent \
+            is the readiness review's fake-API probe (ADR 0034)"]
+fn a_live_session_loads_a_skill_on_use() {
+    if std::env::var("FARIK_LIVE_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set FARIK_LIVE_TESTS=1 to run a live Claude Code session");
+        return;
+    }
+    let env: BTreeMap<String, String> = std::env::vars().collect();
+    let credential = credential_from_env(&env)
+        .expect("FARIK_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
+    let project = Project::new();
+    let local = project.repo.path.join(".farik/local");
+    // A chat session, which works in the project's root: the harder case, where Claude Code's own
+    // deny rule for `.farik/local/**` applies, and the skills' folder lies outside it.
+    let skills_root = skills_state(&project)
+        .join(&project.session_id)
+        .join("skills");
+    project.state.register_session(SessionRegistration {
+        session_id: project.session_id.clone(),
+        web: farik_core::governor::sites::WebAccess::Open,
+        agent_id: "dev-a".to_string(),
+        task_id: None,
+        cwd: project.repo.path.clone(),
+        executor: None,
+        limits: DEFAULT_SESSION_LIMITS,
+        farik_tools: Vec::new(),
+        tiers: project.tiers.iter().copied().collect(),
+        connectors: Vec::new(),
+        preview: None,
+        purpose: SessionPurpose::Chat,
+        in_reply_to: None,
+        thread: None,
+        skills: vec!["fixture-skill".to_string()],
+        skills_root: Some(skills_root),
+    });
+    let mut spec = project.spec();
+    spec.purpose = SessionPurpose::Chat;
+    spec.farik_tools = Vec::new();
+    spec.skills = vec![SessionSkill {
+        name: "fixture-skill".to_string(),
+        files: BTreeMap::from([
+            (
+                "SKILL.md".to_string(),
+                format!(
+                    "---\nname: fixture-skill\ndescription: Use when asked to use the fixture \
+                     skill.\n---\n{SKILL_BODY_MARKER}: read references/note.md, in this skill's \
+                     folder, and report the one word in it.\n"
+                ),
+            ),
+            ("references/note.md".to_string(), "pelican\n".to_string()),
+        ]),
+    }];
+    spec.initial_prompt = "Use the fixture-skill skill, read the note it points to, say the one \
+                           word the note holds, and end."
+        .to_string();
+    let run = run(&project, spec.clone(), credential, &env);
+    assert!(
+        init_skills(&run.stream)
+            .iter()
+            .any(|skill| skill == "farik:fixture-skill"),
+        "{}",
+        run.stream
+    );
+    let logged = project
+        .log
+        .read(&EventQuery::default())
+        .expect("the log reads");
+    let called = |tool: &str, needle: &str| {
+        logged.iter().any(|event| {
+            event.body.kind() == EventKind::ToolCalled
+                && serde_json::to_value(&event.body)
+                    .is_ok_and(|body| body["tool"] == tool && body.to_string().contains(needle))
+        })
+    };
+    assert!(called("Skill", "farik:fixture-skill"), "{logged:?}");
+    assert!(called("Read", "references/note.md"), "{logged:?}");
+    let answer = run
+        .stream
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|line| line["type"] == "result")
+        .and_then(|line| line["result"].as_str().map(str::to_string))
+        .expect("a result line");
+    assert!(answer.contains("pelican"), "the read succeeded: {answer}");
+    let prompt = std::fs::read_to_string(
+        local
+            .join("sessions")
+            .join(&spec.session_id)
+            .join("system-prompt.md"),
+    )
+    .expect("the prompt is kept");
+    assert!(!prompt.contains(SKILL_BODY_MARKER), "{prompt}");
 }

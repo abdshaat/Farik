@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://farik.dev/schemas/approved-sites.schema.json",
+  "title": "FarikApprovedSites",
+  "description": "Farik's own list of approved sites: the long-established shops the Procurement Specialist may read from its first task, stored as roles/procurement_specialist/approved_sites.yaml. It is public data, not a secret (ADR 0044 keeps Farik's credentials out of the code, and a list of shops is none). farik-roles loads it and refuses, beside what this schema cannot say, a host that is not a bare lower-case ASCII host with a dot (no scheme, path, port, IP address or leading www.) and a host listed twice. See docs/SPEC.md 6.10 and 8.6, and ADR 0039.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sites"
+  ],
+  "properties": {
+    "sites": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/site"
+      },
+      "description": "The shops, in the order they are shown, grouped by the order their categories first appear."
+    }
+  },
+  "$defs": {
+    "siteCategory": {
+      "type": "string",
+      "enum": [
+        "general_marketplace",
+        "office_supplies",
+        "industrial_supplies",
+        "packaging_and_shipping",
+        "electronic_components",
+        "computers_and_it",
+        "furniture",
+        "food_service",
+        "printing",
+        "software"
+      ],
+      "description": "What the shop sells, in the ten categories a small business buys in."
+    },
+    "site": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "shop",
+        "category"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "The shop's primary domain: a lower-case ASCII host with a dot, an international name in its xn-- form, and no scheme, path, port, IP address or leading www. A regional domain is a host of its own."
+        },
+        "shop": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "pattern": "^[^\\r\\n]+$",
+          "description": "The shop's name as the owner reads it, 1 to 60 characters on one line."
+        },
+        "category": {
+          "$ref": "#/$defs/siteCategory"
+        }
+      }
+    }
+  }
+}

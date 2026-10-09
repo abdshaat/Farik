@@ -21,6 +21,7 @@ describe("assets", () => {
 			"architect",
 			"developer",
 			"marketing-specialist",
+			"finance-specialist",
 			"extra-1",
 			"extra-2",
 			"extra-3",
@@ -36,10 +37,23 @@ describe("assets", () => {
 	});
 
 	it("has a 256 px avatar for every key", () => {
-		expect(AVATAR_KEYS).toHaveLength(10);
+		expect(AVATAR_KEYS).toHaveLength(11);
 		for (const key of AVATAR_KEYS) {
 			expect(size(here(`assets/avatars/${key}-256.png`))).toEqual([256, 256]);
 		}
+	});
+
+	it("finance_has_its_own_picture", () => {
+		expect(AVATAR_KEYS).toContain("finance-specialist");
+		expect(AVATAR_KEYS).toContain("extra-4");
+		expect(sha(here("assets/avatars/finance-specialist-256.png"))).toBe(
+			sha(here("assets/avatars/extra-4-256.png")),
+		);
+		const character = (name: string) =>
+			new URL(`../../../docs/brand/assets/characters/${name}`, import.meta.url);
+		expect(sha(character("finance-specialist.png"))).toBe(
+			sha(character("extra-4.png")),
+		);
 	});
 
 	it("keeps the founder's masters unchanged", () => {

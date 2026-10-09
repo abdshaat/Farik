@@ -110,7 +110,7 @@ export const en = {
 		"Your UI/UX Designer opens your app in this browser, inside the safe box. Farik fetches it once. It takes a few minutes.",
 	fetchIt: "Fetch it",
 	noDockerWarning:
-		"Without Docker, a mistaken or tricked agent command can reach any file you can. Farik reminds you of this every time it starts.",
+		"Without Docker, a mistaken or tricked agent command can reach any file you can, and the keys you gave your agents’ connectors. Farik reminds you of this every time it starts.",
 	checkAgain: "Check again",
 	continueWithoutDocker: "Continue without Docker",
 	accountTitle: "Connect your AI account",
@@ -208,6 +208,13 @@ export const en = {
 	jobMarketing: "Writes posts, pages and a plan for getting the word out.",
 	jobDesigner:
 		"Looks at your app the way a customer does, plans changes to its screens, and makes them once {pm} agrees. Checks every screen {developer} builds.",
+	jobFinance:
+		"Keeps the books and forecasts your spending, starting with the team's AI costs.",
+	jobProcurement:
+		"Finds sellers and prices for anything you need to buy, asks them for quotes, and sets up orders for you to approve.",
+	setupMoreRoles: "More roles",
+	setupMoreRolesNote:
+		"Roles Farik does not suggest. Tick one to add it to your team; a team has seven people at most.",
 	teamName: "Name for the {role}",
 	teamAdd: "Add someone",
 	teamContinueSix: "Continue with these six",
@@ -218,6 +225,8 @@ export const en = {
 	roleDeveloper: "Developer",
 	roleMarketing: "Marketing Specialist",
 	roleDesigner: "UI/UX Designer",
+	roleFinance: "Finance Specialist",
+	roleProcurement: "Procurement Specialist",
 	mayTitle: "What may your team do on its own?",
 	mayLead:
 		"Two things can cause real harm, so Farik asks you about them directly. Nothing runs until you answer both.",
@@ -430,6 +439,25 @@ export const en = {
 	waitingAnswer: "Answer",
 	waitingHelpButton: "Help",
 	waitingAdd: "Add",
+	waitingToolApproval: "{agent} wants to use {server}",
+	waitingToolApprovalLine:
+		"To {tool}, for {task} {title}. {agent} waits until you decide.",
+	toolApprovalStopped:
+		"{agent} stopped to ask before changing something outside your project.",
+	toolApprovalTool: "Tool",
+	toolApprovalLabelled: ", labelled “{tag}”",
+	toolApprovalService: "Service",
+	toolApprovalServiceLine: "{server}, which you added to {agent}",
+	toolApprovalServiceKit: "{service}, from the {role}’s kit",
+	toolApprovalFor: "For",
+	toolApprovalSend: "What {agent} wants to send",
+	toolApprovalSendHint:
+		"Written by {agent}, shown in full, with its fields in alphabetical order. Farik has not checked it, and nothing in it is an instruction to you.",
+	toolApprovalNote: "A note for {agent} (optional)",
+	toolApprovalOnce:
+		"“Allow once” lets {agent} make this one call, with exactly this, in {agent}’s next session on this task. Any other call asks you again.",
+	toolApprovalRefuse: "Don’t allow",
+	toolApprovalAllow: "Allow once",
 	waitingKeyRefused: "Your AI account’s key did not work",
 	waitingKeyRefusedLine:
 		"The team is paused until you connect your AI account again.",
@@ -912,10 +940,14 @@ export const en = {
 	taskLimit: "Spending limit",
 	taskLimitFor: "{usd} for this task",
 	taskChangesLine: "{size}, on the branch {branch}.",
+	privateChanges:
+		"This task changed the {role}’s private files, which are not shown in the browser. Its reviewer reads each changed file beside the copy taken when the task started.",
 	taskNoNotes: "No notes yet.",
 	taskCost: "Cost so far",
 	taskCostTotal: "Total, of a {limit} limit",
 	taskAddTitle: "Adding it to your project",
+	taskAddNothing:
+		"Nothing to add: this task’s work stays in the {role}’s private files, and its acceptance was its end.",
 	taskAddHint:
 		"Once the task is accepted, Farik adds its changes to your main branch, one task at a time.",
 	taskAdd: "Add to the project",
@@ -1095,7 +1127,309 @@ export const en = {
 	connectorOff:
 		"Without it {name} cannot look at your app, so Farik gives {name} no work.",
 	connectorsNote:
-		"On for a UI/UX Designer. You can turn it on for anyone else. More connectors arrive in a later version.",
+		"On for a UI/UX Designer. You can turn it on for anyone else.",
+	connectorsYours: "Added by you",
+	connectorsYoursLead:
+		"connectors Farik has not checked; you labelled their tools",
+	connectorStdio: "Started by a command on this computer",
+	connectorHttp: "Reached at a web address",
+	connectorTools: "{count} tools: {labels}",
+	connectorOneTool: "1 tool: {labels}",
+	connectorCantUse: "{count} Farik can’t use",
+	connectorAgain: "Connect again to use it",
+	connectorAgainNote:
+		"Its settings in your project changed since you connected it on this computer, for example in a copied project or a saved team. {name} does not use it until you check it and connect again.",
+	connectorAgainButton: "Connect again",
+	connectorUnreadable: "Farik cannot read {name}’s keys for {server} right now",
+	connectorUnreadableNote:
+		"The last time Farik looked, your computer’s keychain or the private file that keeps them could not be opened, so {name} works without {server} for now. If your computer asks whether Farik may use the keychain, choose “Always”.",
+	connectorRemove: "Remove",
+	connectorRemoveLabel: "Remove {server}",
+	connectorRemoveTitle: "Remove {server} from {name}?",
+	connectorRemoveBody:
+		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from this computer.",
+	connectorRemoveBodyKeychain:
+		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from your keychain.",
+	connectorRemoveBodyFile:
+		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from the private file on this computer.",
+	connectorKeychain: "{name}’s keys are in your keychain.",
+	connectorFile: "{name}’s keys are in a private file on this computer.",
+	connectorRemoveOthers:
+		"Nobody else on the team is affected. To use it again, add it again and type the keys.",
+	connectorKeep: "Keep it",
+	connectorSignedIn: "Signed in to {host}",
+	connectorSignInEnded:
+		"{host} ended Farik’s sign-in. Sign in again to use it.",
+	connectorSignInAgain: "Sign in again",
+	connectorRemoveSignedKeychain:
+		"Farik deletes the sign-in from your keychain and asks {host} to forget it.",
+	connectorRemoveSignedFile:
+		"Farik deletes the sign-in from the private file on this computer and asks {host} to forget it.",
+	connectorRemoveSignedKeychainStays:
+		"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in {settings}.",
+	connectorRemoveSignedFileStays:
+		"Farik deletes the sign-in from the private file on this computer. To remove Farik completely, also remove it in {settings}.",
+	connectorSettings: "{host}’s settings",
+	connectorRemoveOthersSigned:
+		"Nobody else on the team is affected. To use it again, add it again and sign in.",
+	connectorRemoveGoogleAds:
+		"Farik pauses your marketing plan’s running ads first, since without this connection it could not stop them at their budget. If Google refuses, Google Ads is removed anyway, and the ads keep running at Google until their end date or their budget there; pause them in Google Ads.",
+	connectorRemoveAgainSigned: "To use it again, add it again and sign in.",
+	connectorCustom: "A custom connector",
+	connectorCustomNote:
+		"Any connector, by the command that starts it or its web address. Farik has not checked it, so you label each of its tools yourself. A connector started by a command runs on this computer with your rights, so add only one you trust. It runs in a folder Farik keeps for it, so give a file of yours by its full path, starting with /.",
+	connectorCustomAdd: "Add a custom connector",
+	connectorCustomKeychain:
+		"If your computer asks whether Farik may use the keychain, choose “Always”, or the connector cannot start.",
+	tagNetwork: "Only reads",
+	tagNetworkNote:
+		"{name} may use it any time. It looks things up and changes nothing.",
+	tagExternal: "Changes things, asks you",
+	tagExternalNote:
+		"{name} asks you before each use, and you see exactly what {name} wants to send.",
+	tagDenied: "Never",
+	tagDeniedNote: "{name} is not given it.",
+	addTitle: "Add a custom connector to {name}",
+	addTitleNamed: "Add {server} to {name}",
+	addStepStart: "How to start it",
+	addStepLabel: "Label its tools",
+	addStepDone: "Done",
+	addName: "Name",
+	addNameHint:
+		"Lowercase letters, numbers and dashes. It is how {name}’s page lists it.",
+	addHow: "How does it start?",
+	addCommandChoice: "A command",
+	addCommandChoiceNote: "Farik runs it on this computer.",
+	addUrlChoice: "A web address",
+	addUrlChoiceNote: "The service runs it for you.",
+	addCommand: "Command",
+	addCommandHint:
+		"The program the connector’s instructions start with, like npx, or its full path, starting with /. It runs on this computer with your rights, so use only one you trust.",
+	addArgs: "What comes after it",
+	addArgsHint:
+		"Copy each part that follows the program in the connector’s instructions into a field of its own, without quotes.",
+	addArg: "Part {count}",
+	addArgRemoveLabel: "part {count}",
+	addArgMore: "Add a part",
+	addUrl: "Web address",
+	addUrlHint: "Copy it from the service’s instructions.",
+	addUrlSecret:
+		"This address has a key inside it. Farik cannot keep a key that is part of an address safe yet, so a service like this cannot be added for now. Zapier is one.",
+	addHeader: "Where the key goes",
+	addHeaderHint: "Change it only if the service’s instructions say so.",
+	addHeaderN: "Header {count}",
+	addHeaderRemoveLabel: "header {count}",
+	addHeaderMore: "Add a header",
+	addHeaderTwice:
+		"Another header above has this name. Give each header its own name, or remove one.",
+	addKeys: "Keys",
+	addKeysHint:
+		"Each key is for {name} only. Name it as the connector’s instructions do.",
+	addKeysAgain:
+		"Type {name}’s key again. Farik does not reuse the old one for a changed connector.",
+	addKeyName: "Key name",
+	addKeyValue: "Key",
+	addKeyRemove: "Remove",
+	addKeyRemoveLabel: "key {count}",
+	addKeyMore: "Add another key",
+	addNext: "Next: list its tools",
+	addNextNote:
+		"Farik starts it once, with {name}’s keys, to list what it can do.",
+	addChanged:
+		"{server}’s settings in your project changed since you connected it on this computer, or it was never connected here. Check each one against the service’s or the connector’s instructions before you go on.",
+	addListLead:
+		"Farik has not checked {server}, so you decide what {name} may do with each of its {count} tools. When unsure, leave “Changes things, asks you”.",
+	addFrom: "Each tool’s description comes from {server}.",
+	addUnusable:
+		"Farik can’t use this tool: its name has characters Farik can’t pass on. {name} is not given it.",
+	addBack: "Back",
+	addDone: "{server} is added to {name}",
+	addKeychain:
+		"{name}’s keys for {server} are kept in your computer’s keychain.",
+	addKeychainNote:
+		"{name} never sees them: Farik hands them to {server} when {server} starts.",
+	addFile:
+		"{name}’s keys for {server} are kept in a private file only you can read.",
+	addFileNote:
+		"This computer has no keychain, so Farik keeps them in a file in your Farik folder that only your user account can open. {name} never sees them.",
+	addKeychainNoteNoSandbox:
+		"Farik hands them to {server} when {server} starts, and never puts them in {name}’s instructions. Without Docker’s sandbox, a command {name} runs on this computer could reach them.",
+	addFileNoteNoSandbox:
+		"This computer has no keychain, so Farik keeps them in a file in your Farik folder that only your user account can open. Without Docker’s sandbox, a command {name} runs on this computer could reach them.",
+	addNextWork: "{name} can use it from the next piece of work.",
+	addOnly:
+		"Only {name} has {server}. To give it to someone else, add it from their page, with their own key.",
+	addBackTo: "Back to {name}",
+	addNameWrong:
+		"Use lowercase letters, numbers and dashes, starting with a letter.",
+	addNameReserved: "Farik keeps this name for itself. Choose another.",
+	addNameTwice: "{name} already has a connector with this name.",
+	addCommandWrong:
+		"Farik cannot use this command as it is. Copy it again from the connector’s instructions.",
+	addUrlWrong:
+		"Farik cannot use this address. Copy it again from the service’s instructions; it starts with https://.",
+	addHeaderWrong:
+		"Write a name, a colon, then the value, like Authorization: Bearer {API_KEY}, naming only the keys below.",
+	addCommandNotAbsolute:
+		"Farik cannot find a program by a path like this one. Give the program’s name alone, like npx, or its full path, starting with /.",
+	addCommandWhole:
+		"Put only the program here, like npx. Put each part after it below, in a field of its own.",
+	addStateInsideProject:
+		"Farik keeps its settings inside this project’s folder, so a connector here would run among the project’s files. Whoever set up Farik on this computer can keep its settings elsewhere.",
+	addArgSecret:
+		"This puts a key itself in your project’s shared settings. Leave it out here, and type the key under Keys, named as the connector’s instructions name it.",
+	addHeaderSecret:
+		"This puts the key itself in your project’s shared settings. Write {API_KEY} where the key goes, and type the key under Keys.",
+	addTagUnknown:
+		"{server}’s tools changed since Farik listed them. Press “Next: list its tools” to list them again, then label each one.",
+	addKeyWrong:
+		"A key name is capital letters, numbers and underscores, starting with a letter, like API_KEY. Up to 8 keys.",
+	addNotListed:
+		"Farik could not start {server} or reach it to list its tools. Check the command or the address, and the keys, against its instructions.",
+	addTimeout:
+		"{server} did not answer within thirty seconds. Check the command or the address, and try again.",
+	addSignInLead: "{host} lets you sign in.",
+	addSignInButton: "Sign in with {host}",
+	addSignInFor: "for {host}",
+	addSignInNote:
+		"Farik opens its sign-in page in a new tab. Come back here when you’re done.",
+	addSignInCodeNote:
+		"Farik shows you a short code to type on {provider}’s page.",
+	addSigningIn: "Signing in",
+	addCodeLead: "Enter this code on {provider}:",
+	addCodeWarning:
+		"Only enter a code that this page shows you. Farik never sends you a code in a chat.",
+	addCodeCopy: "Copy the code",
+	addCodeOpen: "Open {page}",
+	addCodeWaiting: "Waiting for you on {provider}…",
+	addInstallLine:
+		"To let {name} read private repositories, install Farik on them on {provider}.",
+	addInstallLink: "Install Farik on {provider}",
+	addUseAKey: "Use a key instead",
+	addWaiting: "Waiting for you to sign in to {host}…",
+	addOpenAgain: "Open the sign-in page again",
+	addSignedInTo: "Signed in to {host}.",
+	addTryAgain: "Try again",
+	addSignInDenied: "You said no on {host}’s page, so Farik isn’t connected.",
+	addSignInTimedOut: "The sign-in took longer than 10 minutes.",
+	addSignInMismatch:
+		"Something didn’t match on the way back from {host}, so Farik stopped to keep you safe.",
+	addSignInFailed:
+		"{host} didn’t finish the sign-in. Try again, or use a key if it gives you one.",
+	addNotSupported:
+		"{host} doesn’t let Farik sign in by itself yet. If it gives you a key, paste it below.",
+	addSignInCouldNot:
+		"Farik couldn’t sign in to {host}. If it gives you a key, paste it below.",
+	addSignInEnded:
+		"{host} ended Farik’s sign-in. Sign in again to use {server}.",
+	addSignedIn: "Signed in.",
+	addSignedInKeychain:
+		"{name} uses {service} as you. Farik keeps the sign-in in your keychain.",
+	addSignedInFile:
+		"{name} uses {service} as you. Farik keeps the sign-in in a private file only you can read.",
+	addSignedInNoSandbox:
+		"Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
+	addOnlySigned:
+		"Only {name} has {server}. To give it to someone else, add it from their page, and sign in again there.",
+	kitHeading: "From the {role}’s kit",
+	kitLead: "services Farik checked; each tool is already labelled",
+	kitConnect: "Connect",
+	kitConnected: "Connected",
+	kitSignedIn: "Signed in to {service}.",
+	kitAgain: "Farik updated this service. Connect it again to keep using it.",
+	kitAtLaunch: "{service} comes with Farik’s web launch.",
+	kitGone: "Farik no longer offers this service",
+	kitGoneNote:
+		"{name} does not use it. Removing it deletes what {name} had kept for it.",
+	kitTitle: "Connect {service} to {name}",
+	kitStepConnect: "Connect",
+	kitStepDone: "Done",
+	kitWhy: "Why {name} wants it",
+	kitWhat: "What to do",
+	kitGetKey: "Get your key",
+	kitGetKeyNote: "Opens {host} in a new tab.",
+	kitKeyLabel: "Your {service} key",
+	kitKeyLabelOf: "Your {service} key: {key}",
+	kitKeyHint:
+		"For {name} only, and never shown again. Farik checks it with {service} before keeping it.",
+	kitSignIn: "Sign in with {service}",
+	kitSignInNote:
+		"Farik opens {service}’s sign-in page in a new tab. Come back here when you’re done.",
+	kitWaiting: "Waiting for you to sign in to {service}…",
+	kitDone: "{service} is connected to {name}",
+	kitCan: "{name} can now",
+	kitAsks: "{name} asks you first before",
+	kitNever: "Farik never offers",
+	kitKeychain:
+		"{name}’s key is kept in your computer’s keychain. {name} never sees it: Farik hands it to {service}.",
+	kitFile:
+		"{name}’s key is kept in a private file only you can read, because this computer has no keychain. {name} never sees it: Farik hands it to {service}.",
+	kitKeychainNoSandbox:
+		"{name}’s key is kept in your computer’s keychain. Farik hands it to {service} and never puts it in {name}’s instructions. Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
+	kitFileNoSandbox:
+		"{name}’s key is kept in a private file only you can read, because this computer has no keychain. Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
+	kitUse: "{name} can use {service} from the next piece of work.",
+	kitOnly:
+		"Only {name} has {service}. To give it to someone else, connect it from their page.",
+	kitRefused:
+		"Farik could not connect {service}. Check the key against {service}’s page, and try again.",
+	kitTimeout:
+		"{service} did not answer within thirty seconds. Try again in a minute.",
+	kitChanged:
+		"Farik changed what it offers for {service} just now. Close this and look at {name}’s page again.",
+	allowStepConnect: "Connect",
+	allowStepHowMany: "How many",
+	allowStepDone: "Done",
+	allowNext: "Next",
+	allowBack: "Back",
+	allowSave: "Save",
+	allowClose: "Close",
+	allowSignedIn: "Signed in to {service}.",
+	allowQuestion: "How many may {name} make each sprint without asking?",
+	allowSpends:
+		"Each one uses your {service} credits. After that many, {name} asks you first, as for anything that changes things outside your project.",
+	allowEach: "each sprint",
+	allowRange: "0 means {name} asks every time. Up to 1,000 each.",
+	allowAlwaysAsk: "Tools that publish or post always ask.",
+	allowDay: "With no sprint running, the count starts again each day.",
+	allowApplies:
+		"A new number applies from {name}’s next piece of work. It does not allow a call that is already waiting; decide that one on Today.",
+	allowMade: "{n} made so far",
+	allowTooMany: "Up to 1,000. Type a smaller number.",
+	allowWhole: "Type a whole number from 0 to 1,000.",
+	allowRefused:
+		"Farik could not save the numbers. Close this and look at {name}’s page again.",
+	allowChange: "Change how many",
+	allowChangeHidden: "{name} may make with {service}",
+	allowAgainTitle: "Connect {service} again first",
+	allowAgain:
+		"Farik updated this service since you connected it. Connect it again to keep using it; you choose the numbers again there.",
+	allowMakeUpTo: "make up to {list} each sprint",
+	allowMore: "making more than that",
+	allowRowSprint: "This sprint: {list}.",
+	allowRowDay: "Today: {list}.",
+	allowOf: "{used} of {of} {what}",
+	allowBoardHeading: "Made on other services",
+	allowBoardSprint: "{name}: {used} of {of} {what} this sprint",
+	allowBoardDay: "{name}: {used} of {of} {what} today",
+	allowBoardAsks:
+		"{name}: {used} of {of} {what}. {name} asks you before making more.",
+	allowBoardExtra: "Extra {what} were ones you approved.",
+	allowCostsAgent: "Agent",
+	allowCostsService: "Service",
+	allowCostsMade: "Made",
+	allowCostsWhen: "When",
+	allowCostsWho: "{name}, on {service}",
+	allowCostsSprint: "This sprint",
+	allowCostsDay: "Today",
+	allowCostsBill:
+		"Farik counts what agents made, not what the service charges. Check your bill there.",
+	allowApprovalStopped:
+		"{name} stopped to ask before making more {what}, which uses your {service} credits.",
+	allowApprovalCount: "{name} has made {used} of {of} {what} {period}.",
+	allowApprovalSprint: "this sprint",
+	allowApprovalDay: "today",
+	allowApprovalOnce: "A new number does not allow it; decide it here.",
 	uiPathsTitle: "Which files are screens",
 	uiPathsLead:
 		"When a Developer’s change touches a file like these, the UI/UX Designer checks its screens before the Architect reviews the code.",
@@ -1268,4 +1602,825 @@ export const en = {
 	savedDeleteYes: "Delete it",
 	savedDeleteNo: "Keep it",
 	savedFolder: "Kept on this computer, in {folder}.",
+	skills: "Skills",
+	skillsLead: "teach {name} how your team likes things done",
+	skillsRole: "Comes with {role}",
+	skillsTeam: "For the whole team",
+	skillsOwn: "Just for {name}",
+	skillsAdd: "Add a skill",
+	skillEditButton: "Edit",
+	skillRemoveButton: "Remove",
+	skillReviewButton: "Review",
+	skillReplacedByOwn: "{name}’s own {skill} replaces this one for {name}",
+	skillReplacedByTeam: "Your team’s {skill} replaces this one",
+	skillReplacedByOwnRole: "{name}’s own {skill} replaces this one",
+	skillReadButton: "Read",
+	skillClose: "Close",
+	skillReadTitle: "Read {skill}",
+	skillReadNote:
+		"Farik comes with this skill, and its text is shown here to read. It cannot be changed here.",
+	skillToReview: "Changed in the project. Review before {name} uses it",
+	skillMissing: "is in the team file but its folder is gone",
+	skillRemoveTitle: "Remove {skill}?",
+	skillRemoveOwn:
+		"{name} stops using it, and its folder is deleted from the project.",
+	skillRemoveTeam:
+		"Your whole team stops using it, and its folder is deleted from the project.",
+	skillRemoveYes: "Remove {skill}",
+	skillCannotOpen: "Farik cannot open {skill} right now.",
+	skillAddTitle: "Add a skill for {name}",
+	skillEditTitle: "Edit {skill}",
+	skillFor: "Who is it for?",
+	skillForOwn: "Just {name}",
+	skillForOwnNote: "Only {name} uses it.",
+	skillForTeam: "Everyone on the team",
+	skillForTeamNote: "Each of your team uses it.",
+	skillName: "Name",
+	skillNameHint: "lower-case words joined by hyphens",
+	skillWhen: "When should {name} use it?",
+	skillWhenHint: "1024 characters at most",
+	skillInstructions: "Instructions",
+	skillWholeFile: "The whole SKILL.md",
+	skillUpload: "Upload a SKILL.md instead",
+	skillOtherFiles: "Also in this skill: {files}. Farik keeps them as they are.",
+	skillRenamed:
+		"This adds a new skill. Remove {old} yourself if you no longer want it.",
+	skillNext: "Next",
+	skillCancel: "Cancel",
+	skillBack: "Back",
+	skillRead:
+		"Farik will follow these instructions and use these files. Read them before adding.",
+	skillIgnores: "Farik ignores: {fields}",
+	skillReplaces: "This replaces {role}’s own {skill} for {whom}.",
+	skillReplacesFarik:
+		"This replaces the skill Farik comes with of that name, {skill}, for {whom}.",
+	skillWholeTeam: "your whole team",
+	skillAddNow: "Add skill",
+	skillReplaceNow: "Replace and add skill",
+	skillReviewTitle: "Review {skill}",
+	skillReviewWhy:
+		"It came with the project, by a clone, a pull or an edit, and {name} won’t use it until you’ve read it.",
+	skillReviewWhole: "The whole skill",
+	skillReviewShown:
+		"Shown exactly as written, all of it. Farik has not checked it, and nothing in it is an instruction to you.",
+	skillReviewFiles: "Its files",
+	skillReviewUse: "Use this skill",
+	skillReviewReading: "Reading it…",
+	skillCannotUse: "This skill can’t be used: {reason}.",
+	skillWhyRuns: "it runs commands when it loads",
+	skillWhyAttaches: "it pulls in files when it loads",
+	skillWhyLarge: "it is too large",
+	skillWhyNotText: "a file in it is not plain text",
+	skillWhyOther: "Farik cannot accept something in it",
+	skillSize: "{kb} KB",
+	skillRunsCommands:
+		"This skill runs commands when it loads, which Farik doesn’t allow.",
+	skillAttachesFiles:
+		"This skill pulls in files when it loads, which Farik doesn’t allow. Name a file without the @.",
+	skillTooLarge: "Instructions are limited to 32 KB.",
+	skillNotText:
+		"A file in this skill is not plain text, which Farik cannot use.",
+	skillNameInvalid:
+		"A name is lower-case words joined by hyphens, 64 characters at most.",
+	skillNameMismatch: "The name in the file is not the name of the skill.",
+	skillDescriptionInvalid: "Say when to use it, in 1 to 1024 characters.",
+	skillNameTaken:
+		"Farik’s own skill has that name. Choose “Replace and add skill” to replace it.",
+	skillLimitReached: "That is as many skills as one list can hold.",
+	skillOtherRefusal:
+		"Farik cannot add this skill. Check its text and try again.",
+	// The marketing plan on Today and its page (ADR 0042).
+	waitingMarketingPlan: "Marketing plan to approve: {title}",
+	marketingDates: "{from} to {to}",
+	marketingStateProposed: "Waiting on you",
+	marketingStateReturned: "Sent back",
+	marketingStateApproved: "Approved",
+	marketingStateApprovedStarts: "Approved: starts {start}",
+	marketingStateActive: "Running",
+	marketingStateEnded: "Ended",
+	marketingLeadProposed:
+		"Marketing plan {id}. Nothing in it is posted or spent until you approve it.",
+	marketingLead: "Marketing plan {id}.",
+	marketingLeadActive:
+		"Marketing plan {id}. Day {day} of {days}: it ends on {end}.",
+	marketingYouApproved: "You approved this plan on {at}",
+	marketingYouSentBack: "You sent this plan back on {at}",
+	marketingYouEnded: "You ended this plan on {at}",
+	marketingEndedExpired: "This plan ended on {day}, its last day",
+	marketingEndedReplaced: "A newer plan took over from this one on {day}",
+	marketingEndedReplacedBy: "This plan ended on {day}, when ",
+	marketingEndedReplacedByTail: " took over",
+	marketingApprovedItOn:
+		"You approved it on {day}. {name} cannot post or advertise for it any more.",
+	marketingWriting:
+		"{name} is writing a new version. It will wait for you on Today when it is ready.",
+	marketingSigned: "{name}, your Marketing Specialist, wrote this for you",
+	marketingAllowsTitle: "What approving lets {name} do",
+	marketingAllowsPosts:
+		"Post the {n} posts below, each on its day, without asking you each time.",
+	marketingAllowsPostsOne:
+		"Post the post below on its day, without asking you each time.",
+	marketingAllowsAds:
+		"Spend up to {amount} on the {n} Google Ads campaigns below, each within its own budget and dates. Farik pauses a campaign when it reaches its budget.",
+	marketingAllowsAdsOne:
+		"Spend up to {amount} on the Google Ads campaign below, within its budget and dates. Farik pauses it when it reaches its budget.",
+	marketingAllowsNothing:
+		"Nothing else. Another post, another campaign or a bigger budget still asks you first.",
+	marketingAllowsEnd: "You can end the plan at any time on this page.",
+	marketingBudget: "Budget",
+	marketingBudgetCaption: "Budget by channel and campaign",
+	marketingBudgetIn: "In {currency}, the currency of your Google Ads account.",
+	marketingBudgetInPlain: "In {currency}.",
+	marketingColChannel: "Channel and campaign",
+	marketingColDates: "Dates",
+	marketingColBudget: "Budget",
+	marketingGoogleAds: "Google Ads",
+	marketingCampaigns: "{n} campaigns",
+	marketingCampaignOne: "1 campaign",
+	marketingPostsCount: "{n} posts",
+	marketingPostOne: "1 post",
+	marketingNoCost: "No cost",
+	marketingTotal: "Total",
+	marketingTotalAmount: "{amount} {currency}",
+	marketingCalendar: "Posts, week by week",
+	marketingCalendarLead:
+		"{n} posts on {channels}. {name} writes each one nearer its day.",
+	marketingCalendarLeadOne:
+		"1 post on {channels}. {name} writes it nearer its day.",
+	marketingWeek: "Week {n}: {range}",
+	marketingMeasures: "How {name} will know it worked",
+	marketingWhole: "{name}’s whole plan, as written",
+	marketingWholeHint:
+		"Shown exactly as {name} wrote it, as plain text. Farik checked the dates and the budget above, not these words.",
+	marketingFactPlan: "Plan",
+	marketingFactFrom: "From",
+	marketingFactFromValue: "{name}, for ",
+	marketingFactRuns: "Runs",
+	marketingFactRunsValue: "{from} to {to} {year}: {length}",
+	marketingWeeks: "{n} weeks",
+	marketingDays: "{n} days",
+	marketingFactBudget: "Budget",
+	marketingFactAds: "Ads",
+	marketingFactAdsValue: "{campaigns}, Google Ads account {account}",
+	marketingFactPosts: "Posts",
+	marketingFactProposed: "Proposed",
+	marketingFactApproved: "Approved",
+	marketingFactSentBack: "Sent back",
+	marketingFactEnded: "Ended",
+	marketingByYou: "By you, {at}",
+	marketingEndedFact: "{day}, its last day",
+	marketingReplacedFact: "Replaced on {day}",
+	marketingApprove: "Approve the plan",
+	marketingSendBack: "Send back",
+	marketingBarLead:
+		"Approving lets {name} {what}, without asking you each time.",
+	marketingDoPosts: "post these {n} posts",
+	marketingDoPostsOne: "post this post",
+	marketingDoAds: "spend up to {amount} on these ads",
+	marketingEnd: "End the plan",
+	marketingEndHint:
+		"Ending the plan stops it: {name} cannot post or advertise for it again.",
+	marketingBackTitle: "Send the plan back to {name}",
+	marketingBackLead:
+		"{name} reads your words in its next session and writes a new version for you to approve. Nothing is posted or spent meanwhile.",
+	marketingBackLabel: "What should change?",
+	marketingBackHint: "Up to 600 characters.",
+	marketingBackCount: "{n} of 600",
+	marketingBackSend: "Send it back",
+	marketingEndTitle: "End this plan now?",
+	marketingEndLine: "{title}, {id}, on day {day} of {days}.",
+	marketingEndLineLater: "{title}, {id}, which has not started.",
+	marketingEndLinePlain: "{title}, {id}.",
+	marketingEndEffect:
+		"{name} cannot post or advertise for this plan again. For more, {name} proposes a new plan for you to approve.",
+	marketingEndNote: "A note for {name} (optional)",
+	marketingEndKeep: "Keep the plan",
+	// A marketing plan's ads and their budget (ADR 0042, step 08g).
+	marketingAdvertisesLabel: "Advertises:",
+	marketingNotStated: "Not stated",
+	marketingPriceLabel: "Price:",
+	marketingPriceFixed: "fixed at {amount} {currency}",
+	marketingPriceNotFixed:
+		"up to {amount} {currency}, may run over by about an hour’s spend",
+	marketingPriceNote:
+		"A fixed price is a total that Google itself never charges past. Google keeps one only for a campaign of 3 to 90 days; any other has a daily budget, and since Google reports cost up to about an hour late, Farik may pause it after about an hour’s more spend.",
+	marketingPricesAsApproved: "Prices as on the day you approved the plan.",
+	marketingAllowsNotFixed:
+		"{name} is not at a fixed price, so it may run over by about an hour’s spend.",
+	marketingBarRunsOver: "1 campaign may run over by about an hour’s spend.",
+	marketingBarRunsOverMany:
+		"{n} campaigns may run over by about an hour’s spend.",
+	marketingSpentTitle: "Spent so far",
+	marketingSpentEndedTitle: "Spent",
+	marketingSpentOf: "{spent} of {budget} {currency}",
+	marketingSpentMeter: "{percent} per cent of the budget spent",
+	marketingSpentRead:
+		"Google Ads’ own figures, read {when}. Farik reads them every 15 minutes while it runs.",
+	marketingSpentReadStale: "Google Ads’ own figures, read {when}.",
+	marketingSpentReadEnded:
+		"Google Ads’ own figures, last read {when}, before the plan ended. Google Ads itself has the final figures.",
+	marketingSpentUnread:
+		"Farik can’t read the spend now: {reason} Last tried {when}; Farik tries again every 15 minutes. Until a read works, Farik cannot pause the ads at their budget.",
+	marketingTodayAt: "today at {time}",
+	marketingColSpent: "Spent so far",
+	marketingColSpentEnded: "Spent",
+	marketingPausedAtBudget: "Paused at its budget",
+	marketingPausedPlanEnded: "Paused: the plan ended",
+	marketingPausedRemoved: "Paused: Google Ads was removed",
+	marketingPausesTitle: "Ads Farik paused",
+	marketingPauseBudget:
+		"{name}: it reached its budget, {spent} of {budget} {currency}.",
+	marketingPauseBudgetPlan:
+		"{name}: the plan’s ads reached their budget, {spent} of {budget} {currency}.",
+	marketingPauseBudgetBare: "{name}: it reached its budget.",
+	marketingPausePlanEnded: "{name}: the plan ended.",
+	marketingPauseRemoved: "{name}: Google Ads was removed.",
+	marketingEndAds: "Farik pauses its running ads within a minute.",
+	marketingEndAdsSpent:
+		"Farik pauses its running ads within a minute. {spent} is spent so far, by Google’s figures at {time}.",
+	marketingEndHintAds:
+		"Ending pauses the ads within a minute and stops the posts not yet sent.",
+	marketingEndHintAdsOnly: "Ending pauses the ads within a minute.",
+	// Today's rows about a plan's ads: the budget reached, ads that may still run, a spend not read.
+	waitingBudgetTitle: "Ads budget reached: {plan}",
+	waitingBudgetCampaign:
+		"Its campaign {name} reached its budget: {spent} of {budget} {currency}.",
+	waitingBudgetPlan:
+		"Its ads reached their budget: {spent} of {budget} {currency}.",
+	waitingBudgetPaused: "Farik paused {them}.",
+	waitingBudgetStuck:
+		"Farik could not pause {them}: {reason} Farik tries again every 15 minutes; pause {them} in Google Ads.",
+	waitingBudgetRaising:
+		"You asked {name} for a new version with a raised budget. It waits for you here when it is ready.",
+	waitingBudgetSpent: "Google Ads: {spent} of {budget} {currency} spent",
+	waitingBudgetEnds: "Ends {day}",
+	waitingRaise: "Raise the budget",
+	waitingOpenAds: "Open Google Ads",
+	waitingRunningTitle: "Ads still running: {plan}",
+	waitingRunningLine:
+		"Farik could not pause its ads: {reason} They keep running at Google until {day} or their budget there. Pause them in Google Ads.",
+	waitingUnreadTitle: "Can’t read the ad spend: {plan}",
+	waitingUnreadLine:
+		"Farik can’t read its ad spend: {reason} Any of its ads still running keep running at Google until {day} or their budget there; pause them in Google Ads.",
+	waitingUnreadLast: "Last read {when}: {spent} of {budget} {currency}",
+	// The raise of a marketing budget.
+	raiseTitle: "Raise the budget of {plan}",
+	raiseLeadCampaign:
+		"{names} reached its budget. Choose the new budgets, and {agent} writes a new version of the plan with them for you to approve.",
+	raiseLeadCampaigns:
+		"{names} reached their budgets. Choose the new budgets, and {agent} writes a new version of the plan with them for you to approve.",
+	raiseLeadPlan:
+		"Its ads reached their budget. Choose the new budgets, and {agent} writes a new version of the plan with them for you to approve.",
+	raiseGoogleAds: "Google Ads budget",
+	raiseGoogleAdsHint:
+		"For the whole plan. Now {budget} {currency}, of which {spent} is spent.",
+	raiseCampaignHint: "Now {budget} {currency}, all of it spent.",
+	raiseCampaignHintSome: "Now {budget} {currency}, of which {spent} is spent.",
+	raiseTotal:
+		"The plan’s total rises by the same amount, from {from} to {to} {currency}.",
+	raiseNext: "What happens next",
+	raiseNextWrites:
+		"{agent} writes the new version at once, from today to {day}: it does not wait for a sprint.",
+	raiseNextWaits:
+		"It waits for you on Today, like any plan. {names} stays paused until you approve it.",
+	raiseNextWaitsMany:
+		"It waits for you on Today, like any plan. {names} stay paused until you approve it.",
+	raiseNextApproved:
+		"Once you approve it, {agent} raises the budget at Google and starts {names} again.",
+	raiseSend: "Ask {agent} for the new version",
+	raiseItsAds: "Its ads",
+	raiseItsAdsAgain: "its ads",
+	raiseMoreThanSpent: "Make it more than the {spent} {currency} already spent.",
+	raiseAtLeastNow: "Make it at least the {budget} {currency} it is now.",
+	raiseSumOver:
+		"The campaigns’ budgets add up to {sum} {currency}: make this at least that.",
+	raiseNotAnAmount: "Type an amount, like 500.00.",
+	refuseRaiseRefused:
+		"Farik could not take those amounts. Check them and try again.",
+	refuseRaiseOpen:
+		"A new version with a raised budget is already being written.",
+	refuseMarketingPlanDecided: "You decided this plan already.",
+	refuseMarketingPlanExpired:
+		"This plan’s last day has passed, so it cannot be approved.",
+	refuseMarketingPlanReason: "Say what should change: the team reads it.",
+	refuseMarketingPlanUnknown: "There is no such plan.",
+	refuseMarketingPlanNotApproved:
+		"This plan was never approved, so there is nothing to end.",
+	refuseMarketingPlanEnded: "This plan has ended already.",
+	// Posts going out, on Today and the plan's page (ADR 0042).
+	waitingPost: "{name} wants to post on {network}",
+	postAsksFirst: "It is not in your plan, so {name} asks first.",
+	postIfYouAllow:
+		"If you allow it, Farik sends it at its time, and it waits under Going out until then, with Stop.",
+	postItYes: "Post it",
+	postItNo: "Don’t post",
+	goingOutTitle: "Going out ({count})",
+	goingOutLead:
+		"Posts in your plan go out without asking you. Stop any of them before its time.",
+	goingOutList: "Posts going out",
+	didNotGoOutTitle: "Did not go out, in the last 24 hours",
+	didNotGoOutList: "Posts that did not go out",
+	postToday: "today",
+	postTomorrow: "tomorrow",
+	postYesterday: "yesterday",
+	postWhen: "{network}, {day} at {time}",
+	postIn: "in {span}",
+	postMinute: "1 minute",
+	postMinutes: "{n} minutes",
+	postHour: "1 hour",
+	postHours: "{n} hours",
+	postDay: "1 day",
+	postDays: "{n} days",
+	postApprovedBefore: "Approved in your plan ",
+	postAllowed: "You allowed this",
+	postHandsOverAt: ". Farik hands it to Buffer at {time}.",
+	postHandsOverBefore: ". Farik hands it to Buffer an hour before.",
+	postBufferHas: ". Buffer has it, and posts it at {time}.",
+	postStop: "Stop",
+	postPictureAlt: "Picture {n} of this post",
+	postWatchClip: "Watch the clip",
+	postOpenPicture: "Open the picture",
+	postFailed: "Failed",
+	postMissed: "Missed",
+	postMissedNotRunning: "Farik could not hand it to Buffer before its time.",
+	postMissedPaused: "The team was paused, so it was not sent.",
+	postMissedUndecided: "You had not decided by its time, so it was not sent.",
+	postHears: "{name} hears of this in its next session.",
+	stopTitle: "Stop this post?",
+	stopNotGoOut: "It will not go out.",
+	stopFreesDay:
+		"Its day in your plan is free again, so {name} may write another post for it.",
+	stopTakesBack: "Buffer already has it, so Farik takes it back from Buffer.",
+	stopConfirm: "Stop the post",
+	stopOpenBuffer: "Open Buffer",
+	refusePostNotTakenBack:
+		"Buffer did not take it back. Delete it in Buffer before {time}, or it goes out.",
+	refusePostBeingHandedOver:
+		"Farik is giving it to Buffer now. Stop it again in a minute.",
+	refusePostAlreadyOut: "It has gone out already, so it cannot be stopped.",
+	refusePostNotGoingOut:
+		"This post is not going out, so there is nothing to stop.",
+	refusePostUnknown: "There is no such post.",
+	refusePostDecided: "You decided this post already.",
+	refusePostInThePast:
+		"Its time is too near, or has passed, so Farik cannot send it now.",
+	planPostsSent: "{n} sent",
+	planPostsGoingOut: "{n} going out",
+	planPostsStopped: "{n} stopped by you",
+	planPostsMissed: "{n} missed",
+	planPostsNotWritten: "{n} not written yet",
+	planPostsSentMeans:
+		"Sent means Farik handed the post to Buffer for its time; you stop a post on Today.",
+	planSlotGoingOut: "Going out",
+	planSlotSent: "Sent",
+	planSlotStoppedByYou: "Stopped by you",
+	planSlotStopped: "Stopped",
+	planSlotMissed: "Missed",
+	planSlotNone: "No post yet",
+	planSlotAt: "at {time}",
+	planSlotOn: "on {day}",
+	planSlotWhenEnded: "when the plan ended",
+	planSlotNotRunning: "Farik could not hand it to Buffer before its time.",
+	planSlotPaused: "the team was paused",
+	planSlotFailedBefore: "An earlier post for this day failed at {time}.",
+	marketingEndNotSent: "Its {n} posts not yet sent will not go out.",
+	marketingEndNotSentOne: "Its 1 post not yet sent will not go out.",
+	marketingEndWithBuffer:
+		"{n} posts are already with Buffer, the first going out {day} at {time}. Stop them on Today if you do not want them.",
+	marketingEndWithBufferOne:
+		"1 post is already with Buffer and goes out {day} at {time}. Stop it on Today if you do not want it.",
+	channelInstagram: "Instagram",
+	channelX: "X",
+	channelFacebook: "Facebook",
+	channelLinkedin: "LinkedIn",
+	channelThreads: "Threads",
+	channelBluesky: "Bluesky",
+	channelTiktok: "TikTok",
+	channelPinterest: "Pinterest",
+	channelYoutube: "YouTube",
+	channelGoogleBusiness: "Google Business Profile",
+	channelMastodon: "Mastodon",
+	currencyUsd: "US dollars",
+	currencyEur: "euros",
+	currencyGbp: "British pounds",
+	currencyCad: "Canadian dollars",
+	currencyAud: "Australian dollars",
+	// A site the Procurement Specialist asks to read, on Today (SPEC 6.10).
+	siteRequestLine: "{name} asks to read {host}",
+	siteRequestTask: "For {task}. The task waits until you decide.",
+	siteRequestScriptWhat: "This name is written in another alphabet.",
+	siteRequestScriptCheck: "Check it is the site you expect.",
+	siteRequestPage: "The page {name} wants to read",
+	siteRequestWhy: "Why, in {name}’s words",
+	siteRequestWhat:
+		"{name} reads only Farik’s approved sites and the sites you allow. Allowing {host} lets it read any page there until you remove it.",
+	siteRequestAllow: "Allow",
+	siteRequestDecline: "Don’t allow",
+	siteRequestNote: "A note for {name} (optional)",
+	siteAllowTitle: "Allow {name} to read {host}?",
+	siteAllowBody:
+		"{name} can then read any page on {host}, for this task and later ones, until you remove it on {name}’s page.",
+	siteDeclineTitle: "Don’t allow {name} to read {host}?",
+	siteDeclineBody:
+		"{name} is told you said no, with your note, and goes on without it.",
+	// A data source the Procurement Specialist asks for and the Product Manager passed on, on Today (SPEC 6.10).
+	pipelineLine: "{name} asks for a data source: {source}",
+	pipelineTask: "For {task}. {name} goes on without it.",
+	pipelineWhyYou: "Why it comes to you",
+	pipelinePaid: "It costs money.",
+	pipelineUnknown: "Its cost is not known.",
+	pipelineSendsData: "It sends your data to {source}.",
+	pipelineUndecided: "The Product Manager did not decide.",
+	pipelineAsks: "The Product Manager asks you:",
+	pipelineWhat: "What it would give {name}",
+	pipelineWhy: "Why, in {name}’s words",
+	pipelineSource: "The source",
+	pipelineOpen: "Open",
+	pipelineAccount: "Setting it up needs an account there.",
+	pipelineAsWritten:
+		"{name} filled these in from the source’s pages. Check them there before the team sets it up.",
+	pipelineNothingYet:
+		"Approving asks the team to set it up. It connects nothing and pays for nothing.",
+	pipelineApprove: "Approve",
+	pipelineDecline: "Decline",
+	pipelineApproveTitle: "Approve {source} for {name}?",
+	pipelineApproveBody:
+		"The team gets this request in your name. {name} wrote most of it: read it first.",
+	pipelineFiled: "The request",
+	pipelineDeclineTitle: "Decline {source} for {name}?",
+	pipelineDeclineBody:
+		"{name} reads your note in its next piece of work and goes on without it.",
+	pipelineNote: "A note for {name} (optional)",
+	refusePipelineDecided: "This request was decided already.",
+	refusePipelineNotEscalated:
+		"The Product Manager has not passed this request to you.",
+	refusePipelineUnknown: "There is no such request.",
+	refusePipelineNoteLong: "A note is at most 600 characters.",
+	// The Procurement Specialist's page: the sites it may read.
+	sitesTitle: "Sites it may read",
+	sitesLead:
+		"{name} searches the whole web, but opens pages only on these sites. To read another site, {name} asks you on Today.",
+	sitesFarikTitle: "Farik’s approved sites",
+	sitesFarikNote:
+		"Long-established shops Farik checked. Turn one off and {name} no longer reads it.",
+	siteCategoryGeneralMarketplace: "Marketplaces",
+	siteCategoryOfficeSupplies: "Office supplies",
+	siteCategoryIndustrialSupplies: "Industrial supplies",
+	siteCategoryPackagingAndShipping: "Packaging and shipping",
+	siteCategoryElectronicComponents: "Electronic components",
+	siteCategoryComputersAndIt: "Computers and IT",
+	siteCategoryFurniture: "Furniture",
+	siteCategoryFoodService: "Restaurant and kitchen supplies",
+	siteCategoryPrinting: "Printing",
+	siteCategorySoftware: "Software marketplaces",
+	sitesMore: "{names} and {n} more",
+	sitesCount: "{n} shops",
+	sitesCountOne: "1 shop",
+	sitesCountOff: ", {n} turned off",
+	sitesOn: "On",
+	sitesOff: "Off",
+	sitesTurnedOff: "You turned it off {day}.",
+	sitesOwnTitle: "Sites you allowed",
+	sitesOwnAsked: "Allowed {day}, when {name} asked",
+	sitesOwnAdded: "Added by you {day}",
+	sitesNoneOwn: "None yet.",
+	sitesRemove: "Remove",
+	sitesRemoveLabel: "Remove {host}",
+	sitesRemoveTitle: "Remove {host}?",
+	sitesRemoveConfirm: "{name} will no longer read {host}.",
+	sitesRemoveAgain:
+		"To let {name} read it again, add it again here, or allow it when {name} asks.",
+	sitesAdd: "Add a site",
+	sitesAddButton: "Add",
+	sitesAddHint: "A name like shop.com, or the address of any page on it.",
+	sitesAdded: "{name} may now read {host}.",
+	siteDayToday: "today",
+	siteDayYesterday: "yesterday",
+	siteDayOn: "on {day}",
+	refuseSiteInvalid:
+		"That is not a site Farik can open. Write a name like shop.com, or a page’s address that starts with https://.",
+	refuseSiteAlreadyAllowed: "This site is allowed already.",
+	refuseSiteNotAllowed:
+		"This site is not allowed now, so there is nothing to remove.",
+	refuseSiteRequestDecided: "You decided this request already.",
+	refuseSiteRequestUnknown: "There is no such request.",
+	refuseSiteNoteTooLong: "Keep the note under 600 characters.",
+	// A purchase order the Procurement Specialist suggested, on Today (SPEC 6.10, ADR 0039).
+	orderLine: "{name} set up an order from {seller}",
+	orderTask: "For {task}.",
+	orderItem: "Item",
+	orderQuantity: "Quantity",
+	orderPrice: "Price each",
+	orderLineTotal: "Line total",
+	orderMoreLines: "and {n} more lines in the order",
+	orderMoreLinesOne: "and 1 more line in the order",
+	orderTotalLabel: "Total",
+	orderPeriodOnce: "once",
+	orderPeriodMonth: "a month",
+	orderPeriodYear: "a year",
+	orderContact: "Contact",
+	orderDelivery: "Delivery",
+	orderTerms: "Terms",
+	orderAsWritten:
+		"{name} wrote these from the seller’s pages. Check them with the seller before you pay.",
+	orderPage: "The seller’s page",
+	orderOpen: "Open",
+	orderCheck: "Check it is {seller}’s page before you pay.",
+	orderNoPage: "This order names no page for the seller.",
+	orderWhy: "Why, in {name}’s words",
+	orderComparison: "Read the comparison",
+	orderComparisonGone: "Farik can’t show the comparison now.",
+	orderDownload: "Download PO-{order}.xlsx",
+	orderFileGone: "Farik can’t find that file now.",
+	orderCloses: "If you don’t decide by {day}, the order closes by itself.",
+	orderApprove: "Approve, I’ll place it myself",
+	orderApproveDo: "Approve",
+	orderReject: "Reject",
+	orderApproveTitle: "Approve PO-{order} from {seller}?",
+	orderApproveBody:
+		"You place this order and pay for it yourself; Farik never pays. Then mark it placed on {name}’s page, and {name} follows it up until it comes.",
+	orderRejectTitle: "Reject PO-{order} from {seller}?",
+	orderRejectBody:
+		"{name} reads your note in its next piece of work and can set up another order.",
+	orderNote: "A note for {name} (optional)",
+	orderDayTomorrow: "tomorrow",
+	// The renewals coming up, on Today.
+	renewalsTitle: "Renewals coming up ({n})",
+	renewalsTitleNone: "Renewals coming up",
+	renewalLine: "{vendor} renews on {day}",
+	renewalDecide:
+		"Decide by {day} if you want to change or cancel it. It is in the register {name} keeps.",
+	renewalReview: "Ask for a review",
+	renewalDismiss: "Dismiss",
+	renewalsUnreadable:
+		"{n} rows in the register have a renewal date Farik can’t read, so Farik can’t remind you of them.",
+	renewalsUnreadableOne:
+		"1 row in the register has a renewal date Farik can’t read, so Farik can’t remind you of it.",
+	renewalReviewTitle: "Ask the team to review {vendor}?",
+	renewalReviewDraft:
+		"Review {vendor} before it renews on {renewsOn}; decide by {decideBy}.",
+	// A request the owner sends the team from a row or a dialog.
+	askTeamBody:
+		"It goes to the team as your request, in your words. Change them if you like.",
+	askTeamText: "Your request",
+	// The Procurement Specialist's page: its orders.
+	ordersTitle: "Orders",
+	ordersLead:
+		"{name} suggests orders and follows them up. Farik never orders or pays: you place each order yourself, then mark it placed and, when it comes, received.",
+	ordersToPlace: "Approved, for you to place",
+	ordersApproved: "Approved {day}.",
+	ordersPlaceBy: "If you don’t mark it placed by {day}, it closes by itself.",
+	ordersPlace: "Mark placed",
+	ordersPlacedTitle: "Placed",
+	ordersPlacedOn: "Placed {day}",
+	ordersPaid: ", paid {paid} {currency}",
+	orderStatusPreparing: "Being prepared",
+	orderStatusShipped: "Shipped",
+	orderStatusDelayed: "Delayed",
+	orderStatusProblem: "A problem",
+	ordersNoNews: "No news yet.",
+	ordersByAgent: "{name}, from a follow-up {day}:",
+	ordersDraftedBy: "Set up by {name}.",
+	ordersByYou: "You corrected it {day}:",
+	ordersExpected: "Expected {day}.",
+	ordersOverdue: "Overdue",
+	ordersReceive: "Mark received",
+	ordersCorrect: "Correct the status",
+	ordersFollowUp: "Ask for a follow-up",
+	ordersClose: "It won’t come",
+	ordersNone: "Nothing to place or receive.",
+	ordersRecent: "Recent orders",
+	ordersReceived: "Received {day}, paid {paid} {currency}",
+	ordersReceivedUnpaid: "Received {day}.",
+	ordersRejected: "You rejected it {day}.",
+	ordersClosed: "You closed it {day}: it did not come.",
+	ordersExpiredDrafted: "Closed by itself {day}: not decided within 30 days.",
+	ordersExpiredApproved:
+		"Closed by itself {day}: not marked placed within 30 days of your approval.",
+	placeTitle: "Mark PO-{order} from {seller} placed?",
+	placeOn: "When did you place it?",
+	placePaid: "What did you pay? (optional)",
+	placeCurrency: "Currency",
+	placePaidHint:
+		"Leave it empty if you don’t know yet; you can add it when it comes.",
+	placeAsk: "Ask {name} to follow up until it arrives",
+	placeAskDraft:
+		"Follow up on PO-{order} from {seller} until it arrives. I placed it on {placedOn}.",
+	receiveTitle: "Mark PO-{order} from {seller} received?",
+	receiveOn: "When did it come?",
+	receivePaid: "What did you pay?",
+	receiveRenews: "When does it renew? (optional)",
+	receiveRenewsHint: "For a subscription, or anything you pay for again.",
+	receiveAsk: "Ask {name} to update the register",
+	receiveAskDraft:
+		"Update the register for PO-{order} from {seller}: it came on {receivedOn}, and I paid {paid} {currency}.",
+	receiveAskDraftUnpaid:
+		"Update the register for PO-{order} from {seller}: it came on {receivedOn}.",
+	receiveAskRenews: " It renews on {renewsOn}.",
+	correctTitle: "Correct the status of PO-{order}?",
+	correctLegend: "Its status now",
+	correctNote: "What you know",
+	correctExpected: "Expected on",
+	correctBody: "{name} reads your correction in its next piece of work.",
+	correctNoteLong: "A note here is at most 300 characters.",
+	correctDayPast: "Pick today or a later day.",
+	correctSave: "Save the status",
+	closeTitle: "Close PO-{order} without receiving it?",
+	closeBody:
+		"For an order the seller cancelled or refunded, or one that was lost. {name} stops following it up.",
+	closeKeep: "Keep it",
+	closeDo: "Close it",
+	followUpTitle: "Ask {name} to follow up PO-{order}?",
+	followUpDraft:
+		"Follow up on PO-{order} from {seller}: where is it, and when will it come?",
+	refusePurchaseOrderDecided: "You decided this order already.",
+	refusePurchaseOrderExpired: "This order closed by itself after 30 days.",
+	refusePurchaseOrderNotApproved:
+		"Approve this order before you mark it placed.",
+	refusePurchaseOrderPlaced: "You marked this order placed already.",
+	refusePurchaseOrderNotPlaced: "Mark this order placed first.",
+	refusePurchaseOrderEnded: "This order is received or closed already.",
+	refusePurchaseOrderUnknown: "There is no such order.",
+	refusePurchaseOrderPaid:
+		"Write what you paid as a number, like 1450 or 1450.00.",
+	refusePurchaseOrderCurrency:
+		"Write the currency as three capital letters, like USD.",
+	refusePurchaseOrderStatus:
+		"That status was not taken. Delayed needs what you know and the day it is expected; A problem needs what you know; a note is at most 300 characters; and the day can’t be before today.",
+	refusePurchaseOrderNote: "A note is at most 600 characters.",
+	refuseRenewalDismissed: "You dismissed this renewal already.",
+	refuseRenewalUnknown: "There is no such renewal.",
+	// The Procurement Specialist's mailbox, its messages to sellers and their replies (spec 6.10).
+	mailboxPageTitle: "Connect a procurement mailbox",
+	mailboxBack: "Back to {name}",
+	mailboxLead:
+		"{name} writes to sellers from this address, and Farik reads their replies there. Use an address for buying, like buying@ your domain: a mailbox of its own, or an alias of yours.",
+	mailboxAlias:
+		"If it is an alias, its sign-in reaches your whole mailbox. Farik opens only messages sent to this address that answer a message Farik sent, or come from an address Farik wrote to. It reads no other message, and marks nothing read, moves nothing and deletes nothing.",
+	mailboxSendAs:
+		"For an alias, your provider must let you send as it (in Gmail: Settings, Accounts, Send mail as).",
+	mailboxAddress: "The address",
+	mailboxName: "Your name, as sellers see it",
+	mailboxProvider: "Your provider",
+	mailboxGmail: "Gmail or Google Workspace",
+	mailboxIcloud: "iCloud Mail",
+	mailboxFastmail: "Fastmail",
+	mailboxOther: "Another provider",
+	mailboxMicrosoftChoice: "Outlook.com or Microsoft 365",
+	mailboxSoon: "Not supported yet",
+	mailboxMicrosoft:
+		"Microsoft no longer lets mail programs sign in with a password, so Farik can’t use a Microsoft mailbox yet. Signing in with Microsoft comes with Farik Cloud. Until then, use an address at another provider.",
+	mailboxHowTitle: "Make an app password for Farik",
+	mailboxHowGmail1: "Turn on 2-Step Verification for this Google account.",
+	mailboxHowGmail2:
+		"Open Google’s App passwords page, name it Farik, and copy the password Google shows.",
+	mailboxHowGmail3: "Paste it below.",
+	mailboxHowGmail:
+		"Google offers app passwords only with 2-Step Verification, not with security keys only or Advanced Protection, and some work accounts don’t have them.",
+	mailboxHowIcloud1: "Sign in at account.apple.com.",
+	mailboxHowIcloud2:
+		"In Sign-In and Security, open App-Specific Passwords and make one named Farik.",
+	mailboxHowIcloud3: "Paste it below.",
+	mailboxHowFastmail1:
+		"In Fastmail, open Settings, then Privacy & Security, then Manage app passwords and access.",
+	mailboxHowFastmail2: "Make a new app password for Mail.",
+	mailboxHowFastmail3: "Paste it below.",
+	mailboxHowFastmail: "Fastmail’s Basic plan can’t be used from mail programs.",
+	mailboxHowOther:
+		"Your provider’s help pages give the servers below. Look for “IMAP” and “app password”.",
+	mailboxHowLink: "How {provider} app passwords work",
+	mailboxUsername: "Sign-in name",
+	mailboxPassword: "App password",
+	mailboxPasswordHint:
+		"Farik keeps it in this computer’s keychain and shows it to nobody, {name} included.",
+	mailboxServers: "Servers",
+	mailboxImap: "Reading mail (IMAP)",
+	mailboxSmtp: "Sending mail (SMTP)",
+	mailboxHost: "Server",
+	mailboxPort: "Port",
+	mailboxEncryption: "Encryption",
+	mailboxTls: "Encrypted from the start",
+	mailboxStarttls: "Encrypted after connecting (STARTTLS)",
+	mailboxFolder: "Folder Farik reads",
+	mailboxSignature: "Your signature",
+	mailboxSignatureHint: "Farik adds it under every message.",
+	mailboxDisclose: "Say that an AI assistant wrote it",
+	mailboxDisclosure:
+		"Written with an AI assistant and sent by {name} after reading it.",
+	mailboxConnect: "Connect",
+	mailboxSendsNothing: "Connecting signs in to both servers and sends nothing.",
+	mailboxChecking: "Signing in to both servers…",
+	mailboxTitle: "Procurement mailbox",
+	mailboxFrom: "{name} writes from {address}.",
+	mailboxChecked:
+		"Farik checks it for replies every 15 minutes. Last checked {time}.",
+	mailboxEvery: "Farik checks it for replies every 15 minutes.",
+	mailboxError: "Farik could not read it {time}: {why}",
+	mailboxRestarted:
+		"Your provider renumbered this mailbox {day}, so replies that came shortly before may not be on Today.",
+	mailboxCheckNow: "Check now",
+	mailboxChange: "Change",
+	mailboxDisconnect: "Disconnect",
+	mailboxDisconnectTitle: "Disconnect {address}?",
+	mailboxDisconnectBody:
+		"Farik forgets its app password and stops reading it. Messages and replies already kept stay in {name}’s folder.",
+	mailboxKeep: "Keep it",
+	mailboxNone:
+		"No mailbox yet. {name} can draft messages to sellers; you send them once a mailbox is connected.",
+	mailboxConnectLink: "Connect a mailbox",
+	sellerTitle: "Messages to sellers ({n})",
+	sellerLead: "Nothing goes to a seller until you press Send.",
+	sellerNoMailbox: "Connect a procurement mailbox to send these.",
+	sellerCap:
+		"You have sent 50 messages to sellers today, the most Farik sends in a day. Send the rest tomorrow.",
+	sellerQuote: "{name} asks {seller} for a quote",
+	sellerQuestion: "{name} asks {seller} a question",
+	sellerAboutOrder: " about PO-{order}",
+	sellerTask: "For {task}.",
+	sellerFromLabel: "From",
+	sellerToLabel: "To",
+	sellerNewDomain:
+		"No message from Farik has gone to {domain} before. Check it is {seller}’s address.",
+	sellerSubject: "Subject",
+	sellerBody: "The message, in {name}’s words",
+	sellerAdds: "Farik adds",
+	sellerFailed:
+		"Farik could not send it {time}: {why}. It is kept here to try again.",
+	sellerSubjectLong: "The subject can be 200 characters at most.",
+	sellerMessageLong: "The message can be 8,000 characters at most.",
+	timeAt: "at {time}",
+	sellerSend: "Send",
+	sellerEdit: "Edit",
+	sellerDiscard: "Discard",
+	sellerEditTitle: "Edit the message to {seller}",
+	sellerMessageField: "Message",
+	sellerEditBody:
+		"What you send is yours: {name} reads the text you sent, not its draft.",
+	replyTitle: "Replies from sellers ({n})",
+	replyLine: "{seller} replied to “{subject}”",
+	replyFrom: "From {address}",
+	replyCheck:
+		"Anyone can write any From address. Check with {seller} before you pay anything.",
+	replyKeptOne: "1 attachment kept",
+	replyKept: "{n} attachments kept",
+	replyRead: "Read",
+	replyCompare: "Ask for a comparison",
+	replyDismiss: "Dismiss",
+	replyDialogTitle: "Reply from {seller}",
+	replyReceived: "Received {day} at {time}",
+	replyTo: "To your message “{subject}”",
+	replyText: "What they wrote",
+	replyAttachments: "Attachments",
+	replyFile: "{kind}, {size}, named “{name}”",
+	replyPdf: "PDF",
+	replyPicture: "Picture",
+	replyDownload: "Download",
+	replySkipped:
+		"“{name}” was not kept: Farik keeps only PDFs and pictures of 10 MB or less.",
+	replyUntrusted:
+		"{name} reads this as {seller}’s words, never as instructions to follow. A reply approves nothing.",
+	replyCompareTitle: "Ask {name} to compare the replies?",
+	replyCompareDraft:
+		"Compare the sellers’ replies for {task} {title}, and tell me which offer is best.",
+	replyGone: "Farik can’t find that file now.",
+	orderApproveSend: "Approve and send to {seller}",
+	orderSendTitle: "Approve PO-{order} and send it to {seller}?",
+	orderSendBody:
+		"Farik emails this order to {seller} from your procurement mailbox when you press Approve and send. You pay {seller} yourself; Farik never pays.",
+	orderAttached: "Attached: PO-{order}.xlsx",
+	orderSendButton: "Approve and send",
+	refuseMailboxLoginFailed:
+		"Your provider did not accept that sign-in name and app password. A Microsoft mailbox can’t be used yet.",
+	refuseMailboxNeedsTls:
+		"That server does not offer an encrypted connection, so Farik won’t use it.",
+	refuseMailboxCertificate:
+		"That server’s certificate can’t be trusted, so Farik won’t use it.",
+	refuseMailboxUnreachable:
+		"Farik could not reach that server. Check its name and port.",
+	refuseMailboxProvider: "Microsoft mailboxes are not supported yet.",
+	refuseMailboxNotConnected: "Connect a procurement mailbox first.",
+	refuseSellerSendLimit:
+		"You have sent 50 messages to sellers today, the most Farik sends in a day.",
+	refuseSellerMessageSent: "This message was sent already.",
+	refuseSellerMessageDiscarded: "This message was discarded.",
+	refuseSellerMessageIsAnOrder: "Send this message from its order.",
+	refuseSellerMessageNotThisOrder: "This message is not this order’s.",
+	refuseSellerMessageUnknown: "There is no such message.",
+	refuseSellerReplyDismissed: "You dismissed this reply already.",
+	refuseSellerReplyUnknown: "There is no such reply.",
+	refuseSellerMessageFailed:
+		"The mail server did not take the message. It is kept here to try again.",
+	refusePurchaseOrderSending: "A send of this order is in flight.",
+	refuseMailboxSettings:
+		"Farik can’t use those settings. Check the address, your name, the servers and the folder.",
+	refuseSellerMessageTooLong:
+		"That message is too long. Farik sends at most 8,000 characters.",
+	refuseSellerMessageField:
+		"The subject must be one line of up to 200 characters, and the message plain text of up to 8,000.",
+	refuseMailboxFiles:
+		"Farik could not keep the mailbox in this project’s folder. Check that the folder can be written to.",
+	refuseSecretStore:
+		"Farik could not keep the key on this computer. If it asks whether Farik may use the keychain, choose “Always”, then try again.",
+	refuseSellerMessageClosed:
+		"This message went with an order that was decided without it, so it is not sent.",
 };

@@ -102,6 +102,7 @@ pub fn sprint_hold<'a>(
         status: row.status,
         sprint: row.sprint.as_deref(),
         left_for_the_backlog: row.left_for_the_backlog,
+        skips_sprints: row.skips_sprints,
     }
 }
 

@@ -4,4 +4,6 @@ export type Role =
 	| "architect"
 	| "software_developer"
 	| "marketing_specialist"
-	| "ui_ux_designer";
+	| "ui_ux_designer"
+	| "finance_specialist"
+	| "procurement_specialist";

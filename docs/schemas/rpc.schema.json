@@ -58,7 +58,20 @@
         "chat.messages",
         "templates.list",
         "template.preview",
-        "backlog.summary"
+        "backlog.summary",
+        "skills.list",
+        "skill.get",
+        "allowances.list",
+        "marketing_plan.list",
+        "marketing_plan.get",
+        "social_posts.list",
+        "sites.list",
+        "purchase_orders.list",
+        "purchase_order.evaluation",
+        "renewals.list",
+        "procurement_mailbox.get",
+        "seller_messages.list",
+        "seller_replies.list"
       ]
     },
     "subscribeRequest": {
@@ -272,6 +285,39 @@
               "$ref": "#/$defs/costsSummaryQuery"
             },
             {
+              "$ref": "#/$defs/allowancesListQuery"
+            },
+            {
+              "$ref": "#/$defs/marketingPlanListQuery"
+            },
+            {
+              "$ref": "#/$defs/marketingPlanGetQuery"
+            },
+            {
+              "$ref": "#/$defs/socialPostsListQuery"
+            },
+            {
+              "$ref": "#/$defs/sitesListQuery"
+            },
+            {
+              "$ref": "#/$defs/purchaseOrdersListQuery"
+            },
+            {
+              "$ref": "#/$defs/purchaseOrderEvaluationQuery"
+            },
+            {
+              "$ref": "#/$defs/renewalsListQuery"
+            },
+            {
+              "$ref": "#/$defs/procurementMailboxGetQuery"
+            },
+            {
+              "$ref": "#/$defs/sellerMessagesListQuery"
+            },
+            {
+              "$ref": "#/$defs/sellerRepliesListQuery"
+            },
+            {
               "$ref": "#/$defs/metricsQuery"
             },
             {
@@ -291,6 +337,12 @@
             },
             {
               "$ref": "#/$defs/templatePreviewQuery"
+            },
+            {
+              "$ref": "#/$defs/skillsListQuery"
+            },
+            {
+              "$ref": "#/$defs/skillGetQuery"
             }
           ]
         }
@@ -480,6 +532,48 @@
         },
         {
           "$ref": "#/$defs/templateDeleteRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorToolsRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorConnectRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorAllowancesRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorDisconnectRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorSignInRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorSignInStatusRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorSignInCancelRequest"
+        },
+        {
+          "$ref": "#/$defs/socialPostMediaRequest"
+        },
+        {
+          "$ref": "#/$defs/marketingBudgetRaiseRequest"
+        },
+        {
+          "$ref": "#/$defs/purchaseOrderFileRequest"
+        },
+        {
+          "$ref": "#/$defs/procurementMailboxConnectRequest"
+        },
+        {
+          "$ref": "#/$defs/procurementMailboxDisconnectRequest"
+        },
+        {
+          "$ref": "#/$defs/procurementMailboxCheckRequest"
+        },
+        {
+          "$ref": "#/$defs/sellerReplyAttachmentRequest"
         }
       ]
     },
@@ -826,13 +920,194 @@
           "type": "integer",
           "minimum": 1,
           "description": "The most agents a team may have that are not retired (spec 4.1)."
+        },
+        "sandboxed": {
+          "type": "boolean",
+          "description": "Whether sessions run in Docker's sandbox. False in no-sandbox mode, where a command an agent runs can reach a connector's keys (spec 8.6), so no page promises that the agent never sees them."
+        },
+        "connectors": {
+          "type": "array",
+          "description": "Each agent's custom MCP servers and whether each runs (ADR 0030): connected when the definition kept on this machine beside its keys is the team file's and every key it names is kept; connect_again when none is kept or the team file changed since, or, for a kit's service, when the kit's tags or fields changed with a release (ADR 0036), so it runs nothing until the user connects it again; sign_in_again when the service ended the agent's sign-in, so it runs nothing until the user signs in again; not_in_kit when a kit's service is no longer in its agent's role's kit, so the page offers Remove alone (ADR 0036); store_unavailable when the keychain or the private file could not be read, the last time Farik read it, so it is left out of sessions until it can be. The kept definition is read once per connect and disconnect, when a session is set up, and the first time it is asked for.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent",
+              "server",
+              "state",
+              "auth",
+              "source"
+            ],
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "connected",
+                  "connect_again",
+                  "sign_in_again",
+                  "store_unavailable",
+                  "not_in_kit"
+                ]
+              },
+              "auth": {
+                "type": "string",
+                "enum": [
+                  "keys",
+                  "oauth"
+                ],
+                "description": "How the server is reached with the user's authority: keys the user gave, or a sign-in to the service (ADR 0033)."
+              },
+              "revokes": {
+                "type": "boolean",
+                "description": "For a server signed in to: whether the service has a way to be asked to forget the sign-in when it is removed. Absent for a server with keys."
+              },
+              "provider": {
+                "type": "string",
+                "description": "For a server signed in to with one of Farik's own apps: what the app is called (GitHub), which the page names in place of the server's address (step 03b)."
+              },
+              "settings_url": {
+                "type": "string",
+                "description": "For the same: the page at the service where the user removes Farik's app, which Remove's confirmation links to."
+              },
+              "stored_in": {
+                "type": "string",
+                "enum": [
+                  "keychain",
+                  "file"
+                ],
+                "description": "Where the agent's keys for this server are kept, when an entry is: the computer's keychain, or a private file only the user can read. Absent when none is kept or the store could not be read."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "custom",
+                  "kit"
+                ],
+                "description": "Where the server came from: the user's own, or a service of the agent's role's kit (ADR 0036)."
+              }
+            }
+          }
+        },
+        "kits": {
+          "type": "array",
+          "description": "Each role on the team whose kit has a service to connect by name, with the copy the page shows (ADR 0036). A container connector, which Farik runs itself, is not listed, and nor is a role with no service.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "connectors"
+            ],
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "connectors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "title",
+                    "about",
+                    "why",
+                    "setup",
+                    "labels",
+                    "auth",
+                    "credential_keys"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "about": {
+                      "type": "string"
+                    },
+                    "why": {
+                      "type": "string"
+                    },
+                    "setup": {
+                      "type": "string"
+                    },
+                    "key_page": {
+                      "type": "string",
+                      "description": "Where the key is made; present when the service takes keys."
+                    },
+                    "labels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "A tool to what it does in the user's words."
+                    },
+                    "auth": {
+                      "type": "string",
+                      "enum": [
+                        "keys",
+                        "oauth"
+                      ]
+                    },
+                    "credential_keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "at_launch": {
+                      "const": true,
+                      "description": "Present when the service signs in through one of Farik's own connectors and this build has no app of Farik's for it: it comes with the web launch (ADR 0044), and the page offers no Connect."
+                    },
+                    "allowances": {
+                      "type": "array",
+                      "description": "What the kit lets the user pre-approve (ADR 0037): each spending tool with its default calls each period and the plural noun for what a call makes. Present when the kit offers any.",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "tool",
+                          "calls",
+                          "what"
+                        ],
+                        "properties": {
+                          "tool": {
+                            "type": "string"
+                          },
+                          "calls": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000
+                          },
+                          "what": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       },
       "required": [
         "team",
         "agents",
         "judges",
-        "max_agents"
+        "max_agents",
+        "connectors",
+        "kits",
+        "sandboxed"
       ]
     },
     "serveStatusResult": {
@@ -1929,6 +2204,144 @@
         }
       }
     },
+    "allowancesListQuery": {
+      "title": "Allowances List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "allowances.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "marketingPlanListQuery": {
+      "title": "Marketing Plan List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "marketing_plan.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "marketingPlanGetQuery": {
+      "title": "Marketing Plan Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "marketing_plan.get"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "string",
+              "pattern": "^MP-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "plan"
+          ]
+        }
+      }
+    },
+    "socialPostsListQuery": {
+      "title": "Social Posts List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "social_posts.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "purchaseOrdersListQuery": {
+      "title": "Purchase Orders List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "purchase_orders.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "renewalsListQuery": {
+      "title": "Renewals List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "renewals.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "purchaseOrderEvaluationQuery": {
+      "title": "Purchase Order Evaluation Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "purchase_order.evaluation" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["order"],
+          "properties": { "order": { "type": "integer", "minimum": 1 } }
+        }
+      }
+    },
+    "sitesListQuery": {
+      "title": "Sites List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "sites.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
     "metricsQuery": {
       "title": "Metrics Query",
       "type": "object",
@@ -2037,7 +2450,7 @@
       }
     },
     "waitingListResult": {
-      "description": "What waits on the human, questions first, then approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
+      "description": "What waits on the human: first the marketing plans whose ads Farik could not keep within their budget or keep paused, one row each, by precedence (marketing_budget: the active plan whose ads reached a budget, titled \"Ads budget reached: <plan>\", with plan, plan_title, ends_on, currency, google_ads, the plan's Google Ads budget, spent, what Google Ads reported spent, read_at, when it was read, reason, Google's or Farik's words when Farik could not pause the ads, cap, the budget the row's words are about (a pause Google refused can keep it from being the newest), caps, each budget reached, campaigns, each campaign of the plan with its budget and spend, and raising, the task of a request to raise the budget that is open; marketing_ads_running: a plan whose ads Farik could not pause, with reason, titled \"Ads still running: <plan>\"; marketing_spend_unread: the active plan whose spend Farik cannot read, with reason and the last spend and its time, titled \"Can't read the ad spend: <plan>\"; task_id is the task of the plan's proposal and agent_id the agent that proposed it; amounts are decimal strings), then questions first, then connector calls waiting to be allowed (tool_approval, each with approval, the seq of its tool_approval.requested, its server, its bare tool name, and its whole input as compact JSON, which only that kind carries), then marketing plans waiting for the owner (marketing_plan, whose title is the plan's and whose line is \"<agent name> proposes a marketing plan: <title>\", each with plan, its id, its summary, its total budget as a decimal string, its currency, and its first and last day, which only that kind carries), then posts outside the plan waiting for the owner (social_post, whose title is its task's and whose line is \"<agent name> wants to post on <Network>\", each with post, its number, channel, text, media, the pictures and clips as their addresses with kind image or video, and at, when it would go out in the offset it was written in, which only that kind carries; a post that was decided or whose time came is no longer listed), then sites the Procurement Specialist asked to read, waiting for the owner (site_request, whose title is its task's and whose line is \"<agent name> asks to read <host>\", each with request, its number, host, the site in its ASCII form, url, the first page the agent wants exactly as it wrote it, and why, its reason in its own words, which only that kind carries and which are untrusted text; a request that was decided is no longer listed), then purchase orders the Procurement Specialist suggested, waiting for the owner (purchase_order, whose title is its task's and whose line is \"<agent name> set up an order from <seller>: <total> <currency>\", each with order, its number, seller, seller_contact, lines (each with item, quantity, unit, unit_price and line_total), currency, period, total, delivery, terms, url, the seller's page exactly as the agent wrote it or empty, host, the site that address names in its ASCII form, absent when url is empty, evaluation, why, at, when it was drafted, and expires_at, when Farik closes it by itself, which only that kind carries and of which every text is the agent's own and untrusted; an order that was decided or expired is no longer listed and an order holds no task), then data pipeline requests the Product Manager passed to the owner or did not decide, waiting for the owner (data_pipeline, whose title is its task's and whose line is \"<agent name> asks for a data source: <name>\", each with pipeline, its number, name, what, the source would give, url, the source's own page exactly as the agent wrote it, host, the site that address names in its ASCII form, why, cost, one of free, paid and unknown, needs_account, sends_project_data, reason, the Product Manager's reason, absent when Farik passed the request on after the Product Manager's three tries, at, when the agent asked, and request_text, the text of the request an approval files, which only that kind carries and of which every text but host and the labels is the agent's own and untrusted; a request that was decided is no longer listed, an open one waits on the Product Manager, and a request holds no task), approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2059,6 +2472,15 @@
                   "question",
                   "help",
                   "integration",
+                  "tool_approval",
+                  "marketing_plan",
+                  "social_post",
+                  "site_request",
+                  "purchase_order",
+                  "data_pipeline",
+                  "marketing_budget",
+                  "marketing_ads_running",
+                  "marketing_spend_unread",
                   "preview_missing",
                   "designer_needs_sandbox",
                   "designer_needs_browser"
@@ -2075,7 +2497,174 @@
               },
               "line": {
                 "type": "string"
-              }
+              },
+              "approval": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "server": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "input": {
+                "type": "string"
+              },
+              "plan": {
+                "type": "string",
+                "pattern": "^MP-[0-9]{1,6}$"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "total": {
+                "type": "string",
+                "pattern": "^[0-9]+\\.[0-9]{2}$"
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$"
+              },
+              "starts_on": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              "ends_on": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              "post": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "channel": {
+                "type": "string",
+                "enum": ["instagram", "x", "facebook", "linkedin", "threads", "bluesky", "tiktok", "pinterest", "youtube", "google_business", "mastodon"]
+              },
+              "text": {
+                "type": "string"
+              },
+              "media": {
+                "type": "array",
+                "maxItems": 4,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "url": { "type": "string" },
+                    "kind": { "type": "string", "enum": ["image", "video"] }
+                  },
+                  "required": ["url", "kind"]
+                }
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "request": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "host": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              },
+              "order": { "type": "integer", "minimum": 1 },
+              "seller": { "type": "string" },
+              "seller_contact": { "type": "string" },
+              "lines": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "item": { "type": "string" },
+                    "quantity": { "type": "integer", "minimum": 1 },
+                    "unit": { "type": "string" },
+                    "unit_price": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+                    "line_total": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }
+                  },
+                  "required": ["item", "quantity", "unit", "unit_price", "line_total"]
+                }
+              },
+              "period": { "type": "string", "enum": ["once", "month", "year"] },
+              "delivery": { "type": "string" },
+              "terms": { "type": "string" },
+              "evaluation": { "type": "string" },
+              "expires_at": { "type": "string", "format": "date-time" },
+              "send": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["message", "to", "domain", "new_domain", "subject", "body"],
+                "properties": {
+                  "message": { "type": "integer", "minimum": 1 },
+                  "to": { "type": "string" },
+                  "domain": { "type": ["string", "null"] },
+                  "new_domain": { "type": "boolean" },
+                  "subject": { "type": "string" },
+                  "body": { "type": "string" }
+                }
+              },
+              "pipeline": { "type": "integer", "minimum": 1 },
+              "name": { "type": "string" },
+              "what": { "type": "string" },
+              "cost": { "type": "string", "enum": ["free", "paid", "unknown"] },
+              "needs_account": { "type": "boolean" },
+              "sends_project_data": { "type": "boolean" },
+              "request_text": { "type": "string" },
+              "plan_title": { "type": "string" },
+              "google_ads": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "spent": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "read_at": { "type": "string", "format": "date-time" },
+              "reason": { "type": "string" },
+              "cap": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "scope": { "type": "string", "enum": ["campaign", "plan"] },
+                  "key": { "type": "string" },
+                  "name": { "type": "string" },
+                  "spent": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+                  "budget": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }
+                },
+                "required": ["scope", "spent", "budget"]
+              },
+              "caps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "scope": { "type": "string", "enum": ["campaign", "plan"] },
+                    "key": { "type": "string" },
+                    "name": { "type": "string" },
+                    "spent": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+                    "budget": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }
+                  },
+                  "required": ["scope", "spent", "budget"]
+                }
+              },
+              "campaigns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "key": { "type": "string" },
+                    "name": { "type": "string" },
+                    "budget": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+                    "spent": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }
+                  },
+                  "required": ["key", "name", "budget", "spent"]
+                }
+              },
+              "raising": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
             },
             "required": [
               "task_id",
@@ -2191,6 +2780,10 @@
         "removed": {
           "type": "integer",
           "minimum": 0
+        },
+        "private_folder": {
+          "description": "True for a task that works in its role's private folder, which has no diff to show: diff is then empty, and files names what changed in the folder since the copy taken when the task was assigned.",
+          "type": "boolean"
         }
       },
       "required": [
@@ -2832,6 +3425,809 @@
         "tasks",
         "meetings"
       ]
+    },
+    "marketingPlanListResult": {
+      "description": "Every marketing plan, newest first (docs/SPEC.md 6.5; ADR 0042): its id, title, state, dates, currency and total budget as a decimal string with two decimals, the agent that proposed it and the task it waited on the owner for, and when it was proposed. state is proposed (waiting for the owner), returned (sent back), approved (approved, and not the plan in force: not started, or another is active), active (approved, and the plan in force today) or ended.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plans"],
+      "properties": {
+        "plans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["plan", "title", "state", "starts_on", "ends_on", "currency", "total", "agent_id", "task_id", "proposed_at"],
+            "properties": {
+              "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+              "title": { "type": "string" },
+              "state": { "type": "string", "enum": ["proposed", "returned", "approved", "active", "ended"] },
+              "starts_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "ends_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+              "total": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "agent_id": { "type": "string" },
+              "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+              "proposed_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+    "marketingPlanGetResult": {
+      "description": "One marketing plan whole (docs/SPEC.md 6.5; ADR 0042): what was proposed, its state as in marketing_plan.list, the owner's decision with their words (note for an approval, empty when they added nothing; reason for a plan sent back) and when, or null while it waits, and its end with why and when, the owner's note when they ended it with one and the plan that replaced it when a newer plan did, or null. text is the plan's text, to be shown as text and never rendered as markup. Refused not_found for a plan nobody proposed. Beside them, what Farik's watch last read of the plan's Google Ads spend (spend, when it has tried), the budgets its ads reached (reached) and the campaigns Farik paused on its own (paused), step 08g.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "title", "summary", "text", "state", "starts_on", "ends_on", "currency", "budget", "campaigns", "posts", "written_posts", "measures", "google_ads_account", "replaces", "agent_id", "task_id", "proposed_at", "decided", "ended", "reached", "paused"],
+      "properties": {
+        "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "text": { "type": "string" },
+        "state": { "type": "string", "enum": ["proposed", "returned", "approved", "active", "ended"] },
+        "starts_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "ends_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["total", "google_ads"],
+          "properties": { "total": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }, "google_ads": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" } }
+        },
+        "campaigns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "channel", "name", "goal", "advertises", "price", "budget", "starts_on", "ends_on"],
+            "properties": {
+              "key": { "type": "string" },
+              "channel": { "const": "google_ads" },
+              "name": { "type": "string" },
+              "goal": { "type": "string" },
+              "advertises": { "type": "string", "description": "What the campaign advertises; empty for a plan proposed before the field existed." },
+              "price": { "type": "string", "enum": ["fixed", "not_fixed"], "description": "fixed when Google keeps a total budget for the campaign, which it never bills past (3 to 90 days), else not_fixed: a daily budget, which may run over by about an hour's spend. As of today while the plan waits, and as of the day the owner approved it once it is approved." },
+              "budget": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "starts_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "ends_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+            }
+          }
+        },
+        "posts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "channel", "on", "topic"],
+            "properties": {
+              "key": { "type": "string" },
+              "channel": {
+                "type": "string",
+                "enum": ["instagram", "x", "facebook", "linkedin", "threads", "bluesky", "tiktok", "pinterest", "youtube", "google_business", "mastodon"]
+              },
+              "on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "topic": { "type": "string" }
+            }
+          }
+        },
+        "written_posts": {
+          "description": "The posts the Marketing Specialist wrote for this plan's slots, oldest first, each with where it stands: a slot may have several, an earlier one failed, missed or stopped and a newer one written for it. at is when it goes out, in the offset it was written in; state_at is when it reached that state. stopped_by (owner, declined or plan_ended) is there for a stopped post, and missed_why for a missed one. text is shown as text and never rendered as markup.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["post", "slot", "text", "at", "state", "state_at"],
+            "properties": {
+              "post": { "type": "integer", "minimum": 1 },
+              "slot": { "type": "string" },
+              "text": { "type": "string" },
+              "at": { "type": "string", "format": "date-time" },
+              "state": { "type": "string", "enum": ["scheduled", "sent", "stopped", "missed", "failed"] },
+              "state_at": { "type": "string", "format": "date-time" },
+              "stopped_by": { "type": "string", "enum": ["owner", "declined", "plan_ended"] },
+              "missed_why": { "type": "string", "enum": ["not_running", "paused", "undecided"] }
+            }
+          }
+        },
+        "measures": { "type": "array", "items": { "type": "string" } },
+        "google_ads_account": { "type": ["string", "null"] },
+        "replaces": { "type": ["string", "null"] },
+        "agent_id": { "type": "string" },
+        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "proposed_at": { "type": "string", "format": "date-time" },
+        "decided": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["decision", "at"],
+              "properties": {
+                "decision": { "type": "string", "enum": ["approved", "returned"] },
+                "note": { "type": "string" },
+                "reason": { "type": "string" },
+                "at": { "type": "string", "format": "date-time" }
+              }
+            }
+          ]
+        },
+        "ended": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["why", "at"],
+              "properties": {
+                "why": { "type": "string", "enum": ["replaced", "by_owner", "expired"] },
+                "note": { "type": "string", "description": "What the owner said when they ended the plan, as they wrote it; left out when they said nothing." },
+                "replaced_by": { "type": "string", "pattern": "^MP-[0-9]{1,6}$", "description": "The plan that took its place, when why is replaced." },
+                "at": { "type": "string", "format": "date-time" }
+              }
+            }
+          ]
+        },
+        "spend": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What Farik's watch last read of the plan's Google Ads spend, kept in memory while the process runs (step 08g); left out until the watch has tried. read_at, total and by_key are the last read that worked (decimal strings, by plan campaign key); failed is why the last try did not, with failed_at, when.",
+          "properties": {
+            "read_at": { "type": "string", "format": "date-time" },
+            "total": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+            "by_key": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" } },
+            "failed": { "type": "string" },
+            "failed_at": { "type": "string", "format": "date-time" }
+          }
+        },
+        "reached": {
+          "type": "array",
+          "description": "The budgets of the plan its ads reached, oldest first: a campaign's own or the plan's Google Ads budget, with what was spent and the budget, and failed, the first refusal's words when Google would not take a pause.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["scope", "spent", "budget", "at"],
+            "properties": {
+              "scope": { "type": "string", "enum": ["campaign", "plan"] },
+              "key": { "type": "string" },
+              "spent": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "budget": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "failed": { "type": "string" },
+              "at": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "paused": {
+          "type": "array",
+          "description": "The campaigns Farik paused on its own, oldest first, each with its plan campaign's key and name and why: its budget was reached, the plan ended, or Google Ads was removed.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "name", "why", "at"],
+            "properties": {
+              "key": { "type": "string" },
+              "name": { "type": "string" },
+              "why": { "type": "string", "enum": ["budget_reached", "plan_ended", "connection_removed"] },
+              "at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+    "purchaseOrdersListResult": {
+      "description": "Every purchase order the Procurement Specialist suggested, oldest first (docs/SPEC.md 6.10; ADR 0039): order, its number, the n of PO-n; state, one of drafted, approved, rejected, placed, received, closed and expired; seller, total, currency and period (the agent's words, untrusted); task_id and agent_id; drafted_at; decided_at and note, when the owner approved or rejected it and what they said; close_note, what they said closing a placed order; placed_on, the day the owner placed it, with paid, what they paid, and paid_currency; received_on and renews_on; ended_at, when it was rejected, received, closed or expired; status, the latest follow-up status of a placed order, with its note (the agent's words when by is agent, the owner's own when by is owner), expected_on, by, and at; expires_at, when Farik closes a drafted or an approved order by itself; and overdue, whether a placed order's expected day has passed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["orders"],
+      "properties": {
+        "orders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["order", "state", "seller", "total", "currency", "period", "task_id", "agent_id", "drafted_at", "overdue"],
+            "properties": {
+              "order": { "type": "integer", "minimum": 1 },
+              "state": { "type": "string", "enum": ["drafted", "approved", "rejected", "placed", "received", "closed", "expired"] },
+              "seller": { "type": "string" },
+              "total": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+              "period": { "type": "string", "enum": ["once", "month", "year"] },
+              "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+              "agent_id": { "type": "string" },
+              "drafted_at": { "type": "string", "format": "date-time" },
+              "decided_at": { "type": "string", "format": "date-time" },
+              "note": { "type": "string" },
+              "close_note": { "type": "string" },
+              "placed_on": { "type": "string", "format": "date" },
+              "paid": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+              "paid_currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+              "received_on": { "type": "string", "format": "date" },
+              "renews_on": { "type": "string", "format": "date" },
+              "ended_at": { "type": "string", "format": "date-time" },
+              "status": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["status", "note", "by", "at"],
+                "properties": {
+                  "status": { "type": "string", "enum": ["preparing", "shipped", "delayed", "problem"] },
+                  "note": { "type": "string" },
+                  "expected_on": { "type": "string", "format": "date" },
+                  "by": { "type": "string", "enum": ["agent", "owner"] },
+                  "at": { "type": "string", "format": "date-time" }
+                }
+              },
+              "expires_at": { "type": "string", "format": "date-time" },
+              "overdue": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "renewalsListResult": {
+      "description": "The renewals coming up (docs/SPEC.md 6.10; ADR 0039): open is every renewal Farik flagged that the owner has not dismissed, oldest first, each with renewal, its number, vendor (the register's own text, untrusted), renews_on, decide_by, the last day to change or cancel it, and flagged_at; unreadable is how many rows of the register the last daily check could not read, 0 before any check.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["open", "unreadable"],
+      "properties": {
+        "open": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["renewal", "vendor", "renews_on", "decide_by", "flagged_at"],
+            "properties": {
+              "renewal": { "type": "integer", "minimum": 1 },
+              "vendor": { "type": "string" },
+              "renews_on": { "type": "string", "format": "date" },
+              "decide_by": { "type": "string", "format": "date" },
+              "flagged_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "unreadable": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "procurementMailboxGetResult": {
+      "description": "The procurement mailbox (docs/SPEC.md 6.10; ADR 0039): connected; when it is, address, name (as sellers see it), provider (gmail, icloud, fastmail or other), folder, signature and disclose_ai (what Farik adds under each message), checked_at (when Farik last read the mailbox), error (Farik's own sentence about the last check that failed) and restarted_at (when the provider renumbered the folder); and always sent_today, the messages sent on the UTC day, and cap, the most Farik sends in one. The password is never in it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connected", "sent_today", "cap"],
+      "properties": {
+        "connected": { "type": "boolean" },
+        "address": { "type": "string" },
+        "name": { "type": "string" },
+        "provider": { "type": "string", "enum": ["gmail", "icloud", "fastmail", "other"] },
+        "folder": { "type": "string" },
+        "signature": { "type": "string" },
+        "disclose_ai": { "type": "boolean" },
+        "checked_at": { "type": "string", "format": "date-time" },
+        "error": { "type": "string" },
+        "restarted_at": { "type": "string", "format": "date-time" },
+        "sent_today": { "type": "integer", "minimum": 0 },
+        "cap": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "sellerMessagesListResult": {
+      "description": "Every message the Procurement Specialist drafted to a seller, oldest first (docs/SPEC.md 6.10; ADR 0039): message, its number; state, waiting, sent, discarded or closed (an order's message whose order was decided without it); seller, to, subject and body (the agent's words, untrusted; for a sent message the subject and the text the owner sent, with what Farik added); domain, the address's domain in its ASCII form; new_domain, whether no message sent before went to that domain; purpose; purchase_order, the order an order's message or a follow-up is about; task_id and agent_id; drafted_at; sent_at and edited, once sent; why, Farik's sentence about the last try that failed while the message waits, and failed_at, when that try failed. sent_today counts the messages sent on the UTC day, orders' included, and cap is the most Farik sends in one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messages", "sent_today", "cap"],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["message", "state", "seller", "to", "domain", "new_domain", "subject", "body", "purpose", "task_id", "agent_id", "drafted_at"],
+            "properties": {
+              "message": { "type": "integer", "minimum": 1 },
+              "state": { "type": "string", "enum": ["waiting", "sent", "discarded", "closed"] },
+              "seller": { "type": "string" },
+              "to": { "type": "string" },
+              "domain": { "type": ["string", "null"] },
+              "new_domain": { "type": "boolean" },
+              "subject": { "type": "string" },
+              "body": { "type": "string" },
+              "purpose": { "type": "string", "enum": ["quote_request", "question", "purchase_order"] },
+              "purchase_order": { "type": "integer", "minimum": 1 },
+              "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+              "agent_id": { "type": "string" },
+              "drafted_at": { "type": "string", "format": "date-time" },
+              "sent_at": { "type": "string", "format": "date-time" },
+              "edited": { "type": "boolean" },
+              "why": { "type": "string" },
+              "failed_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "sent_today": { "type": "integer", "minimum": 0 },
+        "cap": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "procurementMailboxCheckResult": {
+      "description": "How many replies the check recorded.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["replies"],
+      "properties": { "replies": { "type": "integer", "minimum": 0 } }
+    },
+    "sellerReplyAttachmentResult": {
+      "description": "An attachment of a seller's reply: media_type (application/pdf, image/png or image/jpeg), its bytes as base64, and a name made from the reply and the index with the extension its bytes call for, never the seller's own file name.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["media_type", "base64", "name"],
+      "properties": {
+        "media_type": { "type": "string", "enum": ["application/pdf", "image/png", "image/jpeg"] },
+        "base64": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "sellerRepliesListResult": {
+      "description": "Every reply Farik read in the procurement mailbox, oldest first (docs/SPEC.md 6.10, 8.6): reply, its number; message, the message of Farik's it answers, with task_id, the message's task, and seller and sent_subject, what Farik sent (the subject shown is never the reply's own); from, subject, text, date and attachments, what the seller wrote (untrusted; text is at most 64 KiB, and each attachment has its index counted from 1, the name the seller gave it as text, kept, media_type and bytes when kept); received_at; order, set for a reply to an order's message or a follow-up; and dismissed, whether the owner dismissed it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["replies"],
+      "properties": {
+        "replies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reply", "message", "task_id", "seller", "sent_subject", "from", "subject", "text", "received_at", "attachments", "dismissed"],
+            "properties": {
+              "reply": { "type": "integer", "minimum": 1 },
+              "message": { "type": "integer", "minimum": 1 },
+              "seller": { "type": "string" },
+              "task_id": { "type": "string" },
+              "sent_subject": { "type": "string" },
+              "from": { "type": "string" },
+              "subject": { "type": "string" },
+              "text": { "type": "string" },
+              "date": { "type": "string", "format": "date-time" },
+              "received_at": { "type": "string", "format": "date-time" },
+              "order": { "type": "integer", "minimum": 1 },
+              "dismissed": { "type": "boolean" },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["index", "name", "kept", "bytes"],
+                  "properties": {
+                    "index": { "type": "integer", "minimum": 1 },
+                    "name": { "type": "string" },
+                    "kept": { "type": "boolean" },
+                    "media_type": { "type": "string", "enum": ["application/pdf", "image/png", "image/jpeg"] },
+                    "bytes": { "type": "integer", "minimum": 0 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "purchaseOrderEvaluationResult": {
+      "description": "The comparison an order rests on, evaluations/<name>.md in the agent's private folder, as text: the agent's own words, untrusted, shown as text and never as a page.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": { "text": { "type": "string" } }
+    },
+    "purchaseOrderFileResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["media_type", "base64", "name"],
+      "properties": {
+        "media_type": { "const": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+        "base64": { "type": "string" },
+        "name": { "type": "string", "pattern": "^PO-[0-9]{1,20}\\.xlsx$" }
+      }
+    },
+    "sitesListResult": {
+      "description": "The sites the Procurement Specialist may read (docs/SPEC.md 6.10; ADR 0039): farik is every entry of Farik's own list in its order, with its shop, its category, on (whether the team may read it now, which it may unless the owner turned it off) and at, when the owner last turned it off or back on, absent when they never did; owner is the sites the owner allowed that are not on Farik's list, by host, each with at, when they allowed it, and request, the number of the request their allowing answered, absent for a site they added unasked; waiting is the requests nobody decided yet, by host, each with the agent's address and reason, which are its own words and untrusted text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["farik", "owner", "waiting"],
+      "properties": {
+        "farik": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["host", "shop", "category", "on"],
+            "properties": {
+              "host": { "type": "string" },
+              "shop": { "type": "string" },
+              "category": {
+                "type": "string",
+                "enum": ["general_marketplace", "office_supplies", "industrial_supplies", "packaging_and_shipping", "electronic_components", "computers_and_it", "furniture", "food_service", "printing", "software"]
+              },
+              "on": { "type": "boolean" },
+              "at": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "owner": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["host", "at"],
+            "properties": {
+              "host": { "type": "string" },
+              "at": { "type": "string", "format": "date-time" },
+              "request": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "waiting": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["request", "host", "url", "why", "task_id", "agent_id", "at"],
+            "properties": {
+              "request": { "type": "integer", "minimum": 1 },
+              "host": { "type": "string" },
+              "url": { "type": "string" },
+              "why": { "type": "string" },
+              "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+              "agent_id": { "type": "string" },
+              "at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+    "socialPostsListResult": {
+      "description": "The posts Today shows (docs/SPEC.md 6.5; ADR 0042): every post scheduled or sent whose time is still ahead, soonest first, then every post missed or failed in the last 24 hours, the latest first. A post stopped, one still waiting for the owner (waiting.list has it), and one whose time passed unsent are not here. at is when it goes out, in the offset it was written in; hands_over_at is when Farik hands it to Buffer, in UTC: an hour before at, or later for a post the owner allowed later than that. approved_by is plan or owner; plan and slot are there for a plan's post. missed_why is there for a missed post and reason, Farik's sentence then Buffer's words, for a failed one: both are shown as text, never as markup.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["posts"],
+      "properties": {
+        "posts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["post", "agent_id", "channel", "text", "media", "at", "hands_over_at", "state"],
+            "properties": {
+              "post": { "type": "integer", "minimum": 1 },
+              "agent_id": { "type": "string" },
+              "channel": {
+                "type": "string",
+                "enum": ["instagram", "x", "facebook", "linkedin", "threads", "bluesky", "tiktok", "pinterest", "youtube", "google_business", "mastodon"]
+              },
+              "text": { "type": "string" },
+              "media": {
+                "type": "array",
+                "maxItems": 4,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["url", "kind"],
+                  "properties": {
+                    "url": { "type": "string" },
+                    "kind": { "type": "string", "enum": ["image", "video"] }
+                  }
+                }
+              },
+              "at": { "type": "string", "format": "date-time" },
+              "hands_over_at": { "type": "string", "format": "date-time" },
+              "state": { "type": "string", "enum": ["scheduled", "sent", "missed", "failed"] },
+              "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+              "slot": { "type": "string" },
+              "approved_by": { "type": "string", "enum": ["plan", "owner"] },
+              "missed_why": { "type": "string", "enum": ["not_running", "paused", "undecided"] },
+              "reason": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "socialPostMediaRequest": {
+      "title": "Social Post Media Request",
+      "description": "One picture of a post, fetched by the daemon, since the browser may not load pictures from other sites. Answers socialPostMediaResult; refused not_found for an unknown post or picture, for a clip (the page opens its address in a new tab), and for an address that is not public, is gone, is not a PNG, JPEG, GIF or WebP picture (never an SVG), or is over 20 MiB.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "social_post.media"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["post", "index"],
+          "properties": {
+            "post": { "type": "integer", "minimum": 1 },
+            "index": { "type": "integer", "minimum": 0, "maximum": 3 }
+          }
+        }
+      }
+    },
+    "sellerMessagesListQuery": {
+      "title": "Seller Messages List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "seller_messages.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "sellerRepliesListQuery": {
+      "title": "Seller Replies List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "seller_replies.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "procurementMailboxGetQuery": {
+      "title": "Procurement Mailbox Get Query",
+      "description": "The procurement mailbox (docs/SPEC.md 6.10; ADR 0039): { connected, address?, name?, provider?, folder?, checked_at?, error?, restarted_at?, sent_today, cap }. The password is never in it. checked_at is when Farik last read the mailbox; error is Farik's own sentence about the last check that failed; restarted_at is when the provider renumbered the folder; sent_today counts the messages sent to sellers on the UTC day, of the cap.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "procurement_mailbox.get" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "mailboxServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port", "security"],
+      "properties": {
+        "host": { "type": "string", "minLength": 1, "maxLength": 253 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "security": { "type": "string", "enum": ["tls", "starttls"] }
+      }
+    },
+    "procurementMailboxConnectRequest": {
+      "title": "Procurement Mailbox Connect Request",
+      "description": "Connects the procurement mailbox (docs/SPEC.md 6.6, 6.10; ADR 0039): Farik logs in to both servers over TLS with the certificate checked, sending nothing, then keeps the password in the OS keychain (or, without one, a private file) and records mailbox.connected. provider is gmail, icloud, fastmail (whose servers Farik knows and uses in place of imap and smtp), other (the servers given) or microsoft, which is refused mailbox_provider_unsupported before any connection, as is an address at outlook.com, hotmail.com, live.com or msn.com. folder defaults to INBOX, signature to none and disclose_ai to true. A refusal of these params carries no data, as account.connect's does; a refusal of the mailbox is mailbox_login_failed, mailbox_needs_tls, mailbox_certificate, mailbox_unreachable, mailbox_server or mailbox_settings_invalid, each in Farik's words, never quoting the password. Connecting again replaces all of it. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "procurement_mailbox.connect" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["address", "name", "provider", "imap", "smtp", "username", "password"],
+          "properties": {
+            "address": { "type": "string", "minLength": 3, "maxLength": 254 },
+            "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "provider": { "type": "string", "enum": ["gmail", "icloud", "fastmail", "other", "microsoft"] },
+            "imap": { "$ref": "#/$defs/mailboxServer" },
+            "smtp": { "$ref": "#/$defs/mailboxServer" },
+            "username": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "password": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "folder": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "signature": { "type": "string", "maxLength": 600 },
+            "disclose_ai": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "procurementMailboxDisconnectRequest": {
+      "title": "Procurement Mailbox Disconnect Request",
+      "description": "Disconnects the procurement mailbox: Farik forgets its password and deletes mail/mailbox.json, keeps mail/out/ and mail/in/, and records mailbox.disconnected. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "procurement_mailbox.disconnect" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "procurementMailboxCheckRequest": {
+      "title": "Procurement Mailbox Check Request",
+      "description": "Reads the procurement mailbox now, as Farik does by itself every 15 minutes with no model (docs/SPEC.md 6.10): only messages addressed to the procurement address that answer a message Farik sent, or come from an address it wrote to, are opened. Answers procurementMailboxCheckResult; refused mailbox_not_connected, or with the reason a login or a server gave, in Farik's words (mailbox_login_failed, mailbox_needs_tls, mailbox_certificate, mailbox_unreachable, mailbox_server). A check already running answers replies 0.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "procurement_mailbox.check" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "sellerReplyAttachmentRequest": {
+      "title": "Seller Reply Attachment Request",
+      "description": "A file a seller attached to a reply, for the owner to download: answers sellerReplyAttachmentResult; refused not_found for a reply nobody received, an index it has not (counted from 1) and a file that was not kept (Farik keeps only PDFs and pictures of 10 MB or less, as their bytes say).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "seller_reply.attachment" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reply", "index"],
+          "properties": {
+            "reply": { "type": "integer", "minimum": 1 },
+            "index": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "purchaseOrderFileRequest": {
+      "title": "Purchase Order File Request",
+      "description": "An order's workbook, orders/PO-<n>.xlsx, for the owner to download: answers purchaseOrderFileResult; refused not_found for an order nobody drafted, for a workbook that is gone, and for one that is, or lies behind, a link.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "purchase_order.file" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["order"],
+          "properties": { "order": { "type": "integer", "minimum": 1 } }
+        }
+      }
+    },
+    "marketingBudgetRaiseRequest": {
+      "title": "Marketing Budget Raise Request",
+      "description": "The owner raises the budget of the active marketing plan whose ads reached it (docs/SPEC.md 6.7; ADR 0042, step 08g): google_ads is the plan's new Google Ads budget, in the plan's currency, and campaigns the new budget of each campaign that reached its own, each more than what was spent. The plan's total rises by the same amount as google_ads. Farik files a request for a new version of the plan, triaged small at once and never held for a sprint, and answers marketingBudgetRaiseResult. Refused with errors, each a path, a message and a code: raise_refused (the plan is not the active one, has reached no budget, or an amount is not enough or does not fit) or raise_open (a raise of the plan is open already).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "marketing_budget.raise" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["plan", "google_ads", "campaigns"],
+          "properties": {
+            "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+            "google_ads": { "type": "string", "maxLength": 12 },
+            "campaigns": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["key", "budget"],
+                "properties": {
+                  "key": { "type": "string", "maxLength": 40 },
+                  "budget": { "type": "string", "maxLength": 12 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "marketingBudgetRaiseResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id"],
+      "properties": { "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" } }
+    },
+    "socialPostMediaResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["media_type", "base64"],
+      "properties": {
+        "media_type": { "type": "string", "enum": ["image/png", "image/jpeg", "image/gif", "image/webp"] },
+        "base64": { "type": "string" }
+      }
+    },
+    "allowancesListResult": {
+      "description": "What each connected kit connector of an active agent lets it make without asking, and how many it has made this period (docs/SPEC.md 6.7, ADR 0037): the period, the open sprint's or, with none open, the UTC day's since the later of its start and the last sprint's end, and one row per allowance. used counts every call of the tool in the period, those a grant allowed among them, so it may exceed of. what is the kit's plural noun for what a call makes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "period",
+        "rows"
+      ],
+      "properties": {
+        "period": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "sprint_id"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "sprint"
+                },
+                "sprint_id": {
+                  "type": "string",
+                  "pattern": "^S[1-9][0-9]{0,5}$"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "day"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "day"
+                },
+                "day": {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                }
+              }
+            }
+          ]
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent",
+              "server",
+              "tool",
+              "what",
+              "used",
+              "of"
+            ],
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "what": {
+                "type": "string"
+              },
+              "used": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "of": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              }
+            }
+          }
+        }
+      }
     },
     "costsSummaryResult": {
       "description": "Today's spending (UTC) and the team's daily limit, today's one-to-one chats (purpose chat), the last sprint's (the open one while one is), and each agent's that is not retired, in the team's order.",
@@ -3560,6 +4956,503 @@
         }
       }
     },
+    "connectorServer": {
+      "description": "A service as the user connects it, before its tools are labelled: either a custom MCP server, an mcp_servers entry of team.schema.json without tools (name, transport, and command and args, or url and headers, credential_keys, and oauth for a web address the user signs in to, or for Farik's own connector, the stdio entry `farik connector <name>`, which Farik signs in with its own app (ADR 0033's amendment of 2026-10-06); source, when given, is custom), held to validate_team as the agent's entry; or a service of the agent's role's kit, { name, source: kit }, a form of its own that carries nothing else, so a browser cannot send fields the kit decides (ADR 0036).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "const": "custom"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/kitServer"
+        }
+      ]
+    },
+    "kitServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,39}$"
+        },
+        "source": {
+          "const": "kit"
+        }
+      },
+      "description": "A service of the agent's role's kit, by name: the daemon builds its entry from the kit (kit_entry), its tags included. connector.connect with it takes tags {} (kit_names_these otherwise); a name the agent's role's kit does not have is connector_not_in_kit."
+    },
+    "connectorKeys": {
+      "type": "object",
+      "maxProperties": 8,
+      "propertyNames": {
+        "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      },
+      "description": "Each of the server's keys by name, with its value. Never echoed: a refusal of these params carries no data."
+    },
+    "connectorToolsRequest": {
+      "title": "Connector Tools Request",
+      "description": "Lists a custom MCP server's tools, started or reached with the agent's keys, or with the sign-in an attempt made when the server has oauth, as ConnectorAdd's second step shows them (docs/SPEC.md 5.6; ADRs 0030 and 0033). Nothing is kept, and the attempt is not used up. A server with oauth and no attempt is refused sign_in_needed; an attempt that is unknown, used, expired, unfinished, or another server's is refused sign_in_unknown. A refusal of these params carries no data, as account.connect's does.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.tools"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "$ref": "#/$defs/connectorServer"
+            },
+            "keys": {
+              "$ref": "#/$defs/connectorKeys"
+            },
+            "attempt": {
+              "$ref": "#/$defs/signInAttempt"
+            }
+          }
+        }
+      }
+    },
+    "connectorToolsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tools"
+      ],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "description",
+              "usable"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "usable": {
+                "type": "boolean",
+                "description": "False for a name Claude Code would rewrite (outside ^[A-Za-z0-9_-]{1,64}$): Farik can't use this tool, and it is never written to the team file."
+              }
+            }
+          }
+        }
+      }
+    },
+    "connectorConnectRequest": {
+      "title": "Connector Connect Request",
+      "description": "Gives the agent a custom MCP server (docs/SPEC.md 5.6, 6.7; ADR 0030): its tools listed with the keys, each usable one labelled by tags or else external_effect, the keys kept in the keychain or a private file beside the definition's spec_sha256, then connector_connect handled, which writes the team file and appends connector.connected. A server with oauth takes attempt, a finished sign-in, in place of keys, and uses it up; its grant is kept where keys are, and a grant it replaces is asked to be forgotten. A refusal of these params carries no data, as account.connect's does; a refusal of the entry carries the team's errors, each at its field.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.connect"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server",
+            "tags"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "$ref": "#/$defs/connectorServer"
+            },
+            "keys": {
+              "$ref": "#/$defs/connectorKeys"
+            },
+            "attempt": {
+              "$ref": "#/$defs/signInAttempt"
+            },
+            "allowances": {
+              "$ref": "#/$defs/connectorAllowances"
+            },
+            "tags": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/connectorTag"
+              },
+              "description": "The user's label for each tool by name; a listed tool not named here is external_effect."
+            }
+          }
+        }
+      }
+    },
+    "connectorAllowances": {
+      "type": "object",
+      "maxProperties": 256,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_-]{1,64}$"
+      },
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "description": "How many calls each period the agent makes of each spending tool without asking (ADR 0037), 0 to 1000; the daemon refuses one outside it allowance_out_of_range, and one for a tool the kit gives none allowance_not_offered. A kit service only; left out at a connect, each tool starts at the kit's default."
+    },
+    "connectorAllowancesRequest": {
+      "title": "Connector Allowances Request",
+      "description": "Changes a kit connector's allowances without its key typed again (docs/SPEC.md 6.7; ADR 0037): the kept entry must be the team file's (connector_not_confirmed), the numbers are checked as connect checks them over the ones the entry holds, the same keys or sign-in are kept beside the new entry's hash, then connector_connect is handled, which writes the team file and appends connector.connected. A kit that has changed the service is connector_not_in_kit: connect it again. A tool left out keeps its number. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.allowances"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server",
+            "allowances"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            },
+            "allowances": {
+              "$ref": "#/$defs/connectorAllowances"
+            }
+          }
+        }
+      }
+    },
+    "connectorConnectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stored_in",
+        "tools"
+      ],
+      "properties": {
+        "stored_in": {
+          "type": "string",
+          "enum": [
+            "keychain",
+            "file"
+          ],
+          "description": "Where the keys were kept: the computer's keychain, or a private file only the user can read."
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/connectorTag"
+          },
+          "description": "Each tool as it was written to the team file, with its label."
+        }
+      }
+    },
+    "signInAttempt": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "A sign-in under way, held in the daemon's memory for ten minutes, bound to the agent and the server (name, url and oauth) it was made for, and used up by connector.connect."
+    },
+    "connectorSignInRequest": {
+      "title": "Connector Sign In Request",
+      "description": "Starts signing the agent in to the service of a web-address server (docs/SPEC.md 6.7; ADR 0033): finds how the server offers it, registers Farik as a client or uses the one the server names, opens a listener for the way back on this computer's loopback, and answers the address the user opens in the browser. A new attempt for the same agent and server ends the old one. Refused sign_in_not_offered (the server does not say it can be signed in to), sign_in_not_supported (it does, and Farik has no way to register), pkce_not_supported, or sign_in_failed, each as the message's first word and a colon. server is the object connector.tools takes, and holds oauth.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.sign_in"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "$ref": "#/$defs/connectorServer"
+            }
+          }
+        }
+      }
+    },
+    "connectorSignInResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt",
+        "authorize_url",
+        "issuer"
+      ],
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/signInAttempt"
+        },
+        "authorize_url": {
+          "type": "string",
+          "description": "The service's page, which the browser opens. No token is in it."
+        },
+        "issuer": {
+          "type": "string",
+          "description": "Who signs the user in, as the service says. Its host is what the page names; it can differ from the server's, as Stripe's sign-in is at access.stripe.com."
+        },
+        "provider": {
+          "type": "string",
+          "description": "What Farik's own app for the service is called (GitHub), when one signs the user in: the page names it in place of the issuer's host (step 03b)."
+        },
+        "user_code": {
+          "type": "string",
+          "description": "The short code the user types on authorize_url, for an app that signs in with a code (the device flow). The code Farik polls with is never sent."
+        },
+        "install_url": {
+          "type": "string",
+          "description": "Where the user installs Farik's own app on what the agent is to read, when it must be (a private repository on GitHub)."
+        }
+      }
+    },
+    "connectorSignInStatusRequest": {
+      "title": "Connector Sign In Status Request",
+      "description": "How an attempt is going. Refused sign_in_unknown for one that is not known, was used up, ended, or expired. Never answers a token.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.sign_in_status"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attempt"
+          ],
+          "properties": {
+            "attempt": {
+              "$ref": "#/$defs/signInAttempt"
+            }
+          }
+        }
+      }
+    },
+    "connectorSignInCancelRequest": {
+      "title": "Connector Sign In Cancel Request",
+      "description": "Ends an attempt because the person pressed Cancel (docs/SPEC.md 6.7): its polling or its listener stops, and whatever the service says afterwards, or said already, is dropped, so a sign-in approved after Cancel is never kept. Answers emptyResult, also for an attempt that is already gone or was used up, since there is nothing left to end.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.sign_in_cancel"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attempt"
+          ],
+          "properties": {
+            "attempt": {
+              "$ref": "#/$defs/signInAttempt"
+            }
+          }
+        }
+      }
+    },
+    "connectorSignInStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "waiting",
+            "signed_in",
+            "failed"
+          ]
+        },
+        "reason": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "access_denied",
+                "sign_in_timed_out",
+                "sign_in_mismatch",
+                "sign_in_failed"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "description": "Farik's words for the step that failed and, where there was one, the HTTP status. It quotes nothing the service sent."
+            }
+          },
+          "description": "Present when state is failed."
+        }
+      }
+    },
+    "connectorTag": {
+      "type": "string",
+      "enum": [
+        "network",
+        "external_effect",
+        "denied"
+      ],
+      "description": "A connector tool's label (docs/SPEC.md 5.6): network, only reads; external_effect, changes something outside the sandbox; denied, never offered."
+    },
+    "connectorDisconnectRequest": {
+      "title": "Connector Disconnect Request",
+      "description": "Takes a custom MCP server away from the agent: connector_disconnect handled, which removes its team file entry and appends connector.disconnected, then its keys deleted from wherever they are kept; another agent's are never touched. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.disconnect"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "agentReplaceRequest": {
       "title": "Agent Replace Request",
       "description": "Replace: the agent retired and a newcomer added, in one validated change to the team file, so that a team is never left without the role the agent held. Appends agent.updated, then team.updated. Answers emptyResult; a refusal's data holds errors, each a path, a message and a code, as team.validate answers them, as team.save's does.",
@@ -4121,6 +6014,81 @@
         }
       },
       "description": "The saved teams on this computer, each whole, and the files in the templates folder that are not one. Every template query and method is refused with -32005 and the code no_state_folder at / when Farik has no state folder."
+    },
+    "skillsListQuery": {
+      "title": "Skills List Query",
+      "description": "The skills one agent has (docs/SPEC.md 6.7; ADR 0034): its role's, the team's and its own, each with how it stands for that agent. An agent the team does not have is -32002.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "skills.list" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["agent"],
+          "properties": {
+            "agent": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "skillGetQuery": {
+      "title": "Skill Get Query",
+      "description": "Every file of the team's or one agent's skill name, as its folder holds them now, for the person to read (docs/SPEC.md 6.7; ADR 0034). A folder that is not there is -32002; one the checks refuse, a file that is not UTF-8 text among them (skill_file_not_text), is refused with -32005 and a message starting with the refusal's skill_* code, and no files. An agent level names its agent, a team level names none and a role level names its role; any other is refused with -32005. A role level answers the SKILL.md Farik ships for that role, with no hash.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "skill.get" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["level", "name"],
+          "properties": {
+            "level": { "type": "string", "enum": ["role", "team", "agent"] },
+            "agent": { "type": "string", "minLength": 1 },
+            "role": { "type": "string", "minLength": 1, "description": "A role level's role id, such as software_developer." },
+            "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 }
+          }
+        }
+      }
+    },
+    "skillRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name", "description", "state", "bytes"],
+      "properties": {
+        "level": { "type": "string", "enum": ["role", "team", "agent"] },
+        "name": { "type": "string" },
+        "description": { "type": "string", "description": "When the skill applies, as its SKILL.md says; empty when that cannot be read." },
+        "state": {
+          "type": "string",
+          "enum": ["in_use", "replaced", "review", "missing"],
+          "description": "in_use: it loads in the agent's sessions (a role's, unless replaced). replaced: another level's skill of the same name stands in its place. review: its folder, its pin and this computer's confirmation do not agree, or a check refuses it; it waits for the person to read and confirm it. missing: pinned, and its folder is not there."
+        },
+        "bytes": { "type": "integer", "minimum": 0, "description": "The folder's total size; 0 when missing; a role's, its SKILL.md's." }
+      }
+    },
+    "skillsListResult": {
+      "description": "skills.list's answer: the agent's skills, role rows first, then the team's, then its own, each in the order its list holds. Role rows are read-only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skills"],
+      "properties": {
+        "skills": { "type": "array", "items": { "$ref": "#/$defs/skillRow" } }
+      }
+    },
+    "skillGetResult": {
+      "description": "skill.get's answer: files maps each path to its text as the folder holds it, sha256 is skill_sha256 of the folder (the hash skill_confirm is given; a role level answers none, since a shipped skill is trusted and pinned in the binary), and ignored_fields names the frontmatter keys other than name and description, which Farik drops from a session's copy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files", "ignored_fields"],
+      "properties": {
+        "files": { "type": "object", "additionalProperties": { "type": "string" } },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "ignored_fields": { "type": "array", "items": { "type": "string" } }
+      }
     },
     "templatePreviewQuery": {
       "title": "Template Preview Query",

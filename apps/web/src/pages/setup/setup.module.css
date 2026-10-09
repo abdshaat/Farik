@@ -360,6 +360,28 @@
 	list-style: none;
 }
 
+/* "More roles": the roles Farik does not suggest, under the team's rows. */
+.more {
+	display: grid;
+	gap: var(--farik-space-2);
+	max-width: 760px;
+}
+
+.more h2,
+.more p {
+	margin: 0;
+}
+
+.more h2 {
+	font:
+		var(--farik-type-heading-weight) var(--farik-type-heading-size) /
+		var(--farik-type-heading-line-height) var(--farik-type-heading-family);
+}
+
+.more p {
+	color: var(--farik-color-ink-muted);
+}
+
 .member {
 	display: flex;
 	flex-wrap: wrap;

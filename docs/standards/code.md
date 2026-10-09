@@ -175,4 +175,4 @@ When behavior changes, `docs/SPEC.md` changes in the same pull request. The spec
 
 ## Things deliberately left open
 
-Locale-specific naming in the UI (avatar packs, office themes) will be decided with the design system in Milestone 1. Names for the hosted tier's cloud resources are out of scope until Milestone 3.
+Locale-specific naming in the UI (avatar packs, office themes) will be decided with the design system in Milestone 1. Names for the hosted tier's cloud resources are planned in `farik-ops` (ADR 0047).

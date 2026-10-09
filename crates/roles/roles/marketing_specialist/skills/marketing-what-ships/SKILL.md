@@ -8,6 +8,17 @@ description: Use when a task asks for market research, a marketing plan, release
 Your contract names a deliverable and where it lives; your job is to make it accurate and readable
 by someone who has not read the code.
 
+## What you own
+
+- The brand kit: `docs/marketing/brand/brand-kit.md`, with its files under
+  `docs/marketing/brand/assets/`.
+- The brand persona: `docs/marketing/brand/persona.md`.
+- The marketing plans, `docs/marketing/plans/MP-<n>.md`, and the research they rest on, under
+  `docs/marketing/research/`.
+- The social presence, through the owner's approved plan.
+
+No other role's task names a path under `docs/marketing/`; others read these documents.
+
 ## 1. Research before you write
 
 Use your network access to check what competitors say, what terms the audience already uses, and
@@ -31,5 +42,7 @@ first time it appears.
 
 Commit your changes, write a completion note that opens with two or three plain sentences for the
 user and a blank line (then what changed, what you did not cover, and what the
-reviewer should check first), and request `verifying`. You do not publish anything; that is outside
-the harness.
+reviewer should check first), and request `verifying`. You publish or send only through a connected
+service: a social post in the owner's approved marketing plan goes out through
+`farik_schedule_post`, any other post waits for the owner, and an email is a draft the human sends;
+otherwise the human publishes.

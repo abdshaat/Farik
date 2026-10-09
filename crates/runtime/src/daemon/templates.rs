@@ -199,6 +199,7 @@ fn apply(
     deps.files
         .write_team(&applied.team)
         .map_err(|e| internal(&e))?;
+    crate::orchestrator::forget_removed_keys(deps, state, &before, &applied.team);
     for agent_id in &applied.retired {
         crate::orchestrator::status_effects(
             deps,
@@ -213,6 +214,31 @@ fn apply(
     Ok(answered)
 }
 
+/// Before `template.apply` writes the team: when the template would take Google Ads from an agent
+/// (a removed agent that has it) and would be applied, pauses the plan's campaigns for each as
+/// removing the connection does, whatever Google answers. A template that cannot be applied (it
+/// changed since the preview, or the team it makes is refused) pauses nothing.
+async fn pause_before_dropping_google_ads<'a>(
+    state: &'a Arc<DaemonState>,
+    deps: &Arc<ToolDeps>,
+    params: &Value,
+) -> Option<tokio::sync::MutexGuard<'a, ()>> {
+    let (held, holder, params) = (Arc::clone(deps), Arc::clone(state), params.clone());
+    let taken = off_the_worker(move || {
+        let templates = templates_of(&holder)?;
+        let digest = params["digest"].as_str().unwrap_or_default();
+        let (before, applied, ..) = applying(&held, templates, slug_of(&params), Some(digest))?;
+        Ok(if applied.errors.is_empty() {
+            crate::daemon::ads_calls::google_ads_taken_out(&before, &applied.team)
+        } else {
+            Vec::new()
+        })
+    })
+    .await
+    .unwrap_or_default();
+    crate::daemon::ads_calls::pause_and_hold(state, deps, &taken).await
+}
+
 /// The methods of this module, whose params the schema already passed.
 pub(super) async fn call(
     state: &Arc<DaemonState>,
@@ -224,6 +250,12 @@ pub(super) async fn call(
     };
     templates_of(state)?;
     let applies = method == "template.apply";
+    // Held until the team is written, so no agent's enable runs between the pause and the write.
+    let _ads = if applies {
+        pause_before_dropping_google_ads(state, &deps, params).await
+    } else {
+        None
+    };
     let waker = Arc::clone(state);
     let (state, method, params) = (Arc::clone(state), method.to_string(), params.clone());
     let answered = off_the_worker(move || {
@@ -619,6 +651,225 @@ mod tests {
 
         assert!(applied.is_ok(), "{applied:?}");
         assert!(woken, "the wait ends");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn applying_deletes_a_removed_agents_connector_keys() {
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
+
+        let (harness, folder) = templated("templates-remove-keys", |wire| {
+            wire["agents"][3]["mcp_servers"] = json!([{
+                "name": "github", "source": "custom", "transport": "stdio",
+                "command": "github-mcp", "credential_keys": ["API_KEY"],
+                "tools": { "search": "network" }
+            }]);
+        });
+        saved(&folder, &pair());
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        assert!(harness.daemon.set_connector_secrets(store.clone()));
+        let at = harness
+            .daemon
+            .secret_at(harness.project.deps.files.root(), "kai", "github")
+            .expect("an address");
+        let entry = ConnectorEntry {
+            spec_sha256: "h".to_string(),
+            keys: [(
+                "API_KEY".to_string(),
+                crate::claude::Secret::new("k".to_string()),
+            )]
+            .into(),
+            oauth: None,
+        };
+        store.save(&at, &entry).expect("kept");
+        call(
+            &harness.daemon,
+            "template.apply",
+            &json!({ "slug": "pair", "digest": digest(&harness, "pair") }),
+            "templateAppliedResult",
+        );
+        // Kai never worked, so the template removes Kai, and Kai's keys with Kai.
+        assert_eq!(store.load(&at), Ok(None));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn applying_a_template_that_retires_or_removes_agents_with_google_ads_pauses_first() {
+        use crate::connectors::ConnectorSecrets as _;
+        use crate::daemon::team::tests::{
+            after_the_fixture, kai_and_lia_with_google_ads, paused_at_google,
+        };
+
+        // Kai made the campaigns and so is retired, which deletes his keys; Lia never worked, so
+        // "Pair", which names neither, removes her, with her Google Ads. Farik pauses once, with
+        // the sign-in of the first of them to lose it, since a second pause finds nothing left.
+        let (ads, _lia) = kai_and_lia_with_google_ads("templates-remove-ads").await;
+        let folder = std::env::temp_dir()
+            .join(format!(
+                "farik-daemon-templates-{}-templates-remove-ads",
+                std::process::id()
+            ))
+            .join("templates");
+        let _ = std::fs::remove_dir_all(&folder);
+        served(&ads.harness, Some(folder.clone()));
+        saved(&folder, &pair());
+        let (_, digest) = Templates::new(folder)
+            .read_digested("pair")
+            .expect("the template reads");
+
+        super::call(
+            &ads.harness.daemon,
+            "template.apply",
+            &json!({ "slug": "pair", "digest": digest }),
+        )
+        .await
+        .expect("applied");
+
+        // Paused with Kai's sign-in, before the team was written and his keys deleted.
+        assert_eq!(paused_at_google(&ads).len(), 2);
+        let kai_bearer = format!("Bearer {}", ads.grant.access_token.expose());
+        for seen in ads.google.requests() {
+            assert_eq!(
+                seen.headers.get("authorization").map(String::as_str),
+                Some(kai_bearer.as_str())
+            );
+        }
+        assert_eq!(
+            after_the_fixture(&ads),
+            [
+                "marketing_campaign.paused",
+                "marketing_campaign.paused",
+                "agent.updated",
+                "team.updated"
+            ]
+        );
+        assert!(ads.store.load(&ads.at).expect("reads").is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn applying_a_template_holds_the_ads_lock_through_the_write() {
+        use crate::daemon::team::tests::{
+            kai_and_lia_with_google_ads, no_enable_between_the_pause_and_the_write,
+        };
+
+        let (ads, _lia) = kai_and_lia_with_google_ads("templates-lock").await;
+        let folder = std::env::temp_dir()
+            .join(format!(
+                "farik-daemon-templates-{}-templates-lock",
+                std::process::id()
+            ))
+            .join("templates");
+        let _ = std::fs::remove_dir_all(&folder);
+        served(&ads.harness, Some(folder.clone()));
+        saved(&folder, &pair());
+        let (_, digest) = Templates::new(folder)
+            .read_digested("pair")
+            .expect("the template reads");
+
+        no_enable_between_the_pause_and_the_write(
+            &ads,
+            "template.apply",
+            json!({ "slug": "pair", "digest": digest }),
+            2,
+        )
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_template_that_cannot_be_applied_pauses_nothing() {
+        use crate::daemon::team::tests::kai_and_lia_with_google_ads;
+
+        let (ads, _) = kai_and_lia_with_google_ads("templates-remove-ads-stale").await;
+        let folder = std::env::temp_dir()
+            .join(format!(
+                "farik-daemon-templates-{}-templates-remove-ads-stale",
+                std::process::id()
+            ))
+            .join("templates");
+        let _ = std::fs::remove_dir_all(&folder);
+        served(&ads.harness, Some(folder.clone()));
+        saved(&folder, &pair());
+
+        // A digest of a file that has changed since the preview: refused.
+        let refused = super::call(
+            &ads.harness.daemon,
+            "template.apply",
+            &json!({ "slug": "pair", "digest": NO_DIGEST }),
+        )
+        .await;
+
+        assert!(refused.is_err(), "{refused:?}");
+        assert!(
+            ads.google.requests().is_empty(),
+            "{:?}",
+            ads.google.requests()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn applying_keeps_the_pinned_skills_of_who_stays() {
+        use crate::daemon::team::tests::save_a_skill;
+
+        let (harness, folder) = templated("templates-apply-skills", |_| {});
+        saved(&folder, &pair());
+        let shown = preview(&harness, "pair");
+        let kept = shown["kept"][0]
+            .as_str()
+            .expect("an agent stays")
+            .to_string();
+        let removed = shown["removed"][0]
+            .as_str()
+            .expect("an agent goes")
+            .to_string();
+        save_a_skill(&harness, None, "team-style", "");
+        save_a_skill(&harness, Some(&kept), "kept-style", "");
+        save_a_skill(&harness, Some(&removed), "gone-style", "");
+        let pins_of = |id: &str| {
+            let team = team_file(&harness);
+            team["agents"]
+                .as_array()
+                .expect("agents")
+                .iter()
+                .find(|agent| agent["id"] == id)
+                .map(|agent| agent["skills"].clone())
+        };
+        let (team_pins, kept_pins) = (team_file(&harness)["skills"].clone(), pins_of(&kept));
+        assert_eq!(team_pins[0]["name"], "team-style");
+        call(
+            &harness.daemon,
+            "template.apply",
+            &json!({ "slug": "pair", "digest": digest(&harness, "pair") }),
+            "templateAppliedResult",
+        );
+        assert_eq!(
+            team_file(&harness)["skills"],
+            team_pins,
+            "the team's pins stay"
+        );
+        assert_eq!(
+            pins_of(&kept),
+            kept_pins,
+            "and so do those of an agent that stays"
+        );
+        assert_eq!(
+            pins_of(&removed),
+            None,
+            "an agent that goes takes its pins with it"
+        );
+        // Its folder is the user's file and stays, unpinned and unused.
+        assert!(
+            harness
+                .project
+                .repo
+                .path
+                .join(".farik/agents")
+                .join(&removed)
+                .join("skills/gone-style/SKILL.md")
+                .exists()
+        );
     }
 
     #[test]

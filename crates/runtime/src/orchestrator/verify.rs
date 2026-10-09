@@ -4,7 +4,7 @@
 //! review is filed as a rejection in the reviewer's name, with its note; a passed one goes to the
 //! Product Manager's session, which accepts it, unless the human has to.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use farik_core::branch::task_branch;
@@ -14,20 +14,25 @@ use farik_core::governor::gates::Rejection;
 use farik_core::governor::team_rules::is_ui_change;
 use farik_core::governor::transition::{TransitionContext, TransitionRequest};
 use farik_core::governor::transition_table::TransitionActor;
-use farik_core::team::{Agent, Team};
+use farik_core::team::{Agent, Team, task_private_folder};
 use farik_protocol::event::{
     CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody, EventIds, FarikEvent,
     NoteWrittenBodyKind, ReviewRecordedBody, new_event,
 };
+use farik_store::baseline::{FolderChangeKind, baseline_of, changes_since_baseline, folder_in};
 use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::design::DESIGN_REVIEW_TOOLS;
-use super::messages::{ReviewBrief, accept_message, design_review_message, review_message};
+use super::messages::{
+    Changes, ReviewBrief, accept_message, design_review_message, review_message,
+};
 use super::requests;
 use super::rules::{Waiting, acted, active, asleep, spent};
 use super::session::{SessionAsk, run_session};
-use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
-use crate::criteria::{CriterionError, CriterionOutcome, NewTestsInput, run_criteria};
+use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, session_dir, worktree};
+use crate::criteria::{
+    CriterionError, CriterionOutcome, NewTestsInput, check_artifact_in, run_criteria,
+};
 use crate::exec::ExecError;
 use crate::preview::designer_browser;
 use crate::session::SessionPurpose;
@@ -165,6 +170,10 @@ async fn run_what_farik_runs(
     if pending.is_empty() {
         return Ok(FarikRan::Criteria(0));
     }
+    // A task in a private folder has no worktree, branch or sandbox to run anything in (6.6).
+    if let Some(folder) = task_private_folder(contract) {
+        return run_in_the_folder(deps, contract, &pending, folder);
+    }
     orchestrator.forget_sandbox(&contract.id);
     let base = integration_branch(team, &deps.tools.git)?;
     for criterion in &pending {
@@ -217,19 +226,57 @@ async fn run_what_farik_runs(
             }
         };
         for result in results {
-            append(
-                &deps.tools,
-                &contract.id,
-                None,
-                None,
-                EventBody::CriterionRecorded(CriterionRecordedBody {
-                    criterion_id: result.criterion_id,
-                    passed: result.passed,
-                    evidence: result.evidence,
-                    run_by: CriterionRecordedBodyRunBy::Reviewer,
-                    recorded_by: GOVERNOR.to_string(),
-                }),
-            )?;
+            record_run(deps, contract, result)?;
+        }
+    }
+    Ok(FarikRan::Criteria(pending.len()))
+}
+
+/// Records `result` as the reviewer's run, which Farik made.
+fn record_run(
+    deps: &OrchestratorDeps,
+    contract: &TaskContract,
+    result: CriterionResult,
+) -> Result<(), OrchestratorError> {
+    append(
+        &deps.tools,
+        &contract.id,
+        None,
+        None,
+        EventBody::CriterionRecorded(CriterionRecordedBody {
+            criterion_id: result.criterion_id,
+            passed: result.passed,
+            evidence: result.evidence,
+            run_by: CriterionRecordedBodyRunBy::Reviewer,
+            recorded_by: GOVERNOR.to_string(),
+        }),
+    )?;
+    Ok(())
+}
+
+/// `run_what_farik_runs` for a task in a private folder: each `artifact` criterion is checked on
+/// the host, as a file in the folder (`check_artifact_in`), and recorded before the next. A
+/// `command` or `test` criterion cannot be run for it, the folder being no worktree, and is not
+/// the work's fault, so it is escalated (readiness refuses one, so it is a contract edited by
+/// hand).
+fn run_in_the_folder(
+    deps: &OrchestratorDeps,
+    contract: &TaskContract,
+    pending: &[&ExitCriterion],
+    folder: &str,
+) -> Result<FarikRan, OrchestratorError> {
+    for criterion in pending {
+        if wire_method(&criterion.verification) != Some("artifact") {
+            return Ok(FarikRan::Unrunnable(format!(
+                "Farik could not run {} for the reviewer: a task in a private folder has no \
+                 worktree to run a command or a test in",
+                criterion.id.as_str()
+            )));
+        }
+        if let CriterionOutcome::Result(result) =
+            check_artifact_in(deps.tools.files.root(), folder, criterion, RunBy::Reviewer)
+        {
+            record_run(deps, contract, result)?;
         }
     }
     Ok(FarikRan::Criteria(pending.len()))
@@ -314,12 +361,9 @@ async fn design_review_first(
         changed_paths,
         &team.rules().ui_paths,
     );
-    let review = design_review(
-        team,
-        ui_change,
-        history,
-        designer_browser(team, deps.previews.as_ref()),
-    );
+    let review = design_review(team, ui_change, history, || {
+        designer_browser(team, deps.previews.as_ref())
+    });
     let designer = match (review.state, &review.recorded_by) {
         (ReviewState::NotNeeded | ReviewState::Passed, _) => return Ok(None),
         (ReviewState::Failed, Some((designer, session_id))) => {
@@ -403,7 +447,7 @@ fn reject_as_designer(
     })
 }
 
-/// The reviewer's `verify` session, in the task's worktree with the read tier's built-ins and no
+/// The reviewer's `verify` session, in the task's worktree (or its private folder) with the read tier's built-ins and no
 /// executor, told what Farik found and, when `unanswered` names any, which criteria it still has
 /// to answer; then `review.recorded` when the review is complete.
 async fn review(
@@ -425,13 +469,22 @@ async fn review(
     let history = history(deps, &row.task_id)?;
     let since = since_verifying(&history);
     let context = context(deps, team, &row.task_id)?;
-    let git = &deps.tools.git;
-    let diff = git.diff(&integration_branch(team, git)?, &task_branch(&contract))?;
+    // A task in a private folder has no branch to diff: its reviewer is told which files changed
+    // in the folder, and reads each beside its copy from the start of the task (6.6).
+    let (diff, files);
+    let changes = if let Some(folder) = task_private_folder(&contract) {
+        files = folder_changes(&folder_in(deps.tools.files.root(), folder)?, &contract.id)?;
+        Changes::Folder(&files)
+    } else {
+        let git = &deps.tools.git;
+        diff = git.diff(&integration_branch(team, git)?, &task_branch(&contract))?;
+        Changes::Diff(&diff)
+    };
     let initial_prompt = review_message(&ReviewBrief {
         contract: &contract,
         results: &governor_results(&history, since),
         completion_note: context.done.completion_note.as_deref(),
-        diff: &diff,
+        changes,
         unanswered,
     });
     let end = run_session(
@@ -440,13 +493,41 @@ async fn review(
         read_only(
             &contract,
             reviewer,
-            worktree(deps, &row.task_id),
+            session_dir(deps, &contract)?,
             initial_prompt,
         ),
     )
     .await?;
     record_review(deps, team, &contract, reviewer, &end.session_id, since)?;
     Ok(Some(acted(row, reviewer, "verify", &end)))
+}
+
+/// One line for each file a task changed in its private `folder` since the copy taken for it:
+/// its path, whether it is `new`, `changed` or `removed`, and its size, which for a removed file
+/// is the copy's. Or one line saying nothing changed.
+fn folder_changes(folder: &Path, task: &TaskId) -> Result<Vec<String>, OrchestratorError> {
+    let size = |path: PathBuf| std::fs::metadata(path).map_or(0, |metadata| metadata.len());
+    let lines: Vec<String> = changes_since_baseline(folder, task)?
+        .into_iter()
+        .map(|change| match change.kind {
+            FolderChangeKind::Removed => format!(
+                "{}: removed, it was {} bytes",
+                change.path,
+                size(baseline_of(folder, task).join(&change.path))
+            ),
+            kind => format!(
+                "{}: {}, {} bytes",
+                change.path,
+                kind.word(),
+                size(folder.join(&change.path))
+            ),
+        })
+        .collect();
+    Ok(if lines.is_empty() {
+        vec!["no file in the folder differs from the copy".to_string()]
+    } else {
+        lines
+    })
 }
 
 /// `review.recorded`, once per verification: when none was recorded since the task last moved into
@@ -567,7 +648,7 @@ async fn accept(
         read_only(
             &contract,
             product_manager,
-            worktree(deps, &row.task_id),
+            session_dir(deps, &contract)?,
             initial_prompt,
         ),
     )
@@ -594,6 +675,7 @@ pub(super) fn read_only<'a>(
         in_reply_to: None,
         thread: None,
         initial_prompt,
+        pipeline: None,
     }
 }
 

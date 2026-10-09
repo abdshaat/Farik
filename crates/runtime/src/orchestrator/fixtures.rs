@@ -55,6 +55,11 @@ impl Harness {
         });
         let project = TestProject::new(name, &team);
         let daemon = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
+        // The user's state folder, beside the repository and outside it, as `~/.config/farik` is.
+        daemon.set_state_dir(std::path::PathBuf::from(format!(
+            "{}-state",
+            project.repo.path.display()
+        )));
         let gh = FakeGh::new(name);
         Self {
             project,
@@ -140,6 +145,17 @@ impl Harness {
         adapter: Arc<dyn RuntimeAdapter>,
         clock: Arc<MovableClock>,
     ) -> Orchestrator {
+        let sleeper = Arc::new(MovingSleeper(Arc::clone(&clock)));
+        self.orchestrator_sleeping(adapter, clock, sleeper)
+    }
+
+    /// `orchestrator_on`, waiting on `sleeper`.
+    pub(crate) fn orchestrator_sleeping(
+        &self,
+        adapter: Arc<dyn RuntimeAdapter>,
+        clock: Arc<MovableClock>,
+        sleeper: Arc<dyn Sleeper>,
+    ) -> Orchestrator {
         let deps = &self.project.deps;
         let tools = Arc::new(ToolDeps {
             log: Arc::clone(&deps.log),
@@ -154,8 +170,9 @@ impl Harness {
                 deps.ids.clone(),
             )),
             git: self.project.repo.adapter(),
-            clock: Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
+            clock: clock as Arc<dyn Clock + Send + Sync>,
             ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
         });
         tools.transitions.set_previews(Arc::clone(&self.previews));
         Orchestrator::new(OrchestratorDeps {
@@ -166,7 +183,7 @@ impl Harness {
             previews: Arc::clone(&self.previews),
             session_ids: Arc::new(LaterIds(SequentialIds::new())),
             forge: Arc::new(self.gh.forge(&self.project.repo.path)),
-            sleeper: Arc::new(MovingSleeper(clock)),
+            sleeper,
         })
     }
 
@@ -270,9 +287,110 @@ impl Harness {
         })
     }
 
+    /// A harness whose team also has two Finance Specialists, `fin` and `fin-2`, each of whom may
+    /// hold two tasks.
+    pub(crate) fn with_finance(name: &str) -> Self {
+        Self::new(name, |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+            crate::tools::fixtures::with_the_finance_specialist(wire);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(farik_core::team::fixtures::an_agent_wire(
+                    "fin-2",
+                    "finance_specialist",
+                ));
+        })
+    }
+
+    /// The Finance Specialists' private folder in this project.
+    pub(crate) fn finance_folder(&self) -> PathBuf {
+        self.project.repo.path.join(".farik/local/finance")
+    }
+
+    /// Files `task` `ready` as a Finance Specialist's task in its folder, ended by its books,
+    /// `books.xlsx`, and reviewed by the Product Manager; and, when `held` names a status, held by
+    /// `fin` there.
+    pub(crate) fn finance_task(&self, task: &str, held: Option<&str>) {
+        self.file(task, "ready", |wire| {
+            wire["assignee_role"] = json!("finance_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The books exist.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": "books.xlsx" }
+            }]);
+        });
+        let Some(held) = held else { return };
+        let people = json!({ "assignee": "fin", "reviewer": "pm" });
+        self.project.moved(task, "ready", "assigned", &people);
+        if held != "assigned" {
+            self.project.moved(task, "assigned", held, &people);
+        }
+    }
+
+    /// A harness whose team also has a Finance Specialist, `fin`, and two Procurement
+    /// Specialists, `proc` and `proc-2`, each of whom may hold two tasks.
+    pub(crate) fn with_procurement(name: &str) -> Self {
+        Self::new(name, |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+            crate::tools::fixtures::with_the_finance_specialist(wire);
+            for id in ["proc", "proc-2"] {
+                wire["agents"]
+                    .as_array_mut()
+                    .expect("a list of agents")
+                    .push(farik_core::team::fixtures::an_agent_wire(
+                        id,
+                        "procurement_specialist",
+                    ));
+            }
+        })
+    }
+
+    /// The Procurement Specialists' private folder in this project.
+    pub(crate) fn procurement_folder(&self) -> PathBuf {
+        self.project.repo.path.join(".farik/local/procurement")
+    }
+
+    /// Files `task` `ready` as a Procurement Specialist's task in its folder, ended by its
+    /// comparison, `evaluations/email-sending.md`, and reviewed by the Product Manager; and, when
+    /// `held` names a status, held by `proc` there.
+    pub(crate) fn procurement_task(&self, task: &str, held: Option<&str>) {
+        self.file(task, "ready", |wire| {
+            wire["assignee_role"] = json!("procurement_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!([".farik/local/procurement/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The comparison is written.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": "evaluations/email-sending.md" }
+            }]);
+        });
+        let Some(held) = held else { return };
+        let people = json!({ "assignee": "proc", "reviewer": "pm" });
+        self.project.moved(task, "ready", "assigned", &people);
+        if held != "assigned" {
+            self.project.moved(task, "assigned", held, &people);
+        }
+    }
+
     /// Files `task` `ready`, as `file` does.
     pub(crate) fn ready(&self, task: &str) {
         self.file(task, "ready", |_| {});
+    }
+
+    /// Files `task` `ready` as the request that raises the budget of marketing plan `plan`: one
+    /// that skips the sprint queue.
+    pub(crate) fn ready_raising(&self, task: &str, plan: &str) {
+        self.project
+            .filed_raising(task, ("ready", "task", None), Some(plan), |wire| {
+                wire["assignee_role"] = json!("software_developer");
+                wire["reviewer_role"] = json!("software_developer");
+                wire["allowed_paths"] = json!(["done.txt"]);
+            });
     }
 
     /// Files `task` `ready` and moves it to `assigned` to `assignee`, reviewed by `reviewer`.
@@ -725,11 +843,29 @@ pub(crate) struct ExecutorWitness {
     tools: Mutex<Vec<Vec<String>>>,
     listed: Mutex<Vec<Vec<String>>>,
     tiers: Mutex<Vec<Vec<farik_core::governor::permissions::PermissionTier>>>,
+    connectors: Mutex<Vec<Vec<String>>>,
+    probes: Vec<String>,
+    /// What a probe calls its tool with, until a session's prompt tells it better.
+    input: serde_json::Value,
+    /// Whether a probe takes its input from the `tool_input` block of the session's prompt, as an
+    /// agent that has only that message to go on does.
+    replay: bool,
+    decided: Mutex<Vec<Vec<crate::daemon::HookDecision>>>,
 }
 
 impl ExecutorWitness {
     /// A witness of `inner`'s sessions as `daemon` registered them.
     pub(crate) fn new(inner: Arc<dyn RuntimeAdapter>, daemon: Arc<DaemonState>) -> Self {
+        Self::probing(inner, daemon, &[])
+    }
+
+    /// A witness that also asks the hook, as each session starts, about a call of each tool
+    /// `probes` names.
+    pub(crate) fn probing(
+        inner: Arc<dyn RuntimeAdapter>,
+        daemon: Arc<DaemonState>,
+        probes: &[&str],
+    ) -> Self {
         Self {
             inner,
             daemon,
@@ -737,7 +873,41 @@ impl ExecutorWitness {
             tools: Mutex::new(Vec::new()),
             listed: Mutex::new(Vec::new()),
             tiers: Mutex::new(Vec::new()),
+            connectors: Mutex::new(Vec::new()),
+            probes: probes.iter().map(ToString::to_string).collect(),
+            input: serde_json::json!({ "url": "https://example.com/" }),
+            replay: false,
+            decided: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The same, calling each probe with `input`.
+    pub(crate) fn with_input(mut self, input: serde_json::Value) -> Self {
+        self.input = input;
+        self
+    }
+
+    /// The same, but a session whose prompt holds a `tool_input` block calls each probe with
+    /// what that block says, and nothing else.
+    pub(crate) fn replaying(mut self) -> Self {
+        self.replay = true;
+        self
+    }
+
+    /// For each session started, in order, the servers of the connectors its registration holds.
+    pub(crate) fn given_connectors(&self) -> Vec<Vec<String>> {
+        self.connectors
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
+    }
+
+    /// For each session started, in order, the hook's answer to each probe.
+    pub(crate) fn decided(&self) -> Vec<Vec<crate::daemon::HookDecision>> {
+        self.decided
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
     }
 
     /// For each session started, in order, the tiers its registration holds it to.
@@ -779,6 +949,48 @@ impl RuntimeAdapter for ExecutorWitness {
             .tool_context(&spec.session_id)
             .expect("the session is registered before it starts");
         let executor = context.executor.is_some();
+        self.connectors
+            .lock()
+            .expect("no test panics holding it")
+            .push(
+                context
+                    .connectors
+                    .iter()
+                    .map(|connector| connector.server.clone())
+                    .collect(),
+            );
+        let replayed = self
+            .replay
+            .then(|| {
+                let (_, after) = spec
+                    .system_prompt
+                    .split_once("<untrusted source=\"tool_input\">\n")?;
+                let (block, _) = after.split_once("\n</untrusted>")?;
+                serde_json::from_str(block).ok()
+            })
+            .flatten();
+        let input = replayed.unwrap_or_else(|| self.input.clone());
+        let decided = self
+            .probes
+            .iter()
+            .map(|tool| {
+                let request = crate::daemon::HookRequest {
+                    session_id: spec.session_id.clone(),
+                    cwd: spec.cwd.clone(),
+                    hook_event_name: "PreToolUse".to_string(),
+                    tool_name: tool.clone(),
+                    tool_input: input.clone(),
+                    tool_use_id: Some(format!("probe-{tool}")),
+                    tool_response: None,
+                    duration_ms: None,
+                };
+                crate::daemon::decide_pre_tool_use(&request, &self.daemon)
+            })
+            .collect();
+        self.decided
+            .lock()
+            .expect("no test panics holding it")
+            .push(decided);
         self.tiers
             .lock()
             .expect("no test panics holding it")

@@ -78,6 +78,8 @@ test("ready work waits in the backlog until a sprint plans it, and late work for
 	const backlog = page.getByRole("region", { name: "Backlog" });
 	try {
 		await page.goto(serve.url);
+		await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
+		await expect(page.getByText("Mira").first()).toBeVisible();
 
 		// 1. The small request: Mira asks, the user answers, and Ada checks the plan.
 		await file(

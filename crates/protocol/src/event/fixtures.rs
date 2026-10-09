@@ -50,6 +50,7 @@ pub fn a_full_event_wire(kind: EventKind) -> Value {
 
 /// The body one kind carries, schema-valid and with no optional field.
 #[must_use]
+#[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
 pub fn a_body_wire(kind: EventKind) -> Value {
     match kind {
         EventKind::TaskCreated | EventKind::ContractWritten => a_summary_body_wire(kind),
@@ -143,10 +144,232 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::PreviewStarted
         | EventKind::PreviewStopped
         | EventKind::PageChecked => a_design_body_wire(kind),
+        EventKind::ConnectorConnected
+        | EventKind::ConnectorDisconnected
+        | EventKind::ToolApprovalRequested
+        | EventKind::ToolApprovalGranted
+        | EventKind::ToolApprovalRefused => a_connector_body_wire(kind),
+        EventKind::SkillAdded
+        | EventKind::SkillChanged
+        | EventKind::SkillRemoved
+        | EventKind::SkillConfirmed => a_skill_body_wire(kind),
         EventKind::SprintStarted
         | EventKind::SprintPlanned
         | EventKind::SprintEnded
         | EventKind::RetroAppended => a_sprint_body_wire(kind),
+        EventKind::MarketingPlanProposed
+        | EventKind::MarketingPlanApproved
+        | EventKind::MarketingPlanReturned
+        | EventKind::MarketingPlanEnded => a_marketing_plan_body_wire(kind),
+        EventKind::SocialPostScheduled
+        | EventKind::SocialPostRequested
+        | EventKind::SocialPostSent
+        | EventKind::SocialPostStopped
+        | EventKind::SocialPostMissed
+        | EventKind::SocialPostFailed => a_social_post_body_wire(kind),
+        EventKind::SiteRequested => json!({
+            "host": "shop.example",
+            "url": "https://www.shop.example/boxes?size=12x9x6",
+            "why": "It sells the corrugated boxes the task asks about."
+        }),
+        EventKind::SiteApproved => json!({
+            "host": "shop.example",
+            "request": 7,
+            "note": "Go on, and keep the quotes."
+        }),
+        EventKind::SiteDeclined => json!({
+            "request": 7,
+            "host": "shop.example",
+            "note": "We do not buy from them."
+        }),
+        EventKind::SiteRemoved => json!({ "host": "shop.example" }),
+        EventKind::PurchaseOrderDrafted => json!({
+            "order": 1,
+            "seller": "Acme Auto Parts",
+            "seller_contact": "sales@acme.example",
+            "lines": [{
+                "item": "Baby car mirror",
+                "quantity": 3,
+                "unit": "piece",
+                "unit_price": "19.99",
+                "line_total": "59.97"
+            }],
+            "currency": "USD",
+            "period": "once",
+            "total": "59.97",
+            "delivery": "Ships in 3 days",
+            "terms": "Net 30",
+            "url": "https://www.acme.example/mirrors",
+            "evaluation": "evaluations/baby-car-mirrors.md",
+            "why": "It is the cheapest seller that ships to us with a safety mark."
+        }),
+        EventKind::PurchaseOrderApproved
+        | EventKind::PurchaseOrderRejected
+        | EventKind::PurchaseOrderClosed => json!({ "order": 1, "note": "" }),
+        EventKind::PurchaseOrderPlaced => json!({ "order": 1, "placed_on": "2026-10-08" }),
+        EventKind::PurchaseOrderUpdated => json!({
+            "order": 1,
+            "status": "shipped",
+            "note": "Left the seller's depot."
+        }),
+        EventKind::PurchaseOrderReceived => json!({ "order": 1, "received_on": "2026-10-15" }),
+        EventKind::PurchaseOrderExpired => json!({ "order": 1 }),
+        EventKind::RenewalFlagged => json!({
+            "vendor": "Vercel",
+            "renews_on": "2026-11-30",
+            "decide_by": "2026-10-31"
+        }),
+        EventKind::RenewalDismissed => json!({ "renewal": 7 }),
+        EventKind::RenewalChecked => json!({ "due": 1, "unreadable": 0 }),
+        EventKind::DataPipelineRequested => json!({
+            "name": "Firecrawl",
+            "what": "Prices as clean text from the seller pages the task has to compare.",
+            "source_url": "https://www.firecrawl.dev/pricing",
+            "why": "Three sellers hide their prices behind scripts that the plain page fetch cannot read.",
+            "cost": "paid",
+            "needs_account": true,
+            "sends_project_data": false
+        }),
+        EventKind::DataPipelineEscalated => json!({
+            "pipeline": 7,
+            "reason": "It costs money and the owner decides what the team spends."
+        }),
+        EventKind::DataPipelineApproved => json!({
+            "pipeline": 7,
+            "by": "human",
+            "reason": "",
+            "request": "FRK-9"
+        }),
+        EventKind::DataPipelineDeclined => json!({
+            "pipeline": 7,
+            "by": "product_manager",
+            "reason": "The plain pages answer the question, so use them."
+        }),
+        EventKind::MailboxConnected => json!({
+            "purpose": "procurement",
+            "address": "buying@bakery.test"
+        }),
+        EventKind::MailboxDisconnected => json!({ "purpose": "procurement" }),
+        EventKind::SellerMessageDrafted => json!({
+            "message": 3,
+            "seller": "Pie Box Pros",
+            "to": "sales@pieboxpros.test",
+            "subject": "Quote for 500 printed pie boxes",
+            "purpose": "quote_request",
+            "sha256": "9f2b0c1d5e7a4b3c8d6e1f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c"
+        }),
+        EventKind::SellerMessageSent => json!({
+            "message": 3,
+            "message_id": "0b9d6f7e-1c2a-4f3b-8a5d-6e7f8091a2b3@bakery.test",
+            "sha256": "9f2b0c1d5e7a4b3c8d6e1f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c",
+            "edited": false
+        }),
+        EventKind::SellerMessageFailed => json!({
+            "message": 3,
+            "why": "the mailbox did not accept its sign-in; connect it again"
+        }),
+        EventKind::SellerMessageDiscarded => json!({ "message": 3 }),
+        EventKind::SellerReplyReceived => json!({
+            "reply": 1,
+            "message": 3,
+            "from": "Dana Reyes <sales@pieboxpros.test>",
+            "subject": "Re: Quote for 500 printed pie boxes",
+            "attachments": [
+                { "name": "quote.pdf", "kept": true, "media_type": "application/pdf", "bytes": 48213 }
+            ]
+        }),
+        EventKind::SellerReplyDismissed => json!({ "reply": 1 }),
+        EventKind::MarketingCampaignCreated => json!({
+            "plan": "MP-1",
+            "key": "search-launch",
+            "account": "123-456-7890",
+            "campaign": "customers/1234567890/campaigns/11",
+            "budget": "customers/1234567890/campaignBudgets/12",
+            "budget_kind": "total",
+            "amount": "800.00",
+        }),
+        EventKind::MarketingBudgetReached => json!({
+            "plan": "MP-1",
+            "scope": "campaign",
+            "key": "search-launch",
+            "spent": "800.00",
+            "budget": "800.00",
+            "currency": "USD",
+            "paused": ["customers/1234567890/campaigns/11"],
+        }),
+        EventKind::MarketingCampaignPaused => json!({
+            "plan": "MP-1",
+            "key": "search-launch",
+            "campaign": "customers/1234567890/campaigns/11",
+            "why": "plan_ended",
+        }),
+    }
+}
+
+/// A `social_post.` body: Kai's Instagram post for slot `post-1` of MP-1, scheduled in the plan,
+/// or what happens to a post.
+fn a_social_post_body_wire(kind: EventKind) -> Value {
+    let post = || {
+        json!({
+            "channel": "instagram",
+            "buffer_channel": "chan-1",
+            "text": "We open on Wednesday.",
+            "media": [{ "url": "https://cdn.example.com/open.png", "kind": "image" }],
+            "at": "2026-11-04T09:00:00-05:00",
+        })
+    };
+    match kind {
+        EventKind::SocialPostScheduled => {
+            let mut body = post();
+            body["approved_by"] = json!("plan");
+            body["plan"] = json!("MP-1");
+            body["slot"] = json!("post-1");
+            body
+        }
+        EventKind::SocialPostRequested => post(),
+        EventKind::SocialPostSent => json!({ "post": 7, "buffer_post": "buf-1" }),
+        EventKind::SocialPostStopped => json!({ "post": 7, "by": "owner" }),
+        EventKind::SocialPostMissed => json!({ "post": 7, "why": "not_running" }),
+        _ => json!({ "post": 7, "reason": "Buffer did not take it: \u{201c}no\u{201d}" }),
+    }
+}
+
+/// A `marketing_plan.` body: Kai's two-week plan MP-1 with one campaign and one post, or the
+/// owner's decision on it, or its end by the owner.
+fn a_marketing_plan_body_wire(kind: EventKind) -> Value {
+    match kind {
+        EventKind::MarketingPlanProposed => json!({
+            "plan": "MP-1",
+            "title": "Spring launch",
+            "summary": "Two weeks of posts and one small search campaign.",
+            "text": "x".repeat(300),
+            "starts_on": "2026-11-02",
+            "ends_on": "2026-11-15",
+            "currency": "USD",
+            "budget": { "total": "2000.00", "google_ads": "1000" },
+            "campaigns": [{
+                "key": "search-launch",
+                "channel": "google_ads",
+                "name": "Launch search",
+                "goal": "Bring people to the shop",
+                "budget": "800.50",
+                "starts_on": "2026-11-03",
+                "ends_on": "2026-11-14"
+            }],
+            "posts": [{
+                "key": "post-1",
+                "channel": "instagram",
+                "on": "2026-11-04",
+                "topic": "Opening day"
+            }],
+            "measures": ["New customers who say they found us online"],
+            "proposed_by": "kai"
+        }),
+        EventKind::MarketingPlanApproved => json!({ "plan": "MP-1", "note": "" }),
+        EventKind::MarketingPlanReturned => {
+            json!({ "plan": "MP-1", "reason": "Start with half the budget." })
+        }
+        _ => json!({ "plan": "MP-1", "why": "by_owner" }),
     }
 }
 
@@ -348,4 +571,50 @@ fn a_tool_body_wire(field: &str, value: &str) -> Value {
 #[must_use]
 pub fn a_contract_summary_wire() -> Value {
     json!({ "kind": "task", "title": "Add a login page", "status": "draft", "risk": "low" })
+}
+
+/// `dev-a`'s skill `api-style`, added, changed or confirmed with a hash, or removed.
+fn a_skill_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::SkillRemoved {
+        json!({ "level": "agent", "agent": "dev-a", "name": "api-style" })
+    } else {
+        json!({ "level": "agent", "agent": "dev-a", "name": "api-style", "sha256": "0".repeat(64) })
+    }
+}
+
+/// `dev-a`'s custom server `github`, connected or taken away, or a call of it asked about or
+/// decided.
+fn a_connector_body_wire(kind: EventKind) -> Value {
+    if !matches!(
+        kind,
+        EventKind::ConnectorConnected | EventKind::ConnectorDisconnected
+    ) {
+        return a_tool_approval_body_wire(kind);
+    }
+    if kind == EventKind::ConnectorConnected {
+        json!({
+            "agent": "dev-a",
+            "server": "github",
+            "transport": "stdio",
+            "credential_keys": ["API_KEY"],
+            "tools": { "search_issues": "network", "delete_repo": "denied" },
+            "spec_sha256": "0".repeat(64)
+        })
+    } else {
+        json!({ "agent": "dev-a", "server": "github" })
+    }
+}
+
+/// A `tool_approval.` body: `create_issue` of `github` asked about, or approval 1 decided.
+fn a_tool_approval_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::ToolApprovalRequested {
+        json!({
+            "server": "github",
+            "tool": "create_issue",
+            "input": "{\"title\":\"x\"}",
+            "input_sha256": "0".repeat(64)
+        })
+    } else {
+        json!({ "approval": 1 })
+    }
 }

@@ -1,0 +1,482 @@
+/* The page and its side column. One column on a phone, in the order the phone's mockup draws it:
+the title, the plan's facts, then the summary and the rest. From 1024 px the facts sit beside the
+rest, as the task's page has its cost beside it. */
+.page {
+	display: flex;
+	flex-direction: column;
+	gap: var(--farik-space-6);
+	min-width: 0;
+	max-width: 66rem;
+}
+
+.layout {
+	display: grid;
+	/* A wide child must not widen the column past a phone's screen. */
+	grid-template-columns: minmax(0, 1fr);
+	grid-template-areas:
+		"head"
+		"side"
+		"main";
+	gap: var(--farik-space-6);
+}
+
+.head,
+.main {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: var(--farik-space-6);
+	align-content: start;
+}
+
+.head {
+	grid-area: head;
+}
+
+.main {
+	grid-area: main;
+}
+
+.side {
+	grid-area: side;
+	display: grid;
+	gap: var(--farik-space-3);
+	min-width: 0;
+}
+
+@media (min-width: 1024px) {
+	.layout {
+		grid-template-columns: minmax(0, 1fr) 20rem;
+		grid-template-areas:
+			"head side"
+			"main side";
+		grid-template-rows: auto 1fr;
+		column-gap: var(--farik-space-7);
+		align-items: start;
+	}
+}
+
+/* The side column's heading is for a wide screen; a phone's facts have none, and the heading
+stays there for a screen reader. */
+.aboutTitle {
+	margin: 0;
+}
+
+@media not (min-width: 1024px) {
+	.aboutTitle {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+	}
+}
+
+.letter {
+	display: flex;
+	gap: var(--farik-space-4);
+	align-items: flex-start;
+	padding: var(--farik-space-4);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-raised);
+}
+
+.letter img {
+	flex-shrink: 0;
+}
+
+.letter > div {
+	display: grid;
+	gap: var(--farik-space-2);
+	min-width: 0;
+}
+
+.letter p {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+/* Where the plan stands: the colour says only whether it waits on the owner or runs. */
+.state {
+	justify-self: start;
+	margin: 0;
+	padding: 0 var(--farik-space-2);
+	border: 2px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+	font-weight: 600;
+}
+
+.state[data-state="proposed"] {
+	border-color: var(--farik-color-status-waiting);
+}
+
+.state[data-state="approved"],
+.state[data-state="active"] {
+	border-color: var(--farik-color-status-working);
+}
+
+/* The owner's own decision, with their words, as the page's one quotation. */
+.decision {
+	display: grid;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-3) var(--farik-space-4);
+	border-left: 3px solid var(--farik-color-rule);
+}
+
+.decision p,
+.decision blockquote {
+	margin: 0;
+	max-width: 65ch;
+	overflow-wrap: anywhere;
+}
+
+.decision blockquote {
+	white-space: pre-wrap;
+}
+
+.allows {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+	padding-left: var(--farik-space-5);
+	max-width: 65ch;
+}
+
+.scroll {
+	overflow-x: auto;
+}
+
+.scroll:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.budget {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.budget th,
+.budget td {
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border-bottom: 1px solid var(--farik-color-rule);
+	text-align: start;
+	vertical-align: top;
+	overflow-wrap: anywhere;
+}
+
+.budget thead th {
+	color: var(--farik-color-ink-muted);
+	font-weight: 600;
+}
+
+.budget .number {
+	font-family: var(--farik-type-code-family);
+	font-variant-numeric: tabular-nums;
+	text-align: end;
+	white-space: nowrap;
+}
+
+.budget tfoot th,
+.budget tfoot td {
+	font-weight: 600;
+	border-bottom: 0;
+}
+
+.sub {
+	display: block;
+	color: var(--farik-color-ink-muted);
+}
+
+.campaign td:first-child {
+	padding-inline-start: var(--farik-space-5);
+}
+
+/* Where Farik left a campaign, beside its name: it paused it, and why. */
+.state {
+	display: block;
+	color: var(--farik-color-status-waiting);
+	font-weight: 600;
+}
+
+/* What a campaign advertises and its price, under its goal. */
+.adv,
+.price {
+	display: block;
+	margin-top: var(--farik-space-1);
+}
+
+.price[data-price="not-fixed"] {
+	color: var(--farik-color-status-waiting);
+}
+
+/* Why a price is not fixed, once, under the table. */
+.note {
+	max-width: 65ch;
+}
+
+/* The spend against the budget: the figures large, a bar under them. */
+.big {
+	margin: 0;
+	font-family: var(--farik-type-code-family);
+	font-size: var(--farik-type-heading-size);
+	font-variant-numeric: tabular-nums;
+}
+
+.meter {
+	height: var(--farik-space-2);
+	max-width: 32rem;
+	background: var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+	overflow: hidden;
+}
+
+.meter > span {
+	display: block;
+	height: 100%;
+	background: var(--farik-color-ink);
+}
+
+/* Farik cannot read the spend: said where the owner reads the spend. */
+.unread {
+	margin: 0;
+	padding: var(--farik-space-3);
+	max-width: 65ch;
+	border: 1px solid var(--farik-color-status-waiting);
+	border-radius: var(--farik-radius-control);
+}
+
+.pauses {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: var(--farik-space-2);
+}
+
+.pauses li {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-1) var(--farik-space-3);
+}
+
+.pauses time {
+	color: var(--farik-color-ink-muted);
+	white-space: nowrap;
+}
+
+/* On a phone each row stacks: its name above, then its dates and its budget. */
+@media not (min-width: 640px) {
+	.budget thead {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+	}
+
+	.budget tr {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+	}
+
+	.budget tbody td:first-child,
+	.budget tfoot th {
+		grid-column: 1 / -1;
+		border-bottom: 0;
+	}
+}
+
+.week {
+	margin: var(--farik-space-3) 0 0;
+	font-weight: 600;
+}
+
+/* The slots of a week, ruled: the day, the network, the topic, and once the plan is approved the
+post's state at the row's right end. */
+.posts {
+	display: grid;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-top: 1px solid var(--farik-color-rule);
+}
+
+.posts li {
+	display: grid;
+	grid-template-columns: 6.5rem 6rem minmax(0, 1fr);
+	gap: var(--farik-space-1) var(--farik-space-3);
+	padding: var(--farik-space-2) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+	overflow-wrap: anywhere;
+}
+
+.withState li {
+	grid-template-columns: 6.5rem 6rem minmax(0, 1fr) 9.5rem;
+}
+
+.posts time {
+	color: var(--farik-color-ink-muted);
+	font-family: var(--farik-type-code-family);
+	font-size: var(--farik-type-small-size);
+}
+
+.channel {
+	color: var(--farik-color-ink-muted);
+}
+
+/* The topic, the post's own words under it, and an earlier failure. */
+.slotMain {
+	display: grid;
+	gap: var(--farik-space-1);
+	min-width: 0;
+}
+
+/* What the agent wrote: one line, cut with an ellipsis; the page holds all of it. */
+.slotText {
+	display: block;
+	overflow: hidden;
+	color: var(--farik-color-ink-muted);
+	font-size: var(--farik-type-small-size);
+	line-height: var(--farik-type-small-line-height);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Where the post stands: the state word, and under it when or why, both at the right. */
+.slotState {
+	display: grid;
+	gap: 2px;
+	align-content: start;
+	justify-items: end;
+	color: var(--farik-color-ink-muted);
+	text-align: right;
+}
+
+.slotState strong[data-standing="sent"] {
+	color: var(--farik-color-status-done);
+}
+
+.slotState strong[data-standing="going_out"] {
+	color: var(--farik-color-status-working);
+}
+
+.slotState strong[data-standing="missed"] {
+	color: var(--farik-color-status-waiting);
+}
+
+@media not (min-width: 640px) {
+	.posts li {
+		grid-template-columns: max-content minmax(0, 1fr);
+	}
+
+	.posts li > .topic {
+		grid-column: 1 / -1;
+	}
+
+	/* Each day on a phone: the day and network with the state at the right, then the words, and
+	when or why last. */
+	.withState li {
+		grid-template-columns: max-content max-content minmax(0, 1fr);
+	}
+
+	.withState li > time,
+	.withState li > .channel {
+		grid-row: 1;
+	}
+
+	.withState .slotState {
+		display: contents;
+	}
+
+	.withState .slotState strong {
+		grid-column: 3;
+		grid-row: 1;
+		justify-self: end;
+	}
+
+	.withState .slotMain {
+		grid-column: 1 / -1;
+		grid-row: 2;
+	}
+
+	.withState .slotWhen {
+		grid-column: 1 / -1;
+		grid-row: 3;
+		text-align: left;
+	}
+
+	/* Two lines of the post's words, where there is room for them. */
+	.withState .slotText {
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		white-space: normal;
+	}
+}
+
+/* The agent's whole plan, as typed: wrapped, never cut off, never marked up. */
+.text {
+	margin: 0;
+	padding: var(--farik-space-3);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+	font:
+		var(--farik-type-code-weight) var(--farik-type-code-size) /
+		var(--farik-type-code-line-height) var(--farik-type-code-family);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.facts {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: var(--farik-space-1) var(--farik-space-4);
+	margin: 0;
+}
+
+/* A fact's term and its value are two cells of the list's grid, whatever wraps them. */
+.fact,
+.extra {
+	display: contents;
+}
+
+@media not (min-width: 1024px) {
+	.extra {
+		display: none;
+	}
+}
+
+.facts dt {
+	color: var(--farik-color-ink-muted);
+}
+
+.facts dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+/* The decision stays in view as the page scrolls: at the bottom of the screen, or, on a phone,
+just above the shell's own bar of places. */
+.bar {
+	position: sticky;
+	bottom: var(--farik-shell-bar-height, 0);
+	display: grid;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-3) var(--farik-space-4);
+	background: var(--farik-color-surface);
+	border-top: 1px solid var(--farik-color-control-border);
+}
+
+.bar p {
+	margin: 0;
+	max-width: 65ch;
+}
+
+.over {
+	margin: 0;
+	color: var(--farik-color-status-waiting);
+	font-weight: 600;
+}

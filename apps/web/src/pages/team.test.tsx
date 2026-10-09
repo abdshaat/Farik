@@ -301,6 +301,86 @@ describe("team page", () => {
 		});
 	});
 
+	it("writes_out_what_hides_text_in_an_agents_activity_line", async () => {
+		const { s } = await opened("/team");
+		const list = await screen.findByRole("list", { name: en.teamMembers });
+		const card = within(list)
+			.getByText("Kai persona")
+			.closest("li") as HTMLElement;
+		// A waiting order's line holds the seller, which the agent wrote: U+202E would reverse the
+		// words after it, so the owner reads it written out.
+		await answerQuery(s, "team.activity", {
+			activity: [
+				{
+					agent_id: "kai",
+					state: "idle",
+					line: "Waiting on you: Kai set up an order from Acme\u202e Co: 59.98 USD",
+					task_id: "FRK-21",
+				},
+			],
+		});
+		expect(
+			await within(card).findByText(
+				"Waiting on you: Kai set up an order from Acme\\u{202e} Co: 59.98 USD",
+			),
+		).toBeTruthy();
+		expect(card.textContent).not.toContain("\u202e");
+	});
+
+	it("the_team_page_adds_finance", async () => {
+		const { s } = await opened("/team");
+		const select = (await screen.findByLabelText(
+			en.teamAddRole,
+		)) as HTMLSelectElement;
+		// The Finance Specialist is offered after the Marketing Specialist, and is not suggested.
+		expect(
+			within(select)
+				.getAllByRole("option")
+				.map((option) => option.textContent),
+		).toEqual([
+			en.roleDeveloper,
+			en.roleProductManager,
+			en.roleScrumMaster,
+			en.roleArchitect,
+			en.roleDesigner,
+			en.roleMarketing,
+			"Finance Specialist",
+			"Procurement Specialist",
+		]);
+		fireEvent.change(select, { target: { value: "finance_specialist" } });
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		const team = await saved(s);
+		expect(team.agents.at(-1)).toMatchObject({
+			display_name: "Noor",
+			role: "finance_specialist",
+			avatar: "finance-specialist",
+			status: "active",
+		});
+	});
+
+	it("the_team_page_adds_procurement", async () => {
+		const { s } = await opened("/team");
+		const select = (await screen.findByLabelText(
+			en.teamAddRole,
+		)) as HTMLSelectElement;
+		// The Procurement Specialist is the last role offered, and is not suggested.
+		expect(
+			within(select)
+				.getAllByRole("option")
+				.map((option) => option.textContent)
+				.at(-1),
+		).toBe("Procurement Specialist");
+		fireEvent.change(select, { target: { value: "procurement_specialist" } });
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		const team = await saved(s);
+		expect(team.agents.at(-1)).toMatchObject({
+			display_name: "Noor",
+			role: "procurement_specialist",
+			avatar: "extra-5",
+			status: "active",
+		});
+	});
+
 	it("adds_someone_to_the_team", async () => {
 		const { s } = await opened("/team");
 		fireEvent.change(await screen.findByLabelText(en.teamAddRole), {

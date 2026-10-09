@@ -108,7 +108,56 @@
         "preview.started",
         "preview.stopped",
         "page.checked",
-        "chat_message.posted"
+        "chat_message.posted",
+        "connector.connected",
+        "connector.disconnected",
+        "tool_approval.requested",
+        "tool_approval.granted",
+        "tool_approval.refused",
+        "skill.added",
+        "skill.changed",
+        "skill.removed",
+        "skill.confirmed",
+        "marketing_plan.proposed",
+        "marketing_plan.approved",
+        "marketing_plan.returned",
+        "marketing_plan.ended",
+        "social_post.scheduled",
+        "social_post.requested",
+        "social_post.sent",
+        "social_post.stopped",
+        "social_post.missed",
+        "social_post.failed",
+        "marketing_campaign.created",
+        "marketing_budget.reached",
+        "marketing_campaign.paused",
+        "site.requested",
+        "site.approved",
+        "site.declined",
+        "site.removed",
+        "purchase_order.drafted",
+        "purchase_order.approved",
+        "purchase_order.rejected",
+        "purchase_order.placed",
+        "purchase_order.updated",
+        "purchase_order.received",
+        "purchase_order.closed",
+        "purchase_order.expired",
+        "renewal.flagged",
+        "renewal.dismissed",
+        "renewal.checked",
+        "data_pipeline.requested",
+        "data_pipeline.escalated",
+        "data_pipeline.approved",
+        "data_pipeline.declined",
+        "mailbox.connected",
+        "mailbox.disconnected",
+        "seller_message.drafted",
+        "seller_message.sent",
+        "seller_message.failed",
+        "seller_message.discarded",
+        "seller_reply.received",
+        "seller_reply.dismissed"
       ]
     },
     "eventBodyWire": {
@@ -163,7 +212,49 @@
         { "$ref": "#/$defs/previewPreparedBody" },
         { "$ref": "#/$defs/previewStartedBody" },
         { "$ref": "#/$defs/pageCheckedBody" },
-        { "$ref": "#/$defs/chatMessagePostedBody" }
+        { "$ref": "#/$defs/chatMessagePostedBody" },
+        { "$ref": "#/$defs/connectorConnectedBody" },
+        { "$ref": "#/$defs/connectorDisconnectedBody" },
+        { "$ref": "#/$defs/toolApprovalRequestedBody" },
+        { "$ref": "#/$defs/toolApprovalDecidedBody" },
+        { "$ref": "#/$defs/skillPinnedBody" },
+        { "$ref": "#/$defs/skillRemovedBody" },
+        { "$ref": "#/$defs/marketingPlanProposedBody" },
+        { "$ref": "#/$defs/marketingPlanApprovedBody" },
+        { "$ref": "#/$defs/marketingPlanReturnedBody" },
+        { "$ref": "#/$defs/marketingPlanEndedBody" },
+        { "$ref": "#/$defs/socialPostScheduledBody" },
+        { "$ref": "#/$defs/socialPostRequestedBody" },
+        { "$ref": "#/$defs/socialPostSentBody" },
+        { "$ref": "#/$defs/socialPostStoppedBody" },
+        { "$ref": "#/$defs/socialPostMissedBody" },
+        { "$ref": "#/$defs/socialPostFailedBody" },
+        { "$ref": "#/$defs/marketingCampaignCreatedBody" },
+        { "$ref": "#/$defs/marketingBudgetReachedBody" },
+        { "$ref": "#/$defs/marketingCampaignPausedBody" },
+        { "$ref": "#/$defs/siteRequestedBody" },
+        { "$ref": "#/$defs/siteDecisionBody" },
+        { "$ref": "#/$defs/purchaseOrderDraftedBody" },
+        { "$ref": "#/$defs/purchaseOrderDecisionBody" },
+        { "$ref": "#/$defs/purchaseOrderPlacedBody" },
+        { "$ref": "#/$defs/purchaseOrderUpdatedBody" },
+        { "$ref": "#/$defs/purchaseOrderReceivedBody" },
+        { "$ref": "#/$defs/purchaseOrderExpiredBody" },
+        { "$ref": "#/$defs/renewalFlaggedBody" },
+        { "$ref": "#/$defs/renewalDismissedBody" },
+        { "$ref": "#/$defs/renewalCheckedBody" },
+        { "$ref": "#/$defs/dataPipelineRequestedBody" },
+        { "$ref": "#/$defs/dataPipelineEscalatedBody" },
+        { "$ref": "#/$defs/dataPipelineApprovedBody" },
+        { "$ref": "#/$defs/dataPipelineDeclinedBody" },
+        { "$ref": "#/$defs/mailboxConnectedBody" },
+        { "$ref": "#/$defs/mailboxDisconnectedBody" },
+        { "$ref": "#/$defs/sellerMessageDraftedBody" },
+        { "$ref": "#/$defs/sellerMessageSentBody" },
+        { "$ref": "#/$defs/sellerMessageFailedBody" },
+        { "$ref": "#/$defs/sellerMessageDiscardedBody" },
+        { "$ref": "#/$defs/sellerReplyReceivedBody" },
+        { "$ref": "#/$defs/sellerReplyDismissedBody" }
       ]
     },
     "contractSummary": {
@@ -185,14 +276,15 @@
     },
     "taskCreatedBody": {
       "title": "Task Created Body",
-      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once.",
+      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once. raises names the marketing plan whose budget the request raises (docs/SPEC.md 6.7; ADR 0042, step 08g): such a request skips the sprint queue and is worked on at once, outside any sprint (ADR 0028's exception).",
       "type": "object",
       "additionalProperties": false,
       "required": ["summary", "created_by"],
       "properties": {
         "summary": { "$ref": "#/$defs/contractSummary" },
         "created_by": { "type": "string", "description": "The agent id that filed the request, or human." },
-        "from_chat_message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+        "from_chat_message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "raises": { "$ref": "#/$defs/marketingPlanId" }
       }
     },
     "requestTriagedBody": {
@@ -367,7 +459,7 @@
     },
     "taskTransitionedBody": {
       "title": "Task Transitioned Body",
-      "description": "The governor moved a contract (docs/SPEC.md section 5.2). requested_by is the agent id that asked, or human, or governor; effects are what the decision recorded with the move; assignee, reviewer, and iteration are the contract's after it; blocker, blocker_resolution, and rejection are the evidence the move was judged on, when the requester brought any; reason is the human's words for a move they asked for.",
+      "description": "The governor moved a contract (docs/SPEC.md section 5.2). requested_by is the agent id that asked, or human, or governor; effects are what the decision recorded with the move; assignee, reviewer, and iteration are the contract's after it; blocker, blocker_resolution, and rejection are the evidence the move was judged on, when the requester brought any; reason is the human's words for a move they asked for; changed, on the move of a task in a private folder into accepted (docs/SPEC.md 5.4, 6.6), is the files the task changed in its folder, as paths in it, so that its page keeps them whatever later tasks change, and is absent from every other move and from a log written before it existed.",
       "type": "object",
       "additionalProperties": false,
       "required": ["from", "to", "actor", "requested_by", "gate", "effects", "iteration"],
@@ -379,7 +471,7 @@
         "gate": { "$ref": "#/$defs/gateId" },
         "effects": {
           "type": "array",
-          "items": { "type": "string", "enum": ["increment_iteration", "raise_escalation", "reset_blocker", "stamp_blocked_at"] }
+          "items": { "type": "string", "enum": ["increment_iteration", "raise_escalation", "reset_blocker", "stamp_blocked_at", "nothing_to_integrate"] }
         },
         "assignee": { "type": "string" },
         "reviewer": { "type": "string" },
@@ -387,7 +479,8 @@
         "blocker": { "$ref": "#/$defs/blockerWire" },
         "blocker_resolution": { "type": "string" },
         "rejection": { "$ref": "#/$defs/rejectionWire" },
-        "reason": { "type": "string" }
+        "reason": { "type": "string" },
+        "changed": { "type": ["array", "null"], "items": { "type": "string" } }
       }
     },
     "transitionRefusedBody": {
@@ -837,6 +930,747 @@
         "screenshot": { "type": "string", "minLength": 1 }
       }
     },
+    "connectorConnectedBody": {
+      "title": "Connector Connected Body",
+      "description": "The human gave the agent agent the custom MCP server server, or connected it again (docs/SPEC.md 5.6, 6.7; ADR 0030): how it is reached, the names of the keys it is given, the label of each of its tools, and spec_sha256, the hash of that definition kept beside the keys on this machine. No key's value is ever here. The envelope names no agent: the human acted, and the agent did no work.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "server", "transport", "credential_keys", "tools", "spec_sha256"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "server": { "type": "string", "minLength": 1 },
+        "issuer": { "type": "string", "minLength": 1, "description": "Who signed the agent in, when it signed in to the service instead of being given keys (ADR 0033). No token is ever here." },
+        "transport": { "type": "string", "enum": ["stdio", "http"] },
+        "credential_keys": { "type": "array", "items": { "type": "string" } },
+        "tools": { "type": "object", "additionalProperties": { "$ref": "#/$defs/connectorTag" } },
+        "allowances": { "type": "object", "description": "A kit connector's allowances when it has any (ADR 0037): each tool to the calls each period its agent makes without asking, 0 to 1000.", "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 1000 } },
+        "spec_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "connectorDisconnectedBody": {
+      "title": "Connector Disconnected Body",
+      "description": "The human took the custom MCP server server away from the agent agent, and its keys were deleted (docs/SPEC.md 6.7; ADR 0030).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "server"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "server": { "type": "string", "minLength": 1 }
+      }
+    },
+    "toolApprovalRequestedBody": {
+      "title": "Tool Approval Requested Body",
+      "description": "An agent's session called a connector's tool tagged external_effect with no grant of the human's for it, so the call was denied and waits for the human like a question (docs/SPEC.md 5.6, 5.7; ADR 0031). The event's sequence number is the approval's id. input is the call's whole input as compact JSON, never cut, so the human sees all of what they allow; input_sha256 is the sha256 of its canonical JSON, object keys sorted at every depth, which a grant binds. The envelope names the session, the agent, and the task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server", "tool", "input", "input_sha256"],
+      "properties": {
+        "server": { "type": "string", "minLength": 1 },
+        "tool": { "type": "string", "minLength": 1 },
+        "input": { "type": "string" },
+        "input_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "toolApprovalDecidedBody": {
+      "title": "Tool Approval Decided Body",
+      "description": "The human allowed (tool_approval.granted) or refused (tool_approval.refused) the call an agent asked about (docs/SPEC.md 5.7; ADR 0031): approval is the sequence number of its tool_approval.requested, whose task is on this event's envelope too, and note is what the human said, absent when they said nothing. A grant allows one later call, by the asking agent's next session about the task, with the same server, tool, and input_sha256. Only the human decides: the envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval"],
+      "properties": {
+        "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "note": { "type": "string" }
+      }
+    },
+    "skillPinnedBody": {
+      "title": "Skill Pinned Body",
+      "description": "The human added a skill (skill.added), saved a changed one (skill.changed) or confirmed one on this computer (skill.confirmed) (docs/SPEC.md 6.7; ADR 0034): level is team or agent, agent names the agent for level agent and is absent for team, name is the skill's, and sha256 is skill_sha256 of its folder, the hash the person read and that the team file now pins. The envelope names no agent: the human acted. These events stay in this machine's log and a skill loads only when the newest of them for it carries its pin.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name", "sha256"],
+      "properties": {
+        "level": { "type": "string", "enum": ["team", "agent"] },
+        "agent": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "skillRemovedBody": {
+      "title": "Skill Removed Body",
+      "description": "The human removed a skill and its pin (docs/SPEC.md 6.7; ADR 0034): level, agent (for level agent) and name as in skill.added. A skill.removed after the newest skill.added, skill.changed or skill.confirmed for a skill means it is not confirmed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name"],
+      "properties": {
+        "level": { "type": "string", "enum": ["team", "agent"] },
+        "agent": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "marketingPlanId": {
+      "type": "string",
+      "pattern": "^MP-[0-9]{1,6}$",
+      "description": "A marketing plan's id, MP-<n>: one more than the highest the log and the project's plan files hold."
+    },
+    "marketingPlanAmount": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,2})?$",
+      "description": "An amount of money in the plan's currency as a decimal string, at most two decimals. Compared in hundredths, never as a float."
+    },
+    "marketingPlanBudget": {
+      "title": "Marketing Plan Budget",
+      "description": "What a plan may spend: total in all, and google_ads of it on Google Ads.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "google_ads"],
+      "properties": {
+        "total": { "$ref": "#/$defs/marketingPlanAmount" },
+        "google_ads": { "$ref": "#/$defs/marketingPlanAmount" }
+      }
+    },
+    "marketingPlanCampaign": {
+      "title": "Marketing Plan Campaign",
+      "description": "One paid campaign of a plan: key is unique across the plan's campaigns and posts, and its dates fall inside the plan's. advertises is what the campaign advertises, the product, service or offer, 3 to 200 characters (docs/SPEC.md 6.5; ADR 0042, 2026-10-07); it is optional because a plan proposed before step 08g has none, and reads back empty.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "channel", "name", "goal", "budget", "starts_on", "ends_on"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 },
+        "channel": { "type": "string", "enum": ["google_ads"] },
+        "name": { "type": "string" },
+        "goal": { "type": "string" },
+        "advertises": { "type": "string" },
+        "budget": { "$ref": "#/$defs/marketingPlanAmount" },
+        "starts_on": { "type": "string", "format": "date" },
+        "ends_on": { "type": "string", "format": "date" }
+      }
+    },
+    "marketingPlanPost": {
+      "title": "Marketing Plan Post",
+      "description": "One post slot of a plan: a channel, a day and a topic. key is unique across the plan's campaigns and posts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "channel", "on", "topic"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 },
+        "channel": {
+          "type": "string",
+          "enum": ["instagram", "x", "facebook", "linkedin", "threads", "bluesky", "tiktok", "pinterest", "youtube", "google_business", "mastodon"]
+        },
+        "on": { "type": "string", "format": "date" },
+        "topic": { "type": "string" }
+      }
+    },
+    "marketingPlanProposedBody": {
+      "title": "Marketing Plan Proposed Body",
+      "description": "The Marketing Specialist proposed a marketing plan through farik_propose_marketing_plan (docs/SPEC.md 6.5; ADR 0042): plan is its id, MP-<n>; text is the plan in full, which Farik also wrote to docs/marketing/plans/<plan>.md in the task's worktree; starts_on and ends_on are UTC dates, at most 92 days apart, both counted; budget.google_ads is at most budget.total and the campaigns' budgets add up to at most budget.google_ads; google_ads_account is present exactly when campaigns is not empty; replaces names an approved plan this one supersedes. The envelope names the task, the agent and the session; the task waits on the owner until a marketing_plan.approved or marketing_plan.returned of the plan.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "title", "summary", "text", "starts_on", "ends_on", "currency", "budget", "campaigns", "posts", "measures", "proposed_by"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "text": { "type": "string" },
+        "starts_on": { "type": "string", "format": "date" },
+        "ends_on": { "type": "string", "format": "date" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "budget": { "$ref": "#/$defs/marketingPlanBudget" },
+        "campaigns": { "type": "array", "maxItems": 10, "items": { "$ref": "#/$defs/marketingPlanCampaign" } },
+        "posts": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/marketingPlanPost" } },
+        "measures": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "type": "string" } },
+        "google_ads_account": { "type": "string", "pattern": "^[0-9]{3}-[0-9]{3}-[0-9]{4}$" },
+        "replaces": { "$ref": "#/$defs/marketingPlanId" },
+        "proposed_by": { "type": "string" }
+      }
+    },
+    "marketingPlanApprovedBody": {
+      "title": "Marketing Plan Approved Body",
+      "description": "The owner approved a marketing plan (docs/SPEC.md 6.5; ADR 0042): plan is its id, and note is what the owner added, empty when they added nothing. note is always present, so that this body is never also a valid design_plan.proposed body, whose only property is plan. The envelope names the proposing task and no agent and no session: only the owner decides, under ask and auto alike.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "note"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "note": { "type": "string" }
+      }
+    },
+    "marketingPlanReturnedBody": {
+      "title": "Marketing Plan Returned Body",
+      "description": "The owner sent a marketing plan back (docs/SPEC.md 6.5; ADR 0042): reason is the owner's own words, which the task's next session reads as the owner's, not as untrusted text. The envelope names the proposing task and no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "reason"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "reason": { "type": "string" }
+      }
+    },
+    "marketingPlanEndedBody": {
+      "title": "Marketing Plan Ended Body",
+      "description": "An approved marketing plan ended (docs/SPEC.md 6.5; ADR 0042): why is replaced (a newer approved plan took its place, named by replaced_by), by_owner (the owner ended it, with note when they said why) or expired (its ends_on passed). About no one contract, so the envelope names no task, and no agent and no session: Farik or the owner ended it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "why"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "why": { "type": "string", "enum": ["replaced", "by_owner", "expired"] },
+        "replaced_by": { "$ref": "#/$defs/marketingPlanId" },
+        "note": { "type": "string" }
+      }
+    },
+    "socialPostChannel": {
+      "type": "string",
+      "enum": ["instagram", "x", "facebook", "linkedin", "threads", "bluesky", "tiktok", "pinterest", "youtube", "google_business", "mastodon"],
+      "description": "The network a post is for: one of the eleven of Buffer's that a marketing plan's post slots name."
+    },
+    "socialPostNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "A post's number: the sequence number of the event that made it, social_post.scheduled when the agent scheduled it in the plan, else social_post.requested."
+    },
+    "socialPostTime": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$",
+      "description": "When a post goes out, RFC 3339 with the offset the agent wrote it in, which is kept: the slot's day is the date in that offset."
+    },
+    "socialPostMedia": {
+      "title": "Social Post Media",
+      "description": "One picture or clip of a post: the https address Buffer fetches it from, and whether it is an image or a video, as the agent says and Farik checks against what the address answers.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "kind"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "kind": { "type": "string", "enum": ["image", "video"] }
+      }
+    },
+    "socialPostDetails": {
+      "title": "Social Post Details",
+      "description": "What a post on YouTube or Pinterest needs besides its text: a YouTube video's title and category (one of Buffer's fifteen), or the Pinterest board's id in Buffer.",
+      "oneOf": [
+        {
+          "title": "Social Post Youtube Details",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["title", "category_id"],
+          "properties": {
+            "title": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "category_id": {
+              "type": "string",
+              "enum": ["1", "2", "10", "15", "17", "19", "20", "22", "23", "24", "25", "26", "27", "28", "29"]
+            }
+          }
+        },
+        {
+          "title": "Social Post Pinterest Details",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["board"],
+          "properties": {
+            "board": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" }
+          }
+        }
+      ]
+    },
+    "socialPostScheduledBody": {
+      "title": "Social Post Scheduled Body",
+      "description": "A post is going out (docs/SPEC.md 6.5; ADR 0042). approved_by plan: the Marketing Specialist scheduled it with farik_schedule_post into the slot slot of the active plan plan, at least three hours ahead; the envelope names its task, agent and session, and the event's sequence number is the post's number. approved_by owner: the owner allowed a post that was requested; post is the request's number, and the envelope names the request's task and no agent and no session. channel is the network and buffer_channel Buffer's id for the channel; text is the post's words; media is up to four pictures or clips in order; at is when it goes out, with its offset; details is present on YouTube and Pinterest only. Farik hands it to Buffer an hour before at, or at once when the owner allowed it later than that.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "buffer_channel", "text", "media", "at", "approved_by"],
+      "properties": {
+        "post": { "$ref": "#/$defs/socialPostNumber" },
+        "channel": { "$ref": "#/$defs/socialPostChannel" },
+        "buffer_channel": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "text": { "type": "string", "minLength": 1 },
+        "media": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/socialPostMedia" } },
+        "at": { "$ref": "#/$defs/socialPostTime" },
+        "details": { "$ref": "#/$defs/socialPostDetails" },
+        "approved_by": { "type": "string", "enum": ["plan", "owner"] },
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "slot": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 }
+      }
+    },
+    "socialPostRequestedBody": {
+      "title": "Social Post Requested Body",
+      "description": "The Marketing Specialist wrote a post that is not in the active plan, with farik_schedule_post and no slot (docs/SPEC.md 6.5; ADR 0042). It waits for the owner, who allows it (social_post.scheduled with approved_by owner and post) or does not (social_post.stopped by declined). The event's sequence number is the post's number; the envelope names its task, agent and session, and the task does not wait. The fields are those of social_post.scheduled.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "buffer_channel", "text", "media", "at"],
+      "properties": {
+        "channel": { "$ref": "#/$defs/socialPostChannel" },
+        "buffer_channel": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "text": { "type": "string", "minLength": 1 },
+        "media": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/socialPostMedia" } },
+        "at": { "$ref": "#/$defs/socialPostTime" },
+        "details": { "$ref": "#/$defs/socialPostDetails" }
+      }
+    },
+    "socialPostSentBody": {
+      "title": "Social Post Sent Body",
+      "description": "Farik handed a scheduled post to Buffer with its own create_post call (docs/SPEC.md 6.5; ADR 0042), an hour before it goes out: buffer_post is Buffer's id for it. About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post", "buffer_post"],
+      "properties": {
+        "post": { "$ref": "#/$defs/socialPostNumber" },
+        "buffer_post": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "socialPostStoppedBody": {
+      "title": "Social Post Stopped Body",
+      "description": "A post will not go out (docs/SPEC.md 6.5; ADR 0042). by owner: the owner stopped a scheduled post, with taken_back true when Farik had given it to Buffer and took it back with delete_post; by declined: the owner did not allow a requested post, with note when they said why; by plan_ended: the plan it was in ended and it had not reached Buffer. note is the owner's own words. About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post", "by"],
+      "properties": {
+        "post": { "$ref": "#/$defs/socialPostNumber" },
+        "by": { "type": "string", "enum": ["owner", "declined", "plan_ended"] },
+        "taken_back": { "type": "boolean" },
+        "note": { "type": "string" }
+      }
+    },
+    "socialPostMissedBody": {
+      "title": "Social Post Missed Body",
+      "description": "A post did not go out because its hand-over time passed with the post less than five minutes from its time (docs/SPEC.md 6.5; ADR 0042): why is not_running (Farik was not running), paused (the owner had paused the team) or undecided (a requested post the owner had not decided by its time). About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post", "why"],
+      "properties": {
+        "post": { "$ref": "#/$defs/socialPostNumber" },
+        "why": { "type": "string", "enum": ["not_running", "paused", "undecided"] }
+      }
+    },
+    "socialPostFailedBody": {
+      "title": "Social Post Failed Body",
+      "description": "Farik could not give a post to Buffer (docs/SPEC.md 6.5; ADR 0042): reason is Farik's sentence, then Buffer's own words, cut, which are untrusted text. It is not tried again. About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post", "reason"],
+      "properties": {
+        "post": { "$ref": "#/$defs/socialPostNumber" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "marketingCampaignCreatedBody": {
+      "title": "Marketing Campaign Created Body",
+      "description": "Farik made a Google Ads campaign for a plan campaign of the active marketing plan, paused, on a session's call of create_search_campaign (docs/SPEC.md 6.7; ADR 0042): plan is the active plan, key the plan campaign's, account the ad account as NNN-NNN-NNNN, campaign and budget the resource names Google gave, budget_kind whether the budget is a total one for the campaign's run or a daily one, and amount its figure in the plan's currency. The envelope names the agent, the session and the task that asked, and the event is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "key", "account", "campaign", "budget", "budget_kind", "amount"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "key": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 },
+        "account": { "type": "string", "pattern": "^[0-9]{3}-[0-9]{3}-[0-9]{4}$" },
+        "campaign": { "type": "string", "pattern": "^customers/[0-9]{10}/campaigns/[0-9]{1,20}$" },
+        "budget": { "type": "string", "pattern": "^customers/[0-9]{10}/campaignBudgets/[0-9]{1,20}$" },
+        "budget_kind": { "type": "string", "enum": ["total", "daily"] },
+        "amount": { "$ref": "#/$defs/marketingPlanAmount" }
+      }
+    },
+    "marketingBudgetReachedBody": {
+      "title": "Marketing Budget Reached Body",
+      "description": "A budget of the active marketing plan was reached, and Farik paused the campaigns concerned itself (docs/SPEC.md 6.7; ADR 0042, step 08g): plan is the active plan; scope is campaign (a plan campaign's own budget, named by key) or plan (the plan's Google Ads budget); spent and budget are what Google reported against what the plan allows, in currency; paused lists the resource names of the campaigns Google accepted a pause for or reported already paused, and failed carries the first refusal's words, cut at 300 characters, when a pause was refused. Recorded by Farik: the envelope names no agent, no session and no task, and the event is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "scope", "spent", "budget", "currency", "paused"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "scope": { "type": "string", "enum": ["campaign", "plan"] },
+        "key": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 },
+        "spent": { "$ref": "#/$defs/marketingPlanAmount" },
+        "budget": { "$ref": "#/$defs/marketingPlanAmount" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "paused": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "pattern": "^customers/[0-9]{10}/campaigns/[0-9]{1,20}$" }
+        },
+        "failed": { "type": "string", "maxLength": 300 }
+      }
+    },
+    "marketingCampaignPausedBody": {
+      "title": "Marketing Campaign Paused Body",
+      "description": "Farik paused a Google Ads campaign it made, on its own and not on an agent's call (docs/SPEC.md 6.7; ADR 0042, step 08g): plan is the plan the campaign was made under, key its plan campaign's key, campaign its resource name, and why is plan_ended (no active plan carries it), budget_reached (a later read found it running after its cap) or connection_removed (the owner removed Google Ads). Recorded by Farik: the envelope names no agent, no session and no task, and the event is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "key", "campaign", "why"],
+      "properties": {
+        "plan": { "$ref": "#/$defs/marketingPlanId" },
+        "key": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 },
+        "campaign": { "type": "string", "pattern": "^customers/[0-9]{10}/campaigns/[0-9]{1,20}$" },
+        "why": { "type": "string", "enum": ["plan_ended", "budget_reached", "connection_removed"] }
+      }
+    },
+    "siteRequestedBody": {
+      "title": "Site Requested Body",
+      "description": "The Procurement Specialist asked to read a site it may not yet (docs/SPEC.md 6.10; ADR 0039): host is the site in its ASCII form, as site_of gives it, url the first page it wants exactly as the agent wrote it (untrusted text, shown to the owner as text, never a link), and why its reason in its own words (untrusted), on one line. The event's sequence number is the request's number; the envelope names its task, agent and session, and the task waits for the owner.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "url", "why"],
+      "properties": {
+        "host": { "type": "string", "minLength": 1, "maxLength": 253 },
+        "url": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "why": { "type": "string", "minLength": 1, "maxLength": 300, "pattern": "^[^\\r\\n]+$" }
+      }
+    },
+    "siteDecisionBody": {
+      "title": "Site Decision Body",
+      "description": "What the owner decided about a site (docs/SPEC.md 6.10; ADR 0039), the body of site.approved, site.declined and site.removed: host is the site in its ASCII form; request, the sequence number of a site.requested, is on an approval that answers a request and on every decline, whose task is on the envelope too; note is the owner's own words, which the task's next session reads as the owner's. A site the owner added unasked is a site.approved of its host alone, with no task; a removal, of one the owner allowed or of one of Farik's, names its host alone, with no task. The three kinds share one shape since `{ host }`, `{ host, request }` and `{ request, host, note }` fit more than one of them, and the schema's choice of bodies must match exactly one; the reader holds each kind to its own: site.declined names its request, site.removed names its host alone, and a note goes with a request. The envelope names no agent and no session: only the owner decides.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host"],
+      "properties": {
+        "host": { "type": "string", "minLength": 1, "maxLength": 253 },
+        "request": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "purchaseOrderNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615,
+      "description": "A purchase order's number, the n of PO-n: one more than the highest the log and the orders folder hold."
+    },
+    "purchaseOrderAmount": {
+      "type": "string",
+      "pattern": "^(([0-9]|[1-9][0-9]{1,6})\\.[0-9]{2}|10000000\\.00)$",
+      "description": "An amount of money in the order's currency as a decimal string with exactly two decimals, from 0.00 to 10000000.00, which is the most an order totals. Compared in hundredths, never as a float."
+    },
+    "purchaseOrderCurrency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "A currency, three capital letters."
+    },
+    "purchaseOrderLine": {
+      "title": "Purchase Order Line",
+      "description": "One line of a purchase order, as the agent wrote it, with the line's total Farik computed from the quantity and the unit price in hundredths. Untrusted text: item and unit are shown as text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item", "quantity", "unit", "unit_price", "line_total"],
+      "properties": {
+        "item": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
+        "quantity": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "unit": { "type": "string", "maxLength": 20, "pattern": "^[^\\r\\n]*$" },
+        "unit_price": { "$ref": "#/$defs/purchaseOrderAmount" },
+        "line_total": { "$ref": "#/$defs/purchaseOrderAmount" }
+      }
+    },
+    "purchaseOrderStatus": {
+      "title": "Purchase Order Status",
+      "description": "What the agent learned from a follow-up about a placed order: the seller is making or packing it (preparing), it is on its way (shipped), it will be late (delayed, with the reason and the day it is expected) or something is wrong (problem: out of stock, a payment refused, cancelled by the seller). Never placed, received, paid, confirmed, delivered or cancelled: only the owner takes those steps.",
+      "type": "string",
+      "enum": ["preparing", "shipped", "delayed", "problem"]
+    },
+    "purchaseOrderDraftedBody": {
+      "title": "Purchase Order Drafted Body",
+      "description": "The Procurement Specialist set up an order for the owner to approve or reject, and wrote its workbook, orders/PO-<order>.xlsx, in its private folder (docs/SPEC.md 6.10; ADR 0039). The agent suggests an order and never places, pays for, confirms or cancels one. order is its number; seller, seller_contact, each line's item and unit, delivery, terms, url, evaluation and why are the agent's own words (untrusted, shown as text); url is the seller's page, on an approved site, or empty for a seller with no page; evaluation is the comparison it rests on, evaluations/<name>.md; total is the exact sum of the lines. The envelope names the task, agent and session. The order waits for the owner alone and holds no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "seller", "seller_contact", "lines", "currency", "period", "total", "delivery", "terms", "url", "evaluation", "why"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "seller": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[^\\r\\n]+$" },
+        "seller_contact": { "type": "string", "maxLength": 200, "pattern": "^[^\\r\\n]*$" },
+        "lines": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/purchaseOrderLine" } },
+        "currency": { "$ref": "#/$defs/purchaseOrderCurrency" },
+        "period": { "type": "string", "enum": ["once", "month", "year"] },
+        "total": { "$ref": "#/$defs/purchaseOrderAmount" },
+        "delivery": { "type": "string", "maxLength": 600 },
+        "terms": { "type": "string", "maxLength": 600 },
+        "url": { "type": "string", "maxLength": 2000 },
+        "evaluation": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "why": { "type": "string", "minLength": 20, "maxLength": 600 }
+      }
+    },
+    "purchaseOrderDecisionBody": {
+      "title": "Purchase Order Decision Body",
+      "description": "The owner approved an order (purchase_order.approved: they will place it themselves), did not (purchase_order.rejected), or closed a placed one that will not come (purchase_order.closed: the seller cancelled or refunded it, or it was lost) (docs/SPEC.md 6.10; ADR 0039). note is the owner's own words, empty when they said nothing; it is always present, so that this body is never also an expiry's, which has the order alone. The three kinds share one shape; the envelope names the order's task and no agent and no session: only the owner decides.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "note"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "purchaseOrderPlacedBody": {
+      "title": "Purchase Order Placed Body",
+      "description": "The owner placed an approved order and paid for it themselves, on placed_on, and marked it placed (docs/SPEC.md 6.10; ADR 0039). paid is what they paid, if they knew, and currency its currency, the order's when paid is given alone. The envelope names the order's task and no agent and no session: no Farik tool records a placing or a payment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "placed_on"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "placed_on": { "type": "string", "format": "date" },
+        "paid": { "$ref": "#/$defs/purchaseOrderAmount" },
+        "currency": { "$ref": "#/$defs/purchaseOrderCurrency" }
+      }
+    },
+    "purchaseOrderUpdatedBody": {
+      "title": "Purchase Order Updated Body",
+      "description": "What a placed order's follow-up learned, or the owner's correction of it (docs/SPEC.md 6.10; ADR 0039): the agent's, when the envelope names the order's own agent, and the owner's, when it names none. status is one of four; note is the reason or what is known, on one line, required for delayed and problem, and expected_on the day the seller expects the order, required for delayed. The latest counts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "status", "note"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "status": { "$ref": "#/$defs/purchaseOrderStatus" },
+        "note": { "type": "string", "maxLength": 300, "pattern": "^[^\\r\\n]*$" },
+        "expected_on": { "type": "string", "format": "date" }
+      }
+    },
+    "purchaseOrderReceivedBody": {
+      "title": "Purchase Order Received Body",
+      "description": "The owner marked a placed order received, on received_on (docs/SPEC.md 6.10; ADR 0039). paid and currency are what they paid, if given here (the latest paid given, at placing or receiving, is what was paid), and renews_on the day a subscription or anything paid for again renews. The envelope names the order's task and no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "received_on"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "received_on": { "type": "string", "format": "date" },
+        "paid": { "$ref": "#/$defs/purchaseOrderAmount" },
+        "currency": { "$ref": "#/$defs/purchaseOrderCurrency" },
+        "renews_on": { "type": "string", "format": "date" }
+      }
+    },
+    "purchaseOrderExpiredBody": {
+      "title": "Purchase Order Expired Body",
+      "description": "Farik closed an order by itself (docs/SPEC.md 6.10; ADR 0039): one not decided within 30 days of its drafting, or approved and not marked placed within 30 days of its approval. A placed order never expires. The envelope names the order's task and no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order"],
+      "properties": {
+        "order": { "$ref": "#/$defs/purchaseOrderNumber" }
+      }
+    },
+    "renewalFlaggedBody": {
+      "title": "Renewal Flagged Body",
+      "description": "Farik read the vendors register and found a renewal whose decision date is two weeks off or nearer (docs/SPEC.md 6.10; ADR 0039). The event's sequence number is the renewal's number. vendor is the register's own text (untrusted, on one line, 1 to 100 characters), renews_on the day it renews and decide_by the last day to change or cancel it. About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vendor", "renews_on", "decide_by"],
+      "properties": {
+        "vendor": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[^\\r\\n]+$" },
+        "renews_on": { "type": "string", "format": "date" },
+        "decide_by": { "type": "string", "format": "date" }
+      }
+    },
+    "renewalDismissedBody": {
+      "title": "Renewal Dismissed Body",
+      "description": "The owner dismissed a renewal, or asked the team to review it and so dismissed it (docs/SPEC.md 6.10; ADR 0039): renewal is the sequence number of its renewal.flagged. The envelope names no task, no agent and no session: only the owner dismisses.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["renewal"],
+      "properties": {
+        "renewal": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "renewalCheckedBody": {
+      "title": "Renewal Checked Body",
+      "description": "Farik's daily check of the vendors register ran (docs/SPEC.md 6.10; ADR 0039): due is how many renewals it flagged, unreadable how many rows held a date or a notice or a vendor it could not read. Recorded once per UTC day, which is how the check knows it ran. About no one contract, so the envelope names no task, no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["due", "unreadable"],
+      "properties": {
+        "due": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "unreadable": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      }
+    },
+    "dataPipelineNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615,
+      "description": "A data pipeline request's number: the sequence number of its data_pipeline.requested."
+    },
+    "dataPipelineCost": {
+      "type": "string",
+      "enum": ["free", "paid", "unknown"],
+      "description": "What a data source costs to use, as the agent says on asking: free only when the source's own page says so, paid, or unknown."
+    },
+    "dataPipelineDecidedBy": {
+      "type": "string",
+      "enum": ["product_manager", "human"],
+      "description": "Who decided a request: the Product Manager, in the session that was asked to, or the owner. Under auto (phase 9 step 01) a third word joins them."
+    },
+    "dataPipelineRequestedBody": {
+      "title": "Data Pipeline Requested Body",
+      "description": "The Procurement Specialist asked for a source of prices or provider data it lacks (docs/SPEC.md 6.10; ADR 0039): name the source in 1 to 100 characters on one line, what it would give, source_url the source's own page exactly as the agent wrote it (an address site_of accepts), and why the recommendation would change, each of the three 20 to 600 characters (what and why may hold line breaks). All of them are the agent's words, untrusted, shown as text. cost is free only when the source's own page says so; needs_account and sends_project_data are the agent's answers, which decide who may approve (docs/SPEC.md 6.10). The event's sequence number is the request's number; the envelope names its task, agent and session, and the task goes on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "what", "source_url", "why", "cost", "needs_account", "sends_project_data"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[^\\r\\n]+$" },
+        "what": { "type": "string", "minLength": 20, "maxLength": 600 },
+        "source_url": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "why": { "type": "string", "minLength": 20, "maxLength": 600 },
+        "cost": { "$ref": "#/$defs/dataPipelineCost" },
+        "needs_account": { "type": "boolean" },
+        "sends_project_data": { "type": "boolean" }
+      }
+    },
+    "dataPipelineEscalatedBody": {
+      "title": "Data Pipeline Escalated Body",
+      "description": "A request goes to the owner (docs/SPEC.md 6.10; ADR 0039): the Product Manager passed it on, with its reason on one line of its own words (the envelope names the Product Manager and its decision session), or Farik did after three decision sessions ended without a word (the reason is Farik's sentence and the envelope names no agent and no session). pipeline is the request's number. About the request and no task of its own.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pipeline", "reason"],
+      "properties": {
+        "pipeline": { "$ref": "#/$defs/dataPipelineNumber" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 600 }
+      }
+    },
+    "dataPipelineApprovedBody": {
+      "title": "Data Pipeline Approved Body",
+      "description": "A request was approved, and the team was asked to set the source up (docs/SPEC.md 6.10; ADR 0039): by the Product Manager, from the decision session of this request, or by the owner, whose envelope names no agent and no session. reason is the Product Manager's reason or the owner's note, empty when the owner said nothing; request is the id of the ordinary request that was filed, the only thing an approval does. About the request and no task of its own.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pipeline", "by", "reason", "request"],
+      "properties": {
+        "pipeline": { "$ref": "#/$defs/dataPipelineNumber" },
+        "by": { "$ref": "#/$defs/dataPipelineDecidedBy" },
+        "reason": { "type": "string", "maxLength": 600 },
+        "request": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+      }
+    },
+    "dataPipelineDeclinedBody": {
+      "title": "Data Pipeline Declined Body",
+      "description": "A request was declined, and nothing was filed (docs/SPEC.md 6.10; ADR 0039): by the Product Manager, from the decision session of this request, or by the owner, whose envelope names no agent and no session. reason is the Product Manager's reason or the owner's note, empty when the owner said nothing. About the request and no task of its own.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pipeline", "by", "reason"],
+      "properties": {
+        "pipeline": { "$ref": "#/$defs/dataPipelineNumber" },
+        "by": { "$ref": "#/$defs/dataPipelineDecidedBy" },
+        "reason": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "mailboxPurpose": {
+      "type": "string",
+      "enum": ["procurement"],
+      "description": "What a mailbox is for. Only the Procurement Specialist's before phase 15, whose receipts intake adds a second."
+    },
+    "sellerMessageNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615,
+      "description": "A message to a seller: one more than the highest number among the log's and the files' (mail/out/<n>.txt), taken under a lock."
+    },
+    "sellerReplyNumber": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615,
+      "description": "A reply from a seller: one more than the highest number among the log's and the files'."
+    },
+    "mailboxConnectedBody": {
+      "title": "Mailbox Connected Body",
+      "description": "The owner connected a mailbox for a purpose and Farik logged in to both of its servers (docs/SPEC.md 6.6, 6.10; ADR 0039). address is the one mail is sent from and read for. The password is in the OS keychain, never here. The envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "address"],
+      "properties": {
+        "purpose": { "$ref": "#/$defs/mailboxPurpose" },
+        "address": { "type": "string", "minLength": 3, "maxLength": 254, "pattern": "^[^\\s\\u0000-\\u001f]+$" }
+      }
+    },
+    "mailboxDisconnectedBody": {
+      "title": "Mailbox Disconnected Body",
+      "description": "The owner disconnected a mailbox: Farik forgot its password and stopped reading it; the messages and replies kept stay (docs/SPEC.md 6.6, 6.10). The envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose"],
+      "properties": {
+        "purpose": { "$ref": "#/$defs/mailboxPurpose" }
+      }
+    },
+    "sellerMessageDraftedBody": {
+      "title": "Seller Message Drafted Body",
+      "description": "The Procurement Specialist drafted a message to a seller or a maker, written to mail/out/<message>.txt in its private folder (docs/SPEC.md 6.10; ADR 0039). Nothing is sent: only the owner's press sends it. seller, to, subject and the file's body are the agent's own words (untrusted, shown as text); to is one address; purpose is quote_request, question (a follow-up when it names a placed order) or purchase_order, which names its order and is sent only with that order's approval; sha256 is the draft file's. The envelope names the task, agent and session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "seller", "to", "subject", "purpose", "sha256"],
+      "properties": {
+        "message": { "$ref": "#/$defs/sellerMessageNumber" },
+        "seller": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[^\\r\\n]+$" },
+        "to": { "type": "string", "minLength": 3, "maxLength": 254, "pattern": "^[^\\s\\u0000-\\u001f]+$" },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
+        "purpose": { "type": "string", "enum": ["quote_request", "question", "purchase_order"] },
+        "purchase_order": { "$ref": "#/$defs/purchaseOrderNumber" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "sellerMessageSentBody": {
+      "title": "Seller Message Sent Body",
+      "description": "Farik sent a message to a seller because the owner pressed Send, or Approve and send for an order's (docs/SPEC.md 6.10; ADR 0039). message_id is the Message-ID it went out with, without angle brackets; sha256 is that of mail/out/<message>.sent.txt, the subject line, a blank line and exactly the text sent; edited is true when the owner changed the subject or the body. The envelope names no agent and no session: no Farik tool records a send.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "message_id", "sha256", "edited"],
+      "properties": {
+        "message": { "$ref": "#/$defs/sellerMessageNumber" },
+        "message_id": { "type": "string", "minLength": 3, "maxLength": 300, "pattern": "^[^\\s<>]+@[^\\s<>]+$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "edited": { "type": "boolean" }
+      }
+    },
+    "sellerMessageFailedBody": {
+      "title": "Seller Message Failed Body",
+      "description": "A mail server refused a message the owner pressed Send on; it waits to be tried again (docs/SPEC.md 6.10). why is Farik's own sentence, never the server's words. The envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "why"],
+      "properties": {
+        "message": { "$ref": "#/$defs/sellerMessageNumber" },
+        "why": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "sellerMessageDiscardedBody": {
+      "title": "Seller Message Discarded Body",
+      "description": "The owner discarded a message to a seller; nothing was sent (docs/SPEC.md 6.10). The envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": {
+        "message": { "$ref": "#/$defs/sellerMessageNumber" }
+      }
+    },
+    "sellerReplyAttachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kept", "bytes"],
+      "description": "One attachment of a reply. name is the seller's file name, only ever text; kept is true for a PDF, PNG or JPEG of 10 MB or less, saved under a name made from its bytes; media_type is set when kept.",
+      "properties": {
+        "name": { "type": "string", "maxLength": 255 },
+        "kept": { "type": "boolean" },
+        "media_type": { "type": "string", "enum": ["application/pdf", "image/png", "image/jpeg"] },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 }
+      }
+    },
+    "sellerReplyReceivedBody": {
+      "title": "Seller Reply Received Body",
+      "description": "Farik read a message in the procurement mailbox that answers a message it sent or comes from an address it wrote to, addressed to the procurement address (docs/SPEC.md 6.10, 8.6). reply is its number; message is the sent message it answers; from and subject are the seller's own words (untrusted; \"unknown sender\" when the message names none); the text and kept attachments are under mail/in/, and at most 100 attachments are listed, the first ones. The envelope names no agent and no session: a check is Farik's, with no model.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reply", "message", "from", "subject", "attachments"],
+      "properties": {
+        "reply": { "$ref": "#/$defs/sellerReplyNumber" },
+        "message": { "$ref": "#/$defs/sellerMessageNumber" },
+        "from": { "type": "string", "minLength": 1, "maxLength": 320 },
+        "subject": { "type": "string", "maxLength": 998 },
+        "date": { "type": "string", "format": "date-time" },
+        "attachments": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/sellerReplyAttachment" } }
+      }
+    },
+    "sellerReplyDismissedBody": {
+      "title": "Seller Reply Dismissed Body",
+      "description": "The owner dismissed a reply on Today (docs/SPEC.md 6.10); it stays kept. The envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reply"],
+      "properties": {
+        "reply": { "$ref": "#/$defs/sellerReplyNumber" }
+      }
+    },
     "connectorTag": {
       "type": "string",
       "enum": ["network", "external_effect", "denied"],
@@ -882,7 +1716,7 @@
     },
     "toolCalledBody": {
       "title": "Tool Called Body",
-      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one. A connector's call also names its server and the tool's tag.",
+      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one. A connector's call also names its server and the tool's tag, and a call the human allowed names approval, the sequence number of its tool_approval.requested, which this call uses up. A call the active marketing plan approved, a Farik connector's tool the kit marks as the plan's (ADR 0042), names marketing_plan, the plan's id, and neither approval nor allowance.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tool", "input"],
@@ -891,7 +1725,10 @@
         "tool_use_id": { "type": "string" },
         "input": { "type": "string" },
         "server": { "type": "string", "minLength": 1 },
-        "tag": { "$ref": "#/$defs/connectorTag" }
+        "tag": { "$ref": "#/$defs/connectorTag" },
+        "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "allowance": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "A connector call that ran inside its allowance (ADR 0037) names the number it ran inside, the calls each period its agent makes of the tool without asking. A call a grant allowed names approval instead." },
+        "marketing_plan": { "$ref": "#/$defs/marketingPlanId", "description": "The active marketing plan that approved this call (ADR 0042): present only for a tool the kit marks as the plan's." }
       }
     },
     "toolDeniedBody": {
@@ -933,7 +1770,8 @@
         "effort": { "type": "string", "enum": ["low", "medium", "high"] },
         "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "thread": { "$ref": "#/$defs/thread" },
-        "chat": { "type": "string", "minLength": 1, "description": "The agent whose one-to-one chat a chat session answers, which the envelope also names; only on purpose chat." }
+        "chat": { "type": "string", "minLength": 1, "description": "The agent whose one-to-one chat a chat session answers, which the envelope also names; only on purpose chat." },
+        "pipeline": { "$ref": "#/$defs/dataPipelineNumber", "description": "The data pipeline request a Product Manager's decision session decides (docs/SPEC.md 6.10), which it is the only session to name; only on purpose verify, about no task." }
       }
     },
     "sessionEndedBody": {

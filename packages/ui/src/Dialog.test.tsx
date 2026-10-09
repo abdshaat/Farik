@@ -1,11 +1,42 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { Dialog } from "./Dialog.tsx";
 import { uiStrings } from "./strings.ts";
 import { expectNoAxeViolations } from "./test/axe.ts";
 
+function Opener() {
+	const [open, setOpen] = useState(false);
+	return (
+		<>
+			<button type="button" onClick={() => setOpen(true)}>
+				Open it
+			</button>
+			{open && (
+				<Dialog open title="Remove the plan" onClose={() => setOpen(false)}>
+					<p>Sure?</p>
+				</Dialog>
+			)}
+		</>
+	);
+}
+
 describe("Dialog", () => {
+	it("returns_focus_to_its_opener_when_it_closes", async () => {
+		render(<Opener />);
+		const opener = screen.getByRole("button", { name: "Open it" });
+		opener.focus();
+		fireEvent.click(opener);
+		const dialog = await screen.findByRole("dialog");
+		(dialog.querySelector("button") as HTMLElement).focus();
+		fireEvent(dialog, new Event("cancel", { cancelable: true }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(document.activeElement).toBe(opener);
+	});
+
 	it("opens as a modal named by its title", async () => {
 		const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
 		const { container } = render(
@@ -55,5 +86,68 @@ describe("Dialog", () => {
 			</Dialog>,
 		);
 		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it("fills a phone's screen only when it asks to, its actions pinned", async () => {
+		const { container, rerender } = render(
+			<Dialog
+				open
+				title="Allow"
+				onClose={() => {}}
+				actions={<button type="button">Go</button>}
+			>
+				<p>Long</p>
+			</Dialog>,
+		);
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.hasAttribute("data-fills-phone")).toBe(false);
+		rerender(
+			<Dialog
+				open
+				fillsPhone
+				title="Allow"
+				onClose={() => {}}
+				actions={<button type="button">Go</button>}
+			>
+				<p>Long</p>
+			</Dialog>,
+		);
+		expect(dialog.hasAttribute("data-fills-phone")).toBe(true);
+		await expectNoAxeViolations(container);
+		// jsdom lays nothing out, so the rule that the attribute selects is read from the source.
+		const css = readFileSync(
+			join(import.meta.dirname, "Dialog.module.css"),
+			"utf8",
+		);
+		const phone = css.slice(css.indexOf("@media (max-width: 480px)"));
+		expect(phone).toContain(".dialog[data-fills-phone][open]");
+		expect(phone).toContain("height: 100dvh");
+		expect(phone).toContain(".dialog[data-fills-phone] .body");
+	});
+
+	it("keeps a wide width of its own, whatever it holds, only when it asks to", async () => {
+		const { container, rerender } = render(
+			<Dialog open title="Add" onClose={() => {}}>
+				<p>Short</p>
+			</Dialog>,
+		);
+		const dialog = screen.getByRole("dialog");
+		expect(dialog.hasAttribute("data-wide")).toBe(false);
+		rerender(
+			<Dialog open wide title="Add" onClose={() => {}}>
+				<p>Short</p>
+			</Dialog>,
+		);
+		expect(dialog.hasAttribute("data-wide")).toBe(true);
+		await expectNoAxeViolations(container);
+		// jsdom lays nothing out, so the rule that the attribute selects is read from the source:
+		// a width, not a maximum that the content decides under.
+		const css = readFileSync(
+			join(import.meta.dirname, "Dialog.module.css"),
+			"utf8",
+		);
+		const wide = css.slice(css.indexOf(".dialog[data-wide]"));
+		expect(wide).toMatch(/width:\s*min\(760px,/);
+		expect(wide).toContain("box-sizing: border-box");
 	});
 });

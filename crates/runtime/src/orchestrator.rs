@@ -9,12 +9,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use chrono::{DateTime, Utc};
-use farik_core::contract::TaskId;
+use farik_core::contract::{Role, TaskContract, TaskId};
 use farik_core::governor::permissions::PermissionTier;
-use farik_core::team::Team;
+use farik_core::governor::sites::{WebAccess, web_access};
+use farik_core::team::{Team, task_private_folder};
 use farik_protocol::clock::IdSource;
 use farik_protocol::command::{Command, CommandReply, ReplyKind};
-use farik_roles::RoleError;
+use farik_roles::{KitError, RoleError};
+use farik_store::baseline::{folder_in, make_private_directory};
 use farik_store::files::FilesError;
 use farik_store::{GitError, StoreError};
 
@@ -33,14 +35,19 @@ use crate::transitions::TransitionError;
 mod design;
 #[cfg(test)]
 pub(crate) mod fixtures;
+pub(crate) mod hand_over;
 mod human;
-pub(crate) use human::{status_effects, update_agent_held};
+pub(crate) use human::{
+    forget_removed_keys, status_effects, update_agent_held, with_status, without_connector,
+};
 mod integrate;
 mod messages;
+mod pipeline;
 mod recover;
 mod requests;
 mod rules;
 mod session;
+mod spend;
 mod verify;
 
 pub use crate::session::TRIAGE_MODEL;
@@ -81,6 +88,8 @@ pub enum OrchestratorError {
     Sandbox(SandboxError),
     /// A role could not be loaded.
     Role(RoleError),
+    /// A role's kit could not be loaded.
+    Kit(KitError),
     /// A transition could not be judged or recorded.
     Transition(TransitionError),
     /// A cost could not be recorded, or a budget read.
@@ -109,6 +118,7 @@ impl fmt::Display for OrchestratorError {
             Self::Runtime(error) => write!(formatter, "the runtime failed: {error}"),
             Self::Sandbox(error) => write!(formatter, "the sandbox failed: {error}"),
             Self::Role(error) => write!(formatter, "the role failed: {error}"),
+            Self::Kit(error) => write!(formatter, "the kit failed: {error}"),
             Self::Transition(error) => write!(formatter, "the transition failed: {error}"),
             Self::Cost(error) => write!(formatter, "the cost failed: {error}"),
             Self::Refused { reason } => write!(formatter, "refused: {reason}"),
@@ -152,6 +162,12 @@ impl From<RuntimeError> for OrchestratorError {
 impl From<SandboxError> for OrchestratorError {
     fn from(error: SandboxError) -> Self {
         Self::Sandbox(error)
+    }
+}
+
+impl From<KitError> for OrchestratorError {
+    fn from(error: KitError) -> Self {
+        Self::Kit(error)
     }
 }
 
@@ -452,6 +468,20 @@ impl Orchestrator {
     /// As `tick`.
     pub async fn tick_within(&self, scope: &TickScope) -> Result<TickReport, OrchestratorError> {
         let log = &self.deps.tools.log;
+        // The ends that dates bring to marketing plans come first, before the pause is read: they
+        // start no session, so a paused team has them too (ADR 0042).
+        if scope.task_id.is_none() {
+            rules::end_marketing_plans(&self.deps).await?;
+            // Posts go to Buffer between sessions, with no model, so under Farik's own pause
+            // for a refused key too, and the owner's pause alone holds them (ADR 0042).
+            rules::hand_over_posts(&self.deps).await?;
+            // The orders nobody decided in time, and the renewals coming up, close and flag with
+            // no model too (ADR 0039).
+            rules::close_orders_and_flag_renewals(&self.deps)?;
+            // The procurement mailbox is read every 15 minutes with no model, in a task of its own
+            // so that a slow server never holds the tick, and under a pause too (ADR 0039).
+            rules::check_mail(&self.deps);
+        }
         if crate::pause::paused(log)? {
             // A paused team still answers its chats (ADR 0026), unless the provider refused the
             // key, with which no chat can be answered either.
@@ -602,14 +632,17 @@ impl Orchestrator {
             .projections
             .task(task_id)?
             .and_then(|row| row.assignee_id);
+        // A role held to approved sites (8.6) gets no network in its sandbox, `network` or not: a
+        // command is not held to the sites a `WebFetch` is.
         let network = team
             .agents
             .iter()
             .find(|agent| Some(agent.id.as_str()) == assignee.as_deref())
             .is_some_and(|agent| {
-                agent
-                    .tiers(&team.permissions())
-                    .contains(&PermissionTier::Network)
+                web_access(Role::from(agent.role)) == WebAccess::Open
+                    && agent
+                        .tiers(&team.permissions())
+                        .contains(&PermissionTier::Network)
             });
         let sandbox: Arc<dyn Sandbox> = Arc::from(self.deps.sandboxes.create(
             &self.deps.tools.ids.project_id,
@@ -703,6 +736,26 @@ fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
         .root()
         .join(".farik/local/worktrees")
         .join(task_id.as_str())
+}
+
+/// Where a task's sessions work: its private folder, `.farik/local/finance` for a Finance
+/// Specialist's task and `.farik/local/procurement` for a Procurement Specialist's, made for its
+/// owner alone when it is not there (6.6, 6.10); any other task's worktree (5.14). A session in a
+/// folder has no worktree, no branch and no sandbox.
+///
+/// # Errors
+///
+/// When the folder cannot be made.
+fn session_dir(
+    deps: &OrchestratorDeps,
+    contract: &TaskContract,
+) -> Result<PathBuf, OrchestratorError> {
+    let Some(folder) = task_private_folder(contract) else {
+        return Ok(worktree(deps, &contract.id));
+    };
+    let folder = folder_in(deps.tools.files.root(), folder)?;
+    make_private_directory(&folder)?;
+    Ok(folder)
 }
 
 #[cfg(test)]
@@ -1256,6 +1309,40 @@ mod tests {
             "no contract failed the Definition of Ready"
         );
         assert_eq!(adapter.transcripts_left(), 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_to_work_in_a_folder_reached_through_a_link() {
+        use std::os::unix::fs::symlink;
+
+        // A session in a folder that is a link would work where the link points (5.6, 6.6).
+        let harness = Harness::with_finance("orch-session-dir-link");
+        harness.finance_task("FRK-1", None);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let contract = orchestrator
+            .deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let folder = harness.finance_folder();
+        let outside = harness
+            .project
+            .repo
+            .path
+            .parent()
+            .expect("a parent")
+            .join(format!("{}-session-dir-outside", std::process::id()));
+        std::fs::create_dir_all(&outside).expect("made");
+        std::fs::create_dir_all(folder.parent().expect("a parent")).expect("made");
+        symlink(&outside, &folder).expect("a link");
+
+        let error = super::session_dir(&orchestrator.deps, &contract).expect_err("refused");
+
+        assert!(error.to_string().contains("is a link"), "{error}");
+        // Nothing was made where the link points.
+        assert_eq!(std::fs::read_dir(&outside).expect("read").count(), 0);
     }
 
     #[test]

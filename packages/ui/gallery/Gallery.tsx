@@ -28,6 +28,8 @@ const roles: Role[] = [
 	"architect",
 	"software_developer",
 	"marketing_specialist",
+	"finance_specialist",
+	"procurement_specialist",
 ];
 const diff = [
 	"--- a/site/menu.html",

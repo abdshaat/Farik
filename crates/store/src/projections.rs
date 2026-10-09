@@ -9,7 +9,7 @@ use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
 use farik_protocol::event::{
     ContractSummary, ContractSummaryKind, ContractSummaryRisk, ContractSummaryStatus,
     CostRecordedBody, EscalationRaisedBodyReason, EventBody, FarikEvent, RequestTriagedBodySize,
-    TaskStatusWire, TaskTransitionedBody, TransitionActorWire,
+    TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TransitionActorWire,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
@@ -57,8 +57,9 @@ pub struct TaskProjection {
     /// set by its move into `accepted`, cleared by `task.integrated` (5.14). Never set for an
     /// epic, whose children carry the branches.
     pub awaiting_integration: bool,
-    /// Whether a question asked about the contract is still unanswered (5.7): a `question.asked`
-    /// counts one up and a `question.answered` one down.
+    /// Whether a question asked about the contract is still unanswered (5.7), or a connector's
+    /// call waits for the human to allow it (ADR 0031): a `question.asked` or a
+    /// `tool_approval.requested` counts one up, and its answer or decision one down.
     pub waiting_on_human: bool,
     /// Whether the contract waits for the human's approval (5.16 item 2): set by an
     /// `escalation.raised` with reason `approval` or `risk_gate`, cleared by its next move.
@@ -79,6 +80,9 @@ pub struct TaskProjection {
     /// `left`, cleared by the `sprint.planned` that puts the task in a sprint, and on every task by
     /// a `team.updated` with `plan_in_sprints: false`.
     pub left_for_the_backlog: bool,
+    /// Whether the task skips the sprint queue (ADR 0028, ADR 0042): set by a `task.created` with
+    /// `raises`, the request that raises a marketing plan's budget. It is never held for a sprint.
+    pub skips_sprints: bool,
 }
 
 /// A key that costs are summed by (`docs/SPEC.md` 5.5).
@@ -99,7 +103,7 @@ pub enum CostScope {
     Purpose,
 }
 
-/// Which costs a sum reads: one UTC day's, one sprint's, or all of them.
+/// Which costs a sum reads: one UTC day's, a range of days', one sprint's, or all of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CostWindow {
     /// The costs recorded on this UTC day.
@@ -108,6 +112,8 @@ pub enum CostWindow {
     Sprint(String),
     /// Every cost.
     All,
+    /// The costs recorded from the first UTC day to the second, both included.
+    Between(NaiveDate, NaiveDate),
 }
 
 /// A sprint, as its `sprint.started` and `sprint.ended` left it.
@@ -297,14 +303,21 @@ impl Projections {
             CostScope::Sprint => ("sprint", "sprint"),
             CostScope::Purpose => ("purpose", "purpose"),
         };
-        // The task order holds `?1`, so the window's parameter follows it there.
-        let slot = if scope == CostScope::Task { "?2" } else { "?1" };
-        let (within, bound) = match window {
-            CostWindow::Day(day) => (format!("day = {slot}"), Some(day.to_string())),
-            CostWindow::Sprint(sprint) => (format!("sprint = {slot}"), Some(sprint)),
-            CostWindow::All => ("1".to_string(), None),
+        // The task order holds `?1`, so the window's parameters follow it there.
+        let (slot, next) = if scope == CostScope::Task {
+            ("?2", "?3")
+        } else {
+            ("?1", "?2")
         };
-        let bound = bound.map(rusqlite::types::Value::from);
+        let (within, bound) = match window {
+            CostWindow::Day(day) => (format!("day = {slot}"), vec![day.to_string()]),
+            CostWindow::Sprint(sprint) => (format!("sprint = {slot}"), vec![sprint]),
+            CostWindow::All => ("1".to_string(), Vec::new()),
+            CostWindow::Between(from, to) => (
+                format!("day BETWEEN {slot} AND {next}"),
+                vec![from.to_string(), to.to_string()],
+            ),
+        };
         let connection = self.connection();
         let mut statement = connection.prepare(&format!(
             "SELECT {column}, SUM(cost_usd), SUM(input_tokens), SUM(output_tokens),
@@ -317,7 +330,7 @@ impl Projections {
             CostScope::Task => vec![number_offset().into()],
             _ => Vec::new(),
         };
-        parameters.extend(bound);
+        parameters.extend(bound.into_iter().map(rusqlite::types::Value::from));
         let rows = statement.query_map(rusqlite::params_from_iter(parameters), |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -439,9 +452,11 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                  (SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_records \
                                   WHERE cost_records.task_id = task_projections.task_id), \
                                  assignee_id, reviewer_id, iteration, awaiting_integration, \
-                                 open_questions > 0, awaiting_approval, verifications, \
+                                 (open_questions > 0 OR open_approvals > 0 OR open_plans > 0 \
+                                  OR open_sites > 0), \
+                                 awaiting_approval, verifications, \
                                  rejections, interventions, sprint, \
-                                 left_for_the_backlog \
+                                 left_for_the_backlog, skips_sprints \
                                  FROM task_projections";
 
 /// The board is ordered by the number in the task id, not by the id itself: `FRK-10` sorts before
@@ -484,6 +499,7 @@ type ProjectedRow = (
     i64,
     Option<String>,
     bool,
+    bool,
 );
 
 fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
@@ -509,6 +525,7 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
         row.get(18)?,
         row.get(19)?,
         row.get(20)?,
+        row.get(21)?,
     ))
 }
 
@@ -541,6 +558,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         interventions,
         sprint,
         left_for_the_backlog,
+        skips_sprints,
     ) = row;
     let refuse = |what: &str, value: &str| StoreError::InvalidEvent {
         detail: format!("the projection of {task_id} holds {value:?} as its {what}"),
@@ -575,10 +593,12 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
             .map_err(|_| refuse("interventions", &interventions.to_string()))?,
         sprint,
         left_for_the_backlog,
+        skips_sprints,
     })
 }
 
 /// Applies one event to the projection tables, leaving the cursor to the caller.
+#[allow(clippy::too_many_lines, reason = "one arm per kind of event")]
 fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), StoreError> {
     let seq = i64::try_from(event.envelope.seq).map_err(|_| StoreError::Sqlite {
         detail: format!(
@@ -611,7 +631,18 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
     };
     let id = task_id.to_string();
     match &event.body {
-        EventBody::TaskCreated(body) => write_summary(transaction, &id, &body.summary, seq),
+        EventBody::TaskCreated(body) => {
+            write_summary(transaction, &id, &body.summary, seq)?;
+            // The request that raises a marketing plan's budget skips the sprint queue.
+            if body.raises.is_some() {
+                update(
+                    transaction,
+                    "UPDATE task_projections SET skips_sprints = 1 WHERE task_id = ?1",
+                    (&id,),
+                )?;
+            }
+            Ok(())
+        }
         EventBody::ContractWritten(body) => write_summary(transaction, &id, &body.summary, seq),
         EventBody::RequestTriaged(body) => {
             // Triage decides the kind as well as recording that it happened (5.16 item 1).
@@ -637,7 +668,16 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         ),
         EventBody::QuestionAsked(_)
         | EventBody::QuestionAnswered(_)
-        | EventBody::EscalationRaised(_) => apply_waiting(transaction, &id, &event.body, seq),
+        | EventBody::EscalationRaised(_)
+        | EventBody::ToolApprovalRequested(_)
+        | EventBody::ToolApprovalGranted(_)
+        | EventBody::ToolApprovalRefused(_)
+        | EventBody::MarketingPlanProposed(_)
+        | EventBody::MarketingPlanApproved(_)
+        | EventBody::MarketingPlanReturned(_)
+        | EventBody::SiteRequested(_)
+        | EventBody::SiteApproved(_)
+        | EventBody::SiteDeclined(_) => apply_waiting(transaction, &id, &event.body, seq),
         EventBody::DriftDetected(_)
         | EventBody::PullRequestOpened(_)
         | EventBody::ProjectScanned(_)
@@ -679,7 +719,56 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::PreviewStarted(_)
         | EventBody::PreviewStopped(_)
         | EventBody::PageChecked(_)
-        | EventBody::ChatMessagePosted(_) => Ok(()),
+        | EventBody::ChatMessagePosted(_)
+        | EventBody::ConnectorConnected(_)
+        | EventBody::ConnectorDisconnected(_)
+        | EventBody::SkillAdded(_)
+        | EventBody::SkillChanged(_)
+        | EventBody::SkillRemoved(_)
+        | EventBody::SkillConfirmed(_)
+        | EventBody::MarketingPlanEnded(_)
+        // A post is folded from the log when it is asked for, like a marketing plan, and holds no
+        // task: a requested post waits on the owner while its task goes on.
+        | EventBody::SocialPostScheduled(_)
+        | EventBody::SocialPostRequested(_)
+        | EventBody::SocialPostSent(_)
+        | EventBody::SocialPostStopped(_)
+        | EventBody::SocialPostMissed(_)
+        | EventBody::SocialPostFailed(_)
+        | EventBody::MarketingCampaignCreated(_)
+        | EventBody::MarketingBudgetReached(_)
+        | EventBody::MarketingCampaignPaused(_)
+        // A removal is about no task, and a site is folded from the log when it is asked for.
+        | EventBody::SiteRemoved(_)
+        // An order and a renewal are folded from the log when they are asked for, as a post is,
+        // and hold no task: an order waits on the owner while its task goes on.
+        | EventBody::PurchaseOrderDrafted(_)
+        | EventBody::PurchaseOrderApproved(_)
+        | EventBody::PurchaseOrderRejected(_)
+        | EventBody::PurchaseOrderPlaced(_)
+        | EventBody::PurchaseOrderUpdated(_)
+        | EventBody::PurchaseOrderReceived(_)
+        | EventBody::PurchaseOrderClosed(_)
+        | EventBody::PurchaseOrderExpired(_)
+        | EventBody::RenewalFlagged(_)
+        | EventBody::RenewalDismissed(_)
+        | EventBody::RenewalChecked(_)
+        // A data pipeline request is folded from the log when it is asked for, and holds no
+        // task: it waits for the Product Manager or the owner while its task goes on.
+        | EventBody::DataPipelineRequested(_)
+        | EventBody::DataPipelineEscalated(_)
+        | EventBody::DataPipelineApproved(_)
+        | EventBody::DataPipelineDeclined(_)
+        // The mailbox, the messages to sellers and their replies are folded from the log when
+        // they are shown (`seller_mail`); a draft's task waits on nothing.
+        | EventBody::MailboxConnected(_)
+        | EventBody::MailboxDisconnected(_)
+        | EventBody::SellerMessageDrafted(_)
+        | EventBody::SellerMessageSent(_)
+        | EventBody::SellerMessageFailed(_)
+        | EventBody::SellerMessageDiscarded(_)
+        | EventBody::SellerReplyReceived(_)
+        | EventBody::SellerReplyDismissed(_) => Ok(()),
     }
 }
 
@@ -703,14 +792,19 @@ fn apply_move(
     let is_intervention = body.actor == TransitionActorWire::Human
         && body.from != TaskStatusWire::Escalated
         && body.to != TaskStatusWire::Escalated;
+    // A task in a private folder has no branch (6.6): its acceptance says there is nothing to
+    // integrate, and a task that depends on it counts it integrated from then on.
+    let has_a_branch = !body
+        .effects
+        .contains(&TaskTransitionedBodyEffectsItem::NothingToIntegrate);
     update(
         transaction,
         // Nothing leaves `accepted` (5.2), so only a move into it touches the flag; the
-        // row's kind says whether there is a branch to integrate.
+        // row's kind and the move's effects say whether there is a branch to integrate.
         "UPDATE task_projections
          SET status = ?2, assignee_id = ?3, reviewer_id = ?4, iteration = ?5,
              updated_seq = ?6, awaiting_approval = 0,
-             awaiting_integration = CASE WHEN ?2 = 'accepted' THEN kind = 'task'
+             awaiting_integration = CASE WHEN ?2 = 'accepted' THEN kind = 'task' AND ?8
                                          ELSE awaiting_integration END,
              verifications = verifications + (?2 = 'verifying'),
              rejections = rejections + (?2 = 'rejected'),
@@ -724,12 +818,14 @@ fn apply_move(
             body.iteration,
             seq,
             i64::from(is_intervention),
+            has_a_branch,
         ),
     )
 }
 
-/// The two columns that say what the board waits on the human for: an open question (5.7) and an
-/// approval (5.16 item 2).
+/// The columns that say what the board waits on the human for: an open question (5.7), an open
+/// approval of a connector's call (ADR 0031), an open marketing plan (ADR 0042), an open request
+/// for a site (ADR 0039), and an approval of a contract (5.16 item 2).
 fn apply_waiting(
     transaction: &Transaction<'_>,
     id: &str,
@@ -750,6 +846,46 @@ fn apply_waiting(
              WHERE task_id = ?1",
             (id, seq),
         ),
+        EventBody::ToolApprovalRequested(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_approvals = open_approvals + 1, updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::ToolApprovalGranted(_) | EventBody::ToolApprovalRefused(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_approvals = max(0, open_approvals - 1),
+                 updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::MarketingPlanProposed(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_plans = open_plans + 1, updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::MarketingPlanApproved(_) | EventBody::MarketingPlanReturned(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_plans = max(0, open_plans - 1), updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::SiteRequested(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_sites = open_sites + 1, updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        // A site the owner added unasked answers no request, so it lowers nothing.
+        EventBody::SiteApproved(body) | EventBody::SiteDeclined(body) if body.request.is_some() => {
+            update(
+                transaction,
+                "UPDATE task_projections SET open_sites = max(0, open_sites - 1), updated_seq = ?2
+                 WHERE task_id = ?1",
+                (id, seq),
+            )
+        }
         EventBody::EscalationRaised(body) => {
             // The two reasons of the `ContractRequiresHuman` gate: the contract waits on an
             // approval the process asks for by design, which is no intervention (F17). Any other
@@ -1088,6 +1224,7 @@ mod tests {
                 interventions: 0,
                 sprint: None,
                 left_for_the_backlog: false,
+                skips_sprints: false,
             }]
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -1135,6 +1272,7 @@ mod tests {
                 interventions: 0,
                 sprint: None,
                 left_for_the_backlog: false,
+                skips_sprints: false,
             }
         );
     }
@@ -1335,7 +1473,7 @@ mod tests {
         );
         assert_eq!(
             migrations::known_versions(),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
         );
     }
 
@@ -1587,6 +1725,41 @@ mod tests {
     }
 
     #[test]
+    fn awaits_no_integration_when_there_is_nothing_to_integrate() {
+        // A task in a private folder has no branch (6.6): its acceptance says so in its effects,
+        // and a task that depends on it counts it integrated from then on.
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &moved("FRK-1", "ready", "verifying"));
+        let mut accepted = an_event_wire(EventKind::TaskTransitioned);
+        accepted["task_id"] = json!("FRK-1");
+        accepted["body"]["from"] = json!("verifying");
+        accepted["body"]["to"] = json!("accepted");
+        accepted["body"]["effects"] = json!(["nothing_to_integrate"]);
+        let accepted = event_from_value(&accepted).expect("the fixture is schema-valid");
+        record(
+            &log,
+            &projections,
+            &NewEvent {
+                recorded_at: accepted.envelope.recorded_at,
+                ids: accepted.envelope.ids,
+                body: accepted.body,
+            },
+        );
+        let row = projections
+            .task(&"FRK-1".parse().expect("a task id"))
+            .expect("the read works")
+            .expect("on the board");
+        assert_eq!(row.status, TaskStatus::Accepted);
+        assert!(!row.awaiting_integration);
+        // Acceptance with any other effect still awaits.
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        record(&log, &projections, &moved("FRK-2", "ready", "verifying"));
+        record(&log, &projections, &moved("FRK-2", "verifying", "accepted"));
+        assert!(awaiting(&projections, "FRK-2"));
+    }
+
+    #[test]
     fn reads_an_older_accepted_task_as_awaiting() {
         let directory = std::env::temp_dir().join(format!(
             "farik-older-accepted-{}-{:?}",
@@ -1682,6 +1855,144 @@ mod tests {
         );
         record(&log, &projections, &answer(&second));
         assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+    }
+
+    #[test]
+    fn waits_on_the_human_while_a_marketing_plan_is_proposed() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+        record(
+            &log,
+            &projections,
+            &about(EventKind::MarketingPlanProposed, "FRK-1"),
+        );
+        assert!(
+            row_of(&projections, "FRK-1").waiting_on_human,
+            "the proposing task waits on the owner"
+        );
+        assert!(
+            !row_of(&projections, "FRK-2").waiting_on_human,
+            "no other task does"
+        );
+    }
+
+    #[test]
+    fn stops_waiting_when_a_marketing_plan_is_approved_or_returned() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        for _ in 0..2 {
+            record(
+                &log,
+                &projections,
+                &about(EventKind::MarketingPlanProposed, "FRK-1"),
+            );
+        }
+        let decide = |kind| about(kind, "FRK-1");
+        record(
+            &log,
+            &projections,
+            &decide(EventKind::MarketingPlanApproved),
+        );
+        assert!(
+            row_of(&projections, "FRK-1").waiting_on_human,
+            "one plan still waits"
+        );
+        record(
+            &log,
+            &projections,
+            &decide(EventKind::MarketingPlanReturned),
+        );
+        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+        // A decision with nothing waiting never takes the count below nothing.
+        record(
+            &log,
+            &projections,
+            &decide(EventKind::MarketingPlanApproved),
+        );
+        record(
+            &log,
+            &projections,
+            &about(EventKind::MarketingPlanProposed, "FRK-1"),
+        );
+        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+        // An end is about no task and moves nothing.
+        record(
+            &log,
+            &projections,
+            &a_new_event(EventKind::MarketingPlanEnded),
+        );
+        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+    }
+
+    #[test]
+    fn a_site_request_makes_its_task_wait() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        let first = record(
+            &log,
+            &projections,
+            &about(EventKind::SiteRequested, "FRK-1"),
+        );
+        assert!(
+            row_of(&projections, "FRK-1").waiting_on_human,
+            "the asking task waits on the owner"
+        );
+        assert!(
+            !row_of(&projections, "FRK-2").waiting_on_human,
+            "no other task does"
+        );
+        let second = record(
+            &log,
+            &projections,
+            &about(EventKind::SiteRequested, "FRK-1"),
+        );
+
+        // An approval that answers a request lowers the count, as a decline does.
+        let approves = |request: &FarikEvent| {
+            with_body(
+                EventKind::SiteApproved,
+                "FRK-1",
+                json!({ "host": "shop.example", "request": request.envelope.seq }),
+            )
+        };
+        let declines = |request: &FarikEvent| {
+            with_body(
+                EventKind::SiteDeclined,
+                "FRK-1",
+                json!({ "request": request.envelope.seq, "host": "shop.example", "note": "" }),
+            )
+        };
+        record(&log, &projections, &approves(&first));
+        assert!(
+            row_of(&projections, "FRK-1").waiting_on_human,
+            "one request still waits"
+        );
+        // A site the owner added unasked answers no request and lowers nothing.
+        record(
+            &log,
+            &projections,
+            &with_body(
+                EventKind::SiteApproved,
+                "FRK-1",
+                json!({ "host": "added.example" }),
+            ),
+        );
+        record(&log, &projections, &a_new_event(EventKind::SiteRemoved));
+        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+        record(&log, &projections, &declines(&second));
+        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+
+        // A decision with nothing waiting never takes the count below nothing.
+        record(&log, &projections, &declines(&second));
+        record(
+            &log,
+            &projections,
+            &about(EventKind::SiteRequested, "FRK-1"),
+        );
+        assert!(row_of(&projections, "FRK-1").waiting_on_human);
     }
 
     #[test]
@@ -2318,6 +2629,35 @@ mod tests {
     }
 
     #[test]
+    fn the_mark_is_kept_on_the_row() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        let mut raise = about(EventKind::TaskCreated, "FRK-2");
+        let farik_protocol::event::EventBody::TaskCreated(body) = &mut raise.body else {
+            panic!("a task.created");
+        };
+        body.raises = Some("MP-1".to_string().try_into().expect("a plan id"));
+        record(&log, &projections, &raise);
+
+        assert!(!row_of(&projections, "FRK-1").skips_sprints);
+        assert!(row_of(&projections, "FRK-2").skips_sprints);
+        // The mark stays through what the contract is written as later, and is on the board.
+        record(
+            &log,
+            &projections,
+            &written("FRK-2", "Raise the budget", "refining", "low", None),
+        );
+        let board = projections.board().expect("the board reads");
+        assert_eq!(
+            board
+                .iter()
+                .map(|row| (row.task_id.to_string(), row.skips_sprints))
+                .collect::<Vec<_>>(),
+            [("FRK-1".to_string(), false), ("FRK-2".to_string(), true)]
+        );
+    }
+
+    #[test]
     fn projects_the_open_sprint() {
         let (log, projections) = a_board();
         record(&log, &projections, &started("S1", Some(20.0)));
@@ -2669,6 +3009,39 @@ mod tests {
         assert_eq!(
             agents(CostWindow::All),
             projections.costs(CostScope::Agent).expect("the costs read")
+        );
+    }
+
+    #[test]
+    fn between_sums_the_days_inclusive() {
+        use super::CostWindow;
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        for spent in [
+            cost(Some("FRK-1"), "a", "s1", "2026-10-01", (1.0, 1, 1)),
+            cost(Some("FRK-1"), "a", "s2", "2026-10-02", (2.0, 1, 1)),
+            cost(Some("FRK-1"), "a", "s3", "2026-10-04", (4.0, 1, 1)),
+        ] {
+            record(&log, &projections, &spent);
+        }
+        let day = |day| chrono::NaiveDate::from_ymd_opt(2026, 10, day).expect("a real day");
+        let between = || CostWindow::Between(day(2), day(4));
+        // The project scope: the two later days, the first and the last of the range included.
+        assert_eq!(
+            projections
+                .costs_for(CostScope::Day, between())
+                .expect("the costs read"),
+            vec![
+                row(CostScope::Day, "2026-10-02", (2.0, 1, 1, 1)),
+                row(CostScope::Day, "2026-10-04", (4.0, 1, 1, 1)),
+            ]
+        );
+        // The task scope binds the number offset first, so the range's two ends follow it.
+        assert_eq!(
+            projections
+                .costs_for(CostScope::Task, between())
+                .expect("the costs read"),
+            vec![row(CostScope::Task, "FRK-1", (6.0, 2, 2, 2))]
         );
     }
 

@@ -12,6 +12,14 @@ pub mod board;
 pub mod channel;
 /// The human's one-to-one chats.
 pub mod chat;
+/// `farik connect` and `farik disconnect`: one agent's MCP server, its keys kept by this process
+/// and only names sent on (ADR 0030).
+#[cfg(unix)]
+mod connector;
+/// `farik connector run` and `farik connector headers`: a custom connector's keys, from the
+/// daemon to the server, never through a file (ADR 0030).
+#[cfg(unix)]
+pub mod connector_run;
 /// Taking a contract from the team, and giving it back.
 pub mod contract;
 /// Writing a contract with the Product Manager at the terminal.
@@ -32,14 +40,20 @@ pub mod ids;
 pub mod init;
 /// The event log, filtered and exported.
 pub mod log;
+pub mod marketing;
 /// The harness metrics.
 pub mod metrics;
+pub mod order;
+pub mod pipeline;
 /// Text as a terminal may be given it.
 pub mod printable;
+/// The procurement mailbox and the messages to sellers.
+pub mod procurement;
 /// The project a command runs against.
 pub mod project;
 /// The governor's refusals in words.
 pub mod refusal;
+pub mod renewal;
 /// `farik run` and `farik plan`.
 #[cfg(unix)]
 mod run;
@@ -51,6 +65,10 @@ mod serve;
 mod setup;
 /// One contract, and what happened to it.
 pub mod show;
+pub mod site;
+
+#[cfg(unix)]
+mod skill;
 /// One sprint, and how it went.
 pub mod sprint;
 /// Who drives a project, and how a command reaches it.
@@ -80,6 +98,10 @@ use farik_protocol::clock::{Clock, IdSource, SequentialIds};
 use farik_protocol::command::{AcceptSubject, Command};
 #[cfg(unix)]
 use farik_runtime::RuntimeAdapter;
+#[cfg(unix)]
+use farik_runtime::connectors::{
+    ConnectorSecretStores, ConnectorSecrets, KeychainConnectorSecrets, MemoryConnectorSecrets,
+};
 #[cfg(unix)]
 use farik_runtime::credential::{CredentialStore, FileStore, KeychainStore, MemoryStore};
 #[cfg(unix)]
@@ -122,6 +144,9 @@ pub struct CliIo<'a> {
     /// What a command reads: the hook commands' JSON from Claude Code, and the answers
     /// `farik contract new` asks for. Owned, so that one reader thread can hold it.
     pub stdin: Box<dyn Read + Send>,
+    /// Whether `stdin` is a terminal, where a key is read with its echo off: `false` here, and
+    /// what the process's standard input is in `main`.
+    pub stdin_is_terminal: bool,
     /// What a person or a script asked for.
     pub stdout: Box<dyn Write + 'a>,
     /// Why Farik would not do something, and warnings.
@@ -149,6 +174,20 @@ pub struct CliIo<'a> {
     /// real keychain, and the keychain then the file in `main`.
     #[cfg(unix)]
     pub credential_stores: CredentialStores,
+    /// Where each role's kit comes from (ADR 0036): the shipped kits here and in `main`, which a
+    /// test replaces with a fixture kit whose server is its own.
+    pub kits: farik_runtime::KitSource,
+    /// The apps Farik has registered with a service (ADR 0035), which `farik connect` signs in with:
+    /// `REGISTERED_APPS` here and in `main`, which a test replaces with a table of its fixture's
+    /// addresses.
+    pub registered_apps: &'static [farik_runtime::registered_apps::RegisteredApp],
+    /// Where each agent's connector keys are kept (ADR 0030): in memory here, so that no test
+    /// touches a real keychain, and the keychain then `connectors.json` in `main`.
+    #[cfg(unix)]
+    pub connector_secrets: Arc<dyn ConnectorSecrets>,
+    /// Farik's own executable, which runs Farik's own connectors (ADR 0038): none here, so a
+    /// test names the binary it built, and `std::env::current_exe()` in `main`.
+    pub own_program: Option<PathBuf>,
     /// Whether `farik serve` lets a browser at `http://localhost:<port>` in without a code: the
     /// end-to-end server's `--preview` (step 12, D1). The release build has no such field.
     #[cfg(feature = "e2e")]
@@ -184,6 +223,17 @@ pub fn system_credential_stores(
     })
 }
 
+/// The computer's connector key stores (ADR 0030): its keychain, then `connectors.json` in the
+/// state folder of `env`, when there is one.
+#[cfg(unix)]
+#[must_use]
+pub fn system_connector_secrets(env: &BTreeMap<String, String>) -> Arc<dyn ConnectorSecrets> {
+    Arc::new(ConnectorSecretStores::new(
+        Arc::new(KeychainConnectorSecrets::default()),
+        state::state_dir(env).map(|directory| directory.join("connectors.json")),
+    ))
+}
+
 /// Opens a link in a browser, or says why it could not.
 pub type Opener = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
@@ -201,6 +251,7 @@ impl<'a> CliIo<'a> {
         let (_, never) = tokio::sync::mpsc::unbounded_channel();
         CliIo {
             stdin: Box::new(std::io::empty()),
+            stdin_is_terminal: false,
             stdout,
             stderr,
             cwd,
@@ -217,6 +268,11 @@ impl<'a> CliIo<'a> {
                 let memory: Arc<dyn CredentialStore> = Arc::new(MemoryStore::default());
                 Arc::new(move || vec![Arc::clone(&memory)])
             },
+            kits: Arc::new(farik_roles::load_kit),
+            registered_apps: farik_runtime::registered_apps::REGISTERED_APPS,
+            own_program: None,
+            #[cfg(unix)]
+            connector_secrets: Arc::new(MemoryConnectorSecrets::default()),
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
             #[cfg(feature = "e2e")]
@@ -328,6 +384,73 @@ enum Commands {
         #[command(subcommand)]
         command: HookCommands,
     },
+    /// Start a custom connector, or fill its headers, with its keys from the daemon: what a
+    /// session's `mcp.json` names (ADR 0030).
+    #[cfg(unix)]
+    Connector {
+        #[command(subcommand)]
+        command: ConnectorCommands,
+    },
+    /// Give one agent an MCP server, with its keys read from standard input, and label its tools
+    /// (5.6, ADR 0030).
+    #[cfg(unix)]
+    #[command(group(clap::ArgGroup::new("start").required(false).args(["command", "url"])))]
+    Connect {
+        /// The agent's id.
+        agent: String,
+        /// The server's name: lower-case letters, digits and dashes.
+        name: String,
+        /// The program that starts the server.
+        #[arg(long)]
+        command: Option<String>,
+        /// One argument to that program; repeat it for each.
+        #[arg(long = "arg", allow_hyphen_values = true)]
+        args: Vec<String>,
+        /// The server's web address.
+        #[arg(long)]
+        url: Option<String>,
+        /// A header, as 'Name: template', where {KEY} is a key's value; repeat it for each.
+        #[arg(long = "header")]
+        headers: Vec<String>,
+        /// A key's name; its value is read from standard input. Repeat it for each.
+        #[arg(long = "key")]
+        keys: Vec<String>,
+        /// Sign in to the server's service in your browser instead of giving a key (ADR 0033).
+        #[arg(long, conflicts_with_all = ["keys", "command"])]
+        sign_in: bool,
+        /// The client the service's app registration gave Farik, when it offers no registration.
+        #[arg(long)]
+        client_id: Option<String>,
+        /// The port that client's redirect address names (33418 when left out).
+        #[arg(long)]
+        callback_port: Option<u16>,
+        /// What to ask the service for; repeat it for each. Left out, the service chooses.
+        #[arg(long = "scope")]
+        scopes: Vec<String>,
+        /// A tool's label: `<tool>=network`, `<tool>=external_effect` or `<tool>=denied`. A tool
+        /// left unlabelled is `external_effect`.
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        /// How many calls each sprint the agent makes of a kit service's spending tool without
+        /// asking, `<tool>=<number>` from 0 to 1000; repeat it for each. Left out, the kit's number.
+        #[arg(long = "allowance")]
+        allowances: Vec<String>,
+    },
+    /// Take an MCP server from one agent, and delete its keys.
+    #[cfg(unix)]
+    Disconnect {
+        /// The agent's id.
+        agent: String,
+        /// The server's name.
+        name: String,
+    },
+    /// Give the team or one agent a skill in the Agent Skills format, read before it is added
+    /// (6.7, ADR 0034).
+    #[cfg(unix)]
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommands,
+    },
     /// Drive the team until nothing needs doing, a stop, or Ctrl-C (8.2).
     Run,
     /// Drive the team and keep driving when the board is idle, until a stop or Ctrl-C (8.1).
@@ -394,6 +517,46 @@ enum Commands {
         /// Why.
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         reason: Vec<String>,
+    },
+    /// Allow or refuse one call an agent asked to make to a connector (5.7).
+    Tool {
+        #[command(subcommand)]
+        command: ToolCommands,
+    },
+    /// Show the marketing plans, approve, send back or end one, and list, stop or allow the posts
+    /// (6.5).
+    Marketing {
+        #[command(subcommand)]
+        command: MarketingCommands,
+    },
+    /// List the sites the Procurement Specialist may read, allow or refuse the ones it asked for,
+    /// and add or remove one (6.10).
+    Site {
+        #[command(subcommand)]
+        command: SiteCommands,
+    },
+    /// Connect the mailbox the Procurement Specialist's messages go from, and send, discard or
+    /// read what it wrote to sellers (6.10).
+    Procurement {
+        #[command(subcommand)]
+        command: ProcurementCommands,
+    },
+    /// List the Procurement Specialist's purchase orders, decide one, and say that you placed it,
+    /// that it came, or that it will not (6.10).
+    Order {
+        #[command(subcommand)]
+        command: OrderCommands,
+    },
+    /// List the data sources the Procurement Specialist asked for that wait for you, and approve
+    /// or decline one (6.10).
+    Pipeline {
+        #[command(subcommand)]
+        command: PipelineCommands,
+    },
+    /// List the renewals coming up, and dismiss one (6.10).
+    Renewal {
+        #[command(subcommand)]
+        command: RenewalCommands,
     },
     /// Start, end, or show a sprint (5.5).
     Sprint {
@@ -483,6 +646,113 @@ enum HookCommands {
     },
 }
 
+/// `--team` or `--agent <id>`: whose skill.
+#[cfg(unix)]
+#[derive(clap::Args)]
+#[command(group(clap::ArgGroup::new("whom").required(true).args(["team", "agent"])))]
+struct WhoseSkill {
+    /// The team's skill.
+    #[arg(long)]
+    team: bool,
+    /// One agent's skill, by id.
+    #[arg(long)]
+    agent: Option<String>,
+}
+
+#[cfg(unix)]
+impl WhoseSkill {
+    fn whom(&self) -> skill::Whom<'_> {
+        self.agent
+            .as_deref()
+            .map_or(skill::Whom::Team, skill::Whom::Agent)
+    }
+}
+
+/// What `farik skill` does.
+#[cfg(unix)]
+#[derive(Subcommand)]
+enum SkillCommands {
+    /// List the skills the team has, or with --agent what one agent has and how each stands.
+    List {
+        /// The agent's id.
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Print every file of a skill, and the hash that confirms it.
+    Show {
+        /// The skill's name.
+        name: String,
+        #[command(flatten)]
+        whose: WhoseSkill,
+    },
+    /// Read a skill folder, see all of it, and add it.
+    Add {
+        /// The folder: a SKILL.md and the files it refers to.
+        folder: PathBuf,
+        #[command(flatten)]
+        whose: WhoseSkill,
+        /// Add without asking, once you have read it.
+        #[arg(long)]
+        yes: bool,
+        /// Let it replace a skill Farik ships with its name.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Remove a skill and its folder.
+    Remove {
+        /// The skill's name.
+        name: String,
+        #[command(flatten)]
+        whose: WhoseSkill,
+    },
+    /// Confirm on this computer a skill as its folder is now: after a pull, a clone or an edit.
+    Confirm {
+        /// The skill's name.
+        name: String,
+        #[command(flatten)]
+        whose: WhoseSkill,
+        /// The Hash `farik skill show` printed: all of it, or its first 12 digits.
+        hash: String,
+        /// Let it replace a skill Farik ships with its name.
+        #[arg(long)]
+        replace: bool,
+    },
+}
+
+/// Which session's server `farik connector` asks the daemon for.
+#[derive(clap::Args)]
+struct ConnectorAsk {
+    /// The daemon's `daemon.json`.
+    #[arg(long)]
+    daemon: PathBuf,
+    /// The session's id.
+    #[arg(long)]
+    session: String,
+    /// The server's name.
+    #[arg(long)]
+    server: String,
+}
+
+#[derive(Subcommand)]
+enum ConnectorCommands {
+    /// Start the server with only its keys and the variables Farik keeps.
+    Run(ConnectorAsk),
+    /// Print the server's headers, filled with its keys, as one JSON object.
+    Headers(ConnectorAsk),
+    /// Look packages up in the open vulnerability database (used by the Architect's kit).
+    Osv,
+    /// Run Google Ads' tools in the daemon, for a Marketing Specialist's session (used by its kit).
+    GoogleAds,
+    /// Look exchange rates up at Frankfurter (used by the Procurement Specialist's kit).
+    Fx,
+    /// Look product and vehicle recalls up at the CPSC and NHTSA (used by the Procurement
+    /// Specialist's kit).
+    Recalls,
+    /// Look eBay listings up with the user's own developer keys (used by the Procurement
+    /// Specialist's kit).
+    Ebay,
+}
+
 #[derive(Subcommand)]
 enum SprintCommands {
     /// Start a sprint, which the team plans from the ready backlog.
@@ -497,6 +767,299 @@ enum SprintCommands {
     Show {
         /// The sprint, as S<n>.
         sprint_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProcurementCommands {
+    /// Connect, disconnect or show the mailbox.
+    Mailbox {
+        #[command(subcommand)]
+        command: MailboxCommands,
+    },
+    /// Read the mailbox now, for replies.
+    Check,
+    /// The messages that wait to be sent, whole.
+    Messages,
+    /// Send a message that waits, exactly as printed: nothing leaves Farik but by this.
+    Send {
+        /// The message's number, as `farik procurement messages` prints it.
+        message: u64,
+    },
+    /// Do not send a message that waits.
+    Discard {
+        /// The message's number.
+        message: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum MailboxCommands {
+    /// Connect a mailbox. The password is read without echo, or from standard input.
+    Connect {
+        /// The address mail is sent from and read for.
+        #[arg(long)]
+        address: String,
+        /// The name sellers see.
+        #[arg(long)]
+        name: String,
+        /// gmail, icloud, fastmail or other; told from the address when left out.
+        #[arg(long)]
+        provider: Option<String>,
+        /// The reading server as host:port, for another provider.
+        #[arg(long)]
+        imap: Option<String>,
+        /// The sending server as host:port, for another provider.
+        #[arg(long)]
+        smtp: Option<String>,
+        /// The sign-in name, the address when left out.
+        #[arg(long)]
+        username: Option<String>,
+        /// The folder Farik reads (INBOX when left out).
+        #[arg(long)]
+        folder: Option<String>,
+        /// What Farik adds under every message.
+        #[arg(long)]
+        signature: Option<String>,
+        /// Leave out the line that says an AI assistant wrote the message.
+        #[arg(long)]
+        no_disclosure: bool,
+    },
+    /// Forget the password and the settings; the messages and replies stay.
+    Disconnect,
+    /// The connected mailbox and what was sent today.
+    Show,
+}
+
+#[derive(Subcommand)]
+enum SiteCommands {
+    /// Farik's approved sites, on or off, the sites you allowed, and the requests that wait.
+    List,
+    /// Allow a site the Procurement Specialist asked to read.
+    Approve {
+        /// The request's number, as farik run prints it.
+        request: u64,
+        /// A note for the Procurement Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Do not allow a site the Procurement Specialist asked to read.
+    Decline {
+        /// The request's number, as farik run prints it.
+        request: u64,
+        /// A note for the Procurement Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Allow a site no one asked for, or turn one of Farik's back on.
+    Add {
+        /// A name like shop.com, or the address of any page on it.
+        site: String,
+    },
+    /// Take a site away: one you allowed, or one of Farik's, which this turns off.
+    Remove {
+        /// A name like shop.com, or the address of any page on it.
+        host: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum OrderCommands {
+    /// Every purchase order, oldest first, with where it stands.
+    List,
+    /// Approve an order the Procurement Specialist suggested. Farik places nothing: you place it
+    /// yourself, then say so with `farik order placed`.
+    Approve {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// A note for the Procurement Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Do not approve an order the Procurement Specialist suggested.
+    Reject {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// A note for the Procurement Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Say that you placed an approved order.
+    Placed {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// The day you placed it, as 2026-10-08; today when absent.
+        #[arg(long = "on")]
+        on: Option<String>,
+        /// What you paid, as 1450 or 1450.50, when you know.
+        #[arg(long)]
+        paid: Option<String>,
+        /// The currency of what you paid, as EUR; the order's when absent.
+        #[arg(long)]
+        currency: Option<String>,
+    },
+    /// Say that a placed order came.
+    Received {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// The day it came, as 2026-10-08; today when absent.
+        #[arg(long = "on")]
+        on: Option<String>,
+        /// What you paid, as 1450 or 1450.50, when you say so here.
+        #[arg(long)]
+        paid: Option<String>,
+        /// The currency of what you paid, as EUR.
+        #[arg(long)]
+        currency: Option<String>,
+        /// The day it renews, as 2027-10-08, when it is paid for again.
+        #[arg(long)]
+        renews_on: Option<String>,
+    },
+    /// Correct where a placed order stands.
+    Status {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// One of preparing, shipped, delayed and problem.
+        status: String,
+        /// What you know.
+        #[arg(long)]
+        note: Option<String>,
+        /// The day the seller expects it, as 2026-10-20.
+        #[arg(long)]
+        expected_on: Option<String>,
+    },
+    /// Close a placed order that will not come: cancelled, refunded or lost.
+    Close {
+        /// The order, as 12 or PO-12.
+        order: String,
+        /// A note for the Procurement Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PipelineCommands {
+    /// The data sources that wait for you, oldest first, with why each comes to you.
+    List,
+    /// Approve a data source: the team gets a request, in your name, to set it up. Nothing is
+    /// connected or paid for.
+    Approve {
+        /// The request's number, as `farik pipeline list` prints it.
+        pipeline: u64,
+        /// A note for the Procurement Specialist's next piece of work.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Do not set a data source up.
+    Decline {
+        /// The request's number, as `farik pipeline list` prints it.
+        pipeline: u64,
+        /// A note for the Procurement Specialist's next piece of work.
+        #[arg(long)]
+        note: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RenewalCommands {
+    /// The renewals coming up that nobody dismissed.
+    List,
+    /// Dismiss a renewal coming up.
+    Dismiss {
+        /// The renewal's number, as `farik renewal list` prints it.
+        renewal: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum MarketingCommands {
+    /// The Marketing Specialist's plans.
+    Plan {
+        #[command(subcommand)]
+        command: PlanCommands,
+    },
+    /// The posts it writes: what goes out, and stopping or allowing one.
+    Post {
+        #[command(subcommand)]
+        command: PostCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum PostCommands {
+    /// List the posts going out, soonest first, then those that did not go out in the last day.
+    List,
+    /// Stop a post going out; one Buffer has is taken back from Buffer first.
+    Stop {
+        /// The post's number, as the list prints it.
+        post: u64,
+    },
+    /// Allow a post the Marketing Specialist asked about, which is not in the plan.
+    Send {
+        /// The post's number, as farik run prints it.
+        post: u64,
+    },
+    /// Do not allow a post the Marketing Specialist asked about.
+    Decline {
+        /// The post's number, as farik run prints it.
+        post: u64,
+        /// A note for the Marketing Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PlanCommands {
+    /// List the plans, newest first, or show the one named.
+    Show {
+        /// The plan, as MP-<n>.
+        plan: Option<String>,
+    },
+    /// Approve a plan the Marketing Specialist proposed; it spends and posts only as it says.
+    Approve {
+        /// The plan, as MP-<n>.
+        plan: String,
+        /// A note for the Marketing Specialist's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Send a plan back, with the reason the Marketing Specialist reads.
+    Return {
+        /// The plan, as MP-<n>.
+        plan: String,
+        /// Why; the Marketing Specialist answers it in its next version.
+        #[arg(long)]
+        reason: String,
+    },
+    /// End an approved plan now.
+    End {
+        /// The plan, as MP-<n>.
+        plan: String,
+        /// Why, when you say.
+        #[arg(long)]
+        note: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ToolCommands {
+    /// Allow the call once, with exactly the input the agent asked with.
+    Approve {
+        /// The approval's number, as farik run prints it.
+        approval: u64,
+        /// A note for the agent's next session.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Refuse the call.
+    Refuse {
+        /// The approval's number, as farik run prints it.
+        approval: u64,
+        /// Why, for the agent's next session.
+        #[arg(long)]
+        note: Option<String>,
     },
 }
 
@@ -598,6 +1161,22 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             HookCommands::PostToolUse { daemon } => hook::post_tool_use(&io.cwd.join(daemon), io),
         };
     }
+    #[cfg(unix)]
+    if let Commands::Connector { command } = &parsed.command {
+        return match command {
+            ConnectorCommands::Run(ask) => {
+                connector_run::run(&io.cwd.join(&ask.daemon), &ask.session, &ask.server, io)
+            }
+            ConnectorCommands::Headers(ask) => {
+                connector_run::headers(&io.cwd.join(&ask.daemon), &ask.session, &ask.server, io)
+            }
+            ConnectorCommands::Osv => connector_run::osv(io),
+            ConnectorCommands::GoogleAds => connector_run::google_ads(io),
+            ConnectorCommands::Fx => connector_run::fx(io),
+            ConnectorCommands::Recalls => connector_run::recalls(io),
+            ConnectorCommands::Ebay => connector_run::ebay(io),
+        };
+    }
     if parsed.json && matches!(parsed.command, Commands::Serve { .. }) {
         say(
             &mut io.stderr,
@@ -634,6 +1213,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         | Commands::Accept { .. }
         | Commands::SendBack { .. }
         | Commands::Answer { .. }
+        | Commands::Tool { .. }
         | Commands::Integrate { .. }
         | Commands::Resolve { .. }
         | Commands::Cancel { .. }
@@ -646,6 +1226,46 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             let (name, command) = humans(&parsed.command)?;
             human_command(&project, command, name, io)
         }),
+        Commands::Marketing {
+            command:
+                MarketingCommands::Plan {
+                    command: PlanCommands::Show { plan },
+                },
+        } => open_project(&io.cwd, now)
+            .and_then(|project| marketing::show(&project, plan.as_deref(), now)),
+        Commands::Marketing {
+            command:
+                MarketingCommands::Post {
+                    command: PostCommands::List,
+                },
+        } => open_project(&io.cwd, now).and_then(|project| marketing::posts(&project, now)),
+        Commands::Marketing { .. } => open_project(&io.cwd, now).and_then(|project| {
+            let (name, command) = humans(&parsed.command)?;
+            human_command(&project, command, name, io)
+        }),
+        Commands::Procurement { command } => procurement_arm(command, io, now),
+        Commands::Site {
+            command: SiteCommands::List,
+        } => open_project(&io.cwd, now).and_then(|project| site::list(&project)),
+        Commands::Site { .. } => open_project(&io.cwd, now).and_then(|project| {
+            let (name, command) = humans(&parsed.command)?;
+            human_command(&project, command, name, io)
+        }),
+        Commands::Order {
+            command: OrderCommands::List,
+        } => open_project(&io.cwd, now).and_then(|project| order::list(&project, now)),
+        Commands::Renewal {
+            command: RenewalCommands::List,
+        } => open_project(&io.cwd, now).and_then(|project| renewal::list(&project)),
+        Commands::Pipeline {
+            command: PipelineCommands::List,
+        } => open_project(&io.cwd, now).and_then(|project| pipeline::list(&project)),
+        Commands::Order { .. } | Commands::Pipeline { .. } | Commands::Renewal { .. } => {
+            open_project(&io.cwd, now).and_then(|project| {
+                let (name, command) = humans(&parsed.command)?;
+                human_command(&project, command, name, io)
+            })
+        }
         Commands::Stop { target } => {
             open_project(&io.cwd, now).and_then(|project| stop(&project, target.as_deref()))
         }
@@ -682,6 +1302,69 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Criteria {
             command: CriteriaCommands::List,
         } => open_project(&io.cwd, now).and_then(|project| team::criteria(&project)),
+        #[cfg(unix)]
+        Commands::Connect {
+            agent,
+            name,
+            command,
+            args,
+            url,
+            headers,
+            keys,
+            sign_in,
+            client_id,
+            callback_port,
+            scopes,
+            tags,
+            allowances,
+        } => open_project(&io.cwd, now).and_then(|project| {
+            connector::connect(
+                &project,
+                &connector::Asked {
+                    agent,
+                    name,
+                    command: command.as_deref(),
+                    args,
+                    url: url.as_deref(),
+                    headers,
+                    keys,
+                    tags,
+                    allowances,
+                    sign_in: *sign_in,
+                    client_id: client_id.as_deref(),
+                    callback_port: *callback_port,
+                    scopes,
+                },
+                io,
+            )
+        }),
+        #[cfg(unix)]
+        Commands::Disconnect { agent, name } => open_project(&io.cwd, now)
+            .and_then(|project| connector::disconnect(&project, agent, name, io)),
+        #[cfg(unix)]
+        Commands::Skill { command } => {
+            open_project(&io.cwd, now).and_then(|project| match command {
+                SkillCommands::List { agent } => skill::list(&project, agent.as_deref(), io),
+                SkillCommands::Show { name, whose } => skill::show(&project, name, &whose.whom()),
+                SkillCommands::Add {
+                    folder,
+                    whose,
+                    yes,
+                    replace,
+                } => skill::add(&project, folder, &whose.whom(), *yes, *replace, io),
+                SkillCommands::Remove { name, whose } => {
+                    skill::remove(&project, name, &whose.whom(), io)
+                }
+                SkillCommands::Confirm {
+                    name,
+                    whose,
+                    hash,
+                    replace,
+                } => skill::confirm(&project, name, &whose.whom(), hash, *replace, io),
+            })
+        }
+        #[cfg(unix)]
+        Commands::Connector { .. } => unreachable!("a connector command returned above"),
         Commands::Hook { .. }
         | Commands::Run
         | Commands::Serve { .. }
@@ -691,6 +1374,77 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         } => unreachable!("a hook, run, plan, or contract new command returned above"),
     };
     report(outcome, parsed.json, io)
+}
+
+/// `farik procurement`: the reads here, the writes through the process that drives the project.
+fn procurement_arm(
+    command: &ProcurementCommands,
+    io: &mut CliIo<'_>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Report, String> {
+    let project = open_project(&io.cwd, now)?;
+    match command {
+        ProcurementCommands::Messages => procurement::messages(&project, io),
+        ProcurementCommands::Mailbox {
+            command: MailboxCommands::Show,
+        } => procurement::show(&project, io),
+        ProcurementCommands::Send { message } => {
+            let row = procurement::waiting(&project, io, *message)?;
+            let said = human_command(
+                &project,
+                procurement::send_command(&row),
+                "procurement send",
+                io,
+            )?;
+            Ok(procurement::shown_then(&row, said))
+        }
+        ProcurementCommands::Discard { message } => human_command(
+            &project,
+            Command::SellerMessageDiscard { message: *message },
+            "procurement discard",
+            io,
+        ),
+        #[cfg(unix)]
+        ProcurementCommands::Check => procurement::check(&project, io),
+        #[cfg(unix)]
+        ProcurementCommands::Mailbox {
+            command: MailboxCommands::Disconnect,
+        } => procurement::disconnect(&project, io),
+        #[cfg(unix)]
+        ProcurementCommands::Mailbox {
+            command:
+                MailboxCommands::Connect {
+                    address,
+                    name,
+                    provider,
+                    imap,
+                    smtp,
+                    username,
+                    folder,
+                    signature,
+                    no_disclosure,
+                },
+        } => procurement::connect(
+            &project,
+            &procurement::ConnectArgs {
+                address,
+                name,
+                provider: provider.as_deref(),
+                imap: imap.as_deref(),
+                smtp: smtp.as_deref(),
+                username: username.as_deref(),
+                folder: folder.as_deref(),
+                signature: signature.as_deref(),
+                no_disclosure: *no_disclosure,
+            },
+            io,
+        ),
+        #[cfg(not(unix))]
+        _ => Err(
+            "this farik procurement command needs the daemon, which runs on Linux and macOS"
+                .to_string(),
+        ),
+    }
 }
 
 /// One of phase 2's writes, which reach the process driving the project when one does.
@@ -735,6 +1489,15 @@ fn phase_two_write(
     }
 }
 
+/// A day a person typed after `flag`, as `2026-10-08`, or none when they typed nothing.
+fn day(flag: &str, text: Option<&str>) -> Result<Option<chrono::NaiveDate>, String> {
+    text.map(|text| {
+        text.parse()
+            .map_err(|_| format!("{flag} {text} is not a day: write it as 2026-10-08"))
+    })
+    .transpose()
+}
+
 /// A task id a person typed.
 pub(crate) fn task(task_id: &str) -> Result<TaskId, String> {
     task_id
@@ -743,6 +1506,7 @@ pub(crate) fn task(task_id: &str) -> Result<TaskId, String> {
 }
 
 /// The human's command a subcommand stands for, and its name as typed.
+#[allow(clippy::too_many_lines, reason = "one arm per command")]
 fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
     Ok(match command {
         Commands::Approve { task_id } => (
@@ -782,6 +1546,24 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
             Command::QuestionAnswer {
                 question_id: *question_id,
                 answer: answer.join(" "),
+            },
+        ),
+        Commands::Tool {
+            command: ToolCommands::Approve { approval, note },
+        } => (
+            "tool approve",
+            Command::ToolApprove {
+                approval: *approval,
+                note: note.clone(),
+            },
+        ),
+        Commands::Tool {
+            command: ToolCommands::Refuse { approval, note },
+        } => (
+            "tool refuse",
+            Command::ToolRefuse {
+                approval: *approval,
+                note: note.clone(),
             },
         ),
         Commands::Integrate { task_id } => (
@@ -837,6 +1619,182 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 text: text.join(" "),
             },
         ),
+        Commands::Marketing {
+            command: MarketingCommands::Plan { command },
+        } => match command {
+            PlanCommands::Approve { plan, note } => (
+                "marketing plan approve",
+                Command::MarketingPlanDecide {
+                    plan: plan.clone(),
+                    approve: true,
+                    note: note.clone(),
+                },
+            ),
+            PlanCommands::Return { plan, reason } => (
+                "marketing plan return",
+                Command::MarketingPlanDecide {
+                    plan: plan.clone(),
+                    approve: false,
+                    note: Some(reason.clone()),
+                },
+            ),
+            PlanCommands::End { plan, note } => (
+                "marketing plan end",
+                Command::MarketingPlanEnd {
+                    plan: plan.clone(),
+                    note: note.clone(),
+                },
+            ),
+            PlanCommands::Show { .. } => {
+                return Err("farik marketing plan show only reads".to_string());
+            }
+        },
+        Commands::Marketing {
+            command: MarketingCommands::Post { command },
+        } => match command {
+            PostCommands::Stop { post } => (
+                "marketing post stop",
+                Command::SocialPostStop { post: *post },
+            ),
+            PostCommands::Send { post } => (
+                "marketing post send",
+                Command::SocialPostDecide {
+                    post: *post,
+                    post_it: true,
+                    note: None,
+                },
+            ),
+            PostCommands::Decline { post, note } => (
+                "marketing post decline",
+                Command::SocialPostDecide {
+                    post: *post,
+                    post_it: false,
+                    note: note.clone(),
+                },
+            ),
+            PostCommands::List => {
+                return Err("farik marketing post list only reads".to_string());
+            }
+        },
+        Commands::Site { command } => match command {
+            SiteCommands::Approve { request, note } => (
+                "site approve",
+                Command::SiteDecide {
+                    request: *request,
+                    allow: true,
+                    note: note.clone(),
+                },
+            ),
+            SiteCommands::Decline { request, note } => (
+                "site decline",
+                Command::SiteDecide {
+                    request: *request,
+                    allow: false,
+                    note: note.clone(),
+                },
+            ),
+            SiteCommands::Add { site } => ("site add", Command::SiteAdd { site: site.clone() }),
+            SiteCommands::Remove { host } => {
+                ("site remove", Command::SiteRemove { host: host.clone() })
+            }
+            SiteCommands::List => return Err("farik site list only reads".to_string()),
+        },
+        Commands::Pipeline { command } => match command {
+            PipelineCommands::Approve { pipeline, note } => (
+                "pipeline approve",
+                Command::DataPipelineDecide {
+                    pipeline: *pipeline,
+                    approve: true,
+                    note: note.clone(),
+                },
+            ),
+            PipelineCommands::Decline { pipeline, note } => (
+                "pipeline decline",
+                Command::DataPipelineDecide {
+                    pipeline: *pipeline,
+                    approve: false,
+                    note: note.clone(),
+                },
+            ),
+            PipelineCommands::List => return Err("farik pipeline list only reads".to_string()),
+        },
+        Commands::Order { command } => match command {
+            OrderCommands::Approve { order, note } => (
+                "order approve",
+                Command::PurchaseOrderDecide {
+                    order: order::number(order)?,
+                    approve: true,
+                    note: note.clone(),
+                },
+            ),
+            OrderCommands::Reject { order, note } => (
+                "order reject",
+                Command::PurchaseOrderDecide {
+                    order: order::number(order)?,
+                    approve: false,
+                    note: note.clone(),
+                },
+            ),
+            OrderCommands::Placed {
+                order,
+                on,
+                paid,
+                currency,
+            } => (
+                "order placed",
+                Command::PurchaseOrderPlace {
+                    order: order::number(order)?,
+                    placed_on: day("--on", on.as_deref())?,
+                    paid: paid.clone(),
+                    currency: currency.clone(),
+                },
+            ),
+            OrderCommands::Received {
+                order,
+                on,
+                paid,
+                currency,
+                renews_on,
+            } => (
+                "order received",
+                Command::PurchaseOrderReceive {
+                    order: order::number(order)?,
+                    received_on: day("--on", on.as_deref())?,
+                    paid: paid.clone(),
+                    currency: currency.clone(),
+                    renews_on: day("--renews-on", renews_on.as_deref())?,
+                },
+            ),
+            OrderCommands::Status {
+                order,
+                status,
+                note,
+                expected_on,
+            } => (
+                "order status",
+                Command::PurchaseOrderUpdate {
+                    order: order::number(order)?,
+                    status: status.clone(),
+                    note: note.clone(),
+                    expected_on: day("--expected-on", expected_on.as_deref())?,
+                },
+            ),
+            OrderCommands::Close { order, note } => (
+                "order close",
+                Command::PurchaseOrderClose {
+                    order: order::number(order)?,
+                    note: note.clone(),
+                },
+            ),
+            OrderCommands::List => return Err("farik order list only reads".to_string()),
+        },
+        Commands::Renewal { command } => match command {
+            RenewalCommands::Dismiss { renewal } => (
+                "renewal dismiss",
+                Command::RenewalDismiss { renewal: *renewal },
+            ),
+            RenewalCommands::List => return Err("farik renewal list only reads".to_string()),
+        },
         _ => return Err("this is not one of the human's commands".to_string()),
     })
 }

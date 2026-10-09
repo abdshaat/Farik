@@ -17,6 +17,8 @@ a{color:#A44D2B}a:hover{color:#7E3A1F}
 button:focus-visible,a:focus-visible{outline:2px solid #5A8DFF;outline-offset:2px}
 </style>
 </helmet>
+<div style="width: 1440px; background: #F3E7D3;">
+<p style="margin: 0; padding: 14px 24px; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347; background: #F3E7D3; border-top: 1px solid #161616;">1. The board beside the sprint’s progress: what each agent made on other services this sprint, against how many you allowed.</p>
 <div style="width: 1440px; height: 900px; display: flex; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif;">
 
 <nav aria-label="Main" style="width: 88px; flex-shrink: 0; background: #161616; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 0; box-sizing: border-box;">
@@ -37,6 +39,8 @@ button:focus-visible,a:focus-visible{outline:2px solid #5A8DFF;outline-offset:2p
 <div style="display: flex; align-items: center; gap: 16px;">
 <h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Board</h1>
 <span style="font-size: 16px; color: #5B5347;">Sprint 2 is running: 4 of 7 tasks done</span>
+<span style="width: 1px; align-self: stretch; background: #D9CBB3;"></span>
+<ul aria-label="Made on other services" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 14px; line-height: 20px;"><li><strong>Kai:</strong> 14 of 20 images this sprint</li><li><strong>Kai:</strong> 2 of 5 videos this sprint</li></ul>
 <span style="flex-grow: 1;"></span>
 <button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 10px 16px; cursor: pointer;">End the sprint early</button>
 </div>
@@ -70,8 +74,17 @@ button:focus-visible,a:focus-visible{outline:2px solid #5A8DFF;outline-offset:2p
 </div>
 </main>
 </div>
+<p style="margin: 0; padding: 14px 24px; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347; background: #F3E7D3; border-top: 1px solid #161616;">2. At the number: Kai asks you before making more.</p>
+<div style="width: 1440px; height: 110px; display: flex; background: #F3E7D3; overflow: hidden;"><div aria-hidden="true" style="width: 88px; flex-shrink: 0; background: #161616;"></div><div style="flex-grow: 1; padding: 32px 40px; display: flex; align-items: center; gap: 16px; align-self: flex-start;"><h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Board</h1><span style="font-size: 16px; color: #5B5347;">Sprint 2 is running: 4 of 7 tasks done</span>
+<span style="width: 1px; align-self: stretch; background: #D9CBB3;"></span>
+<ul aria-label="Made on other services" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 14px; line-height: 20px;"><li><strong>Kai:</strong> 20 of 20 images. Kai asks you before making more.</li><li><strong>Kai:</strong> 2 of 5 videos this sprint</li></ul></div></div>
+<p style="margin: 0; padding: 14px 24px; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347; background: #F3E7D3; border-top: 1px solid #161616;">3. Past it, because you allowed more one at a time: the count shows as it is, and says why.</p>
+<div style="width: 1440px; height: 110px; display: flex; background: #F3E7D3; overflow: hidden;"><div aria-hidden="true" style="width: 88px; flex-shrink: 0; background: #161616;"></div><div style="flex-grow: 1; padding: 32px 40px; display: flex; align-items: center; gap: 16px; align-self: flex-start;"><h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Board</h1><span style="font-size: 16px; color: #5B5347;">Sprint 2 is running: 4 of 7 tasks done</span>
+<span style="width: 1px; align-self: stretch; background: #D9CBB3;"></span>
+<ul aria-label="Made on other services" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 14px; line-height: 20px;"><li><strong>Kai:</strong> 21 of 20 images. Kai asks you before making more. Extra images were ones you approved.</li><li><strong>Kai:</strong> 2 of 5 videos this sprint</li></ul></div></div>
+</div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1267}}'>
 class Component extends DCLogic {
   renderVals() {
     var pm = '/_blob/9bb5279ccb2c1912098a3a1b2c486aee', dev = '/_blob/b3a8b1467a4f9ce051ca665a72525186', mkt = '/_blob/d639a95a4e1c0d33f55ba49d10828138', sm = '/_blob/50d64e70d63028a36a09a3b10dd330bb';

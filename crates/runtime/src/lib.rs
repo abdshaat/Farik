@@ -1,6 +1,8 @@
 //! Farik's agent runtime: a session is started, read, talked to, and stopped through one trait
 //! (`docs/SPEC.md` section 8.2), whatever program or recording is behind it.
 
+/// A kit connector's allowances: the period, the count and what a connect may set.
+pub mod allowances;
 /// The team's ceremonies: the facts each is given.
 pub mod ceremonies;
 /// The team's channel: messages, and whom they mention.
@@ -13,6 +15,9 @@ pub mod claude;
 /// What the first-run wizard finds on the computer, and the sandbox image it builds.
 #[cfg(unix)]
 pub mod computer;
+/// A custom connector's keys, per agent: the keychain, or a private file.
+#[cfg(unix)]
+pub mod connectors;
 /// What a session cost, and what each budget has left.
 pub mod cost;
 /// Where the model credential is kept: the environment, the keychain, or a private file.
@@ -23,27 +28,71 @@ pub mod criteria;
 /// The local service: the hooks around every tool call, and Farik's tools over MCP.
 #[cfg(unix)]
 pub mod daemon;
+/// Farik's own server over eBay's Browse API (ADR 0038, ADR 0043).
+pub mod ebay;
 /// Commands run on an agent's behalf, and what came of them.
 pub mod exec;
 /// The forge pull requests live on, driven through the `gh` program.
 pub mod forge;
+/// Farik's own server over the central banks' exchange rates (ADR 0038).
+pub mod fx;
+/// Farik's own Google Ads connector: the client for Google's API and what each tool sends (ADR
+/// 0038, ADR 0042).
+#[cfg(unix)]
+pub mod google_ads;
+/// A stand-in for the Google Ads API, for the tests of the connector.
+#[cfg(all(test, unix))]
+#[path = "../tests/support/google_ads_fixture.rs"]
+mod google_ads_fixture;
+/// A mail server in Docker for the tests of the procurement mailbox.
+#[cfg(all(test, unix))]
+#[path = "../tests/support/greenmail.rs"]
+mod greenmail;
+/// The procurement mailbox over IMAP and SMTP: its settings, the login, sending and reading.
+#[cfg(unix)]
+pub mod mailbox;
+/// The owner's decisions on marketing plans, the ends that dates bring, and how a plan is worded
+/// on the wire.
+pub mod marketing;
+/// An OAuth authorization server and a protected MCP server for the sign-in tests.
+#[cfg(all(test, unix))]
+#[path = "../tests/support/oauth_fixture.rs"]
+mod oauth_fixture;
 /// Farik running its team: the board read, the next thing on it done, one session at a time.
 #[cfg(unix)]
 pub mod orchestrator;
+/// Farik's own server over the open vulnerability database (ADR 0038).
+pub mod osv;
 /// Whether the human has paused the team.
 pub mod pause;
+#[cfg(all(test, unix))]
+#[path = "../tests/support/ports.rs"]
+mod ports;
 /// The project's preview, and the confined browser beside it.
 pub mod preview;
+/// The Procurement Specialist's purchase orders and renewals: the locks that number, decide and
+/// expire them, and what the clock closes.
+pub mod procurement;
 /// A session's system prompt, assembled in one fixed order.
 pub mod prompt;
+/// Farik's own server over the United States' product and vehicle safety agencies (ADR 0038).
+pub mod recalls;
 /// Sessions replayed from recorded transcripts.
 pub mod recorded;
+/// The apps Farik has registered with a service, and which servers' addresses each serves.
+pub mod registered_apps;
 /// Where a task's commands run: a container per task, or the host in no-sandbox mode.
 pub mod sandbox;
 /// What a session is, what it reports, and the traits every runtime implements.
 pub mod session;
 /// When each session started and how it ended, in the log.
 pub mod sessions;
+/// Signing in to a connector's service: the grant, and its refresh and revocation.
+#[cfg(unix)]
+pub mod sign_in;
+/// Skills an agent is given beyond its role's: reading, confirming, loading.
+#[cfg(unix)]
+pub mod skills;
 /// An agent asleep until its model provider's limit resets.
 pub mod sleep;
 /// Starting and ending a sprint.
@@ -92,9 +141,9 @@ pub use exec::{ExecError, ExecResult, Executor, OUTPUT_LIMIT_BYTES};
 #[cfg(unix)]
 pub use preview::docker::DockerPreviewFactory;
 pub use preview::{
-    BLACKHOLE_PROXY, CheckError, CheckTheme, CheckWidth, NoPreviews, PageCheck, PreviewError,
-    PreviewFactory, RunningPreview, browser_container, check_page, connector_server,
-    disallowed_tools,
+    AVAILABLE_FOR, BLACKHOLE_PROXY, CheckError, CheckTheme, CheckWidth, NoPreviews, PageCheck,
+    PolledPreviews, PreviewError, PreviewFactory, RunningPreview, browser_container, check_page,
+    connector_server, disallowed_tools,
 };
 pub use recorded::{RecordedAdapter, Transcript};
 #[cfg(unix)]
@@ -109,4 +158,6 @@ pub use session::{
 pub use stream::StreamParser;
 #[cfg(unix)]
 pub use templates::{TemplateError, TemplateListing, Templates};
-pub use tools::{FarikTool, ToolContext, ToolDeps, ToolError, call_tool, tool_descriptors};
+pub use tools::{
+    FarikTool, KitSource, ToolContext, ToolDeps, ToolError, call_tool, tool_descriptors,
+};

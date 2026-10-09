@@ -104,7 +104,7 @@ fn assignees_task<'a>(call: &'a Call<'_>) -> Result<&'a TaskId, ToolError> {
 }
 
 /// The task's worktree, `.farik/local/worktrees/<id>` (5.14).
-fn worktree(call: &Call<'_>, task: &TaskId) -> PathBuf {
+pub(super) fn worktree(call: &Call<'_>, task: &TaskId) -> PathBuf {
     call.deps()
         .files
         .root()

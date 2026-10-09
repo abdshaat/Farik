@@ -4,6 +4,8 @@ Date: 2026-09-29
 Status: accepted
 Amended 2026-09-30 by ADR 0025: phase numbers after 9 moved up by one, and every role kit must be tested and work on every supported engine and provider.
 Amended 2026-10-01 by ADR 0029: the role kits come first, as phase 7, built on Claude; engines and providers become phase 8 and re-check every kit; the ecosystem's rest is phase 9; the Milestone 1 test still runs on Claude, at the end of phase 7.
+Amended 2026-10-08 by ADR 0048 (the founder: "Lets set up the infra repository as well as the cloud hosting, landing page, etc. in phase 8"): a phase, Farik Cloud, follows the role kits as phase 8, so the phases after phase 7 moved up by one (Engines and providers 9, Ecosystem 10, Proof of concept 11, Web launch 12, Business workspaces 13, Desktop 14, Native mobile 15, Premium 16); the numbers below are the old ones.
+Amended 2026-10-09 by ADR 0049 (the founder: "Lets stop this phase after completing step 10g. We have to start the next phase"; "DevOps later, rest after Cloud"): a phase, Ask or auto and the milestones, follows Farik Cloud as phase 9, so the phases after phase 8 moved up by one (Engines and providers 10, Ecosystem 11, Proof of concept 12, Web launch 13, Business workspaces 14, Desktop 15, Native mobile 16, Premium 17). The kit check and the Milestone 1 test run on Claude in phase 9, after Farik Cloud, not at the end of phase 7; Engines and providers, now phase 10, re-checks every kit but the DevOps Engineer's, which comes after it in the Ecosystem phase, now phase 11, and is checked there on each engine and provider added by then. The numbers below are the old ones.
 
 ## Context
 

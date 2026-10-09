@@ -252,8 +252,8 @@ fn the_pinned_image_lists_the_pinned_tools() {
         .collect();
     assert!(
         untagged.is_empty(),
-        "the pinned image lists tools playwright.yaml does not tag; add each as denied: \
-         {untagged:?}"
+        "the pinned image lists tools the Designer's kit does not tag; add each as denied in \
+         roles/ui_ux_designer/kit.yaml: {untagged:?}"
     );
 }
 
@@ -287,13 +287,18 @@ impl RunningPreview for BridgePreview {
     }
 }
 
-/// How many requests the sink has answered.
-fn sink_hits(sink: &str) -> usize {
-    docker(&["logs", sink])
-        .1
+/// The sink's whole log, for a failure message.
+fn sink_log(sink: &str) -> String {
+    docker(&["logs", sink]).1
+}
+
+/// The `url:` line of each request the sink has answered.
+fn sink_requests(sink: &str) -> Vec<String> {
+    sink_log(sink)
         .lines()
         .filter(|line| line.contains("url:"))
-        .count()
+        .map(str::to_string)
+        .collect()
 }
 
 /// The connector's arguments with one confinement flag, and its value, left out.
@@ -447,12 +452,9 @@ fn the_browser_reaches_only_the_preview() {
     };
 
     // (a) The preview's network is off, and the browser has neither the proxy nor the origins.
-    let preview = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: playwright().image,
-    }
-    .start(&project, &task(), &root, &serving(), "tree")
-    .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
+    let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
+        .start(&project, &task(), &root, &serving(), "tree")
+        .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let (page, direct, away) = browse(
         preview.as_ref(),
         &output,
@@ -480,7 +482,11 @@ fn the_browser_reaches_only_the_preview() {
         away.contains("ERR_PROXY_CONNECTION_FAILED"),
         "(b) redirect: {away}"
     );
-    assert_eq!(sink_hits(&sink), 0, "(b) a request left the namespace");
+    assert!(
+        sink_requests(&sink).is_empty(),
+        "(b) a request left the namespace: {}",
+        sink_log(&sink)
+    );
 
     // (c) The bridge, and `--allowed-origins` alone: it blocks the direct navigation, and not the
     // redirect, which reaches example.com, as the server's README says. That is why the proxy is.
@@ -491,10 +497,16 @@ fn the_browser_reaches_only_the_preview() {
         direct.contains("ERR_BLOCKED_BY_CLIENT"),
         "(c) direct: {direct}"
     );
+    // Only the redirect's own request counts: a second one (a favicon, a retry) is the browser's.
+    let redirects = sink_requests(&sink)
+        .iter()
+        .filter(|line| line.ends_with("url:/"))
+        .count();
     assert_eq!(
-        sink_hits(&sink),
+        redirects,
         1,
-        "(c) the redirect, and only the redirect, reached example.com"
+        "(c) the redirect reached example.com once; the sink's log: {}",
+        sink_log(&sink)
     );
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -508,10 +520,7 @@ fn stop_leaves_no_container() {
     let _cleanup = Cleanup(project.clone());
     let output = root.join("output");
     std::fs::create_dir_all(&output).expect("the output folder is made");
-    let factory = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: playwright().image,
-    };
+    let factory = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image);
     let preview = factory
         .start(&project, &task(), &root, &serving(), "tree")
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
@@ -544,12 +553,9 @@ fn the_task_cleanup_removes_the_preview() {
     let root = worktree("cleanup");
     let project = project("cleanup");
     let _cleanup = Cleanup(project.clone());
-    let preview = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: playwright().image,
-    }
-    .start(&project, &task(), &root, &serving(), "tree")
-    .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
+    let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
+        .start(&project, &task(), &root, &serving(), "tree")
+        .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let name = preview.container();
     assert_eq!(containers_named(&name), 1);
 
@@ -580,12 +586,9 @@ fn checks_a_page_on_the_pinned_image() {
     let _cleanup = Cleanup(project.clone());
     let output = root.join("screenshots");
     std::fs::create_dir_all(&output).expect("the output folder is made");
-    let preview = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: playwright().image,
-    }
-    .start(&project, &task(), &root, &serving(), "tree")
-    .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
+    let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
+        .start(&project, &task(), &root, &serving(), "tree")
+        .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let check = |theme: CheckTheme| {
         check_page(
             &playwright(),
@@ -638,12 +641,9 @@ fn a_page_cannot_hide_its_violations_from_the_check() {
     let _cleanup = Cleanup(project.clone());
     let output = root.join("screenshots");
     std::fs::create_dir_all(&output).expect("the output folder is made");
-    let preview = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: playwright().image,
-    }
-    .start(&project, &task(), &root, &serving(), "tree")
-    .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
+    let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
+        .start(&project, &task(), &root, &serving(), "tree")
+        .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let checked = check_page(
         &playwright(),
         preview.as_ref(),
@@ -671,10 +671,10 @@ fn refuses_to_start_without_the_browser_image() {
     let root = worktree("no-browser");
     let project = project("no-browser");
     let _cleanup = Cleanup(project.clone());
-    let refused = DockerPreviewFactory {
-        image: ALPINE.to_owned(),
-        browser: "farik-test/no-such-browser:absent".to_owned(),
-    }
+    let refused = DockerPreviewFactory::new(
+        ALPINE.to_owned(),
+        "farik-test/no-such-browser:absent".to_owned(),
+    )
     .start(&project, &task(), &root, &serving(), "tree")
     .err()
     .expect("no preview starts without the browser's image");

@@ -32,7 +32,32 @@
         "message_post",
         "chat_message_post",
         "team_pause",
-        "team_resume"
+        "team_resume",
+        "connector_connect",
+        "connector_disconnect",
+        "tool_approve",
+        "tool_refuse",
+        "skill_save",
+        "skill_remove",
+        "skill_confirm",
+        "marketing_plan_decide",
+        "marketing_plan_end",
+        "social_post_stop",
+        "social_post_decide",
+        "site_decide",
+        "site_add",
+        "site_remove",
+        "purchase_order_decide",
+        "purchase_order_place",
+        "purchase_order_receive",
+        "purchase_order_close",
+        "purchase_order_update",
+        "renewal_dismiss",
+        "data_pipeline_decide",
+        "seller_message_send",
+        "seller_message_discard",
+        "seller_reply_dismiss",
+        "purchase_order_send"
       ]
     },
     "commandBodyWire": {
@@ -52,6 +77,28 @@
         { "$ref": "#/$defs/sprintStartBody" },
         { "$ref": "#/$defs/messagePostBody" },
         { "$ref": "#/$defs/chatMessagePostBody" },
+        { "$ref": "#/$defs/connectorConnectBody" },
+        { "$ref": "#/$defs/connectorDisconnectBody" },
+        { "$ref": "#/$defs/toolDecisionBody" },
+        { "$ref": "#/$defs/skillSaveBody" },
+        { "$ref": "#/$defs/skillRemoveBody" },
+        { "$ref": "#/$defs/skillConfirmBody" },
+        { "$ref": "#/$defs/marketingPlanDecideBody" },
+        { "$ref": "#/$defs/marketingPlanEndBody" },
+        { "$ref": "#/$defs/socialPostStopBody" },
+        { "$ref": "#/$defs/socialPostDecideBody" },
+        { "$ref": "#/$defs/siteDecideBody" },
+        { "$ref": "#/$defs/siteAddBody" },
+        { "$ref": "#/$defs/siteRemoveBody" },
+        { "$ref": "#/$defs/purchaseOrderDecideBody" },
+        { "$ref": "#/$defs/purchaseOrderStepBody" },
+        { "$ref": "#/$defs/purchaseOrderUpdateBody" },
+        { "$ref": "#/$defs/renewalDismissBody" },
+        { "$ref": "#/$defs/dataPipelineDecideBody" },
+        { "$ref": "#/$defs/sellerMessageSendBody" },
+        { "$ref": "#/$defs/sellerMessageDiscardBody" },
+        { "$ref": "#/$defs/sellerReplyDismissBody" },
+        { "$ref": "#/$defs/purchaseOrderSendBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -199,6 +246,275 @@
       "properties": {
         "agent_id": { "type": "string" },
         "text": { "type": "string" }
+      }
+    },
+    "connectorConnectBody": {
+      "title": "Connector Connect Body",
+      "description": "Gives the agent agent the custom MCP server server, an mcp_servers entry as team.schema.json shapes it with source custom, or replaces the one of its name (docs/SPEC.md 6.7; ADR 0030). Its keys were already kept on this machine, beside spec_sha256, by whoever sends this, so no value is here: the entry holds key names and header templates only. The handler holds the entry to validate_team, and spec_sha256 to the entry's own hash, then writes the team file and appends connector.connected.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "server", "spec_sha256"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "server": { "type": "object" },
+        "spec_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "issuer": { "type": "string", "minLength": 1, "description": "Who signed the agent in, when the connector is signed in to rather than given keys; recorded on connector.connected. The grant itself is kept by whoever sends this, never here." }
+      }
+    },
+    "connectorDisconnectBody": {
+      "title": "Connector Disconnect Body",
+      "description": "Takes the custom MCP server named server away from the agent agent: the team file loses its entry and connector.disconnected is appended. Its keys are deleted by whoever sends this.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "server"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "server": { "type": "string", "minLength": 1 }
+      }
+    },
+    "toolDecisionBody": {
+      "title": "Tool Decision Body",
+      "description": "The human allows (tool_approve) or refuses (tool_refuse) one connector call an agent asked about (docs/SPEC.md 5.7; ADR 0031): approval is the sequence number of its tool_approval.requested, and note is what the human says to the agent, absent when they say nothing. Refused unknown_approval when approval names no tool_approval.requested, and approval_decided when it was already allowed or refused. tool_approval.granted or tool_approval.refused is appended with the request's task on its envelope. tool_approve and tool_refuse share this body.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval"],
+      "properties": {
+        "approval": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "note": { "type": "string" }
+      }
+    },
+    "marketingPlanDecideBody": {
+      "title": "Marketing Plan Decide Body",
+      "description": "The owner approves (decision approve) or sends back (decision return) the marketing plan plan, MP-<n> (docs/SPEC.md 6.5; ADR 0042). note is what the owner says to the agent: required for return, where it is the reason and Farik refuses it blank as marketing_plan_reason_needed, and optional for approve. Only the owner decides, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session. Refused unknown_marketing_plan when plan names none, marketing_plan_decided when it was decided before, and marketing_plan_expired when approving one whose ends_on is past. marketing_plan.approved or marketing_plan.returned is appended with the proposing task on its envelope; an approval also ends every approved plan the new one replaces.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "decision"],
+      "properties": {
+        "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+        "decision": { "type": "string", "enum": ["approve", "return"] },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "marketingPlanEndBody": {
+      "title": "Marketing Plan End Body",
+      "description": "The owner ends the approved marketing plan plan, MP-<n>, at any time (docs/SPEC.md 6.5; ADR 0042); note says why, when they say. Refused unknown_marketing_plan when plan names none, marketing_plan_not_approved when it was never approved, and marketing_plan_ended when it has ended already. marketing_plan.ended { by_owner } is appended.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan"],
+      "properties": {
+        "plan": { "type": "string", "pattern": "^MP-[0-9]{1,6}$" },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "socialPostStopBody": {
+      "title": "Social Post Stop Body",
+      "description": "The owner stops post post, which is going out or is with Buffer (docs/SPEC.md 6.5; ADR 0042): a scheduled post not yet with Buffer records social_post.stopped { by owner }; one Farik has given to Buffer is first deleted from Buffer by Farik's own delete_post, and only when Buffer takes it back is social_post.stopped { by owner, taken_back } recorded. Refused unknown_post when post names none; post_not_going_out for a post that was requested, stopped, missed or failed; post_being_handed_over while Farik is giving it to Buffer, to be tried again in a minute; post_already_out once its time has passed; post_not_taken_back when Buffer would not delete it, with nothing recorded. Only the owner stops a post: the command arrives behind the daemon's token or the browser's cookie, never from an agent's session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post"],
+      "properties": {
+        "post": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "socialPostDecideBody": {
+      "title": "Social Post Decide Body",
+      "description": "The owner allows (decision post) or does not allow (decision dont_post) post post, which the Marketing Specialist wrote outside the marketing plan (docs/SPEC.md 6.5; ADR 0042). Allowed, it is recorded as social_post.scheduled { approved_by owner } with the request's task and no agent, and Farik hands it to Buffer an hour before its time, or at once when that hour has passed. Not allowed, social_post.stopped { by declined } is recorded with note, the owner's words, which the agent reads as the owner's own. Refused unknown_post when post names none, post_decided when it was decided before, and post_in_the_past when its time has passed, or is within five minutes for one to allow, since Farik can no longer hand it to Buffer. Only the owner decides, under ask and auto alike.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["post", "decision"],
+      "properties": {
+        "post": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "decision": { "type": "string", "enum": ["post", "dont_post"] },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "siteDecideBody": {
+      "title": "Site Decide Body",
+      "description": "The owner allows (allow true) or does not allow (allow false) the site the Procurement Specialist asked to read in request, the sequence number of its site.requested (docs/SPEC.md 6.10; ADR 0039). note is what the owner says to the agent, whichever they decide, at most 600 characters. Allowed, site.approved { host, request, note } is recorded with the request's task and no agent, and so is one for every other request still waiting for the same site, each on its own task; not allowed, site.declined { request, host, note } is recorded for this request alone. Refused unknown_site_request when request names no site.requested, and site_request_decided when it was decided before. Only the owner decides, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request", "allow"],
+      "properties": {
+        "request": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "allow": { "type": "boolean" },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "siteAddBody": {
+      "title": "Site Add Body",
+      "description": "The owner allows a site no agent asked for, or turns one of Farik's back on (docs/SPEC.md 6.10; ADR 0039). site is trimmed, has https:// put before it only when it holds no ://, and is then taken as the site its address names, a host and its www. twin being one: site.approved { host } is recorded with no task, and every request waiting for the site is allowed too. Refused site_invalid for a site Farik cannot open (an address that is not https, a port, a user name, an IP address, a name with no dot), and site_already_allowed for one that is approved.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["site"],
+      "properties": {
+        "site": { "type": "string", "minLength": 1, "maxLength": 2048 }
+      }
+    },
+    "siteRemoveBody": {
+      "title": "Site Remove Body",
+      "description": "The owner takes a site away from the Procurement Specialist, whether they allowed it or it is one of Farik's, which this turns off (docs/SPEC.md 6.10; ADR 0039). host is normalised as siteAddBody's site is: site.removed { host } is recorded with no task. Refused site_invalid for a host Farik cannot open, and site_not_allowed for one that is not approved now.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host"],
+      "properties": {
+        "host": { "type": "string", "minLength": 1, "maxLength": 2048 }
+      }
+    },
+    "purchaseOrderDecideBody": {
+      "title": "Purchase Order Decide Body",
+      "description": "The owner approves (decision approve: they will place and pay for the order themselves) or rejects (decision reject) the purchase order order, the n of PO-n (docs/SPEC.md 6.10; ADR 0039). note is what the owner says to the agent, whichever they decide, at most 600 characters. purchase_order.approved or purchase_order.rejected is appended with the order's task on its envelope and no agent and no session, its note empty when the owner said nothing. Refused unknown_purchase_order when order names no drafted order, purchase_order_decided when it was decided before, purchase_order_ended when it was received or closed, purchase_order_expired when Farik closed it by itself, and purchase_order_note_too_long past 600 characters. Only the owner decides, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session, and no tool of an agent records an approval.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "decision"],
+      "properties": {
+        "order": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "decision": { "type": "string", "enum": ["approve", "reject"] },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "sellerMessageSendBody": {
+      "title": "Seller Message Send Body",
+      "description": "The owner presses Send on message message to a seller, with the subject and the body they saw (docs/SPEC.md 6.10; ADR 0039): Farik adds the owner's signature and the line saying an AI assistant wrote it, sends the message from the procurement mailbox and appends seller_message.sent, or seller_message.failed when a mail server refuses it, in which case the message waits to be tried again. subject is 1 to 200 characters on one line and body 1 to 8000 characters, with no control character but a line break and a tab. Refused unknown_seller_message, seller_message_sent (also for a send of it that is in flight), seller_message_discarded, seller_message_closed (an order's message whose order was decided without it), seller_message_is_an_order (an order's message goes with its order, by purchase_order_send), mailbox_not_connected, seller_message_field_invalid, seller_message_too_long, seller_send_limit (50 messages have gone today, UTC, orders' included) and seller_message_failed. Only the owner sends: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session, and no tool of an agent sends or records a send.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "subject", "body"],
+      "properties": {
+        "message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
+        "body": { "type": "string", "minLength": 1, "maxLength": 8000 }
+      }
+    },
+    "sellerMessageDiscardBody": {
+      "title": "Seller Message Discard Body",
+      "description": "The owner discards message message to a seller; nothing is sent and seller_message.discarded is appended (docs/SPEC.md 6.10). Refused unknown_seller_message, seller_message_sent (also for a send of it that is in flight), seller_message_discarded and seller_message_closed (an order's message whose order was decided without it).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": {
+        "message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "sellerReplyDismissBody": {
+      "title": "Seller Reply Dismiss Body",
+      "description": "The owner dismisses reply reply from a seller on Today; it stays kept and seller_reply.dismissed is appended (docs/SPEC.md 6.10). Refused unknown_seller_reply and seller_reply_dismissed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reply"],
+      "properties": {
+        "reply": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "purchaseOrderSendBody": {
+      "title": "Purchase Order Send Body",
+      "description": "The owner presses Approve and send on a purchase order (docs/SPEC.md 6.10; ADR 0039, its amendment of 2026-10-07): Farik emails message, the order's own, with the order's workbook, orders/PO-<order>.xlsx, attached, to the seller, with the subject and body the owner saw, and only then appends purchase_order.approved (with note), seller_message.sent and purchase_order.placed (today, UTC), each with the order's task on its envelope and no agent and no session. A failed send appends seller_message.failed alone and the order still waits. The owner pays the seller outside Farik. Refused as purchase_order_decide refuses an order, and unknown_seller_message, seller_message_not_this_order (message is not this order's waiting message), and as seller_message_send refuses a message; a second send of the order's message while the first is in flight is refused seller_message_sent (purchase_order_sending is purchase_order_decide's, for an order being emailed). A message that sends an order is sent by this command alone, under ask and auto alike.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "message", "subject", "body"],
+      "properties": {
+        "order": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
+        "body": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "purchaseOrderStepBody": {
+      "title": "Purchase Order Step Body",
+      "description": "The body of purchase_order_place, purchase_order_receive and purchase_order_close (docs/SPEC.md 6.10; ADR 0039), which share one shape since `{ order }` fits all three and the schema's choice of bodies must match exactly one; the reader holds each command to its own fields. purchase_order_place: order is an approved order the owner placed and paid for themselves, placed_on the day (today, in UTC, when absent), paid what they paid if they know (a number such as 1450 or 1450.00, at most 10000000.00) and currency its currency (three capital letters, the order's when absent beside a paid). purchase_order_receive: the owner marks a placed order received on received_on (today when absent), with paid and currency if given here (the latest paid given, at placing or receiving, is what was paid) and renews_on, the day a subscription or anything paid for again renews. purchase_order_close: the owner closes a placed order that will not come (the seller cancelled or refunded it, or it was lost), with note, at most 600 characters. Refused unknown_purchase_order, purchase_order_expired, purchase_order_not_approved (placing an order not approved), purchase_order_placed (placing one placed), purchase_order_not_placed (receiving or closing one not placed), purchase_order_ended (any step on one received or closed), purchase_order_paid_invalid, purchase_order_currency_invalid and purchase_order_note_too_long. The events are appended with the order's task on the envelope and no agent and no session: no Farik tool records an order placed or received or what was paid.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order"],
+      "properties": {
+        "order": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "placed_on": { "type": "string", "format": "date" },
+        "received_on": { "type": "string", "format": "date" },
+        "paid": { "type": "string", "maxLength": 32 },
+        "currency": { "type": "string", "maxLength": 8 },
+        "renews_on": { "type": "string", "format": "date" },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "purchaseOrderUpdateBody": {
+      "title": "Purchase Order Update Body",
+      "description": "The owner corrects the follow-up status of a placed order (docs/SPEC.md 6.10; ADR 0039): status is one of preparing, shipped, delayed and problem, note what they know (at most 300 characters on one line, required for delayed and problem) and expected_on the day the seller expects the order (today or later, required for delayed). purchase_order.updated is appended with the order's task on the envelope and no agent and no session, so it is the owner's correction and replaces what the agent recorded. Refused unknown_purchase_order, purchase_order_expired, purchase_order_not_placed, purchase_order_ended and purchase_order_status_invalid.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "status"],
+      "properties": {
+        "order": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "status": { "type": "string", "maxLength": 32 },
+        "note": { "type": "string", "maxLength": 600 },
+        "expected_on": { "type": "string", "format": "date" }
+      }
+    },
+    "renewalDismissBody": {
+      "title": "Renewal Dismiss Body",
+      "description": "The owner dismisses a renewal coming up, or sends a request to review it and so dismisses it (docs/SPEC.md 6.10; ADR 0039): renewal is the sequence number of its renewal.flagged. renewal.dismissed is appended with no task, no agent and no session. Refused unknown_renewal when renewal names no renewal.flagged and renewal_dismissed when it was dismissed before.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["renewal"],
+      "properties": {
+        "renewal": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "dataPipelineDecideBody": {
+      "title": "Data Pipeline Decide Body",
+      "description": "The owner approves (decision approve: the team is asked to set the source up, in the owner's name) or declines (decision decline) a data pipeline request the Product Manager passed to them, pipeline being its number (docs/SPEC.md 6.10; ADR 0039). note is what the owner says to the agent, whichever they decide, at most 600 characters. data_pipeline.approved or data_pipeline.declined is appended with by human, the note as its reason, and no agent and no session on the envelope; an approval files an ordinary request in the owner's name and records its id. Refused unknown_pipeline when pipeline names no request, pipeline_decided when it was approved or declined before, pipeline_not_escalated when it is still the Product Manager's to decide, pipeline_not_filed when the request could not be filed and pipeline_note_too_long past 600 characters. Only the owner decides an escalated request, under ask and auto alike: the command arrives on POST /command behind the daemon's token or the browser's command behind its cookie, never from an agent's session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pipeline", "decision"],
+      "properties": {
+        "pipeline": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "decision": { "type": "string", "enum": ["approve", "decline"] },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "skillLevel": {
+      "type": "string",
+      "enum": ["team", "agent"],
+      "description": "Whose skill: the team's (.farik/skills/<name>/) or one agent's (.farik/agents/<agent>/skills/<name>/). With agent, the agent is named in agent; with team there is no agent. The reader refuses both mismatches at /body/agent."
+    },
+    "skillSaveBody": {
+      "title": "Skill Save Body",
+      "description": "Adds the skill whose folder is files to level, or replaces the one of its name (docs/SPEC.md 6.7; ADR 0034). files maps each path in the folder to its text, SKILL.md among them; the name is the one in SKILL.md's frontmatter. The handler holds it to check_skill and the counts, writes the folder, then the pin in the team file, then appends skill.added or skill.changed. A name Farik ships is refused skill_name_taken unless replace_shipped is true. The refusals are skill_* codes, agent_unknown and skill_limit_reached.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "files"],
+      "properties": {
+        "level": { "$ref": "#/$defs/skillLevel" },
+        "agent": { "type": "string", "minLength": 1 },
+        "files": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": { "type": "string" }
+        },
+        "replace_shipped": { "type": "boolean" }
+      }
+    },
+    "skillRemoveBody": {
+      "title": "Skill Remove Body",
+      "description": "Removes the skill name of level: its folder, its pin, and appends skill.removed (docs/SPEC.md 6.7; ADR 0034). A skill whose folder is already gone is unpinned all the same. Refused skill_unknown for a name not pinned there.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name"],
+      "properties": {
+        "level": { "$ref": "#/$defs/skillLevel" },
+        "agent": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 }
+      }
+    },
+    "skillConfirmBody": {
+      "title": "Skill Confirm Body",
+      "description": "Confirms on this computer the skill name of level as its folder is now, which the person read as the folder hashing to sha256 (docs/SPEC.md 6.7; ADR 0034). Refused skill_hash_mismatch unless the folder's skill_sha256 is sha256, and with whatever check_skill refuses; the pin is rewritten to that hash when it differs, then skill.confirmed is appended.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "name", "sha256"],
+      "properties": {
+        "level": { "$ref": "#/$defs/skillLevel" },
+        "agent": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "replace_shipped": { "type": "boolean" }
       }
     },
     "emptyBody": {

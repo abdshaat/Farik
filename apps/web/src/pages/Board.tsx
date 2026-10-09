@@ -13,6 +13,7 @@ import { statusWord } from "../app/words.ts";
 import { useWide } from "../shell/Shell.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
+import { boardLine, useAllowances } from "./allowances.tsx";
 import styles from "./Board.module.css";
 import { EndSprint } from "./dialogs/EndSprint.tsx";
 import { StartSprint } from "./dialogs/StartSprint.tsx";
@@ -70,6 +71,8 @@ export function Board() {
 		{},
 	);
 	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
+	// What agents made on other services, never waited for: the board draws without it.
+	const allowances = useAllowances();
 	const [who, setWho] = useState<string>();
 	const [mine, setMine] = useState(false);
 	const [epic, setEpic] = useState<string>();
@@ -261,6 +264,22 @@ export function Board() {
 					</p>
 				) : (
 					<p>{t(backlog.planInSprints ? "sprintNoneBacklog" : "sprintNone")}</p>
+				)}
+				{allowances && allowances.rows.length > 0 && (
+					<section aria-label={t("allowBoardHeading")}>
+						<ul className={styles.allowances}>
+							{allowances.rows.map((row) => (
+								<li key={`${row.agent}-${row.server}-${row.tool}`}>
+									{boardLine(
+										row,
+										agents.find((a) => a.id === row.agent)?.displayName ??
+											row.agent,
+										allowances.period,
+									)}
+								</li>
+							))}
+						</ul>
+					</section>
 				)}
 				<Button
 					kind={sprint ? "secondary" : "primary"}

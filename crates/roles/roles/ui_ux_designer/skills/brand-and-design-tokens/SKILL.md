@@ -10,10 +10,12 @@ ones in the code.
 
 ## 1. Find the tokens
 
-Before you plan, find where the project keeps its brand and its design tokens: a tokens file, a
+Before you plan, read `docs/marketing/brand/brand-kit.md` first when it exists: the Marketing
+Specialist keeps the business's brand there, and its colours and voice are the ones you take. Then
+find where the project keeps its brand and its design tokens: a tokens file, a
 theme, CSS custom properties, a component library. Read the brand's written rules if it has them.
-For Farik itself they are the `@farik/brand` package (`packages/brand/tokens/tokens.json`) and
-`docs/brand/brand.md`, and the components in `@farik/ui`.
+For Farik itself they are the `brand` package of the `farik` scope (`packages/brand/tokens/tokens.json`) and
+`docs/brand/brand.md`, and the components in its `ui` package.
 
 ## 2. Never invent a value
 

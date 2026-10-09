@@ -17,14 +17,14 @@ use farik_runtime::daemon::{
 };
 use farik_runtime::forge::Forge;
 use farik_runtime::orchestrator::{
-    CommandError, CommandReport, Orchestrator, OrchestratorDeps, RecoveryReport, command_handler,
-    result_of,
+    CommandError, CommandReport, Orchestrator, OrchestratorDeps, OrchestratorError, RecoveryReport,
+    command_handler, result_of,
 };
 use farik_runtime::sleep::{Sleeper, TokioSleeper};
 use farik_runtime::{
-    DockerPreviewFactory, DockerSandboxFactory, HostSandboxFactory, NoPreviews, PreviewFactory,
-    RuntimeAdapter, RuntimeError, SANDBOX_IMAGE, SandboxFactory, SessionHandle, SessionSpec,
-    Templates,
+    AVAILABLE_FOR, DockerPreviewFactory, DockerSandboxFactory, HostSandboxFactory, NoPreviews,
+    PolledPreviews, PreviewFactory, RuntimeAdapter, RuntimeError, SANDBOX_IMAGE, SandboxFactory,
+    SessionHandle, SessionSpec, Templates,
 };
 use farik_store::files::Sandbox;
 use serde_json::Value;
@@ -91,12 +91,39 @@ pub(crate) fn command(
 ) -> Result<CommandReport, CommandError> {
     match try_lock(&project.root).map_err(|detail| CommandError::Failed { detail })? {
         Some(lock) => {
-            let handled = handle_here(project, command, name, io);
+            let ended = match &command {
+                Command::MarketingPlanEnd { plan, .. } => Some(plan.clone()),
+                _ => None,
+            };
+            let handled = handle_here(project, command, name, io).map(|report| match &ended {
+                Some(plan) => saying_when_ads_pause(project, io, plan, report),
+                None => report,
+            });
             drop(lock);
             handled
         }
         None => send(&project.root, &command),
     }
+}
+
+/// `report`, the answer to ending `plan` in a process that drives nothing, with the sentence that
+/// Farik pauses the plan's ads when a process does, when it made some that are still to pause.
+fn saying_when_ads_pause(
+    project: &Project,
+    io: &CliIo<'_>,
+    plan: &str,
+    mut report: CommandReport,
+) -> CommandReport {
+    let left = tool_deps(project, io)
+        .ok()
+        .and_then(|tools| farik_runtime::marketing::ads::ads_left_to_pause(&tools, plan).ok());
+    if left == Some(true) {
+        report.said = format!(
+            "{}. Farik pauses {plan}'s ads when it next runs.",
+            report.said
+        );
+    }
+    report
 }
 
 /// One of phase 2's writes: done here by `here`, holding the run lock while it writes, when nothing
@@ -195,9 +222,24 @@ pub(crate) fn command_orchestrator(
     name: &str,
     io: &CliIo<'_>,
 ) -> Result<Orchestrator, String> {
+    Ok(Orchestrator::new(command_deps(project, name, io)?))
+}
+
+/// What the orchestrator of a command handled in this process is made of. Its daemon holds the
+/// connections kept on this computer, as a driving process's does, so that a command that calls a
+/// connector itself (a Stop of a post Buffer has) reaches it.
+///
+/// # Errors
+///
+/// A sentence saying what the store refused.
+pub(crate) fn command_deps(
+    project: &Project,
+    name: &str,
+    io: &CliIo<'_>,
+) -> Result<OrchestratorDeps, String> {
     let tools = tool_deps(project, io)?;
-    Ok(Orchestrator::new(OrchestratorDeps {
-        daemon: Arc::new(DaemonState::new(Arc::clone(&tools))),
+    Ok(OrchestratorDeps {
+        daemon: connected_daemon(&tools, io),
         tools,
         adapter: Arc::new(NoSessions {
             command: name.to_string(),
@@ -207,7 +249,24 @@ pub(crate) fn command_orchestrator(
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
-    }))
+    })
+}
+
+/// A daemon over `tools` that keeps connector keys where `io` says, and runs each stdio
+/// connector in a folder of the user's state folder (ADR 0030).
+pub(crate) fn connected_daemon(
+    tools: &Arc<farik_runtime::tools::ToolDeps>,
+    io: &CliIo<'_>,
+) -> Arc<DaemonState> {
+    let daemon = Arc::new(DaemonState::new(Arc::clone(tools)));
+    daemon.set_connector_secrets(Arc::clone(&io.connector_secrets));
+    if let Some(directory) = state_dir(&io.env) {
+        daemon.set_state_dir(directory);
+    }
+    if let Some(program) = &io.own_program {
+        daemon.set_own_program(program.clone());
+    }
+    daemon
 }
 
 /// What a driving process waits on: the test's sleeper, else the machine's timer over the clock.
@@ -278,8 +337,9 @@ pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.farik/lo
     read your credential files (~/.git-credentials, ~/.ssh, ~/.claude/.credentials.json, the gh \
     configuration), push with a git hidden in a script, which farik_exec's check does not see, and \
     read .farik/local/daemon.json, whose token lets them act as you through farik: approve, \
-    accept, answer, and integrate. The governor still checks every path and permission it is \
-    asked about.";
+    accept, answer, add skills, mark orders placed and received, and integrate, and get the keys \
+    you gave a connector, which they can also read from a running connector's /proc/<pid>/environ. \
+    The governor still checks every path and permission it is asked about.";
 
 /// The variables of the environment a Claude Code session is given besides its credential.
 const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];
@@ -313,7 +373,22 @@ pub(crate) struct Driver {
     /// The first connect code, when the browser routes are on.
     pub(crate) connect_code: Option<String>,
     handle: DaemonHandle,
+    /// The watch on the marketing plans' Google Ads spend, which runs beside the ticks.
+    watch: tokio::task::JoinHandle<Result<(), OrchestratorError>>,
     _lock: RunLock,
+}
+
+/// What the end of the spend watch says of the run, when it ended on its own with an error (a
+/// store error, which stopped the orchestrator): the sentence to report, so that `farik serve`
+/// ends saying why. `None` when it was still watching, or ended without a fault.
+fn watch_failure(
+    ended: Option<Result<Result<(), OrchestratorError>, tokio::task::JoinError>>,
+) -> Option<String> {
+    match ended? {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => Some(format!("the ad spend watch stopped the run: {error}")),
+        Err(error) => Some(format!("the ad spend watch failed: {error}")),
+    }
 }
 
 impl Driver {
@@ -328,8 +403,23 @@ impl Driver {
     ///
     /// A sentence saying the daemon could not be shut down.
     pub(crate) async fn finish(self) -> Result<(), String> {
-        let Driver { handle, _lock, .. } = self;
-        handle.shutdown().await.map_err(|error| error.to_string())
+        let Driver {
+            handle,
+            watch,
+            _lock,
+            ..
+        } = self;
+        let ended = if watch.is_finished() {
+            Some(watch.await)
+        } else {
+            watch.abort();
+            None
+        };
+        let shut = handle.shutdown().await.map_err(|error| error.to_string());
+        match watch_failure(ended) {
+            Some(failure) => Err(failure),
+            None => shut,
+        }
     }
 }
 
@@ -424,7 +514,11 @@ async fn start_listening(
         );
     }
     let tools = tool_deps(project, io)?;
-    let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));
+    // Before the daemon listens: a tab that reconnects asks `team.get` the moment it does, and a
+    // task in `verifying` or `team.propose` asks whether the Designer can have its browser.
+    tools.transitions.set_sandbox(settings.sandbox);
+    let (sandboxes, previews) = told_factories(&tools, settings.sandbox, sandbox_image(io)).await?;
+    let daemon = connected_daemon(&tools, io);
     let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
     let web = options
         .web
@@ -454,8 +548,6 @@ async fn start_listening(
             return Err(error);
         }
     };
-    let (sandboxes, previews) = factories(settings.sandbox, sandbox_image(io));
-    tools.transitions.set_previews(Arc::clone(&previews));
     let orchestrator = Arc::new(Orchestrator::new(OrchestratorDeps {
         tools,
         daemon: Arc::clone(&daemon),
@@ -480,6 +572,7 @@ async fn start_listening(
         }
     };
     Ok(Driver {
+        watch: watching(&orchestrator),
         orchestrator,
         daemon,
         interrupts: tokio::sync::mpsc::unbounded_channel().1,
@@ -490,6 +583,64 @@ async fn start_listening(
         handle,
         _lock: lock,
     })
+}
+
+/// The watch on the marketing plans' Google Ads spend, started once recovery is done and running
+/// beside the ticks: a tick waits for a running session to end, and the spend is read every
+/// fifteen minutes whatever runs (spec 6.7).
+fn watching(
+    orchestrator: &Arc<Orchestrator>,
+) -> tokio::task::JoinHandle<Result<(), OrchestratorError>> {
+    let (stopping, watching) = (Arc::clone(orchestrator), Arc::clone(orchestrator));
+    supervised(move || stopping.stop(), async move {
+        watching.watch_marketing_spend().await
+    })
+}
+
+/// A task that runs `watch` and, if `watch` panics, calls `stop` and panics the same way, so that
+/// the run ends and `Driver::finish` says why, as it does for the store error that stops the
+/// watch itself (spec 6.5). Aborting the task aborts `watch` with it.
+fn supervised(
+    stop: impl FnOnce() + Send + 'static,
+    watch: impl std::future::Future<Output = Result<(), OrchestratorError>> + Send + 'static,
+) -> tokio::task::JoinHandle<Result<(), OrchestratorError>> {
+    /// A task that is aborted when its handle is dropped.
+    struct Aborting(tokio::task::JoinHandle<Result<(), OrchestratorError>>);
+    impl Drop for Aborting {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    tokio::spawn(async move {
+        let mut inner = Aborting(tokio::spawn(watch));
+        match (&mut inner.0).await {
+            Ok(ended) => ended,
+            Err(error) if error.is_panic() => {
+                stop();
+                std::panic::resume_unwind(error.into_panic())
+            }
+            // Cancelled: nothing else holds the handle, so it was aborted from outside.
+            Err(_) => Ok(()),
+        }
+    })
+}
+
+/// `factories`, the preview's told to the governor's door once its first answer of whether a
+/// preview can run is in, which for Docker takes at most `docker info`'s 10 seconds. It is waited
+/// for here, before the daemon listens, and nowhere else: from then on the answer is what Docker
+/// said, and no request waits for it.
+async fn told_factories(
+    tools: &farik_runtime::tools::ToolDeps,
+    sandbox: Sandbox,
+    image: &str,
+) -> Result<(Arc<dyn SandboxFactory>, Arc<dyn PreviewFactory>), String> {
+    let (sandboxes, previews) = factories(sandbox, image);
+    tools.transitions.set_previews(Arc::clone(&previews));
+    let settling = Arc::clone(&previews);
+    tokio::task::spawn_blocking(move || settling.settle())
+        .await
+        .map_err(|error| format!("Docker could not be asked: {error}"))?;
+    Ok((sandboxes, previews))
 }
 
 /// The image Docker's sandbox and the preview run in: `SANDBOX_IMAGE`, or the end-to-end
@@ -504,17 +655,21 @@ fn sandbox_image<'a>(io: &'a CliIo<'_>) -> &'a str {
 }
 
 /// What makes a task's sandbox and its preview, by the project's sandbox setting, in `image`:
-/// the Designer has no browser without Docker's sandbox (D3).
+/// the Designer has no browser without Docker's sandbox (D3). Whether Docker is there is asked
+/// off every request's path, from the moment the factory is made.
 fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn PreviewFactory>) {
     match sandbox {
         Sandbox::Docker => (
             Arc::new(DockerSandboxFactory {
                 image: image.to_string(),
             }),
-            Arc::new(DockerPreviewFactory {
-                image: image.to_string(),
-                browser: farik_runtime::computer::browser_image(),
-            }),
+            Arc::new(PolledPreviews::new(
+                Arc::new(DockerPreviewFactory::new(
+                    image.to_string(),
+                    farik_runtime::computer::browser_image(),
+                )),
+                AVAILABLE_FOR,
+            )),
         ),
         Sandbox::None => (Arc::new(HostSandboxFactory), Arc::new(NoPreviews)),
     }
@@ -581,6 +736,15 @@ fn adapter(
                 daemon_file: project.root.join(DAEMON_FILE),
                 daemon: handle.info.clone(),
                 sessions_dir: project.root.join(".farik/local/sessions"),
+                // No state folder, or no id for the project: the orchestrator offers no skills
+                // either, so nothing is written here.
+                skills_dir: state_dir(&io.env)
+                    .and_then(|state| {
+                        let id = farik_runtime::connectors::local_project_id(&state, &project.root)
+                            .ok()?;
+                        Some(farik_runtime::skills::skills_dir(&state, &id))
+                    })
+                    .unwrap_or_default(),
                 team_file: project.root.join(".farik/team.yaml"),
                 env: SESSION_ENV
                     .iter()
@@ -619,5 +783,139 @@ pub(crate) fn listen(interrupts: Interrupts) -> Result<UnboundedReceiver<()>, St
             });
             Ok(receiver)
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use farik_protocol::clock::FixedClock;
+    use farik_runtime::connectors::{ConnectorSecrets, MemoryConnectorSecrets};
+    use farik_store::git::fixtures::TempRepo;
+
+    use farik_runtime::orchestrator::OrchestratorError;
+
+    use super::{command_deps, supervised, watch_failure};
+    use crate::{CliIo, open_project, run_cli};
+
+    #[tokio::test]
+    async fn says_why_the_ad_spend_watch_ended_the_run() {
+        // Still watching, or ended without a fault: nothing to say.
+        assert_eq!(watch_failure(None), None);
+        assert_eq!(watch_failure(Some(Ok(Ok(())))), None);
+        // A fault it ended on, which stopped the orchestrator, is the run's end.
+        let refused = OrchestratorError::Refused {
+            reason: "marketing_event_not_recorded: no".to_string(),
+        };
+        assert_eq!(
+            watch_failure(Some(Ok(Err(refused)))),
+            Some(
+                "the ad spend watch stopped the run: refused: marketing_event_not_recorded: no"
+                    .to_string()
+            )
+        );
+        // And so is a panic in it.
+        let panicked = tokio::spawn(async { panic!("the watch broke") })
+            .await
+            .map(|()| Ok(()));
+        let said = watch_failure(Some(panicked)).expect("a panic is a fault");
+        assert!(said.starts_with("the ad spend watch failed: "), "{said}");
+    }
+
+    /// A flag and the `stop` that raises it.
+    fn stopping() -> (Arc<AtomicBool>, impl FnOnce() + Send + 'static) {
+        let stopped = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stopped);
+        (stopped, move || flag.store(true, Ordering::SeqCst))
+    }
+
+    #[tokio::test]
+    async fn a_panic_in_the_ad_spend_watch_stops_the_run_and_is_said() {
+        let (stopped, stop) = stopping();
+
+        let handle = supervised(stop, async { panic!("the watch broke") });
+        let ended = handle.await;
+
+        // The run is told to stop, and the end of the task still says why when it is finished.
+        assert!(stopped.load(Ordering::SeqCst), "the run was not stopped");
+        assert!(ended.as_ref().is_err_and(tokio::task::JoinError::is_panic));
+        let said = watch_failure(Some(ended)).expect("a panic is a fault");
+        assert!(said.starts_with("the ad spend watch failed: "), "{said}");
+    }
+
+    #[tokio::test]
+    async fn an_ad_spend_watch_that_ends_on_its_own_stops_nothing_more() {
+        // Its own store error stops the orchestrator already (`watch_marketing_spend`), and an end
+        // without a fault is a stop that was asked for: neither calls `stop` again.
+        for ended in [
+            Ok(()),
+            Err(OrchestratorError::Refused {
+                reason: "marketing_event_not_recorded: no".to_string(),
+            }),
+        ] {
+            let (stopped, stop) = stopping();
+            let expected = ended.clone();
+            let handle = supervised(stop, async move { ended });
+            assert_eq!(handle.await.expect("joined"), expected);
+            assert!(!stopped.load(Ordering::SeqCst));
+        }
+    }
+
+    #[tokio::test]
+    async fn aborting_the_supervisor_aborts_the_watch() {
+        struct Flag(Arc<AtomicBool>);
+        impl Drop for Flag {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let held = Flag(Arc::clone(&dropped));
+        let (stopped, stop) = stopping();
+        let handle = supervised(stop, async move {
+            let _held = held;
+            std::future::pending::<Result<(), OrchestratorError>>().await
+        });
+        tokio::task::yield_now().await;
+
+        handle.abort();
+        let _ = handle.await;
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while !dropped.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the watch was dropped with its supervisor");
+        assert!(!stopped.load(Ordering::SeqCst), "an abort is not a fault");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_command_handled_here_has_the_kept_connections() {
+        let repository = TempRepo::new("start-command-deps");
+        let at = chrono::Utc::now();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let mut io = CliIo::new(
+            repository.path.clone(),
+            Box::new(&mut out),
+            Box::new(&mut err),
+            Arc::new(FixedClock::new(at)),
+        );
+        let init = ["farik", "init"].map(String::from);
+        assert_eq!(run_cli(&init, &mut io), 0);
+        let project = open_project(&repository.path, at).expect("the project opens");
+
+        let deps = command_deps(&project, "marketing post stop", &io).expect("the deps are made");
+
+        // The daemon's store of keys is the one `io` names, as a driving process's is, so that a
+        // Stop of a post reaches Buffer with the connection kept on this computer.
+        let other: Arc<dyn ConnectorSecrets> = Arc::new(MemoryConnectorSecrets::default());
+        assert!(
+            !deps.daemon.set_connector_secrets(other),
+            "a store was set already"
+        );
     }
 }

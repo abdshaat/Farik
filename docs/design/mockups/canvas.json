@@ -3,13 +3,13 @@
   "attachments": {},
   "boards": {
     "AgentEdit.dc.html": {
-      "h": 1000,
-      "is_interactive": true,
-      "page": "team",
-      "title": "Edit Theo",
+      "x": 0,
+      "y": 0,
       "w": 1440,
-      "x": 1520,
-      "y": 0
+      "h": 6498,
+      "title": "Edit Theo and Mira: the role’s kit, connectors added by you, Sign in again, skills, Remove",
+      "page": "connectors",
+      "is_interactive": true
     },
     "AnswerQuestion.dc.html": {
       "h": 1000,
@@ -30,10 +30,10 @@
       "y": 0
     },
     "Board.dc.html": {
-      "h": 900,
+      "h": 1267,
       "is_interactive": true,
       "page": "daily",
-      "title": "Board",
+      "title": "Board, with what agents made on other services",
       "w": 1440,
       "x": 3040,
       "y": 0
@@ -60,7 +60,7 @@
       "h": 1000,
       "is_interactive": true,
       "page": "daily",
-      "title": "Costs",
+      "title": "Costs, with what agents made on other services",
       "w": 1440,
       "x": 3040,
       "y": 2240
@@ -310,7 +310,7 @@
       "y": 0,
       "w": 1440,
       "h": 2080,
-      "title": "Iris\u2019s plan, and checking the screens",
+      "title": "Iris’s plan, and checking the screens",
       "page": "designer",
       "is_interactive": true
     },
@@ -319,7 +319,7 @@
       "y": 0,
       "w": 1440,
       "h": 2200,
-      "title": "Accept work, with Iris\u2019s check",
+      "title": "Accept work, with Iris’s check",
       "page": "designer",
       "is_interactive": true
     },
@@ -448,6 +448,663 @@
       "title": "Setup: sprints on by default",
       "page": "sprints",
       "is_interactive": true
+    },
+    "ConnectorAdd.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 18065,
+      "title": "Add a connector: custom (start it or sign in, label its tools) or from a kit (key or sign-in, done)",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "ToolApproval.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 3490,
+      "title": "Theo wants to use airtable: Today and Allow once; Kai past an allowance",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "PhoneToolApproval.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 360,
+      "h": 1626,
+      "title": "Theo wants to use airtable, on a phone",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "GitHubSignIn.dc.html": {
+      "x": 5000,
+      "y": 0,
+      "w": 1440,
+      "h": 5420,
+      "title": "Signing in with GitHub by a code, and Remove naming GitHub’s or Google’s settings (step 03b)",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "PhoneGitHubSignIn.dc.html": {
+      "x": 6520,
+      "y": 0,
+      "w": 360,
+      "h": 5442,
+      "title": "Signing in with GitHub, on a phone (step 03b)",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "PhoneSignIn.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 360,
+      "h": 11372,
+      "title": "Signing in to a service, on a phone",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "PhoneSkills.dc.html": {
+      "x": 5000,
+      "y": 0,
+      "w": 360,
+      "h": 7425,
+      "title": "Skills on the agent page, on a phone",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "SignInDone.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 1095,
+      "title": "Signed in: the tab Farik serves",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "SkillEdit.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 4025,
+      "title": "Add or edit a skill",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "SkillReview.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 1320,
+      "title": "Review a skill",
+      "page": "signin-skills",
+      "is_interactive": true
+    },
+    "ConnectorAllowance.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 3900,
+      "title": "How many Kai may make: after signing in, and Change how many",
+      "page": "team",
+      "is_interactive": true
+    },
+    "PhoneKit.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 360,
+      "h": 5587,
+      "title": "Connecting a kit’s service, on a phone",
+      "page": "team",
+      "is_interactive": true
+    },
+    "PhoneAllowances.dc.html": {
+      "x": 5000,
+      "y": 0,
+      "w": 360,
+      "h": 2247,
+      "title": "Allowances on the board, on Costs and when asking, on a phone",
+      "page": "team",
+      "is_interactive": true
+    },
+    "TodayMarketingPlan.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 2078,
+      "title": "Today: a marketing plan to approve (step 08c)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "MarketingPlan.dc.html": {
+      "x": 1480,
+      "y": 0,
+      "w": 1280,
+      "h": 9988,
+      "title": "The marketing plan: waiting, sent back, running, ended (step 08c)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneMarketingPlan.dc.html": {
+      "x": 2960,
+      "y": 0,
+      "w": 390,
+      "h": 9110,
+      "title": "Phone: the marketing plan (step 08c)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "TodayGoingOut.dc.html": {
+      "x": 3550,
+      "y": 0,
+      "w": 1280,
+      "h": 6828,
+      "title": "Today: posts going out, Stop, missed and failed (step 08d)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneGoingOut.dc.html": {
+      "x": 5030,
+      "y": 0,
+      "w": 390,
+      "h": 5533,
+      "title": "Phone: posts going out (step 08d)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "SetupTeamMoreRoles.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 4329,
+      "title": "Setup: More roles offers the Finance and the Procurement Specialist (step 10b)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneSetupTeamMoreRoles.dc.html": {
+      "x": 1640,
+      "y": 0,
+      "w": 390,
+      "h": 4568,
+      "title": "Phone: setup’s More roles, with the DevOps Engineer (steps 10b, 11)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "TodaySiteRequest.dc.html": {
+      "x": 2230,
+      "y": 0,
+      "w": 1280,
+      "h": 3337,
+      "title": "Today: Ivo asks to read two sites, Allow and Don’t allow (step 10b2)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneSiteRequest.dc.html": {
+      "x": 3710,
+      "y": 0,
+      "w": 390,
+      "h": 3193,
+      "title": "Phone: Ivo asks to read a site (step 10b2)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "AgentSites.dc.html": {
+      "x": 4300,
+      "y": 0,
+      "w": 1440,
+      "h": 3841,
+      "title": "Ivo’s sites: Farik’s approved sites, the sites you allowed, Remove and Add a site (step 10b2)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneAgentSites.dc.html": {
+      "x": 5940,
+      "y": 0,
+      "w": 390,
+      "h": 3029,
+      "title": "Phone: Ivo’s sites (step 10b2)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "TodayBudgetReached.dc.html": {
+      "x": 5620,
+      "y": 0,
+      "w": 1280,
+      "h": 4082,
+      "title": "Today: a plan’s ads reached their budget, Farik could not pause them, the spend unread, ads still running (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneBudgetReached.dc.html": {
+      "x": 7100,
+      "y": 0,
+      "w": 390,
+      "h": 3406,
+      "title": "Phone: a plan’s ads reached their budget (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "RaiseBudget.dc.html": {
+      "x": 7690,
+      "y": 0,
+      "w": 1280,
+      "h": 3277,
+      "title": "Raise the budget: the new budgets, refused amounts, sent (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneRaiseBudget.dc.html": {
+      "x": 9170,
+      "y": 0,
+      "w": 390,
+      "h": 2907,
+      "title": "Phone: raise the budget (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "MarketingPlanSpend.dc.html": {
+      "x": 9760,
+      "y": 0,
+      "w": 1280,
+      "h": 5750,
+      "title": "The plan’s spend and the ads Farik paused: running, unread, End, ended (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneMarketingPlanSpend.dc.html": {
+      "x": 11240,
+      "y": 0,
+      "w": 390,
+      "h": 2708,
+      "title": "Phone: the plan’s spend and pauses (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "MarketingPlanApproval.dc.html": {
+      "x": 11830,
+      "y": 0,
+      "w": 1280,
+      "h": 3394,
+      "title": "The plan to approve: what each campaign advertises, and its price (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "PhoneMarketingPlanApproval.dc.html": {
+      "x": 13310,
+      "y": 0,
+      "w": 390,
+      "h": 2143,
+      "title": "Phone: what each campaign advertises, and its price (step 08g)",
+      "page": "marketing",
+      "is_interactive": true
+    },
+    "RemoveGoogleAds.dc.html": {
+      "x": 6960,
+      "y": 0,
+      "w": 1440,
+      "h": 1742,
+      "title": "Remove Google Ads: Farik pauses the plan’s ads first, and Today when Google refused (step 08g)",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "PhoneRemoveGoogleAds.dc.html": {
+      "x": 8480,
+      "y": 0,
+      "w": 360,
+      "h": 1624,
+      "title": "Phone: Remove Google Ads, pausing the ads first (step 08g)",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "TodayPurchaseOrder.dc.html": {
+      "x": 6530,
+      "y": 0,
+      "w": 1280,
+      "h": 5587,
+      "title": "Today: Ivo sets up an order, Approve and send, Approve or Reject (steps 10c, 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhonePurchaseOrder.dc.html": {
+      "x": 8010,
+      "y": 0,
+      "w": 390,
+      "h": 4406,
+      "title": "Phone: Ivo sets up an order, Approve and send (steps 10c, 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "AgentOrders.dc.html": {
+      "x": 8600,
+      "y": 0,
+      "w": 1440,
+      "h": 5636,
+      "title": "Ivo’s orders: to place, placed with their status, received, and recent (step 10c)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneAgentOrders.dc.html": {
+      "x": 10240,
+      "y": 0,
+      "w": 390,
+      "h": 4044,
+      "title": "Phone: Ivo’s orders, Mark placed and Mark received (step 10c)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "TodayRenewal.dc.html": {
+      "x": 10830,
+      "y": 0,
+      "w": 1280,
+      "h": 2685,
+      "title": "Today: renewals coming up, Ask for a review and Dismiss (step 10c)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneRenewal.dc.html": {
+      "x": 12310,
+      "y": 0,
+      "w": 390,
+      "h": 1834,
+      "title": "Phone: renewals coming up (step 10c)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "TodayDataPipeline.dc.html": {
+      "x": 12900,
+      "y": 0,
+      "w": 1280,
+      "h": 4649,
+      "title": "Today: Ivo asks for two data sources Mira passed to you, Approve or Decline (step 10e)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneDataPipeline.dc.html": {
+      "x": 14380,
+      "y": 0,
+      "w": 390,
+      "h": 4133,
+      "title": "Phone: Ivo asks for a data source (step 10e)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "ProcurementMailbox.dc.html": {
+      "x": 14970,
+      "y": 0,
+      "w": 1440,
+      "h": 4494,
+      "title": "Connect a procurement mailbox: providers, Microsoft not supported yet, the alias note; Ivo’s mailbox section (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneProcurementMailbox.dc.html": {
+      "x": 16610,
+      "y": 0,
+      "w": 390,
+      "h": 4220,
+      "title": "Phone: connect a procurement mailbox (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "TodaySellerMessages.dc.html": {
+      "x": 17200,
+      "y": 0,
+      "w": 1280,
+      "h": 3659,
+      "title": "Today: Ivo’s messages to sellers, Send, Edit or Discard, and the sellers’ replies (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneSellerMessages.dc.html": {
+      "x": 18680,
+      "y": 0,
+      "w": 390,
+      "h": 3965,
+      "title": "Phone: messages to sellers and their replies (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "SellerMessage.dc.html": {
+      "x": 19270,
+      "y": 0,
+      "w": 1280,
+      "h": 2336,
+      "title": "Edit a message to a seller, then send it; a refused send and the daily cap (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneSellerMessage.dc.html": {
+      "x": 20750,
+      "y": 0,
+      "w": 390,
+      "h": 4303,
+      "title": "Phone: edit a message to a seller (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "SellerReply.dc.html": {
+      "x": 21340,
+      "y": 0,
+      "w": 1280,
+      "h": 2770,
+      "title": "Read a seller’s reply as text, its attachments, Ask for a comparison (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "PhoneSellerReply.dc.html": {
+      "x": 22820,
+      "y": 0,
+      "w": 390,
+      "h": 2192,
+      "title": "Phone: read a seller’s reply (step 10f)",
+      "page": "procurement",
+      "is_interactive": true
+    },
+    "SettingsApprovals.dc.html": {
+      "x": 5440,
+      "y": 0,
+      "w": 1280,
+      "h": 2311,
+      "title": "Settings: Approvals, ask me first or let the team act on its own (step 10h)",
+      "page": "team",
+      "is_interactive": true
+    },
+    "PhoneSettingsApprovals.dc.html": {
+      "x": 6800,
+      "y": 0,
+      "w": 390,
+      "h": 2327,
+      "title": "Phone: Approvals in Settings (step 10h)",
+      "page": "team",
+      "is_interactive": true
+    },
+    "AutoMode.dc.html": {
+      "x": 7270,
+      "y": 0,
+      "w": 1280,
+      "h": 1269,
+      "title": "Let the team act on its own? What stops asking, what never does, Turn on or Keep asking (step 10h)",
+      "page": "team",
+      "is_interactive": true
+    },
+    "PhoneAutoMode.dc.html": {
+      "x": 8630,
+      "y": 0,
+      "w": 390,
+      "h": 1470,
+      "title": "Phone: let the team act on its own? (step 10h)",
+      "page": "team",
+      "is_interactive": true
+    },
+    "TodayOnItsOwn.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 3593,
+      "title": "Today on auto: the mode, what it did on its own, a limit reached with Raise it, a post outside the plan with Stop, a message that could not go (step 10h)",
+      "page": "auto",
+      "is_interactive": true
+    },
+    "PhoneTodayOnItsOwn.dc.html": {
+      "x": 1480,
+      "y": 0,
+      "w": 390,
+      "h": 4397,
+      "title": "Phone: Today on auto, and Raise it (step 10h)",
+      "page": "auto",
+      "is_interactive": true
+    },
+    "DoneOnItsOwn.dc.html": {
+      "x": 2070,
+      "y": 0,
+      "w": 1280,
+      "h": 2867,
+      "title": "Done on its own: each act, and what went out as text (step 10h)",
+      "page": "auto",
+      "is_interactive": true
+    },
+    "PhoneDoneOnItsOwn.dc.html": {
+      "x": 3550,
+      "y": 0,
+      "w": 390,
+      "h": 2388,
+      "title": "Phone: Done on its own (step 10h)",
+      "page": "auto",
+      "is_interactive": true
+    },
+    "DevOpsRole.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 3587,
+      "title": "Setup: More roles offers the DevOps Engineer, Lena; seven at most; Sami and Rui added by hand (step 11)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "DevOpsCard.dc.html": {
+      "x": 1640,
+      "y": 0,
+      "w": 1440,
+      "h": 1596,
+      "title": "Your team: Lena’s card says what the production watch last saw (steps 11, 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "Production.dc.html": {
+      "x": 3280,
+      "y": 0,
+      "w": 1280,
+      "h": 2831,
+      "title": "Settings: Your production, kept on this computer; no platform yet; the refusals (step 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "PhoneProduction.dc.html": {
+      "x": 4760,
+      "y": 0,
+      "w": 390,
+      "h": 3133,
+      "title": "Phone: Your production (step 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "TodayIncident.dc.html": {
+      "x": 5350,
+      "y": 0,
+      "w": 1280,
+      "h": 2943,
+      "title": "Today: an incident first, its steps, Stop, Restart, Roll back, Mark as fixed, and its states (steps 11d, 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "PhoneIncident.dc.html": {
+      "x": 6830,
+      "y": 0,
+      "w": 390,
+      "h": 2843,
+      "title": "Phone: an incident on Today (steps 11d, 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "Incident.dc.html": {
+      "x": 7420,
+      "y": 0,
+      "w": 1280,
+      "h": 1235,
+      "title": "Incident 412: what happened, Lena’s notes as text, the deploys it touched, the fix (step 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "DeployPanel.dc.html": {
+      "x": 8900,
+      "y": 0,
+      "w": 1280,
+      "h": 2369,
+      "title": "A deploy task: its Deploy tab, each state, and its gate (steps 11b, 11f)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "TodayDeployApproval.dc.html": {
+      "x": 10380,
+      "y": 0,
+      "w": 1280,
+      "h": 2563,
+      "title": "Today: Lena wants to put a new version live, a deploy the sprint did not plan (step 11b)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "SprintStartDeploys.dc.html": {
+      "x": 11860,
+      "y": 0,
+      "w": 1440,
+      "h": 1069,
+      "title": "Start a sprint: it approves the deploys planned into it (step 11b)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "ConnectorFileKey.dc.html": {
+      "x": 13500,
+      "y": 0,
+      "w": 1440,
+      "h": 1948,
+      "title": "Connect Kubernetes to Lena: a key that is a whole file (step 12d)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "DoneOnItsOwnDeploy.dc.html": {
+      "x": 4140,
+      "y": 0,
+      "w": 1280,
+      "h": 900,
+      "title": "Done on its own: Lena put a1b2c3d live for FRK-40, a deploy made on auto (step 11b)",
+      "page": "auto",
+      "is_interactive": true
+    },
+    "PhoneDoneOnItsOwnDeploy.dc.html": {
+      "x": 5620,
+      "y": 0,
+      "w": 390,
+      "h": 1039,
+      "title": "Phone: Done on its own, with a deploy made on auto (step 11b)",
+      "page": "auto",
+      "is_interactive": true
+    },
+    "PhoneDeployApproval.dc.html": {
+      "x": 15140,
+      "y": 0,
+      "w": 390,
+      "h": 2599,
+      "title": "Phone: Lena wants to put a new version live, and why it asks (step 11b)",
+      "page": "devops",
+      "is_interactive": true
+    },
+    "PhoneSprintStartDeploys.dc.html": {
+      "x": 15730,
+      "y": 0,
+      "w": 390,
+      "h": 1045,
+      "title": "Phone: start a sprint, which approves the deploys planned into it (step 11b)",
+      "page": "devops",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -507,7 +1164,7 @@
     },
     "t_team": {
       "kind": "title1",
-      "maxW": 4400,
+      "maxW": 9020,
       "page": "team",
       "text": "Farik: team and settings",
       "w": 240,
@@ -546,6 +1203,51 @@
       "maxW": 6000,
       "page": "sprints",
       "text": "Sprints gather ready work",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_connectors": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "connectors",
+      "text": "Connectors per agent, and approving their calls",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_signin-skills": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "signin-skills",
+      "text": "Signing in to a service, and skills per agent",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_procurement": {
+      "kind": "title1",
+      "maxW": 23300,
+      "page": "procurement",
+      "text": "Procurement Specialist: more roles in setup, the sites it may read, purchase orders, renewals, data pipelines and contacting sellers",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_auto": {
+      "kind": "title1",
+      "maxW": 6010,
+      "page": "auto",
+      "text": "Ask or auto: Today when the team acts on its own, and what it did on its own",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_devops": {
+      "kind": "title1",
+      "maxW": 16120,
+      "page": "devops",
+      "text": "DevOps Engineer: Lena on the team, production, deploys and incidents",
       "w": 240,
       "x": 0,
       "y": -300
@@ -601,7 +1303,80 @@
     "BoardBacklog.dc.html",
     "TodayBacklog.dc.html",
     "SettingsSprints.dc.html",
-    "SetupSprints.dc.html"
+    "SetupSprints.dc.html",
+    "ConnectorAdd.dc.html",
+    "ToolApproval.dc.html",
+    "PhoneToolApproval.dc.html",
+    "GitHubSignIn.dc.html",
+    "PhoneGitHubSignIn.dc.html",
+    "PhoneSignIn.dc.html",
+    "PhoneSkills.dc.html",
+    "SignInDone.dc.html",
+    "SkillEdit.dc.html",
+    "SkillReview.dc.html",
+    "ConnectorAllowance.dc.html",
+    "PhoneKit.dc.html",
+    "PhoneAllowances.dc.html",
+    "TodayMarketingPlan.dc.html",
+    "MarketingPlan.dc.html",
+    "PhoneMarketingPlan.dc.html",
+    "TodayGoingOut.dc.html",
+    "PhoneGoingOut.dc.html",
+    "SetupTeamMoreRoles.dc.html",
+    "PhoneSetupTeamMoreRoles.dc.html",
+    "TodaySiteRequest.dc.html",
+    "PhoneSiteRequest.dc.html",
+    "AgentSites.dc.html",
+    "PhoneAgentSites.dc.html",
+    "TodayBudgetReached.dc.html",
+    "PhoneBudgetReached.dc.html",
+    "RaiseBudget.dc.html",
+    "PhoneRaiseBudget.dc.html",
+    "MarketingPlanSpend.dc.html",
+    "PhoneMarketingPlanSpend.dc.html",
+    "MarketingPlanApproval.dc.html",
+    "PhoneMarketingPlanApproval.dc.html",
+    "RemoveGoogleAds.dc.html",
+    "PhoneRemoveGoogleAds.dc.html",
+    "TodayPurchaseOrder.dc.html",
+    "PhonePurchaseOrder.dc.html",
+    "AgentOrders.dc.html",
+    "PhoneAgentOrders.dc.html",
+    "TodayRenewal.dc.html",
+    "PhoneRenewal.dc.html",
+    "TodayDataPipeline.dc.html",
+    "PhoneDataPipeline.dc.html",
+    "ProcurementMailbox.dc.html",
+    "PhoneProcurementMailbox.dc.html",
+    "TodaySellerMessages.dc.html",
+    "PhoneSellerMessages.dc.html",
+    "SellerMessage.dc.html",
+    "PhoneSellerMessage.dc.html",
+    "SellerReply.dc.html",
+    "PhoneSellerReply.dc.html",
+    "SettingsApprovals.dc.html",
+    "PhoneSettingsApprovals.dc.html",
+    "AutoMode.dc.html",
+    "PhoneAutoMode.dc.html",
+    "TodayOnItsOwn.dc.html",
+    "PhoneTodayOnItsOwn.dc.html",
+    "DoneOnItsOwn.dc.html",
+    "PhoneDoneOnItsOwn.dc.html",
+    "DevOpsRole.dc.html",
+    "DevOpsCard.dc.html",
+    "Production.dc.html",
+    "PhoneProduction.dc.html",
+    "TodayIncident.dc.html",
+    "PhoneIncident.dc.html",
+    "Incident.dc.html",
+    "DeployPanel.dc.html",
+    "TodayDeployApproval.dc.html",
+    "SprintStartDeploys.dc.html",
+    "ConnectorFileKey.dc.html",
+    "DoneOnItsOwnDeploy.dc.html",
+    "PhoneDoneOnItsOwnDeploy.dc.html",
+    "PhoneDeployApproval.dc.html",
+    "PhoneSprintStartDeploys.dc.html"
   ],
   "pages": [
     {
@@ -643,6 +1418,30 @@
     {
       "id": "sprints",
       "name": "Sprints"
+    },
+    {
+      "id": "connectors",
+      "name": "Connectors"
+    },
+    {
+      "id": "signin-skills",
+      "name": "Sign-in and skills"
+    },
+    {
+      "id": "marketing",
+      "name": "Marketing plan and posts"
+    },
+    {
+      "id": "procurement",
+      "name": "Procurement Specialist"
+    },
+    {
+      "id": "auto",
+      "name": "Ask or auto"
+    },
+    {
+      "id": "devops",
+      "name": "DevOps Engineer"
     }
   ],
   "title": "Farik web UI mockup"

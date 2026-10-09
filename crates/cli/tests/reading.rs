@@ -716,6 +716,48 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_no_diff_for_a_task_in_a_private_folder() {
+    // A Finance Specialist's task has no branch (6.6), and its files are not printed.
+    let repository = TempRepo::new("read-show-folder");
+    repository.write("Cargo.toml", "[package]\nname = \"one\"\n");
+    repository.commit_at("a project", COMMITTED);
+    let init = run_in(&repository.path, &["init"]);
+    assert_eq!(init.code, 0, "{}", init.err);
+    let request = a_request("Record the spending")
+        .replace("software_developer", "finance_specialist")
+        .replace("reviewer_role: architect", "reviewer_role: product_manager")
+        .replace("crates/cli/**", ".farik/local/finance/**")
+        .replace(
+            "method: test\n      command: cargo test --workspace\n      new_tests_required: true",
+            "method: artifact\n      path: books.xlsx",
+        );
+    repository.write("request.yaml", &request);
+    let filed = run_in(&repository.path, &["task", "create", "request.yaml"]);
+    assert_eq!(filed.code, 0, "{}{}", filed.out, filed.err);
+    let folder = repository.path.join(".farik/local/finance");
+    std::fs::create_dir_all(&folder).expect("the folder is made");
+    std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+    let task = "FRK-1".parse().expect("a task id");
+    farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+    std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
+
+    let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(!ran.out.contains("diff --git"), "{}", ran.out);
+    assert!(!ran.out.contains("edited books"), "{}", ran.out);
+    let ran = run_in(
+        &repository.path,
+        &["--json", "task", "show", "FRK-1", "--diff"],
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let shown: Value = serde_json::from_str(ran.out.trim()).expect("JSON");
+    assert_eq!(shown["diff"], "", "{shown}");
+}
+
 /// `a_project_with_a_task` and a second request, both accepted, with every metric a different
 /// number so that no line or field can be printed from another's value:
 ///

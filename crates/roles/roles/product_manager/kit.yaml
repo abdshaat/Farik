@@ -1,0 +1,227 @@
+# The Product Manager's kit: six skills and four services. Amplitude, Linear and Notion it only
+# reads, each signed in (route 1, ADR 0035). GitHub it reads and, only after the human allows the
+# call, writes an issue or a comment, with a key the user pastes until Farik Cloud signs users in
+# (ADR 0044, step 07c). Tool lists are from each service's documentation on 2026-10-02 (step 06's
+# plan) and, for GitHub, on 2026-10-06; the live pin test compares them. A tool a service lists
+# that is not here is never offered (`tool_not_tagged`) until a pin update tags it.
+role: product_manager
+skills:
+  - asking-the-right-questions
+  - writing-requirements
+  - prioritising-the-backlog
+  - scoping-a-release
+  - using-product-sources
+  - deciding-data-pipelines
+connectors:
+  - name: amplitude
+    transport: http
+    url: https://mcp.amplitude.com/mcp
+    oauth: { scopes: [mcp:read, offline_access] }
+    title: Amplitude
+    about: "Amplitude shows how people use your product: which features they open, where they stop, and what changed after a release."
+    why: "So the Product Manager can check how a feature is really used before deciding what to build, and read the numbers again after it ships. It only reads."
+    setup: "Sign in with your Amplitude account and allow Farik to read your project. Farik connects to Amplitude's United States service; a project kept in Amplitude's European service cannot be connected yet."
+    labels:
+      search: "search charts and dashboards"
+      get_amplitude_context: "read the project's setup"
+      query_amplitude_data: "ask about usage"
+      get_amplitude_charts: "read charts"
+      get_experiments: "list experiments"
+      query_experiment: "read an experiment's results"
+      get_flags: "list feature switches"
+      get_amp_taxonomy: "read the list of tracked actions"
+      get_transformations: "read how actions are combined"
+      get_group_types: "list account groups"
+      list_guides_surveys: "list guides and surveys"
+      get_guide_or_survey: "read a guide or survey"
+      query_wave_opportunities: "read suggested opportunities"
+      query_wave_product_areas: "read product areas"
+    tools:
+      search: network
+      get_amplitude_context: network
+      query_amplitude_data: network
+      get_amplitude_charts: network
+      get_experiments: network
+      query_experiment: network
+      get_flags: network
+      get_amp_taxonomy: network
+      get_transformations: network
+      get_group_types: network
+      list_guides_surveys: network
+      get_guide_or_survey: network
+      query_wave_opportunities: network
+      query_wave_product_areas: network
+      render_amplitude_chart: denied
+      use_amplitude_chart_monitors: denied
+      use_amp_dashboards: denied
+      use_amp_notebooks: denied
+      use_amp_comments: denied
+      share_amp_entities: denied
+      use_amplitude_cohorts: denied
+      get_amp_user_data: denied
+      create_experiment: denied
+      update_experiment: denied
+      create_metric: denied
+      create_flags: denied
+      update_flag: denied
+      manage_amp_events: denied
+      manage_amp_properties: denied
+      manage_amp_taxonomy: denied
+      get_session_replays: denied
+      list_session_replays: denied
+      get_session_replay_events: denied
+      manage_wave_opportunities: denied
+      manage_wave_product_areas: denied
+      manage_wave_verification_artifacts: denied
+      use_amplitude_ai_feedback: denied
+      get_agent_results: denied
+      get_amplitude_agent_analytics_info: denied
+      get_data_ingestion_sources: denied
+      get_data_source_details: denied
+      get_data_warehouse_destinations: denied
+      get_data_warehouse_jobs: denied
+      get_deployments: denied
+      get_from_url: denied
+  - name: linear
+    transport: http
+    url: https://mcp.linear.app/mcp/readonly
+    oauth: { scopes: [read] }
+    title: Linear
+    about: "Linear is where many teams keep their backlog: issues, projects and the talk around them."
+    why: "So the Product Manager can turn an issue you already wrote into a request, with its comments, instead of you typing it again. It only reads."
+    setup: "Sign in with your Linear account and allow Farik to read your workspace. Farik asks Linear for reading only, so it can never change an issue."
+    labels:
+      list_issues: "list issues"
+      get_issue: "read an issue"
+      list_comments: "read comments"
+      list_projects: "list projects"
+      get_project: "read a project"
+      list_documents: "list documents"
+      get_document: "read a document"
+      list_cycles: "list cycles"
+      list_milestones: "list milestones"
+      get_milestone: "read a milestone"
+      list_teams: "list teams"
+      get_team: "read a team"
+      list_users: "list people"
+      get_user: "read a person"
+      list_issue_statuses: "list issue states"
+      get_issue_status: "read an issue state"
+      list_issue_labels: "list issue labels"
+      list_project_labels: "list project labels"
+      get_attachment: "read an attachment"
+      extract_images: "read an issue's images"
+      search_documentation: "search Linear's help"
+    tools:
+      list_issues: network
+      get_issue: network
+      list_comments: network
+      list_projects: network
+      get_project: network
+      list_documents: network
+      get_document: network
+      list_cycles: network
+      list_milestones: network
+      get_milestone: network
+      list_teams: network
+      get_team: network
+      list_users: network
+      get_user: network
+      list_issue_statuses: network
+      get_issue_status: network
+      list_issue_labels: network
+      list_project_labels: network
+      get_attachment: network
+      extract_images: network
+      search_documentation: network
+  - name: notion
+    transport: http
+    url: https://mcp.notion.com/mcp
+    oauth: {}
+    title: Notion
+    about: "Notion holds your team's pages and databases: plans, notes and product documents."
+    why: "So the Product Manager starts from what you already wrote, such as a product brief or customer notes, instead of asking again. It only reads."
+    setup: "Sign in with your Notion account and allow Farik to read your workspace. Farik can see the pages you can see there, and it never changes them."
+    labels:
+      notion-search: "search pages"
+      notion-fetch: "read a page or database"
+      notion-query-data-sources: "read a database's rows"
+      notion-get-comments: "read comments"
+      notion-get-teams: "list teamspaces"
+      notion-get-users: "list people"
+      notion-download-attachment: "read an attachment"
+      notion-get-tool-access: "check what your Notion plan allows"
+    tools:
+      notion-search: network
+      notion-fetch: network
+      notion-query-data-sources: network
+      notion-get-comments: network
+      notion-get-teams: network
+      notion-get-users: network
+      notion-download-attachment: network
+      notion-get-tool-access: network
+      notion-ai-search: denied
+      notion-download-skill: denied
+      notion-create-file-upload: denied
+      notion-create-attachment: denied
+      notion-create-pages: denied
+      notion-update-page: denied
+      notion-convert-page-to-skill: denied
+      notion-move-pages: denied
+      notion-duplicate-page: denied
+      notion-create-database: denied
+      notion-create-folder: denied
+      notion-update-data-source: denied
+      notion-create-view: denied
+      notion-update-view: denied
+      notion-query-meeting-notes: denied
+      notion-list-agents: denied
+      notion-search-agents: denied
+      notion-query-sessions: denied
+      notion-search-sessions: denied
+      notion-spawn-session: denied
+      notion-get-session-status: denied
+      notion-wait-session: denied
+      notion-send-message-to-session: denied
+      notion-stop-session: denied
+      notion-list-session-events: denied
+      notion-read-session-event: denied
+      notion-create-comment: denied
+      notion-get-async-task: denied
+  - name: github
+    transport: http
+    url: https://api.githubcopilot.com/mcp/
+    headers:
+      Authorization: "Bearer {GITHUB_KEY}"
+      X-MCP-Toolsets: "issues,projects"
+    credential_keys: [GITHUB_KEY]
+    key_page: "https://github.com/settings/personal-access-tokens/new?name=Farik+Product+Manager&description=Farik%27s+Product+Manager+reads+issues+and+files+the+issues+and+comments+you+allow.&expires_in=366&issues=write"
+    title: GitHub
+    about: "GitHub keeps your code and the work around it: issues, pull requests and project boards."
+    why: "So the Product Manager can turn an issue you already wrote into a request, read your project boards, and file an issue or a comment when you say yes."
+    setup: "“Get your key” opens GitHub's page with the key's name, a year's life and its access filled in. Under ‘Resource owner’, choose the owner of your issues; under ‘Repository access’, choose ‘Only select repositories’ and pick them. For an organisation's boards, also give ‘Projects’ read access. Choose ‘Generate token’ and paste the key here. An organisation may allow a shorter life, need you signed in to its single sign-on, or need its owner's approval. Farik asks you before each issue or comment it posts."
+    labels:
+      issue_read: "read an issue and its comments"
+      list_issues: "list issues"
+      search_issues: "search issues"
+      list_issue_types: "list issue types"
+      list_issue_fields: "list issue fields"
+      get_label: "read a label"
+      projects_list: "list project boards and their cards"
+      projects_get: "read a project board or a card"
+      issue_write: "file or change an issue"
+      add_issue_comment: "comment on an issue"
+    tools:
+      issue_read: network
+      list_issues: network
+      search_issues: network
+      list_issue_types: network
+      list_issue_fields: network
+      get_label: network
+      projects_list: network
+      projects_get: network
+      issue_write: external_effect
+      add_issue_comment: external_effect
+      sub_issue_write: denied
+      update_issue_comment: denied
+      projects_write: denied

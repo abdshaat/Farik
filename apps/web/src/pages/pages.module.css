@@ -176,6 +176,19 @@
 	gap: var(--farik-space-3);
 }
 
+/* Where a sign-in shows, a phone's footer puts Cancel above Next, each the full width (phase 7
+   step 03b, board 3); the buttons come Next first, which a larger screen keeps. */
+@media (max-width: 40rem) {
+	.signInActions {
+		flex-direction: column-reverse;
+		align-items: stretch;
+	}
+
+	.signInActions > button {
+		width: 100%;
+	}
+}
+
 .field {
 	display: grid;
 	gap: var(--farik-space-1);
@@ -378,4 +391,548 @@
 
 .waiting li span:first-child {
 	font-family: var(--farik-type-code-family);
+}
+
+/* An agent's connectors and ConnectorAdd's tools: one ruled row each (phase 7 step 01's mockups). */
+.ruled {
+	display: grid;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-top: 1px solid var(--farik-color-rule);
+}
+
+.ruled > li {
+	display: grid;
+	gap: var(--farik-space-1);
+	padding: var(--farik-space-3) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.ruled p {
+	margin: 0;
+}
+
+.code {
+	margin: 0;
+	padding: 0;
+	font-family: var(--farik-type-code-family);
+	overflow-wrap: anywhere;
+}
+
+/* The code card's two buttons: side by side where they fit, and each the full width on a phone
+   (phase 7 step 03b's board). */
+.codeActions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-2) var(--farik-space-3);
+}
+
+@media (max-width: 40rem) {
+	.codeActions > button {
+		flex: 1 1 100%;
+	}
+}
+
+/* The code a user types on a service's page: large, in the code face, spaced (phase 7 step 03b). */
+.userCode {
+	font-family: var(--farik-type-code-family);
+	font-size: 32px;
+	line-height: 40px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	overflow-wrap: anywhere;
+}
+
+/* A tool's three labels, side by side where they fit; each a 44 px target. */
+.labels {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-2);
+}
+
+.labels label {
+	display: flex;
+	align-items: center;
+	gap: var(--farik-space-2);
+	min-height: 44px;
+	padding: 0 var(--farik-space-3);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+	background: var(--farik-color-surface);
+	cursor: pointer;
+}
+
+.labels label:has(input:focus-visible) {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.tagWords {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+	padding: var(--farik-space-3);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+}
+
+.tagWords dt {
+	font-weight: 600;
+}
+
+.tagWords dd {
+	margin: 0;
+}
+
+/* A key's name, its value and Remove: in a row where they fit, stacked on a phone. */
+.keyRow {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: end;
+	gap: var(--farik-space-2) var(--farik-space-3);
+}
+
+.keyRow > * {
+	flex: 1 1 12rem;
+}
+
+.keyRow > button {
+	flex: 0 0 auto;
+}
+
+.rowHead {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--farik-space-2);
+}
+
+.group {
+	display: grid;
+	gap: var(--farik-space-2);
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.group > legend {
+	padding: 0;
+	margin-bottom: var(--farik-space-1);
+	font-weight: 600;
+}
+
+/* The tool approval dialog: what the agent wants to send, framed as untrusted text. */
+.toolApproval {
+	display: grid;
+	gap: var(--farik-space-3);
+}
+
+.toolApproval p,
+.toolApproval h3 {
+	margin: 0;
+}
+
+.toolApproval h3 {
+	font-size: inherit;
+}
+
+.toolApproval dl {
+	display: grid;
+	grid-template-columns: 6rem minmax(0, 1fr);
+	gap: var(--farik-space-1) var(--farik-space-3);
+	margin: 0;
+}
+
+.toolApproval dt,
+.toolHint {
+	color: var(--farik-color-ink-muted);
+}
+
+.toolApproval dd {
+	margin: 0;
+}
+
+.untrusted {
+	margin: 0;
+	max-height: 18rem;
+	overflow: auto;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	font-family: var(--farik-type-code-family);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-left: 3px solid var(--farik-color-ink);
+	border-radius: var(--farik-radius-control);
+}
+
+.untrusted pre {
+	margin: 0;
+	font: inherit;
+	white-space: inherit;
+}
+
+.untrusted:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+/* A skill's instructions: the text is code-like, so it is set in the code face. */
+.code textarea {
+	font-family: var(--farik-type-code-family);
+}
+
+/* A service of a role's kit: its words in one column and its buttons in the other, and on a phone
+   the buttons come last, under the words. */
+.kitRow {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	column-gap: var(--farik-space-3);
+}
+
+.kitRow > .actions {
+	grid-column: 2;
+	grid-row: 1 / span 9;
+	align-self: start;
+}
+
+@media (max-width: 40rem) {
+	.kitRow {
+		grid-template-columns: 1fr;
+	}
+
+	.kitRow > .actions {
+		grid-column: auto;
+		grid-row: auto;
+	}
+}
+
+/* A line that says a service needs the user: the one warning colour. */
+.warn {
+	color: var(--farik-color-status-waiting);
+}
+
+/* The dialog that asks about a site an agent wants to read. */
+.siteRequest {
+	display: grid;
+	gap: var(--farik-space-3);
+}
+
+.siteRequest p {
+	margin: 0;
+}
+
+/* A name written in another alphabet: the warning stands out from the plain words around it. */
+.siteScript {
+	padding: var(--farik-space-2) var(--farik-space-3);
+	background: var(--farik-color-surface);
+	border-left: 3px solid var(--farik-color-status-waiting);
+}
+
+/* The Procurement Specialist's sites: Farik's by kind of shop, then the ones the owner allowed. */
+.siteCategories,
+.siteShops,
+.siteOwn {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.siteCategories {
+	border-top: 1px solid var(--farik-color-rule);
+}
+
+.siteCategories > li {
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.siteCategory {
+	margin: 0;
+	font-size: inherit;
+}
+
+/* A kind of shop opens and closes: the button spans the row, the kind first, then what is in it. */
+.siteToggle {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-1) var(--farik-space-3);
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 44px;
+	align-items: center;
+	padding: var(--farik-space-2) 0;
+	font: inherit;
+	text-align: start;
+	color: inherit;
+	background: none;
+	border: 0;
+	cursor: pointer;
+}
+
+.siteToggle::before {
+	content: "\25B8";
+}
+
+.siteToggle[aria-expanded="true"]::before {
+	content: "\25BE";
+}
+
+.siteKind {
+	font-weight: var(--farik-type-heading-weight);
+}
+
+.siteToggle:focus-visible,
+.siteRemove:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.siteShops {
+	display: grid;
+	padding-inline-start: var(--farik-space-4);
+}
+
+.siteShops > li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--farik-space-1) var(--farik-space-3);
+	padding: var(--farik-space-2) 0;
+}
+
+.siteState {
+	color: var(--farik-color-ink-muted);
+}
+
+.siteOwn {
+	display: grid;
+	border-top: 1px solid var(--farik-color-rule);
+}
+
+.siteOwn > li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--farik-space-2) var(--farik-space-3);
+	padding: var(--farik-space-3) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.siteText {
+	display: grid;
+	gap: var(--farik-space-1);
+	min-width: 0;
+}
+
+.siteHost {
+	font-family: var(--farik-type-code-family);
+	overflow-wrap: anywhere;
+}
+
+/* The site just added is marked, so that it is found in the list. */
+.siteNew {
+	padding-inline-start: var(--farik-space-3);
+	border-left: 3px solid var(--farik-color-status-waiting);
+}
+
+.siteRemove {
+	min-height: 44px;
+	padding: 0 var(--farik-space-2);
+	font: inherit;
+	color: inherit;
+	text-decoration: underline;
+	background: none;
+	border: 0;
+	cursor: pointer;
+}
+
+.siteAdd {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: var(--farik-space-3);
+}
+
+.siteAdd > :first-child {
+	flex: 1 1 16rem;
+}
+
+.siteAdded {
+	font-weight: var(--farik-type-heading-weight);
+}
+
+/* The owner's steps on a purchase order, in dialogs (spec 6.10). */
+.orderForm {
+	display: grid;
+	gap: var(--farik-space-3);
+}
+
+.orderForm p {
+	margin: 0;
+}
+
+.orderHint {
+	color: var(--farik-color-ink-muted);
+}
+
+.dayField {
+	display: flex;
+	flex-direction: column;
+	gap: var(--farik-space-1);
+}
+
+.dayError {
+	margin: 0;
+	font-weight: 600;
+}
+
+.dayField input {
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+	background: var(--farik-color-surface);
+	color: var(--farik-color-ink);
+}
+
+.dayField input:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+/* What was paid and in which currency: side by side where there is room. */
+.money {
+	display: grid;
+	grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+	gap: var(--farik-space-3);
+}
+
+.tick {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--farik-space-2);
+	min-height: 44px;
+}
+
+/* "Orders" on the Procurement Specialist's page. */
+.orders,
+.ordersRecent {
+	display: grid;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-top: 1px solid var(--farik-color-rule);
+}
+
+.orders > li {
+	display: grid;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-3) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.orders p {
+	margin: 0;
+}
+
+.orderHead {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--farik-space-1) var(--farik-space-3);
+}
+
+.orderNumber {
+	font-family: var(--farik-type-code-family);
+}
+
+.orderSeller {
+	font-weight: var(--farik-type-heading-weight);
+	overflow-wrap: anywhere;
+}
+
+.orderAmount {
+	font-family: var(--farik-type-code-family);
+	font-variant-numeric: tabular-nums;
+}
+
+.orderActions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-2) var(--farik-space-3);
+}
+
+.orderStatus {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-1) var(--farik-space-3);
+}
+
+/* A status word in a pill; the ones that ask for attention are told apart by their rule and colour. */
+.orderTag {
+	padding: 0 var(--farik-space-2);
+	font-weight: var(--farik-type-heading-weight);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: 999px;
+}
+
+.orderTag[data-status="delayed"],
+.orderTag[data-status="problem"],
+.orderTag[data-status="overdue"] {
+	border-width: 2px;
+	border-color: var(--farik-color-status-waiting);
+	color: var(--farik-color-status-waiting);
+}
+
+.orderNote {
+	overflow-wrap: anywhere;
+}
+
+/* What the agent wrote, framed so that it is never taken for Farik's or the owner's own words. */
+.orderUntrusted {
+	margin: 0;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	font-family: var(--farik-type-code-family);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-left: 3px solid var(--farik-color-ink);
+	border-radius: var(--farik-radius-control);
+}
+
+.ordersRecent > li {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-1) var(--farik-space-3);
+	padding: var(--farik-space-2) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+/* The request an approved data source files: the owner's words and the agent's, shown as text. */
+.pipelineHeading {
+	font-weight: 600;
+}
+
+.pipelineFrame {
+	min-width: 0;
+	margin: 0;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	font-family: var(--farik-type-code-family);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-left: 3px solid var(--farik-color-ink);
+	border-radius: var(--farik-radius-control);
 }

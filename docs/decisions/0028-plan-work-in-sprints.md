@@ -3,6 +3,8 @@
 Date: 2026-10-01
 Status: accepted (the founder, in conversation, 2026-10-01)
 Mockups approved by: the founder, 2026-10-01 (canvas version 1790857656-ceac)
+Amended 2026-10-05: "Phase 9 step 06" below is now phase 7 step 11e (the incident fix), after ADR 0029 moved the DevOps Engineer into phase 7 and the step plans of 2026-10-05 split its step 11; the exception it keeps is unchanged.
+Amended 2026-10-09 by ADR 0049 (the founder: "Lets stop this phase after completing step 10g. We have to start the next phase"; "DevOps later, rest after Cloud"): phase 7 step 11e, the incident fix, is phase 11 step 05e, since the DevOps Engineer moved to the Ecosystem phase, now phase 11; the exception it keeps is unchanged.
 
 ## Context
 

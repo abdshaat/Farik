@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use farik_core::budget::{DEFAULT_SESSION_LIMITS, SessionLimits};
+use farik_protocol::clock::Clock;
 use farik_protocol::event::{EventKind, FarikEvent};
 use farik_store::git::fixtures::TempRepo;
 use farik_store::open_event_log;
@@ -56,6 +57,11 @@ impl TestDaemon {
             .create_worktree(&worktree, &project.branch("FRK-1"), "main")
             .expect("the worktree is made");
         let state = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
+        // The user's state folder, beside the repository and outside it, as `~/.config/farik` is.
+        state.set_state_dir(std::path::PathBuf::from(format!(
+            "{}-state",
+            project.repo.path.display()
+        )));
         let daemon = Self {
             project,
             worktree,
@@ -63,6 +69,43 @@ impl TestDaemon {
         };
         daemon.register(DEV_SESSION, "dev-a", Some("FRK-1"), DEFAULT_SESSION_LIMITS);
         daemon
+    }
+
+    /// The same daemon on a clock that sleeps `delay` each time it is read, which every append
+    /// does before it writes: a race between a check and the write after it falls inside the
+    /// sleep, where a test can see it. Only `DEV_SESSION` is registered on it afresh.
+    pub(crate) fn slowed(mut self, delay: std::time::Duration) -> Self {
+        let state = Arc::new(DaemonState::new(slowed_deps(&self.project, delay)));
+        state.set_state_dir(std::path::PathBuf::from(format!(
+            "{}-state",
+            self.project.repo.path.display()
+        )));
+        self.state = state;
+        self.register(DEV_SESSION, "dev-a", Some("FRK-1"), DEFAULT_SESSION_LIMITS);
+        self
+    }
+
+    /// The same daemon on a clock that says it is `now`. Only `DEV_SESSION` is registered on it
+    /// afresh.
+    pub(crate) fn on_the_clock(mut self, now: chrono::DateTime<chrono::Utc>) -> Self {
+        let deps = &self.project.deps;
+        let state = Arc::new(DaemonState::new(Arc::new(ToolDeps {
+            log: Arc::clone(&deps.log),
+            projections: Arc::clone(&deps.projections),
+            files: Arc::clone(&deps.files),
+            transitions: Arc::clone(&deps.transitions),
+            git: self.project.repo.adapter(),
+            clock: Arc::new(farik_protocol::clock::FixedClock::new(now)),
+            ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
+        })));
+        state.set_state_dir(std::path::PathBuf::from(format!(
+            "{}-state",
+            self.project.repo.path.display()
+        )));
+        self.state = state;
+        self.register(DEV_SESSION, "dev-a", Some("FRK-1"), DEFAULT_SESSION_LIMITS);
+        self
     }
 
     /// Registers a session of `agent` in the worktree, given every Farik tool, so that its tiers
@@ -89,6 +132,7 @@ impl TestDaemon {
     ) {
         self.state.register_session(SessionRegistration {
             session_id: session_id.to_string(),
+            web: self.web_of(agent),
             agent_id: agent.to_string(),
             task_id: task.map(|task| task.parse().expect("a task id")),
             cwd: self.worktree.clone(),
@@ -101,7 +145,29 @@ impl TestDaemon {
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
         });
+    }
+
+    /// How far `agent`'s web reading reaches, from its role as the team file says now: what a
+    /// session of it is registered with. An agent the team does not have is open, as no one asks.
+    pub(crate) fn web_of(&self, agent: &str) -> farik_core::governor::sites::WebAccess {
+        use farik_core::contract::Role;
+        use farik_core::governor::sites::{WebAccess, web_access};
+
+        self.project
+            .deps
+            .files
+            .read_team()
+            .ok()
+            .and_then(|team| {
+                team.agents
+                    .iter()
+                    .find(|one| one.id.as_str() == agent)
+                    .map(|one| web_access(Role::from(one.role)))
+            })
+            .unwrap_or(WebAccess::Open)
     }
 
     /// A recorded hook input with `/workspace` made the worktree.
@@ -146,9 +212,11 @@ impl TestDaemon {
             git: self.project.repo.adapter(),
             clock: Arc::clone(&deps.clock),
             ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
         }));
         state.register_session(SessionRegistration {
             session_id: DEV_SESSION.to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("FRK-1".parse().expect("a task id")),
             cwd: self.worktree.clone(),
@@ -161,6 +229,60 @@ impl TestDaemon {
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
+        });
+        state
+    }
+
+    /// A daemon on the same project whose log is a file that has lost its table of events after
+    /// it was opened, so that every read of it is refused, with `proc`'s session registered on it
+    /// as `session-proc`, about FRK-1.
+    pub(crate) fn with_a_log_that_cannot_be_read(&self) -> DaemonState {
+        let path = self.project.repo.path.join(".farik/local/unreadable.db");
+        let log = Arc::new(open_event_log(&path, at()).expect("the log is made"));
+        rusqlite::Connection::open(&path)
+            .expect("the file opens")
+            .execute_batch("DROP TABLE events")
+            .expect("the table is dropped");
+        let deps = &self.project.deps;
+        let state = DaemonState::new(Arc::new(ToolDeps {
+            projections: Arc::clone(&deps.projections),
+            log,
+            files: Arc::clone(&deps.files),
+            transitions: Arc::clone(&deps.transitions),
+            git: self.project.repo.adapter(),
+            clock: Arc::clone(&deps.clock),
+            ids: deps.ids.clone(),
+            kits: Arc::clone(&deps.kits),
+        }));
+        state.register_session(SessionRegistration {
+            session_id: "session-proc".to_string(),
+            web: self.web_of("proc"),
+            agent_id: "proc".to_string(),
+            task_id: Some("FRK-1".parse().expect("a task id")),
+            cwd: self.worktree.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: every_farik_tool().iter().map(ToString::to_string).collect(),
+            tiers: tiers_of(deps, "proc"),
+            connectors: vec![farik_core::governor::permissions::SessionConnector {
+                server: "github".to_string(),
+                origin: None,
+                tools: [(
+                    "search_issues".to_string(),
+                    farik_core::governor::permissions::ConnectorTag::Network,
+                )]
+                .into(),
+                allowances: std::collections::BTreeMap::new(),
+                plan_tools: std::collections::BTreeSet::new(),
+            }],
+            preview: None,
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            skills: Vec::new(),
+            skills_root: None,
         });
         state
     }
@@ -171,9 +293,60 @@ impl TestDaemon {
     }
 }
 
+/// `project`'s tool dependencies on a clock that sleeps `delay` each time it is read, which every
+/// append does before it writes (see `TestDaemon::slowed`).
+pub(crate) fn slowed_deps(project: &TestProject, delay: std::time::Duration) -> Arc<ToolDeps> {
+    struct Slow(Arc<dyn Clock + Send + Sync>, std::time::Duration);
+    impl Clock for Slow {
+        fn now(&self) -> chrono::DateTime<chrono::Utc> {
+            std::thread::sleep(self.1);
+            self.0.now()
+        }
+    }
+    let deps = &project.deps;
+    Arc::new(ToolDeps {
+        log: Arc::clone(&deps.log),
+        projections: Arc::clone(&deps.projections),
+        files: Arc::clone(&deps.files),
+        transitions: Arc::clone(&deps.transitions),
+        git: project.repo.adapter(),
+        clock: Arc::new(Slow(Arc::clone(&deps.clock), delay)),
+        ids: deps.ids.clone(),
+        kits: Arc::clone(&deps.kits),
+    })
+}
+
 /// The reply frame to `method` with `params`, as the web page's socket is answered: for a test
 /// outside the daemon that asks what the page asks.
 pub(crate) async fn answered(state: &Arc<DaemonState>, method: &str, params: &Value) -> Value {
     let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
     super::web::answer(state, &frame.to_string(), &mut None).await
+}
+
+/// An executable standing in for Farik's own program, written for `test`: it runs the stdio
+/// fixture server of `tests/fixtures/mcp_server.sh` whatever its arguments are, so that `farik
+/// connector osv` lists that server's tools.
+pub(crate) fn own_program_serving_the_fixture(test: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("farik-own-program-{}-{test}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the folder is made");
+    let server = dir.join("server.sh");
+    std::fs::write(&server, include_str!("../../tests/fixtures/mcp_server.sh"))
+        .expect("the script is written");
+    let program = dir.join("farik");
+    std::fs::write(
+        &program,
+        format!("#!/bin/sh\nexec sh '{}'\n", server.display()),
+    )
+    .expect("the program is written");
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+        .expect("the program is made executable");
+    program
+}
+
+/// What `team.get` answers of each agent's custom connectors and their states.
+pub(crate) fn connector_states(state: &Arc<DaemonState>) -> Value {
+    super::gates::tests::query(state, "team.get", &serde_json::json!({}), "teamGetResult")
+        ["connectors"]
+        .clone()
 }

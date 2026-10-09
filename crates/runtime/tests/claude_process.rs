@@ -11,6 +11,7 @@ use std::time::Duration;
 use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, ClaudeCredential, Secret};
 use farik_runtime::daemon::DaemonInfo;
 use farik_runtime::recorded::fixtures::{a_session_spec, reads_a_file};
+use farik_runtime::session::SessionSkill;
 use farik_runtime::{
     EndReason, RuntimeAdapter, RuntimeError, SessionEvent, SessionHandle, SessionSpec, StreamParser,
 };
@@ -83,6 +84,7 @@ impl Fake {
                 pid: 1,
             },
             sessions_dir: farik.join("local/sessions"),
+            skills_dir: self.project.root.join("skills-state"),
             team_file: farik.join("team.yaml"),
             env: BTreeMap::from([
                 ("PATH".to_string(), "/usr/bin:/bin".to_string()),
@@ -693,4 +695,89 @@ fn refuses_to_start_a_session_outside_a_tokio_runtime() {
 /// A credential as the adapter holds it.
 fn shared(credential: ClaudeCredential) -> farik_runtime::claude::SharedCredential {
     std::sync::Arc::new(std::sync::Mutex::new(credential))
+}
+
+/// A spec with one skill, and the plugin folder the adapter will write for it.
+fn with_a_skill(fake: &Fake) -> (SessionSpec, PathBuf) {
+    let spec = SessionSpec {
+        skills: vec![SessionSkill {
+            name: "api-style".to_string(),
+            files: BTreeMap::from([(
+                "SKILL.md".to_string(),
+                "---\nname: api-style\n---\n".to_string(),
+            )]),
+        }],
+        ..fake.spec()
+    };
+    let plugin = fake.config().skills_dir.join(&spec.session_id);
+    (spec, plugin)
+}
+
+#[tokio::test]
+async fn removes_the_plugin_folder_when_the_program_exits() {
+    // The program sees the folder while it runs (`$dir` is the fake's folder, beside the
+    // config's `skills-state`), then ends with a result.
+    let script = format!(
+        "[ -f \"$dir/../skills-state/{}/skills/api-style/SKILL.md\" ] && echo seen > \"$dir/seen\"; \
+         cat '{}'",
+        a_session_spec().session_id,
+        transcript_path("reads_a_file").display()
+    );
+    let fake = Fake::new("plugin-exit", &script);
+    let (spec, plugin) = with_a_skill(&fake);
+    let mut handle = fake
+        .adapter()
+        .start_session(spec)
+        .expect("the session starts");
+    tokio::time::timeout(Duration::from_secs(10), drain(handle.as_mut()))
+        .await
+        .expect("the session ends");
+    assert_eq!(
+        fake.written("seen").trim(),
+        "seen",
+        "the program saw its skills"
+    );
+    assert!(
+        !plugin.exists(),
+        "the plugin folder is gone once the program exited"
+    );
+    assert!(
+        fake.written("args")
+            .lines()
+            .any(|arg| arg == "--plugin-dir"),
+        "{}",
+        fake.written("args")
+    );
+}
+
+#[tokio::test]
+async fn removes_the_plugin_folder_when_the_session_is_killed() {
+    let fake = Fake::new("plugin-kill", "sleep 30");
+    let (mut spec, plugin) = with_a_skill(&fake);
+    spec.limits.max_wall_clock = Duration::from_secs(1);
+    let mut handle = fake
+        .adapter()
+        .start_session(spec)
+        .expect("the session starts");
+    fake.wait_for("pid").await;
+    assert!(
+        plugin.join("skills/api-style/SKILL.md").exists(),
+        "written for the program"
+    );
+    drain(handle.as_mut()).await;
+    assert!(!plugin.exists(), "the plugin folder is gone after a kill");
+}
+
+#[tokio::test]
+async fn removes_the_plugin_folder_when_the_program_cannot_be_started() {
+    let fake = Fake::new("plugin-spawn", "true");
+    let (spec, plugin) = with_a_skill(&fake);
+    let adapter = fake.adapter();
+    std::fs::remove_file(fake.dir.join("claude")).expect("the program is gone");
+    let started = adapter.start_session(spec);
+    assert!(matches!(started, Err(RuntimeError::Spawn { .. })));
+    assert!(
+        !plugin.exists(),
+        "nothing is left for a program that never ran"
+    );
 }

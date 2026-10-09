@@ -1,0 +1,103 @@
+# The Architect's kit: five skills and the services it only reads. Context7 signs in (route 1,
+# ADR 0035); Grep needs no account; OSV is Farik's own server, started by `farik connector osv`
+# (ADR 0038); GitHub is reached with a key the user pastes, until Farik Cloud signs users in
+# (ADR 0044, step 07c), and its headers keep the server to code and pull requests, read only.
+# Tool lists are from each service's documentation and a probe on 2026-10-02 (step 07's plan) and,
+# for GitHub, its documentation of 2026-10-06; the live pin test compares them, except OSV's, whose
+# pin is an offline test. A tool a service lists that is not here is never offered
+# (`tool_not_tagged`) until a pin update tags it.
+role: architect
+skills:
+  - designing-apis-and-data
+  - reviewing-dependencies
+  - security-review
+  - setting-performance-budgets
+  - using-architecture-sources
+connectors:
+  - name: context7
+    transport: http
+    url: https://mcp.context7.com/mcp/oauth
+    oauth: { scopes: [profile, email, offline_access] }
+    title: Context7
+    about: "Context7 keeps up-to-date documentation and code examples for thousands of programming libraries."
+    why: "So the Architect checks how a library works today, in the version your project uses, before it writes a decision. It only reads."
+    setup: "Sign in with a free Context7 account and allow Farik to use it. The questions your agent asks about a library go to Context7; the free plan allows about a thousand a month."
+    labels:
+      resolve-library-id: "find a library"
+      query-docs: "read a library's documentation"
+    tools:
+      resolve-library-id: network
+      query-docs: network
+  - name: grep
+    transport: http
+    url: https://mcp.grep.app
+    title: Grep
+    about: "Grep, run by Vercel, searches the code of over a million public projects on GitHub."
+    why: "So the Architect sees how other projects really use a library or solve a problem before it chooses a pattern. It only reads public code."
+    setup: "Nothing to set up: Grep needs no account. What the Architect searches for goes to Grep; it searches public projects only, never your private ones."
+    labels:
+      searchGitHub: "search public code"
+    tools:
+      searchGitHub: network
+  - name: osv
+    transport: stdio
+    command: farik
+    args: [connector, osv]
+    title: OSV
+    about: "OSV is a free, open database of known security flaws in open-source packages, run by Google."
+    why: "So the Architect can check whether a library your project uses, or one it is about to add, has a known flaw, and which version fixes it. It only reads."
+    setup: "Nothing to set up: Farik looks packages up in OSV itself, with no account. Farik sends OSV only the names and versions of the packages it checks."
+    labels:
+      query_package: "check a package for known flaws"
+      query_packages: "check many packages at once"
+      get_vulnerability: "read a known flaw"
+    tools:
+      query_package: network
+      query_packages: network
+      get_vulnerability: network
+  - name: github
+    transport: http
+    url: https://api.githubcopilot.com/mcp/
+    headers:
+      Authorization: "Bearer {GITHUB_KEY}"
+      X-MCP-Toolsets: "repos,pull_requests"
+      X-MCP-Readonly: "true"
+    credential_keys: [GITHUB_KEY]
+    key_page: "https://github.com/settings/personal-access-tokens/new?name=Farik+Architect&description=Farik%27s+Architect+reads+code+and+pull+requests+and+changes+nothing.&expires_in=366&contents=read&pull_requests=read"
+    title: GitHub
+    about: "GitHub keeps your code and the work around it: issues, pull requests and project boards."
+    why: "So the Architect can search and read the code and pull requests in your own repositories, private ones included, before it writes a decision. It only reads."
+    setup: "“Get your key” opens GitHub's page with the key's name, a year's life and read access to code and pull requests filled in. Under ‘Resource owner’, choose the owner of your code; under ‘Repository access’, choose ‘Only select repositories’ and pick the ones the Architect may read. Choose ‘Generate token’ and paste the key here. An organisation may allow a shorter life, need you signed in to its single sign-on, or need its owner's approval. The Architect only reads."
+    labels:
+      search_code: "search code"
+      get_file_contents: "read a file or folder"
+      list_branches: "list branches"
+      list_commits: "list changes"
+      get_commit: "read a change"
+      search_commits: "search changes"
+      list_tags: "list tags"
+      get_tag: "read a tag"
+      list_releases: "list releases"
+      get_latest_release: "read the latest release"
+      get_release_by_tag: "read a release"
+      search_repositories: "search repositories"
+      list_pull_requests: "list pull requests"
+      pull_request_read: "read a pull request"
+      search_pull_requests: "search pull requests"
+    tools:
+      search_code: network
+      get_file_contents: network
+      list_branches: network
+      list_commits: network
+      get_commit: network
+      search_commits: network
+      list_tags: network
+      get_tag: network
+      list_releases: network
+      get_latest_release: network
+      get_release_by_tag: network
+      search_repositories: network
+      list_pull_requests: network
+      pull_request_read: network
+      search_pull_requests: network
+      list_repository_collaborators: denied

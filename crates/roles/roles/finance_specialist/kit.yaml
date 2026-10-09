@@ -1,0 +1,148 @@
+# The Finance Specialist's kit (ADR 0019; phase 7 step 10): the six skills of its work and the
+# services it reads. It only reads: every tool that changes anything at a service is `denied`, and
+# no tool is `external_effect`, so no service has an allowance.
+#
+# Stripe is the service's official server, signed in to by route 1 (it registers Farik itself). The
+# scope is pinned, since `oauth: {}` would ask for every scope Stripe advertises, a wider one added
+# later included. The user chooses the account, live or a sandbox, and the permissions on Stripe's
+# own page. Its tools are from docs.stripe.com/mcp, read 2026-10-07.
+#
+# Digits and Kick are bookkeeping services a business may already keep its books in, each the
+# service's official server, signed in to by route 1, and each read: Digits says it is read-only
+# (help.digits.com, "Digits MCP"), and Kick is asked for `mcp:read` alone, so a write is refused
+# at Kick as well as here. Kick's tools are from its tool reference (docs.kick.co, read
+# 2026-10-07), which warns that the tools listed vary by the grant's scope; the pin run (step 10's
+# Task 6) settles it against a live listing. Kick's `list_kick_skills` and `load_kick_skill` load
+# Kick's own instructions into the session, so they are `denied`: the role's instructions are
+# Farik's skills.
+role: finance_specialist
+skills:
+  - categorising-expenses
+  - closing-the-month
+  - forecasting
+  - unit-economics-and-pricing
+  - recommending-a-budget
+  - using-finance-sources
+connectors:
+  - name: stripe
+    transport: http
+    url: https://mcp.stripe.com
+    oauth: { scopes: [mcp] }
+    title: Stripe
+    about: "Stripe takes your product's payments: charges, subscriptions, invoices, fees, refunds and payouts."
+    why: "So the Finance Specialist can put your revenue, fees and payouts in the books from Stripe's own numbers. It only reads."
+    setup: "Sign in with your Stripe account. On Stripe's page, choose the account and give Farik read access only; Farik refuses every change anyway. Farik can see your customers' names, emails, addresses and the last four digits of their cards; it keeps only totals and Stripe's references in your books. To end Farik's access, revoke it under ‘OAuth sessions’ in your Stripe user settings."
+    labels:
+      stripe_api_search: "find what Stripe can answer"
+      stripe_api_details: "read how to ask Stripe"
+      stripe_api_read: "read payments and payouts"
+      get_stripe_account_info: "read the account"
+      stripe_analytics: "ask about revenue"
+      get_balance_summary: "read the balance"
+      search_stripe_documentation: "search Stripe's help"
+    tools:
+      stripe_api_search: network
+      stripe_api_details: network
+      stripe_api_read: network
+      get_stripe_account_info: network
+      stripe_analytics: network
+      get_balance_summary: network
+      search_stripe_documentation: network
+      stripe_api_write: denied
+      stripe_implementation_planner: denied
+      send_stripe_feedback: denied
+  - name: digits
+    transport: http
+    url: https://api.digits.com/mcp
+    oauth: {}
+    title: Digits
+    about: "Digits keeps your books: every transaction, with profit and loss, balance sheet, cash flow and who owes whom."
+    why: "So the Finance Specialist can read the books you already keep there instead of rebuilding them. It only reads."
+    setup: "Sign in with your Digits account and choose the business. Digits gives Farik read access only."
+    labels:
+      list_businesses: "list businesses"
+      select_business: "choose a business"
+      query_transactions: "read transactions"
+      search_term: "find a name in the books"
+      list_departments: "list departments"
+      list_locations: "list locations"
+      list_categories: "list categories"
+      dimensional_summarize_transactions: "total transactions"
+      financial_statement: "read a financial statement"
+    tools:
+      list_businesses: network
+      select_business: network
+      query_transactions: network
+      search_term: network
+      list_departments: network
+      list_locations: network
+      list_categories: network
+      dimensional_summarize_transactions: network
+      financial_statement: network
+      list_business_users: denied
+  - name: kick
+    transport: http
+    url: https://use.kick.co/mcp
+    oauth: { scopes: ["mcp:read"] }
+    title: Kick
+    about: "Kick keeps your books from your bank and card accounts: transactions, categories, journals and reports."
+    why: "So the Finance Specialist can read the books you already keep there instead of rebuilding them. It only reads."
+    setup: "Sign in with your Kick account. Farik asks Kick for read access only, so it cannot change your books, and it refuses every change anyway."
+    labels:
+      context_browse: "list workspaces"
+      context_resolve: "find a workspace"
+      financial_accounts_query: "read bank and card accounts"
+      transactions_query: "read transactions"
+      categories_query: "read categories"
+      classes_query: "read classes"
+      counterparties_query: "read who you pay and who pays you"
+      rules_query: "read categorising rules"
+      accounting_query: "read the chart of accounts"
+      opening_balances_query: "read opening balances"
+      journals_query: "read journal entries"
+      reports_query: "read a report"
+      documents_query: "list documents"
+      documents_download: "read a document"
+      entities_query: "read entities"
+      activity_query: "read recent changes"
+      tasks_query: "read bookkeeping tasks"
+    tools:
+      context_browse: network
+      context_resolve: network
+      financial_accounts_query: network
+      transactions_query: network
+      categories_query: network
+      classes_query: network
+      counterparties_query: network
+      rules_query: network
+      accounting_query: network
+      opening_balances_query: network
+      journals_query: network
+      reports_query: network
+      documents_query: network
+      documents_download: network
+      entities_query: network
+      activity_query: network
+      tasks_query: network
+      transactions_act: denied
+      transactions_transfer_matches_act: denied
+      transactions_document_links_act: denied
+      categories_act: denied
+      classes_act: denied
+      counterparties_act: denied
+      rules_act: denied
+      accounting_act: denied
+      account_groups_act: denied
+      opening_balances_act: denied
+      journals_act: denied
+      documents_act: denied
+      entities_act: denied
+      activity_undo: denied
+      tasks_act: denied
+      organization_clients_create: denied
+      invoices_create: denied
+      invoices_update: denied
+      bills_create: denied
+      bills_update: denied
+      list_kick_skills: denied
+      load_kick_skill: denied

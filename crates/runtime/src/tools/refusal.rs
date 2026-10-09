@@ -5,6 +5,7 @@ use farik_core::contract::{Role, TaskStatus};
 use farik_core::criteria::CriteriaError;
 use farik_core::governor::gates::ContractWriteRefusal;
 use farik_core::governor::permissions::{CommandRefusal, ToolRefusal};
+use farik_core::marketing::ProposalRefusal;
 use farik_core::team::AgentStatus;
 
 use super::ToolError;
@@ -113,6 +114,25 @@ pub(crate) enum Refusal {
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
+    /// A marketing plan refused as a whole, under the code it names: asked outside the
+    /// Marketing Specialist's implement session of a task, while the task has a plan waiting, or
+    /// over a file that is there already (ADR 0042).
+    MarketingPlan { code: &'static str, detail: String },
+    /// A marketing plan with faults, every one of them, each under its own code and field.
+    MarketingPlanFaults { faults: Vec<ProposalRefusal> },
+    /// A refusal of one of the Finance Specialist's tools under the code it names: another role's
+    /// call, a range of costs, a workbook, a formula, a path (6.6).
+    Finance { code: &'static str, detail: String },
+    /// A refusal of one of the Procurement Specialist's site tools, or of a hand-in while a site
+    /// waits, under the code it names (6.10).
+    Sites { code: &'static str, detail: String },
+    /// A refusal of one of the Procurement Specialist's purchase order tools under the code it
+    /// names (6.10).
+    PurchaseOrder { code: &'static str, detail: String },
+    /// A refusal of one of the data pipeline tools under the code it names (6.10).
+    Pipeline { code: &'static str, detail: String },
+    /// A refusal of one of the tools for the messages to sellers under the code it names (6.10).
+    Seller { code: &'static str, detail: String },
 }
 
 impl Refusal {
@@ -210,6 +230,20 @@ impl Refusal {
             Self::CheckPageRefused { detail } => ("check_page_refused", detail.clone()),
             Self::DesignReviewRefused { detail } => ("design_review_refused", detail.clone()),
             Self::ChatReplyRefused { detail } => ("chat_reply_refused", detail.clone()),
+            Self::MarketingPlan { code, detail }
+            | Self::Finance { code, detail }
+            | Self::Sites { code, detail }
+            | Self::PurchaseOrder { code, detail }
+            | Self::Pipeline { code, detail }
+            | Self::Seller { code, detail } => (*code, detail.clone()),
+            // Each fault on a line of its own, the first one's code leading the reason.
+            Self::MarketingPlanFaults { faults } => {
+                return faults
+                    .iter()
+                    .map(|fault| format!("{}: {}: {}", fault.code, fault.field, fault.message))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+            }
             Self::DesignReviewIncomplete { missing } => (
                 "design_review_incomplete",
                 format!("check each page at both widths in both themes first; missing: {missing}"),

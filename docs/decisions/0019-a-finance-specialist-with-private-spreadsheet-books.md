@@ -4,6 +4,10 @@ Date: 2026-09-27
 Status: accepted
 Amended 2026-09-29 by ADR 0023: phase numbers after 6 moved up by one.
 Amended 2026-09-30 by ADR 0025: phase numbers after 9 moved up by one.
+Amended 2026-10-06 by phase 7 step 09c: a finance task's sessions run with the folder as their working directory, which the hook already holds every session to, so the exceptions to the protected `.farik/local/**` in the hook and in the program's `permissions.deny` list were not needed and are withdrawn (spec 5.6, 6.6; 0.62), and one piece of work touches the folder at a time means no other task holds it, in any status but `accepted` and `cancelled`, not only one `in_progress` or `verifying` (spec 5.2).
+Amended 2026-10-07 by phase 7 step 10: Stripe is signed in to (route 1), not reached with a read-only key; read-only is held by Farik's `denied` tags and by the permissions the user grants on Stripe's page.
+Amended 2026-10-08 by ADR 0048 (the founder: "Lets set up the infra repository as well as the cloud hosting, landing page, etc. in phase 8"): a phase, Farik Cloud, follows the role kits as phase 8, so the phases after phase 7 moved up by one (Engines and providers 9, Ecosystem 10, Proof of concept 11, Web launch 12, Business workspaces 13, Desktop 14, Native mobile 15, Premium 16); the receipts intake is phase 14 step 02, and the numbers below are the old ones.
+Amended 2026-10-09 by ADR 0049 (the founder: "Lets stop this phase after completing step 10g. We have to start the next phase"; "DevOps later, rest after Cloud"): a phase, Ask or auto and the milestones, follows Farik Cloud as phase 9, so the phases after phase 8 moved up by one (Engines and providers 10, Ecosystem 11, Proof of concept 12, Web launch 13, Business workspaces 14, Desktop 15, Native mobile 16, Premium 17); the receipts intake is phase 15 step 02, and the numbers below are the old ones.
 
 ## Context
 

@@ -13,8 +13,18 @@ pub mod criteria;
 pub mod generated;
 /// The governor: every rule of `docs/SPEC.md` section 5 as pure functions.
 pub mod governor;
+/// The marketing plan the owner approves: its checks and which approved plan is active.
+pub mod marketing;
+/// A purchase order's lines and total.
+pub mod order;
+/// The rule that sends a data pipeline request to the owner.
+pub mod pipeline;
 /// The price table and the cost of model usage.
 pub mod pricing;
+/// The renewals a register of vendors says are coming up.
+pub mod renewals;
+/// A skill's hash.
+pub mod skill;
 /// The sprint and its validator.
 pub mod sprint;
 /// The team, its rules, and its validator.

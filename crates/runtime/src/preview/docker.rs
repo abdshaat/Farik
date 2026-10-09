@@ -10,7 +10,9 @@ use farik_core::contract::TaskId;
 use farik_core::team::Preview;
 
 use crate::exec::supervise;
-use crate::preview::{PreviewError, PreviewFactory, RunningPreview, browser_container};
+use crate::preview::{
+    AVAILABLE_FOR, PreviewError, PreviewFactory, RunningPreview, browser_container,
+};
 use crate::sandbox::SandboxError;
 use crate::sandbox::docker::{docker, docker_name, id, removed, stderr_of};
 
@@ -22,8 +24,8 @@ const ANSWER_LIMIT: Duration = Duration::from_secs(120);
 const PROBE_LIMIT: Duration = Duration::from_secs(5);
 /// How long after a deadline the docker client is killed, beyond the command's own `timeout`.
 const CLIENT_GRACE: Duration = Duration::from_secs(30);
-/// How long `docker info`'s answer holds for `available`.
-const AVAILABLE_FOR: Duration = Duration::from_secs(60);
+/// How long `docker info` has to answer before Docker counts as not there.
+const INFO_LIMIT: Duration = Duration::from_secs(10);
 /// How many lines of output a failure keeps.
 const TAIL_LINES: usize = 40;
 
@@ -32,8 +34,22 @@ const TAIL_LINES: usize = 40;
 const PREPARE_SCRIPT: &str = "timeout -k 2 900 sh -c \"$1\" > /tmp/farik-prepare.log 2>&1; \
      code=$?; tail -n 40 /tmp/farik-prepare.log; exit $code";
 
-/// The last answer of `docker info`, and when it came.
-static AVAILABLE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+/// Whether `program info` succeeds within `limit`. A client that has not answered by then is
+/// killed and counts as no answer: a daemon that hangs would otherwise hold the caller for as long
+/// as it likes.
+fn daemon_answers(program: &str, limit: Duration) -> bool {
+    let mut client = Command::new(program);
+    client.arg("info");
+    supervise(
+        &mut client,
+        limit,
+        |child| {
+            let _ = child.kill();
+        },
+        |_| {},
+    )
+    .is_ok_and(|finished| finished.exit_code == 0 && !finished.killed)
+}
 
 /// Makes previews in containers of one image.
 pub struct DockerPreviewFactory {
@@ -41,15 +57,37 @@ pub struct DockerPreviewFactory {
     pub image: String,
     /// The browser's image, the Playwright connector's pinned one outside tests.
     pub browser: String,
+    /// The client `available` asks, `docker` outside tests.
+    program: String,
+    /// How long that client has to answer, `INFO_LIMIT` outside tests.
+    info_limit: Duration,
+    /// The last answer of `docker info`, and when it came.
+    asked: Mutex<Option<(Instant, bool)>>,
+}
+
+impl DockerPreviewFactory {
+    /// A factory of previews in containers of `image`, with `browser` for the Designer.
+    #[must_use]
+    pub fn new(image: String, browser: String) -> Self {
+        Self {
+            image,
+            browser,
+            program: "docker".to_string(),
+            info_limit: INFO_LIMIT,
+            asked: Mutex::new(None),
+        }
+    }
 }
 
 impl PreviewFactory for DockerPreviewFactory {
     fn available(&self) -> bool {
-        let mut last = crate::locked(&AVAILABLE);
+        let mut last = crate::locked(&self.asked);
+        // The driver's `PolledPreviews` holds its answer as long, and records it after this one,
+        // so that when it asks again this answer is out of date and Docker is asked.
         match *last {
             Some((at, answer)) if at.elapsed() < AVAILABLE_FOR => answer,
             _ => {
-                let answer = docker(&["info"]).is_ok_and(|output| output.status.success());
+                let answer = daemon_answers(&self.program, self.info_limit);
                 *last = Some((Instant::now(), answer));
                 answer
             }
@@ -271,4 +309,108 @@ fn docker_error(error: &SandboxError) -> PreviewError {
 fn last_lines(text: &str) -> String {
     let lines: Vec<&str> = text.trim_end().lines().collect();
     lines[lines.len().saturating_sub(TAIL_LINES)..].join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    use super::{DockerPreviewFactory, daemon_answers};
+    use crate::preview::PreviewFactory;
+
+    /// A folder holding an executable `docker` that runs `body` under `sh`, answering its path.
+    /// A child process writes it, so that no write descriptor lives in this process: another test
+    /// thread's fork would inherit it until its exec, and running the script meanwhile fails with
+    /// "text file busy".
+    fn a_docker(test: &str, body: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("farik-docker-{}-{test}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("the folder is made");
+        let program: PathBuf = dir.join("docker");
+        let written = std::process::Command::new("sh")
+            .args([
+                "-c",
+                "printf '%s\\n' \"$2\" > \"$1\" && chmod 755 \"$1\"",
+                "sh",
+            ])
+            .arg(&program)
+            .arg(format!("#!/bin/sh\n{body}"))
+            .status()
+            .expect("sh runs");
+        assert!(written.success());
+        program.display().to_string()
+    }
+
+    #[test]
+    fn says_docker_is_not_there_when_its_daemon_does_not_answer_in_time() {
+        // `info` that would answer after 20 s, asked to answer within a fifth of a second.
+        let docker = a_docker("hangs", "exec sleep 20");
+        let started = Instant::now();
+        assert!(!daemon_answers(&docker, Duration::from_millis(200)));
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the probe waited {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn says_docker_is_there_when_its_daemon_answers() {
+        let docker = a_docker("answers", "[ \"$1\" = info ] && exit 0\nexit 1");
+        assert!(daemon_answers(&docker, Duration::from_secs(30)));
+    }
+
+    /// A factory whose `docker` is `program`, giving it `limit` to answer `info`.
+    fn a_factory(program: String, limit: Duration) -> DockerPreviewFactory {
+        let mut factory = DockerPreviewFactory::new("image".to_string(), "browser".to_string());
+        factory.program = program;
+        factory.info_limit = limit;
+        factory
+    }
+
+    #[test]
+    fn asks_whether_docker_is_there_through_the_bounded_probe() {
+        // The wiring of `available` to `daemon_answers`: a `docker` that hangs is given its limit
+        // and no more, and one that answers `info` counts as there. Asking `docker info` bare
+        // would run the real client, which hangs without a limit or answers whatever the
+        // machine's docker does.
+        let hangs = a_factory(
+            a_docker("asks-hangs", "exec sleep 20"),
+            Duration::from_millis(200),
+        );
+        let started = Instant::now();
+        assert!(!hangs.available());
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the probe waited {:?}",
+            started.elapsed()
+        );
+        let answers = a_factory(
+            a_docker("asks-answers", "[ \"$1\" = info ] && exit 0\nexit 1"),
+            Duration::from_secs(30),
+        );
+        assert!(answers.available());
+    }
+
+    #[test]
+    fn asks_docker_once_for_a_minute_of_answers() {
+        // Each ask of the client leaves a line beside the script.
+        let docker = a_docker("asks-once", "echo asked >> \"$0.asked\"\nexit 0");
+        let factory = a_factory(docker.clone(), Duration::from_secs(30));
+        assert!(factory.available());
+        assert!(factory.available());
+        let asked = std::fs::read_to_string(format!("{docker}.asked")).expect("it was asked");
+        assert_eq!(asked.lines().count(), 1, "{asked}");
+    }
+
+    #[test]
+    fn says_docker_is_not_there_when_its_daemon_refuses_or_the_program_is_missing() {
+        let refuses = a_docker("refuses", "echo 'Cannot connect' >&2\nexit 1");
+        assert!(!daemon_answers(&refuses, Duration::from_secs(30)));
+        assert!(!daemon_answers(
+            "/nonexistent/farik-docker",
+            Duration::from_secs(30)
+        ));
+    }
 }

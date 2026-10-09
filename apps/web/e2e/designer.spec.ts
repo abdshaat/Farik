@@ -13,6 +13,8 @@ function logOf(project: string, task: string): string[] {
 
 async function send(page: Page, request: string, task: string) {
 	await page.getByRole("link", { name: "Today" }).first().click();
+	await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
+	await expect(page.getByText("Mira").first()).toBeVisible();
 	await page.getByLabel("What should the team do next?").fill(request);
 	await page.getByRole("button", { name: "Send to the team" }).click();
 	await expect(page).toHaveURL(new RegExp(`/requests/${task}$`));
@@ -106,10 +108,9 @@ test("a Designer's task and a design review run through the real server and brow
 		});
 		await page.getByRole("link", { name: "Review" }).click();
 		await page.getByRole("button", { name: "Approve the plan" }).click();
-		await page.goto(`http://127.0.0.1:${serve.port}/tasks/FRK-2`);
-		await expect(page.getByText("Checking the screens").first()).toBeVisible({
-			timeout: 120_000,
-		});
+		// "Checking the screens" is not asserted here: it shows only between Theo's commit and
+		// Iris's review, a few seconds the fake models can finish before the page has loaded. The
+		// task page and the daemon's task.get tests hold that wording.
 		await expect
 			.poll(() => logOf(serve.project, "FRK-2"), { timeout: 180_000 })
 			.toContainEqual("review.recorded ada");

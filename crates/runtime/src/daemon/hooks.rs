@@ -6,21 +6,29 @@ use std::path::{Component, Path, PathBuf};
 
 use farik_core::contract::Role;
 use farik_core::governor::permissions::{
-    AgentGrants, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext, ToolCallRequest,
-    ToolDescriptor, evaluate_connector_call, evaluate_tool_call,
+    AgentGrants, ApprovalKey, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext,
+    ToolCallRequest, ToolDescriptor, evaluate_connector_call, evaluate_tool_call, input_sha256,
 };
-use farik_core::team::{AgentStatus, BUILTIN_CONNECTORS, Team};
+use farik_core::governor::sites::{WebAccess, check_site_urls, site_of};
+use farik_core::marketing::active_plan;
+use farik_core::team::{AgentStatus, Team};
 use farik_protocol::event::{
-    ConnectorTagWire, EventBody, EventIds, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
-    new_event,
+    ConnectorTagWire, EventBody, EventIds, EventKind, ToolApprovalRequestedBody, ToolCalledBody,
+    ToolDeniedBody, ToolReturnedBody, new_event,
 };
+use farik_store::EventQuery;
+use farik_store::marketing::marketing_plans;
+use farik_store::waiting::open_grants;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 
 use super::{DaemonError, DaemonState, SessionRegistration};
+use crate::allowances::allowance_period;
+use crate::session::SessionPurpose;
 use crate::tools::design::design_plan_gate;
 use crate::tools::refusal::Refusal;
-use crate::tools::{ToolDeps, ToolError, tool_descriptors};
+use crate::tools::sites::{approved_set, shown};
+use crate::tools::{ToolDeps, ToolError, paths_of, tool_descriptors};
 
 /// What Claude Code sends a hook on its standard input, the fields Farik reads.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -79,6 +87,11 @@ impl Serialize for HookDecision {
 const RECORD_LIMIT_BYTES: usize = 4_096;
 /// What ends a value the log kept only part of.
 const CUT_MARKER: &str = "[cut at 4 KiB]";
+/// Claude Code's tool for loading a skill.
+const SKILL_TOOL: &str = "Skill";
+/// Claude Code's tool for reading a page, which a session held to approved sites may point only at
+/// one.
+const FETCH_TOOL: &str = "WebFetch";
 /// The prefix Claude Code gives the tools of Farik's own MCP server.
 const FARIK_PREFIX: &str = "mcp__farik__";
 /// The largest integer a JSON number holds exactly, and the schema's ceiling for one.
@@ -87,6 +100,9 @@ const JSON_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const ALLOWED: &str = "allowed by the governor";
 /// The kind of the denial of every call of a session told to stop.
 const SESSION_STOPPED: &str = "session_stopped";
+/// The kind of the denial of a connector's call that waits for the human, and the start of the
+/// stop and the end's detail it gives its session (ADR 0031).
+pub(crate) const APPROVAL_NEEDED: &str = "approval_needed";
 
 /// The tier a Claude Code built-in tool needs, or `None` for one no session may call: `Bash`
 /// above all, because a session's shell is `farik_exec` (ADR 0004).
@@ -104,10 +120,12 @@ pub fn builtin_tool_tier(tool: &str) -> Option<PermissionTier> {
 /// Decides one `PreToolUse` hook and records the decision, `tool.called` or `tool.denied`. It
 /// refuses, in this order: a session the daemon does not know (`unknown_session`); an agent that
 /// is not active (`agent_not_active`); a session at its `max_tool_calls` (`tool_call_limit`); a
+/// `Skill` call that is not `farik:<name>` of one of the session's skills (`skill_not_in_session`); a
 /// tool that is neither Farik's nor a built-in with a tier (`tool_not_allowed`); a Farik tool the
 /// session was not given (`tool_not_in_session`); a built-in's path
-/// outside the session's worktree (`path_outside_workspace`); and whatever `evaluate_tool_call`
-/// refuses. A decision the log cannot record is a deny (`record_failed`). Only an allowed call
+/// outside the session's worktree (`path_outside_workspace`); whatever `evaluate_tool_call`
+/// refuses; and, for a session held to approved sites, a `WebFetch` of any other site
+/// (`site_not_approved`). A decision the log cannot record is a deny (`record_failed`). Only an allowed call
 /// counts towards the limit, and the count is checked and raised under one lock, because Claude
 /// Code runs read tools in parallel.
 #[must_use]
@@ -129,16 +147,28 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
     };
     let verdict = match &session.stop_reason {
         Some(reason) => Err(Denial::from(format!("{SESSION_STOPPED}: {reason}"))),
-        None => judge(request, &session.registration, session.tool_calls, deps),
+        None => judge(
+            request,
+            &session.registration,
+            session.tool_calls,
+            deps,
+            state,
+        ),
     };
     let verdict = verdict.map_err(|denial| {
         if let Some(stop) = denial.stop {
-            session.stop_reason.get_or_insert_with(|| stop.to_string());
+            session.stop_reason.get_or_insert(stop);
             state.stops().notify_waiters();
         }
         denial.reason
     });
     let connector = connector_of(request, &session.registration);
+    // A connector call that used a grant or an allowance is one more of the agent's this period.
+    let counted = verdict
+        .as_ref()
+        .ok()
+        .filter(|pass| pass.approval.is_some() || pass.allowance.is_some())
+        .and(connector_tool(&request.tool_name));
     let decision = record_decision(
         deps,
         ids_of(deps, &session.registration),
@@ -148,15 +178,31 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
     );
     if decision.allow {
         session.tool_calls += 1;
+        if let Some((server, tool)) = counted {
+            state
+                .allowance_counts()
+                .raise(&session.registration.agent_id, server, tool);
+        }
     }
     decision
 }
 
+/// What let a call through, beyond that it was allowed: the human's grant it uses up, or the
+/// allowance it ran inside (ADR 0037).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Pass {
+    approval: Option<u64>,
+    allowance: Option<u32>,
+    /// The active marketing plan that approved the call (ADR 0042).
+    marketing_plan: Option<String>,
+}
+
 /// Why a call is denied, and the stop the denial asks of the session when it asks one: an agent
-/// the human paused or retired stops at its next tool call (F1).
+/// the human paused or retired stops at its next tool call (F1), and a call that waits for the
+/// human ends its session (ADR 0031).
 struct Denial {
     reason: String,
-    stop: Option<&'static str>,
+    stop: Option<String>,
 }
 
 impl From<String> for Denial {
@@ -200,6 +246,7 @@ pub fn record_post_tool_use(request: &HookRequest, state: &DaemonState) -> Resul
                 .and_then(|ms| i64::try_from(ms.min(JSON_SAFE_INTEGER)).ok()),
         }),
     )
+    .map(|_| ())
     .map_err(|detail| DaemonError::Io { detail })
 }
 
@@ -209,11 +256,12 @@ fn judge(
     registration: &SessionRegistration,
     tool_calls: u32,
     deps: &ToolDeps,
-) -> Result<(), Denial> {
+    state: &DaemonState,
+) -> Result<Pass, Denial> {
     let team = deps
         .files
         .read_team()
-        .map_err(|error| format!("team_unreadable: {error}"))?;
+        .map_err(|error| Denial::from(format!("team_unreadable: {error}")))?;
     match team
         .agents
         .iter()
@@ -228,34 +276,50 @@ fn judge(
                     status,
                 }
                 .reason(),
-                stop: Some(if status == Some(AgentStatus::Paused) {
-                    "agent paused by the user"
-                } else {
-                    "agent retired by the user"
-                }),
+                stop: Some(
+                    if status == Some(AgentStatus::Paused) {
+                        "agent paused by the user"
+                    } else {
+                        "agent retired by the user"
+                    }
+                    .to_string(),
+                ),
             });
         }
     }
-    judge_call(request, registration, tool_calls, deps, &team).map_err(Denial::from)
+    if tool_calls >= registration.limits.max_tool_calls {
+        return Err(Denial::from(format!(
+            "tool_call_limit: the session has made the {} tool calls it may make",
+            registration.limits.max_tool_calls
+        )));
+    }
+    // A skill is loaded by name, which is no tier's business (ADR 0034).
+    if request.tool_name == SKILL_TOOL {
+        return judge_skill(&request.tool_input, registration)
+            .map(|()| Pass::default())
+            .map_err(Denial::from);
+    }
+    // A connector's call is judged by its tag alone, whatever the session's tiers (5.6).
+    if !request.tool_name.starts_with(FARIK_PREFIX) && connector_tool(&request.tool_name).is_some()
+    {
+        return judge_connector(request, registration, deps, state, &team);
+    }
+    judge_call(request, registration, deps, &team)
+        .map(|()| Pass::default())
+        .map_err(Denial::from)
 }
 
-/// Whether an active agent's call may go ahead, or the reason it may not: by the tiers the
-/// session started with (spec 4.4).
+/// Whether an active agent's call of a Farik tool or a built-in may go ahead, or the reason it may
+/// not: by the tiers the session started with (spec 4.4).
 fn judge_call(
     request: &HookRequest,
     registration: &SessionRegistration,
-    tool_calls: u32,
     deps: &ToolDeps,
     team: &Team,
 ) -> Result<(), String> {
-    if tool_calls >= registration.limits.max_tool_calls {
-        return Err(format!(
-            "tool_call_limit: the session has made the {} tool calls it may make",
-            registration.limits.max_tool_calls
-        ));
-    }
     let (tier, paths) = match request.tool_name.strip_prefix(FARIK_PREFIX) {
-        // A Farik tool is asked with no paths here: `call_tool` asks again with its real ones.
+        // A Farik tool is asked with the paths its input names, as `call_tool` asks again: a
+        // `write_workspace` call with none is refused.
         Some(name) => match tool_descriptors().iter().find(|tool| tool.name == name) {
             Some(_) if !registration.farik_tools.iter().any(|given| given == name) => {
                 return Err(Refusal::ToolNotInSession {
@@ -263,13 +327,12 @@ fn judge_call(
                 }
                 .reason());
             }
-            Some(tool) => (tool.tier, Vec::new()),
+            Some(tool) => (tool.tier, paths_of(name, &request.tool_input)),
             None => return Err(not_allowed(&request.tool_name)),
         },
-        None if connector_tool(&request.tool_name).is_some() => {
-            (judge_connector(request, registration)?, Vec::new())
-        }
         None => match builtin_tool_tier(&request.tool_name) {
+            // The skills' folder is outside the worktree, and a read there asks about no path.
+            Some(tier) if in_skill_folder(request, registration) => (tier, Vec::new()),
             Some(tier) => (
                 tier,
                 workspace_paths(&request.tool_name, &request.tool_input, &registration.cwd)?,
@@ -308,6 +371,150 @@ fn judge_call(
         },
     )
     .map_err(|refusal| Refusal::Tool(refusal).reason())?;
+    plan_gate(deps, team, registration, tier)?;
+    // A held session's page read, after its tier: Claude Code's own direct fetch follows a
+    // redirect only to the same site, so what it reads next is judged again (spec 8.6).
+    if registration.web == WebAccess::ApprovedSites && request.tool_name == FETCH_TOOL {
+        judge_fetch(&request.tool_input, registration, deps)?;
+    }
+    Ok(())
+}
+
+/// How a session held to approved sites is told to get another: in the implement session of a
+/// task, the one that can wait for the owner, it asks with `farik_request_sites`; no other can.
+fn how_to_ask(registration: &SessionRegistration) -> &'static str {
+    if registration.purpose == SessionPurpose::Implement && registration.task_id.is_some() {
+        "ask with farik_request_sites, then end your turn"
+    } else {
+        "you can ask for it only while working on a task"
+    }
+}
+
+/// The sites a held session may read now, from the log at this call: Farik's, and the owner's.
+/// A log that cannot be read denies.
+fn approved_now(deps: &ToolDeps) -> Result<BTreeSet<String>, String> {
+    approved_set(&deps.log).map_err(|error| format!("sites_unreadable: {error}"))
+}
+
+/// A held session's `WebFetch`: its `url` must be a string on an approved site.
+fn judge_fetch(
+    input: &Value,
+    registration: &SessionRegistration,
+    deps: &ToolDeps,
+) -> Result<(), String> {
+    let approved = approved_now(deps)?;
+    let address = input.get("url");
+    match address
+        .and_then(Value::as_str)
+        .map(|text| (text, site_of(text)))
+    {
+        Some((_, Ok(site))) if approved.contains(&site) => Ok(()),
+        Some((_, Ok(site))) => Err(format!(
+            "site_not_approved: {site} is not a site the owner allowed; {}",
+            how_to_ask(registration)
+        )),
+        Some((text, Err(_))) => Err(format!(
+            "site_not_approved: {} is not an https address on a named site",
+            shown(text)
+        )),
+        None => Err(format!(
+            "site_not_approved: {} is not an https address on a named site",
+            address.map_or_else(|| "no url".to_string(), |value| shown(&value.to_string()))
+        )),
+    }
+}
+
+/// A held session's connector call: every field named `url` or `urls`, and every string anywhere in
+/// the input that is an address with a host, must name an approved site, whatever the connector,
+/// its tool and its tag.
+fn judge_sites_of_call(
+    input: &Value,
+    registration: &SessionRegistration,
+    deps: &ToolDeps,
+) -> Result<(), String> {
+    let approved = approved_now(deps)?;
+    check_site_urls(input, &approved).map_err(|refusal| {
+        format!(
+            "site_not_approved: {} is not on a site the owner allowed; {}",
+            shown(&refusal.address),
+            how_to_ask(registration)
+        )
+    })
+}
+
+/// Whether a `Skill` call names one of the session's skills as `farik:<name>` and holds nothing
+/// but that and an optional string `args` holding no `@`, which Claude Code would attach as a file
+/// past this hook (ADR 0034): a bare name would load Claude Code's own
+/// skill of that name, and any other field is not one Farik has judged.
+fn judge_skill(input: &Value, registration: &SessionRegistration) -> Result<(), String> {
+    let named = input.as_object().is_some_and(|fields| {
+        fields.keys().all(|key| key == "skill" || key == "args")
+            && fields
+                .get("args")
+                .is_none_or(|args| args.as_str().is_some_and(|text| !text.contains('@')))
+            && fields
+                .get("skill")
+                .and_then(Value::as_str)
+                .and_then(|skill| skill.strip_prefix("farik:"))
+                .is_some_and(|name| registration.skills.iter().any(|given| given == name))
+    });
+    if named {
+        return Ok(());
+    }
+    Err(format!(
+        "skill_not_in_session: a session uses its own skills as farik:<name> with nothing but an \
+         optional args without @, and this one has {}",
+        if registration.skills.is_empty() {
+            "none".to_string()
+        } else {
+            registration.skills.join(", ")
+        }
+    ))
+}
+
+/// Whether a `Read`, `Glob` or `Grep` is of the session's skills folder, resolved through links:
+/// the one place outside the worktree a session reads (ADR 0034). A `Glob` pattern stays
+/// relative, as everywhere.
+fn in_skill_folder(request: &HookRequest, registration: &SessionRegistration) -> bool {
+    let Some(skills_root) = &registration.skills_root else {
+        return false;
+    };
+    let field = match request.tool_name.as_str() {
+        "Read" => "file_path",
+        "Glob" | "Grep" => "path",
+        _ => return false,
+    };
+    let Some(raw) = request.tool_input.get(field).and_then(Value::as_str) else {
+        return false;
+    };
+    if request.tool_name == "Glob"
+        && let Some(pattern) = request.tool_input.get("pattern").and_then(Value::as_str)
+        && (Path::new(pattern).is_absolute()
+            || parts(pattern).any(|part| part == "..")
+            || expands_home(pattern))
+    {
+        return false;
+    }
+    if expands_home(raw) {
+        return false;
+    }
+    match (
+        skills_root.canonicalize(),
+        resolve(&registration.cwd.join(raw)),
+    ) {
+        (Ok(root), Some(resolved)) => resolved.starts_with(root),
+        _ => false,
+    }
+}
+
+/// The Designer's plan gate (ADR 0026): before the Product Manager approves its plan, a Designer's
+/// call at a writing tier, `external_effect` among them, is refused.
+fn plan_gate(
+    deps: &ToolDeps,
+    team: &Team,
+    registration: &SessionRegistration,
+    tier: PermissionTier,
+) -> Result<(), String> {
     let role = team
         .agents
         .iter()
@@ -321,12 +528,11 @@ fn judge_call(
     })
 }
 
-/// A shipped connector's tool name, `mcp__<server>__<tool>`, as its server and its tool; `None`
-/// for any other name, which no session is served.
+/// A connector's tool name, `mcp__<server>__<tool>`, as its server and its tool; `None` for any
+/// other name. A server's name holds no `_` (the team file's rule), so the first `__` ends it.
+/// Farik's own tools are told apart before this is asked.
 fn connector_tool(name: &str) -> Option<(&str, &str)> {
-    name.strip_prefix("mcp__")?
-        .split_once("__")
-        .filter(|(server, _)| BUILTIN_CONNECTORS.contains(server))
+    name.strip_prefix("mcp__")?.split_once("__")
 }
 
 /// The server and the tag a connector's call is recorded with: its server whenever the name is a
@@ -344,21 +550,68 @@ fn connector_of(
     Some((server.to_string(), tag))
 }
 
-/// The tier a connector's call needs, `network`, once `evaluate_connector_call` passes it (5.6).
+/// Whether a connector's call may go ahead, and the grant or allowance it uses, by
+/// `evaluate_connector_call` (5.6): no tier is asked, and `preauthorized_external_tools` is never
+/// consulted. A session held to approved sites has its call's `url` and `urls` fields judged
+/// against the approved sites first (`site_not_approved`, or `sites_unreadable` when the log cannot
+/// be read), before the connector or the tool is looked at (6.10, 8.6). An `external_effect` call meets the Designer's plan gate first, then the human's open
+/// grant for it is looked up, then, with none, the agent's calls of the tool this period are
+/// counted against its allowance; with neither, it asks (ADR 0031, ADR 0037). The caller holds the
+/// sessions lock, so the count and the call it allows are one step.
 fn judge_connector(
     request: &HookRequest,
     registration: &SessionRegistration,
-) -> Result<PermissionTier, String> {
+    deps: &ToolDeps,
+    state: &DaemonState,
+    team: &Team,
+) -> Result<Pass, Denial> {
     let Some((server, tool)) = connector_tool(&request.tool_name) else {
-        return Err(not_allowed(&request.tool_name));
+        return Err(Denial::from(not_allowed(&request.tool_name)));
     };
+    // A held session's addresses come first, whatever else would refuse the call, so that a call
+    // naming a site that is not approved asks for nothing and uses no grant or allowance.
+    if registration.web == WebAccess::ApprovedSites {
+        judge_sites_of_call(&request.tool_input, registration, deps).map_err(Denial::from)?;
+    }
     let connector = registration
         .connectors
         .iter()
         .find(|connector| connector.server == server);
-    evaluate_connector_call(tool, &request.tool_input, connector)
-        .map(|_| PermissionTier::Network)
-        .map_err(|refusal| match refusal {
+    let mut granted = None;
+    let mut used = 0;
+    let mut plan = None;
+    if connector.and_then(|connector| connector.tools.get(tool))
+        == Some(&ConnectorTag::ExternalEffect)
+    {
+        plan_gate(deps, team, registration, PermissionTier::ExternalEffect)?;
+        if connector.is_some_and(|connector| connector.plan_tools.contains(tool)) {
+            // The owner's plan approves it or nothing does: no grant is looked up and no allowance
+            // counted, and the log is read for the active plan only for such a tool.
+            plan = active_marketing_plan(deps)?;
+        } else {
+            granted = grant_for(deps, registration, server, tool, &request.tool_input)?;
+            // Zero asks every time, and a grant is used before an allowance: neither needs the
+            // count.
+            if granted.is_none()
+                && connector
+                    .and_then(|connector| connector.allowances.get(tool))
+                    .is_some_and(|calls| *calls > 0)
+            {
+                used = calls_made(deps, state, &registration.agent_id, server, tool)?;
+            }
+        }
+    }
+    let active = plan.is_some();
+    match evaluate_connector_call(tool, &request.tool_input, connector, granted, used, active) {
+        Ok(pass) => Ok(Pass {
+            approval: pass.approval,
+            allowance: pass.allowance,
+            marketing_plan: plan.filter(|_| pass.plan_approved),
+        }),
+        Err(ConnectorRefusal::ApprovalNeeded) => {
+            Err(ask(deps, registration, server, tool, &request.tool_input))
+        }
+        Err(refusal) => Err(Denial::from(match refusal {
             ConnectorRefusal::ConnectorNotInSession => format!(
                 "connector_not_in_session: {server} is not a connector this session was given"
             ),
@@ -367,14 +620,145 @@ fn judge_connector(
                  offered"
             ),
             ConnectorRefusal::ToolDenied => format!(
-                "tool_denied: {tool} of {server} reaches beyond the preview or changes something \
-                 outside the sandbox, and no session may call it"
+                "tool_denied: {tool} of {server} is tagged denied, and no session may call it"
+            ),
+            ConnectorRefusal::ApprovalNeeded => unreachable!("asked above"),
+            ConnectorRefusal::NoActivePlan => format!(
+                "no_active_marketing_plan: {tool} of {server} runs only inside a marketing plan \
+                 the owner approved"
+            ),
+            ConnectorRefusal::InputTooLarge => format!(
+                "tool_input_too_large: {tool}'s input is over 64 KiB, too long to show you, so it \
+                 is refused"
             ),
             ConnectorRefusal::UrlOutsidePreview { url } => format!(
                 "url_outside_preview: {url} is not the project's preview; open pages under {}",
-                connector.map_or("", |connector| connector.origin.as_str())
+                connector
+                    .and_then(|connector| connector.origin.as_deref())
+                    .unwrap_or_default()
             ),
+        })),
+    }
+}
+
+/// The id of the marketing plan that is active today by the daemon's clock, from the log.
+fn active_marketing_plan(deps: &ToolDeps) -> Result<Option<String>, Denial> {
+    let plans = marketing_plans(&deps.log)
+        .map_err(|error| Denial::from(format!("marketing_plan_unreadable: {error}")))?;
+    let records: Vec<_> = plans.iter().map(|plan| plan.record.clone()).collect();
+    Ok(active_plan(&records, deps.clock.now().date_naive()).map(|plan| plan.id.clone()))
+}
+
+/// The calls `agent` has made of `tool` of `server` this period, from the daemon's counts.
+fn calls_made(
+    deps: &ToolDeps,
+    state: &DaemonState,
+    agent: &str,
+    server: &str,
+    tool: &str,
+) -> Result<u32, Denial> {
+    let unreadable =
+        |error: farik_store::StoreError| Denial::from(format!("allowance_unreadable: {error}"));
+    let period =
+        allowance_period(&deps.log, &deps.projections, deps.clock.now()).map_err(unreadable)?;
+    state
+        .allowance_counts()
+        .used(&deps.log, &period, agent, server, tool)
+        .map_err(unreadable)
+}
+
+/// The open grant this session may use for this exact call: the human's, for the session's agent
+/// and task, server, tool and input, granted before this session started. Only the task's events
+/// are read, so the sessions lock the caller holds stays short.
+fn grant_for(
+    deps: &ToolDeps,
+    registration: &SessionRegistration,
+    server: &str,
+    tool: &str,
+    input: &Value,
+) -> Result<Option<u64>, Denial> {
+    let Some(task_id) = &registration.task_id else {
+        return Ok(None);
+    };
+    let events = deps
+        .log
+        .read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            kinds: vec![
+                EventKind::ToolApprovalRequested,
+                EventKind::ToolApprovalGranted,
+                EventKind::ToolApprovalRefused,
+                EventKind::ToolCalled,
+                EventKind::SessionStarted,
+                EventKind::SessionEnded,
+            ],
+            ..EventQuery::default()
         })
+        .map_err(|error| Denial::from(format!("grants_unreadable: {error}")))?;
+    // The latest start of this session's id: an id is never given twice, and if it were, the
+    // session running now is the last one started under it.
+    let Some(started) = events
+        .iter()
+        .rev()
+        .find(|event| {
+            matches!(event.body, EventBody::SessionStarted(_))
+                && event.envelope.ids.session_id.as_deref() == Some(&registration.session_id)
+        })
+        .map(|event| event.envelope.seq)
+    else {
+        return Ok(None);
+    };
+    let key = ApprovalKey {
+        agent_id: registration.agent_id.clone(),
+        task_id: task_id.clone(),
+        server: server.to_string(),
+        tool: tool.to_string(),
+        input_sha256: input_sha256(input),
+    };
+    Ok(open_grants(&events)
+        .into_iter()
+        .find(|grant| grant.key == key && grant.granted_at < started)
+        .map(|grant| grant.approval))
+}
+
+/// Records that the call waits for the human, `tool_approval.requested` with its whole input, and
+/// the denial that names its seq and stops the session. A session about no task has nothing to
+/// wait on, so its call is refused without asking.
+fn ask(
+    deps: &ToolDeps,
+    registration: &SessionRegistration,
+    server: &str,
+    tool: &str,
+    input: &Value,
+) -> Denial {
+    if registration.task_id.is_none() {
+        return Denial::from(format!(
+            "external_effect_refused: {tool} of {server} changes something outside the sandbox, \
+             and only a session about a task can ask you to allow it"
+        ));
+    }
+    // The connector's own checks passed, so neither name is empty; a panic here would poison the
+    // sessions lock, so a body that cannot be made is a failed record instead.
+    let requested = (|| {
+        Some(EventBody::ToolApprovalRequested(
+            ToolApprovalRequestedBody {
+                server: server.to_string().try_into().ok()?,
+                tool: tool.to_string().try_into().ok()?,
+                input: input.to_string(),
+                input_sha256: input_sha256(input).try_into().ok()?,
+            },
+        ))
+    })()
+    .ok_or_else(|| format!("{server} {tool} cannot be named in a request"));
+    match requested.and_then(|body| append(deps, ids_of(deps, registration), body)) {
+        Ok(seq) => Denial {
+            reason: format!(
+                "{APPROVAL_NEEDED}: {server} {tool} waits for the human (approval {seq})"
+            ),
+            stop: Some(format!("{APPROVAL_NEEDED}: approval {seq}")),
+        },
+        Err(detail) => Denial::from(format!("record_failed: {detail}")),
+    }
 }
 
 fn not_allowed(tool: &str) -> String {
@@ -476,7 +860,7 @@ fn record_decision(
     ids: EventIds,
     request: &HookRequest,
     connector: Option<(String, Option<ConnectorTag>)>,
-    verdict: Result<(), String>,
+    verdict: Result<Pass, String>,
 ) -> HookDecision {
     let (server, tag) = match connector {
         Some((server, tag)) => (Some(server), tag.map(tag_wire)),
@@ -485,13 +869,18 @@ fn record_decision(
     let tool = request.tool_name.clone();
     let tool_use_id = request.tool_use_id.clone();
     let (body, decision) = match verdict {
-        Ok(()) => (
+        Ok(pass) => (
             EventBody::ToolCalled(ToolCalledBody {
                 tool,
                 tool_use_id,
                 input: cut(request.tool_input.to_string()),
                 server: server.and_then(|name| name.try_into().ok()),
                 tag,
+                approval: pass.approval.and_then(std::num::NonZeroU64::new),
+                allowance: pass
+                    .allowance
+                    .and_then(|calls| std::num::NonZeroU64::new(u64::from(calls))),
+                marketing_plan: pass.marketing_plan.and_then(|plan| plan.try_into().ok()),
             }),
             HookDecision {
                 allow: true,
@@ -510,7 +899,7 @@ fn record_decision(
         ),
     };
     match append(deps, ids, body) {
-        Ok(()) => decision,
+        Ok(_) => decision,
         Err(detail) => HookDecision::deny(format!("record_failed: {detail}")),
     }
 }
@@ -523,13 +912,15 @@ fn tag_wire(tag: ConnectorTag) -> ConnectorTagWire {
     }
 }
 
-fn append(deps: &ToolDeps, ids: EventIds, body: EventBody) -> Result<(), String> {
+/// Appends one event and projects it: the seq it was written at.
+pub(super) fn append(deps: &ToolDeps, ids: EventIds, body: EventBody) -> Result<u64, String> {
     let event = new_event(body, deps.clock.now(), ids)
         .map_err(|error| format!("the event cannot be stamped: {error:?}"))?;
     let appended = deps.log.append(&event).map_err(|error| error.to_string())?;
     deps.projections
         .apply(&appended)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    Ok(appended.envelope.seq)
 }
 
 /// `text` whole when it fits in 4 KiB, or cut at the last character boundary that leaves room
@@ -554,7 +945,7 @@ mod tests {
 
     use super::{HookDecision, HookRequest, cut, decide_pre_tool_use, record_post_tool_use};
     use crate::daemon::fixtures::{DEV_SESSION, POST_READ, PRE_READ, PRE_WRITE, TestDaemon};
-    use crate::tools::fixtures::{a_team_of_three, with_the_designer};
+    use crate::tools::fixtures::{a_team_of_three, at, with_the_designer};
 
     fn denied_for(decision: &HookDecision, kind: &str) {
         assert!(!decision.allow, "{decision:?}");
@@ -848,9 +1239,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn denies_bash_and_every_tool_without_a_tier() {
         let daemon = TestDaemon::new("hook-bash", |_| {});
-        for tool in ["Bash", "Task", "mcp__github__create_issue"] {
+        for (tool, kind) in [
+            ("Bash", "tool_not_allowed"),
+            ("Task", "tool_not_allowed"),
+            // Any `mcp__<server>__<tool>` is a connector's call, judged by the session's connectors.
+            ("mcp__github__create_issue", "connector_not_in_session"),
+        ] {
             let decision = decide_pre_tool_use(&daemon.dev_call(tool, &json!({})), &daemon.state);
-            denied_for(&decision, "tool_not_allowed");
+            denied_for(&decision, kind);
         }
     }
 
@@ -873,6 +1269,40 @@ mod tests {
             &daemon.state,
         );
         assert!(read.allow, "{read:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn judges_a_farik_tool_that_writes_by_the_path_it_will_write() {
+        // A write_workspace tool of Farik's names the file it writes (here, a plan in the plans
+        // folder), so the hook checks that path against the contract as `call_tool` does, instead
+        // of finding the call names none.
+        let daemon = TestDaemon::new("hook-farik-write", |_| {});
+        let outside = decide_pre_tool_use(
+            &daemon.dev_call("mcp__farik__farik_propose_marketing_plan", &json!({})),
+            &daemon.state,
+        );
+        denied_for(&outside, "path_outside_allowed");
+        daemon
+            .project
+            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+                wire["allowed_paths"] = json!(["docs/marketing/**"]);
+            });
+        daemon.register(
+            "session-docs",
+            "dev-a",
+            Some("FRK-2"),
+            DEFAULT_SESSION_LIMITS,
+        );
+        let inside = decide_pre_tool_use(
+            &daemon.call(
+                "session-docs",
+                "mcp__farik__farik_propose_marketing_plan",
+                &json!({}),
+            ),
+            &daemon.state,
+        );
+        assert!(inside.allow, "{inside:?}");
     }
 
     #[test]
@@ -1047,6 +1477,416 @@ mod tests {
         denied_for(&next, "tier_not_granted");
     }
 
+    /// A session of `dev-a` with the skill `api-style`, whose plugin folder is `<state>/plugin`,
+    /// outside the project; `cwd` is where it works.
+    fn register_with_skills(
+        daemon: &TestDaemon,
+        session: &str,
+        cwd: &std::path::Path,
+        purpose: crate::session::SessionPurpose,
+        limits: SessionLimits,
+    ) -> std::path::PathBuf {
+        use crate::daemon::SessionRegistration;
+
+        let plugin = std::path::PathBuf::from(format!(
+            "{}-state/plugin-{session}",
+            daemon.project.repo.path.display()
+        ));
+        let _ = std::fs::remove_dir_all(&plugin);
+        let skill = plugin.join("skills/api-style");
+        std::fs::create_dir_all(skill.join("references")).expect("a plugin folder");
+        std::fs::write(skill.join("SKILL.md"), "x").expect("a file");
+        std::fs::write(skill.join("references/a.md"), "details").expect("a file");
+        std::fs::create_dir_all(plugin.join(".claude-plugin")).expect("a folder");
+        std::fs::write(plugin.join(".claude-plugin/plugin.json"), "{}").expect("a file");
+        daemon.state.register_session(SessionRegistration {
+            session_id: session.to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
+            agent_id: "dev-a".to_string(),
+            task_id: None,
+            purpose,
+            in_reply_to: None,
+            thread: None,
+            skills: vec!["api-style".to_string()],
+            skills_root: Some(plugin.join("skills")),
+            cwd: cwd.to_path_buf(),
+            executor: None,
+            limits,
+            farik_tools: Vec::new(),
+            tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
+            connectors: Vec::new(),
+            preview: None,
+        });
+        plugin
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_hook_allows_only_the_sessions_skills() {
+        let daemon = TestDaemon::new("hook-skills", |_| {});
+        register_with_skills(
+            &daemon,
+            "session-skills",
+            &daemon.worktree,
+            crate::session::SessionPurpose::Implement,
+            DEFAULT_SESSION_LIMITS,
+        );
+        let call = |input: Value| {
+            decide_pre_tool_use(
+                &daemon.call("session-skills", "Skill", &input),
+                &daemon.state,
+            )
+        };
+        for input in [
+            json!({ "skill": "farik:api-style" }),
+            json!({ "skill": "farik:api-style", "args": "x" }),
+        ] {
+            let allowed = call(input.clone());
+            assert!(allowed.allow, "{input}: {allowed:?}");
+        }
+        let called = daemon.events(EventKind::ToolCalled);
+        assert!(
+            called
+                .iter()
+                .filter(|event| matches!(&event.body, EventBody::ToolCalled(body) if body.tool == "Skill"))
+                .count()
+                == 2,
+            "two allowed calls are recorded"
+        );
+        for input in [
+            json!({ "skill": "api-style" }),
+            json!({ "skill": "deep-research" }),
+            json!({ "skill": "farik:other" }),
+            json!({ "skill": 3 }),
+            json!({}),
+            json!({ "skill": "farik:api-style", "extra": 1 }),
+            json!({ "skill": "farik:api-style", "args": 5 }),
+            json!({ "skill": "farik:api-style", "args": "@~/.ssh/id_rsa" }),
+            json!({ "skill": "farik:api-style", "args": "see @x" }),
+            json!({ "skill": "farik:api-style", "args": "x\u{3002}@y" }),
+            json!({ "skill": "farik:api-style", "args": "ana@example.com" }),
+            json!("farik:api-style"),
+        ] {
+            denied_for(&call(input.clone()), "skill_not_in_session");
+        }
+        // A session with no skills is denied even the plugin's name.
+        let denied = decide_pre_tool_use(
+            &daemon.dev_call("Skill", &json!({ "skill": "farik:api-style" })),
+            &daemon.state,
+        );
+        denied_for(&denied, "skill_not_in_session");
+
+        // An allowed call counts towards the limit, and at it the name is denied like any call.
+        register_with_skills(
+            &daemon,
+            "session-limited",
+            &daemon.worktree,
+            crate::session::SessionPurpose::Implement,
+            SessionLimits {
+                max_tool_calls: 1,
+                ..DEFAULT_SESSION_LIMITS
+            },
+        );
+        let first = decide_pre_tool_use(
+            &daemon.call(
+                "session-limited",
+                "Skill",
+                &json!({ "skill": "farik:api-style" }),
+            ),
+            &daemon.state,
+        );
+        assert!(first.allow, "{first:?}");
+        let second = decide_pre_tool_use(
+            &daemon.call(
+                "session-limited",
+                "Skill",
+                &json!({ "skill": "farik:api-style" }),
+            ),
+            &daemon.state,
+        );
+        denied_for(&second, "tool_call_limit");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_session_in_a_private_folder_reaches_nothing_outside_it() {
+        // A finance task's session works in `.farik/local/finance`, with that folder as its
+        // working directory (6.6): the hook judges every path against it, so the folder is all
+        // it reaches, and no exception to the protected `.farik/local/**` is needed. The hook
+        // reads no role, so `dev-a`, who holds `write_workspace`, stands in for the Finance
+        // Specialist's session, registered about a finance task whose contract it loads.
+        use crate::daemon::SessionRegistration;
+
+        let daemon = TestDaemon::new("hook-private-folder", |_| {});
+        daemon
+            .project
+            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+                wire["assignee_role"] = json!("finance_specialist");
+                wire["reviewer_role"] = json!("product_manager");
+                wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+                wire["exit_criteria"] = json!([{
+                    "id": "C1",
+                    "text": "The books exist.",
+                    "satisfies": ["R1"],
+                    "verification": { "method": "artifact", "path": "books.xlsx" }
+                }]);
+            });
+        let root = daemon.project.repo.path.clone();
+        let folder = root.join(".farik/local/finance");
+        std::fs::create_dir_all(&folder).expect("the folder is made");
+        std::fs::write(folder.join("books.xlsx"), "books").expect("written");
+        std::fs::write(root.join(".farik/local/settings.json"), "{}").expect("written");
+        std::fs::write(daemon.worktree.join("x"), "another task's").expect("written");
+        daemon.state.register_session(SessionRegistration {
+            session_id: "session-folder".to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
+            agent_id: "dev-a".to_string(),
+            task_id: Some("FRK-2".parse().expect("a task id")),
+            purpose: crate::session::SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            skills: Vec::new(),
+            skills_root: None,
+            cwd: folder.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
+            connectors: Vec::new(),
+            preview: None,
+        });
+        let hook = |tool: &str, input: Value| {
+            decide_pre_tool_use(&daemon.call("session-folder", tool, &input), &daemon.state)
+        };
+        // What is in the folder is reachable, by a path relative to it or an absolute one.
+        for file in [
+            "books.xlsx",
+            &folder.join("books.xlsx").display().to_string(),
+        ] {
+            let allowed = hook("Read", json!({ "file_path": file }));
+            assert!(allowed.allow, "{file}: {allowed:?}");
+        }
+        let allowed = hook("LS", json!({ "path": "." }));
+        assert!(allowed.allow, "{allowed:?}");
+        // Another task's worktree, the project's database, and the files above the folder are not.
+        for file in [
+            "../worktrees/FRK-1/x".to_string(),
+            daemon.worktree.join("x").display().to_string(),
+            root.join(".farik/local/farik.db").display().to_string(),
+            "../../settings.json".to_string(),
+            root.join("README.md").display().to_string(),
+            "../finance/../../farik.db".to_string(),
+        ] {
+            denied_for(
+                &hook("Read", json!({ "file_path": file })),
+                "path_outside_workspace",
+            );
+        }
+        denied_for(
+            &hook("Glob", json!({ "pattern": "../worktrees/**" })),
+            "path_outside_workspace",
+        );
+        // The copy of the folder taken for the task cannot be written over, so what the task
+        // changed is always judged against the state it started from.
+        std::fs::create_dir_all(folder.join(".history/FRK-2")).expect("the copy is made");
+        std::fs::write(folder.join(".history/FRK-2/books.xlsx"), "books").expect("written");
+        for tool in ["Write", "Edit"] {
+            let refused = hook(
+                tool,
+                json!({ "file_path": ".history/FRK-2/books.xlsx", "content": "changed" }),
+            );
+            denied_for(&refused, "path_outside_allowed");
+        }
+        assert_eq!(
+            std::fs::read_to_string(folder.join(".history/FRK-2/books.xlsx")).ok(),
+            Some("books".to_string())
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn procurement_cannot_climb_out() {
+        // A procurement task's session works in `.farik/local/procurement` (6.10), beside the
+        // finance folder. The hook reads no role: the working directory holds the session, as it
+        // holds a finance one, so the finance books are as far away as the project's database.
+        use crate::daemon::SessionRegistration;
+
+        let daemon = TestDaemon::new("hook-procurement-folder", |_| {});
+        daemon
+            .project
+            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+                wire["assignee_role"] = json!("procurement_specialist");
+                wire["reviewer_role"] = json!("product_manager");
+                wire["allowed_paths"] = json!([".farik/local/procurement/**"]);
+                wire["exit_criteria"] = json!([{
+                    "id": "C1",
+                    "text": "The comparison is written.",
+                    "satisfies": ["R1"],
+                    "verification": { "method": "artifact", "path": "evaluations/email-sending.md" }
+                }]);
+            });
+        let root = daemon.project.repo.path.clone();
+        let folder = root.join(".farik/local/procurement");
+        let finance = root.join(".farik/local/finance");
+        std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
+        std::fs::create_dir_all(&finance).expect("the finance folder is made");
+        std::fs::write(folder.join("evaluations/email-sending.md"), "a note").expect("written");
+        std::fs::write(finance.join("books.xlsx"), "books").expect("written");
+        daemon.state.register_session(SessionRegistration {
+            session_id: "session-procurement".to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
+            agent_id: "dev-a".to_string(),
+            task_id: Some("FRK-2".parse().expect("a task id")),
+            purpose: crate::session::SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            skills: Vec::new(),
+            skills_root: None,
+            cwd: folder.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: crate::tools::fixtures::tiers_of(&daemon.project.deps, "dev-a"),
+            connectors: Vec::new(),
+            preview: None,
+        });
+        let hook = |tool: &str, input: Value| {
+            decide_pre_tool_use(
+                &daemon.call("session-procurement", tool, &input),
+                &daemon.state,
+            )
+        };
+        // Its own folder is reachable, by a path relative to it or an absolute one.
+        for file in [
+            "evaluations/email-sending.md",
+            &folder
+                .join("evaluations/email-sending.md")
+                .display()
+                .to_string(),
+        ] {
+            let allowed = hook("Read", json!({ "file_path": file }));
+            assert!(allowed.allow, "{file}: {allowed:?}");
+        }
+        // So is the copy taken when the task was assigned, which a reviewer reads a note beside.
+        std::fs::create_dir_all(folder.join(".history/FRK-2/evaluations")).expect("the copy");
+        std::fs::write(
+            folder.join(".history/FRK-2/evaluations/email-sending.md"),
+            "the note at assignment",
+        )
+        .expect("written");
+        let allowed = hook(
+            "Read",
+            json!({ "file_path": ".history/FRK-2/evaluations/email-sending.md" }),
+        );
+        assert!(allowed.allow, "{allowed:?}");
+        // The finance folder is not, by a path that climbs, an absolute one, or one from the root.
+        for file in [
+            "../finance/books.xlsx".to_string(),
+            "../../local/finance/books.xlsx".to_string(),
+            finance.join("books.xlsx").display().to_string(),
+            ".farik/local/finance/books.xlsx".to_string(),
+        ] {
+            let refused = hook("Read", json!({ "file_path": file }));
+            assert!(!refused.allow, "{file}: {refused:?}");
+        }
+        denied_for(
+            &hook("Glob", json!({ "pattern": "../finance/**" })),
+            "path_outside_workspace",
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_reach_the_skill_folder_and_writes_do_not() {
+        let daemon = TestDaemon::new("hook-skill-reads", |_| {});
+        let root = daemon.project.repo.path.clone();
+        // The task session works in its worktree; the chat session in the project's root.
+        for (session, cwd, purpose) in [
+            (
+                "session-task",
+                daemon.worktree.clone(),
+                crate::session::SessionPurpose::Implement,
+            ),
+            (
+                "session-chat",
+                root.clone(),
+                crate::session::SessionPurpose::Chat,
+            ),
+        ] {
+            let plugin =
+                register_with_skills(&daemon, session, &cwd, purpose, DEFAULT_SESSION_LIMITS);
+            let skills = plugin.join("skills");
+            let hook = |tool: &str, input: Value| {
+                decide_pre_tool_use(&daemon.call(session, tool, &input), &daemon.state)
+            };
+            let note = skills
+                .join("api-style/references/a.md")
+                .display()
+                .to_string();
+            let allowed = hook("Read", json!({ "file_path": note }));
+            assert!(allowed.allow, "{session}: {allowed:?}");
+            for (tool, input) in [
+                (
+                    "Glob",
+                    json!({ "path": skills.display().to_string(), "pattern": "**/*.md" }),
+                ),
+                (
+                    "Grep",
+                    json!({ "path": skills.display().to_string(), "pattern": "det" }),
+                ),
+            ] {
+                let allowed = hook(tool, input);
+                assert!(allowed.allow, "{session} {tool}: {allowed:?}");
+            }
+            // A Glob pattern stays relative, and a link out of the folder is judged by where it
+            // points.
+            let absolute = hook(
+                "Glob",
+                json!({ "path": skills.display().to_string(), "pattern": "/etc/*" }),
+            );
+            denied_for(&absolute, "path_outside_workspace");
+            let climbing = hook(
+                "Glob",
+                json!({ "path": skills.display().to_string(), "pattern": "../*" }),
+            );
+            denied_for(&climbing, "path_outside_workspace");
+            std::os::unix::fs::symlink("/etc/hostname", skills.join("api-style/link.md"))
+                .expect("a link");
+            let linked = hook(
+                "Read",
+                json!({ "file_path": skills.join("api-style/link.md").display().to_string() }),
+            );
+            denied_for(&linked, "path_outside_workspace");
+            // Writes there, any other tool's path there, and the plugin's other files are not.
+            for (tool, input) in [
+                ("Write", json!({ "file_path": note, "content": "x" })),
+                (
+                    "Edit",
+                    json!({ "file_path": note, "old_string": "a", "new_string": "b" }),
+                ),
+                ("LS", json!({ "path": skills.display().to_string() })),
+                (
+                    "Read",
+                    json!({ "file_path": plugin.join(".claude-plugin/plugin.json").display().to_string() }),
+                ),
+                (
+                    "Read",
+                    json!({ "file_path": plugin.join("skills/../x").display().to_string() }),
+                ),
+            ] {
+                denied_for(&hook(tool, input.clone()), "path_outside_workspace");
+            }
+            // The session's own prompt and MCP config, in the project, stay unreadable: outside the
+            // task's worktree, or under the protected `.farik/local/**` in the root.
+            let mcp = root
+                .join(".farik/local/sessions")
+                .join(session)
+                .join("mcp.json");
+            let refused = hook("Read", json!({ "file_path": mcp.display().to_string() }));
+            assert!(!refused.allow, "{session}: {refused:?}");
+        }
+    }
+
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn denies_a_connector_call_outside_the_rules() {
@@ -1060,11 +1900,14 @@ mod tests {
         let definition = farik_roles::builtin_connector("playwright").expect("shipped");
         daemon.state.register_session(SessionRegistration {
             session_id: "session-browser".to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("FRK-1".parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
             cwd: daemon.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
@@ -1072,8 +1915,10 @@ mod tests {
             tiers: vec![PermissionTier::Read, PermissionTier::Network],
             connectors: vec![SessionConnector {
                 server: "playwright".to_string(),
-                origin: "http://localhost:4400".to_string(),
+                origin: Some("http://localhost:4400".to_string()),
                 tools: definition.tools,
+                allowances: std::collections::BTreeMap::new(),
+                plan_tools: std::collections::BTreeSet::new(),
             }],
             preview: None,
         });
@@ -1149,6 +1994,1067 @@ mod tests {
         );
         assert_eq!(body.tag, None);
         assert_eq!(daemon.events(EventKind::ToolCalled).len(), 1);
+    }
+
+    /// Registers `session-github`, a session of `dev-a` holding the `read` tier alone and given
+    /// the custom server `github`, which has one tool of each tag and no origin.
+    fn with_github(daemon: &TestDaemon) {
+        github_session(daemon, "session-github", "dev-a");
+    }
+
+    /// Registers `session`, of `agent` on FRK-1, as `with_github` describes, and records its
+    /// `session.started`.
+    fn github_session(daemon: &TestDaemon, session: &str, agent: &str) {
+        task_session(daemon, session, agent, "FRK-1");
+    }
+
+    /// `github_session` on `task`. `github` also has `close_issue`, and the session is given
+    /// `gitlab` too, both tagged `external_effect`.
+    fn task_session(daemon: &TestDaemon, session: &str, agent: &str, task: &str) {
+        allowing_session(daemon, session, agent, task, None);
+    }
+
+    /// `task_session`, with `github`'s `create_issue` allowed `calls` each period unasked.
+    fn allowing_session(
+        daemon: &TestDaemon,
+        session: &str,
+        agent: &str,
+        task: &str,
+        calls: Option<u32>,
+    ) {
+        registering(daemon, session, agent, task, calls, &[]);
+    }
+
+    /// `allowing_session`, with `plan_tools` of `github` marked as approved by the marketing plan.
+    fn registering(
+        daemon: &TestDaemon,
+        session: &str,
+        agent: &str,
+        task: &str,
+        calls: Option<u32>,
+        plan_tools: &[&str],
+    ) {
+        use farik_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
+
+        use crate::daemon::SessionRegistration;
+        use crate::session::SessionPurpose;
+
+        daemon.state.register_session(SessionRegistration {
+            session_id: session.to_string(),
+            web: daemon.web_of(agent),
+            agent_id: agent.to_string(),
+            task_id: Some(task.parse().expect("a task id")),
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            skills: Vec::new(),
+            skills_root: None,
+            cwd: daemon.worktree.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: vec![PermissionTier::Read],
+            connectors: vec![
+                SessionConnector {
+                    server: "github".to_string(),
+                    origin: None,
+                    tools: [
+                        ("search_issues", ConnectorTag::Network),
+                        ("create_issue", ConnectorTag::ExternalEffect),
+                        ("close_issue", ConnectorTag::ExternalEffect),
+                        ("delete_repo", ConnectorTag::Denied),
+                    ]
+                    .into_iter()
+                    .map(|(tool, tag)| (tool.to_string(), tag))
+                    .collect(),
+                    allowances: calls
+                        .map(|calls| [("create_issue".to_string(), calls)].into())
+                        .unwrap_or_default(),
+                    plan_tools: plan_tools.iter().map(|tool| (*tool).to_string()).collect(),
+                },
+                SessionConnector {
+                    server: "gitlab".to_string(),
+                    origin: None,
+                    tools: [("create_issue".to_string(), ConnectorTag::ExternalEffect)].into(),
+                    allowances: std::collections::BTreeMap::new(),
+                    plan_tools: std::collections::BTreeSet::new(),
+                },
+            ],
+            preview: None,
+        });
+        task_event(
+            daemon,
+            task,
+            session,
+            agent,
+            "session.started",
+            &json!({ "purpose": "implement", "model": "claude-opus-5", "effort": "high" }),
+        );
+    }
+
+    /// Appends an event of `session`, of `agent` on FRK-1.
+    fn session_event(daemon: &TestDaemon, session: &str, agent: &str, kind: &str, body: &Value) {
+        task_event(daemon, "FRK-1", session, agent, kind, body);
+    }
+
+    /// Appends an event of `session`, of `agent` on `task`.
+    fn task_event(
+        daemon: &TestDaemon,
+        task: &str,
+        session: &str,
+        agent: &str,
+        kind: &str,
+        body: &Value,
+    ) {
+        use farik_protocol::event::{NewEvent, event_from_value};
+
+        let event = event_from_value(&json!({
+            "seq": 1, "recorded_at": "2026-09-17T10:00:00Z", "team_id": "farik",
+            "project_id": "farik", "task_id": task, "agent_id": agent, "session_id": session,
+            "kind": kind, "body": body,
+        }))
+        .expect("schema-valid");
+        let deps = &daemon.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
+    }
+
+    /// `session` calls `create_issue` with `input`.
+    fn create_issue(daemon: &TestDaemon, session: &str, input: &Value) -> HookDecision {
+        decide_pre_tool_use(
+            &daemon.call(session, "mcp__github__create_issue", input),
+            &daemon.state,
+        )
+    }
+
+    /// `session` calls `create_issue` with `input`, is asked, and the approval's seq.
+    fn asked(daemon: &TestDaemon, session: &str, input: &Value) -> u64 {
+        let decision = create_issue(daemon, session, input);
+        denied_for(&decision, "approval_needed");
+        let requested = daemon.events(EventKind::ToolApprovalRequested);
+        let seq = requested.last().expect("recorded").envelope.seq;
+        assert_eq!(
+            decision.reason,
+            format!("approval_needed: github create_issue waits for the human (approval {seq})")
+        );
+        seq
+    }
+
+    /// The human allows `approval`, as the command records it.
+    fn grant(daemon: &TestDaemon, approval: u64) {
+        daemon.project.record(
+            "FRK-1",
+            "tool_approval.granted",
+            &json!({ "approval": approval }),
+        );
+    }
+
+    /// The approval the last `tool.called` used.
+    fn used(daemon: &TestDaemon) -> Option<u64> {
+        let called = daemon.events(EventKind::ToolCalled);
+        let EventBody::ToolCalled(body) = &called.last().expect("recorded").body else {
+            panic!("a tool.called body");
+        };
+        body.approval.map(std::num::NonZeroU64::get)
+    }
+
+    fn github_call(daemon: &TestDaemon, tool: &str, input: &Value) -> HookDecision {
+        decide_pre_tool_use(&daemon.call("session-github", tool, input), &daemon.state)
+    }
+
+    /// The server the last `tool.denied` was recorded against.
+    fn last_denied_server(daemon: &TestDaemon) -> Option<String> {
+        let denied = daemon.events(EventKind::ToolDenied);
+        let EventBody::ToolDenied(body) = &denied.last().expect("recorded").body else {
+            panic!("a tool.denied body");
+        };
+        body.server.as_deref().map(ToString::to_string)
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_hook_judges_any_connector_the_session_has() {
+        use farik_protocol::event::ConnectorTagWire;
+
+        let daemon = TestDaemon::new("hook-custom", |_| {});
+        with_github(&daemon);
+        // `network` runs whatever the agent's tiers, and with no origin any url.
+        let search = "mcp__github__search_issues";
+        let allowed = github_call(
+            &daemon,
+            search,
+            &json!({ "url": "https://api.github.com/search/issues?q=bug" }),
+        );
+        assert!(allowed.allow, "{allowed:?}");
+        let called = daemon.events(EventKind::ToolCalled);
+        let EventBody::ToolCalled(body) = &called.last().expect("recorded").body else {
+            panic!("a tool.called body");
+        };
+        assert_eq!(body.tool, search);
+        assert_eq!(body.server.as_deref().map(String::as_str), Some("github"));
+        assert_eq!(body.tag, Some(ConnectorTagWire::Network));
+
+        denied_for(
+            &github_call(&daemon, "mcp__github__delete_repo", &json!({})),
+            "tool_denied",
+        );
+        denied_for(
+            &github_call(&daemon, "mcp__github__merge_pull", &json!({})),
+            "tool_not_tagged",
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_custom_connector_does_not_let_webfetch_through() {
+        let daemon = TestDaemon::new("hook-custom-webfetch", |_| {});
+        with_github(&daemon);
+        for tool in ["WebFetch", "WebSearch"] {
+            let decision = github_call(&daemon, tool, &json!({ "url": "https://example.com/" }));
+            denied_for(&decision, "tier_not_granted");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_session_about_no_task_is_refused_without_asking() {
+        let daemon = TestDaemon::new("hook-external-no-task", |_| {});
+        with_github(&daemon);
+        daemon
+            .state
+            .sessions()
+            .get_mut("session-github")
+            .expect("registered")
+            .registration
+            .task_id = None;
+
+        let decision = create_issue(&daemon, "session-github", &json!({ "title": "x" }));
+
+        denied_for(&decision, "external_effect_refused");
+        assert!(
+            daemon.events(EventKind::ToolApprovalRequested).is_empty(),
+            "nothing is recorded that no row lists and nothing can decide"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_external_effect_call_asks_with_its_whole_input() {
+        let daemon = TestDaemon::new("hook-custom-external", |_| {});
+        with_github(&daemon);
+        // Longer than the 4 KiB a tool call's input is cut at, keys out of order.
+        let input = json!({ "title": "x", "body": "b".repeat(5_000) });
+        let approval = asked(&daemon, "session-github", &input);
+        assert_eq!(
+            last_denied_server(&daemon).as_deref(),
+            Some("github"),
+            "recorded against its server"
+        );
+        let requested = daemon.events(EventKind::ToolApprovalRequested);
+        assert_eq!(requested.len(), 1);
+        let ids = &requested[0].envelope.ids;
+        assert_eq!(ids.agent_id.as_deref(), Some("dev-a"));
+        assert_eq!(ids.session_id.as_deref(), Some("session-github"));
+        assert_eq!(
+            ids.task_id.as_ref().map(|id| id.to_string()).as_deref(),
+            Some("FRK-1")
+        );
+        let EventBody::ToolApprovalRequested(body) = &requested[0].body else {
+            panic!("a tool_approval.requested body");
+        };
+        assert_eq!(body.server.as_str(), "github");
+        assert_eq!(body.tool.as_str(), "create_issue");
+        assert_eq!(body.input, input.to_string(), "whole, never cut");
+        assert_eq!(
+            body.input_sha256.as_str(),
+            farik_core::governor::permissions::input_sha256(&input)
+        );
+        assert_eq!(
+            daemon.state.stop_reason("session-github"),
+            Some(format!("approval_needed: approval {approval}")),
+            "the session is stopped"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_large_input_is_refused_not_asked() {
+        let daemon = TestDaemon::new("hook-custom-large", |_| {});
+        with_github(&daemon);
+        let large = json!({ "body": "b".repeat(64 * 1024) });
+        let decision = create_issue(&daemon, "session-github", &large);
+        assert_eq!(
+            decision.reason,
+            "tool_input_too_large: create_issue's input is over 64 KiB, too long to show you, so \
+             it is refused"
+        );
+        assert!(!decision.allow);
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+        assert_eq!(daemon.events(EventKind::ToolDenied).len(), 1);
+        assert_eq!(daemon.state.stop_reason("session-github"), None);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_preauthorized_external_tool_still_asks() {
+        let daemon = TestDaemon::new("hook-custom-preauthorized", |_| {});
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&a_team_of_three(|wire| {
+                wire["agents"][1]["preauthorized_external_tools"] =
+                    json!(["mcp__github__create_issue"]);
+            }))
+            .expect("the team is written");
+        with_github(&daemon);
+        asked(&daemon, "session-github", &json!({}));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_designers_call_before_the_plan_is_refused_not_asked() {
+        let daemon = TestDaemon::new("hook-custom-designer", |_| {});
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&a_team_of_three(with_the_designer))
+            .expect("the team is written");
+        github_session(&daemon, "session-iris", "iris");
+        let decision = create_issue(&daemon, "session-iris", &json!({ "title": "x" }));
+        denied_for(&decision, "design_plan_not_approved");
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+        assert_eq!(daemon.state.stop_reason("session-iris"), None);
+        // Once the plan is approved, it asks.
+        daemon.project.record(
+            "FRK-1",
+            "design_plan.proposed",
+            &json!({ "plan": "A plan." }),
+        );
+        daemon.project.record(
+            "FRK-1",
+            "design_plan.approved",
+            &json!({ "reason": "Go ahead." }),
+        );
+        asked(&daemon, "session-iris", &json!({ "title": "x" }));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn approve_then_the_same_call_runs_once() {
+        let daemon = TestDaemon::new("hook-grant-once", |_| {});
+        with_github(&daemon);
+        let input = json!({ "title": "x", "labels": ["bug"] });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        github_session(&daemon, "session-next", "dev-a");
+        // The same input, its keys in another order.
+        let reordered: Value =
+            serde_json::from_str(r#"{"labels":["bug"],"title":"x"}"#).expect("JSON");
+        let allowed = create_issue(&daemon, "session-next", &reordered);
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(used(&daemon), Some(approval));
+        let again = asked(&daemon, "session-next", &input);
+        assert!(again > approval);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_is_used_once_under_concurrency() {
+        // A clock that sleeps in every append puts a check-then-write race inside its window.
+        let daemon = TestDaemon::new("hook-grant-concurrent", |_| {})
+            .slowed(std::time::Duration::from_millis(50));
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        github_session(&daemon, "session-next", "dev-a");
+        let request = daemon.call("session-next", "mcp__github__create_issue", &input);
+        let barrier = std::sync::Barrier::new(2);
+        let decisions: Vec<HookDecision> = std::thread::scope(|scope| {
+            let calls: Vec<_> = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        decide_pre_tool_use(&request, &daemon.state)
+                    })
+                })
+                .collect();
+            calls
+                .into_iter()
+                .map(|call| call.join().expect("the call ends"))
+                .collect()
+        });
+        assert_eq!(
+            decisions.iter().filter(|decision| decision.allow).count(),
+            1,
+            "{decisions:?}"
+        );
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 1);
+    }
+
+    /// `dev-a`'s `session-github`, allowed `calls` of `create_issue` each period unasked.
+    fn allowing_github(daemon: &TestDaemon, calls: u32) {
+        allowing_session(daemon, "session-github", "dev-a", "FRK-1", Some(calls));
+    }
+
+    /// The `allowance` the last `tool.called` ran inside.
+    fn ran_inside(daemon: &TestDaemon) -> Option<u32> {
+        let called = daemon.events(EventKind::ToolCalled);
+        let EventBody::ToolCalled(body) = &called.last().expect("recorded").body else {
+            panic!("a tool.called body");
+        };
+        body.allowance
+            .map(|calls| u32::try_from(calls.get()).expect("at most 1000"))
+    }
+
+    /// `dev-a`'s `create_issue` through `session-github`, with an input of its own each time.
+    fn issue(daemon: &TestDaemon, n: u32) -> HookDecision {
+        create_issue(daemon, "session-github", &json!({ "title": n }))
+    }
+
+    /// A `tool.called` of `agent` for `tool` of `server`, recorded at `when`, as the hook would.
+    fn called_at(
+        daemon: &TestDaemon,
+        agent: &str,
+        server: &str,
+        tool: &str,
+        when: chrono::DateTime<chrono::Utc>,
+    ) {
+        daemon.project.record_by(
+            Some(agent),
+            when,
+            "FRK-1",
+            "tool.called",
+            &json!({ "tool": tool, "input": "{}", "server": server, "tag": "external_effect" }),
+        );
+    }
+
+    /// `session`, of `kai` on FRK-1, given `server` as the kit wrote it for the agent, and its
+    /// `session.started` recorded.
+    fn kai_session(daemon: &TestDaemon, session: &str, server: &farik_core::team::CustomServer) {
+        use farik_core::governor::permissions::{PermissionTier, SessionConnector};
+
+        use crate::daemon::SessionRegistration;
+        use crate::session::SessionPurpose;
+
+        daemon.state.register_session(SessionRegistration {
+            session_id: session.to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
+            agent_id: "kai".to_string(),
+            task_id: Some("FRK-1".parse().expect("a task id")),
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            skills: Vec::new(),
+            skills_root: None,
+            cwd: daemon.worktree.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: vec![PermissionTier::Read],
+            connectors: vec![SessionConnector {
+                server: server.name.clone(),
+                origin: None,
+                tools: server.tools.clone(),
+                allowances: server.allowances.clone(),
+                plan_tools: std::collections::BTreeSet::new(),
+            }],
+            preview: None,
+        });
+        task_event(
+            daemon,
+            "FRK-1",
+            session,
+            "kai",
+            "session.started",
+            &json!({ "purpose": "implement", "model": "claude-sonnet-5-5", "effort": "medium" }),
+        );
+    }
+
+    /// A guard, not RED: the shipped entry is committed before this test. Proves, on the entry the
+    /// kit writes, that a tool the kit never offers is refused, that twenty images run unasked,
+    /// that the twenty-first and a batch ask. An ask stops the session, so the order is the plan's.
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn higgsfields_images_run_inside_their_allowance_then_ask() {
+        use std::collections::BTreeMap;
+
+        use farik_core::contract::Role;
+        use farik_core::team::fixtures::an_agent_wire;
+        use farik_protocol::event::ConnectorTagWire;
+
+        let daemon = TestDaemon::new("hook-higgsfield-allowance", |_| {});
+        let team = a_team_of_three(|wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(an_agent_wire("kai", "marketing_specialist"));
+        });
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&team)
+            .expect("the team is written");
+        let kit = farik_roles::load_kit(Role::MarketingSpecialist)
+            .expect("the Marketing Specialist's kit");
+        let (_, server) =
+            crate::daemon::team::kit_entry(&kit, &team, "kai", "higgsfield", &BTreeMap::new())
+                .expect("the kit's entry for kai");
+        kai_session(&daemon, "session-kai", &server);
+        let hook = |session: &str, tool: &str, input: &Value| {
+            decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
+        };
+
+        // A shell on Higgsfield's machine is never offered.
+        let refused = hook("session-kai", "mcp__higgsfield__sandbox_exec", &json!({}));
+        denied_for(&refused, "tool_denied");
+        let denied = daemon.events(EventKind::ToolDenied);
+        assert_eq!(denied.len(), 1);
+        let EventBody::ToolDenied(body) = &denied[0].body else {
+            panic!("a tool.denied body");
+        };
+        assert_eq!(
+            body.server.as_deref().map(String::as_str),
+            Some("higgsfield")
+        );
+        assert_eq!(body.tag, Some(ConnectorTagWire::Denied));
+        assert!(daemon.events(EventKind::ToolCalled).is_empty());
+        assert_eq!(daemon.state.stop_reason("session-kai"), None);
+
+        // Twenty images run inside the allowance, each with an input of its own.
+        for n in 1..=20 {
+            let allowed = hook(
+                "session-kai",
+                "mcp__higgsfield__generate_image",
+                &json!({ "prompt": format!("a banner, take {n}"), "count": 1 }),
+            );
+            assert!(allowed.allow, "{n}: {allowed:?}");
+            assert_eq!(ran_inside(&daemon), Some(20), "{n}");
+        }
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+
+        // The twenty-first asks, and the ask stops the session.
+        let asked = hook(
+            "session-kai",
+            "mcp__higgsfield__generate_image",
+            &json!({ "prompt": "a banner, take 21", "count": 1 }),
+        );
+        denied_for(&asked, "approval_needed");
+        assert_eq!(daemon.events(EventKind::ToolApprovalRequested).len(), 1);
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 20);
+        assert!(daemon.state.stop_reason("session-kai").is_some());
+
+        // A batch asks whatever the count: it has no allowance. A second session, since the first
+        // one stopped.
+        kai_session(&daemon, "session-kai-next", &server);
+        let batch = hook(
+            "session-kai-next",
+            "mcp__higgsfield__generate_image_batch",
+            &json!({ "prompts": ["a banner"] }),
+        );
+        denied_for(&batch, "approval_needed");
+        assert_eq!(daemon.events(EventKind::ToolApprovalRequested).len(), 2);
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 20);
+    }
+
+    /// `dev-a`'s `close_issue` through `session-github`.
+    fn close(daemon: &TestDaemon) -> HookDecision {
+        decide_pre_tool_use(
+            &daemon.call(
+                "session-github",
+                "mcp__github__close_issue",
+                &json!({ "n": 1 }),
+            ),
+            &daemon.state,
+        )
+    }
+
+    /// The marketing plan the last `tool.called` names.
+    fn ran_for_plan(daemon: &TestDaemon) -> Option<String> {
+        let called = daemon.events(EventKind::ToolCalled);
+        let EventBody::ToolCalled(body) = &called.last().expect("recorded").body else {
+            panic!("a tool.called body");
+        };
+        body.marketing_plan
+            .as_ref()
+            .map(|plan| plan.as_str().to_string())
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_plan_marked_call_runs_while_a_plan_is_active() {
+        let daemon = TestDaemon::new("hook-plan-marked", |_| {});
+        registering(
+            &daemon,
+            "session-github",
+            "dev-a",
+            "FRK-1",
+            Some(5),
+            &["close_issue"],
+        );
+
+        // No plan, and a plan only proposed: refused with the plan's reason, never asked.
+        denied_for(&close(&daemon), "no_active_marketing_plan");
+        daemon
+            .project
+            .plan_proposed("FRK-1", "MP-1", "2026-09-20", "2026-10-10");
+        denied_for(&close(&daemon), "no_active_marketing_plan");
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+        assert!(daemon.events(EventKind::ToolCalled).is_empty());
+        assert_eq!(daemon.state.stop_reason("session-github"), None);
+
+        // Approved and in its dates: it runs, naming the plan, with no grant and no allowance,
+        // and nothing is asked.
+        daemon.project.plan_approved("FRK-1", "MP-1", "");
+        let allowed = close(&daemon);
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(ran_for_plan(&daemon), Some("MP-1".to_string()));
+        assert_eq!(ran_inside(&daemon), None);
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+
+        // The plan approves only what the kit marked: its neighbour inside its allowance runs as
+        // before and names no plan, and one with none still asks.
+        assert!(issue(&daemon, 1).allow);
+        assert_eq!(ran_for_plan(&daemon), None);
+        assert_eq!(ran_inside(&daemon), Some(5));
+
+        // Ended by the owner, it approves nothing.
+        daemon.project.record(
+            "",
+            "marketing_plan.ended",
+            &json!({ "plan": "MP-1", "why": "by_owner" }),
+        );
+        denied_for(&close(&daemon), "no_active_marketing_plan");
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn runs_a_call_inside_its_allowance_without_asking() {
+        let daemon = TestDaemon::new("hook-allowance-inside", |_| {});
+        allowing_github(&daemon, 2);
+        for n in 1..=2 {
+            let allowed = issue(&daemon, n);
+            assert!(allowed.allow, "{n}: {allowed:?}");
+            assert_eq!(ran_inside(&daemon), Some(2), "{n}");
+        }
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn asks_for_the_first_call_beyond_it() {
+        let daemon = TestDaemon::new("hook-allowance-beyond", |_| {});
+        allowing_github(&daemon, 2);
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        denied_for(&issue(&daemon, 3), "approval_needed");
+        assert_eq!(daemon.events(EventKind::ToolApprovalRequested).len(), 1);
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 2);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_per_agent_and_per_tool() {
+        let daemon = TestDaemon::new("hook-allowance-per", |_| {});
+        allowing_github(&daemon, 2);
+        // Another agent's calls of the tool, and this agent's of another, are not its count.
+        for _ in 0..2 {
+            called_at(
+                &daemon,
+                "dev-b",
+                "github",
+                "mcp__github__create_issue",
+                at(),
+            );
+            called_at(&daemon, "dev-a", "github", "mcp__github__close_issue", at());
+        }
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        denied_for(&issue(&daemon, 3), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn resets_with_the_sprint() {
+        let daemon = TestDaemon::new("hook-allowance-sprint", |_| {});
+        allowing_github(&daemon, 2);
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        denied_for(&issue(&daemon, 3), "approval_needed");
+        // The calls before the sprint started are not its.
+        daemon.project.open_sprint("S1", None, &[]);
+        // The ask stopped that session; the agent's next one makes its calls.
+        allowing_session(&daemon, "session-next", "dev-a", "FRK-1", Some(2));
+        let next = |n: u32| create_issue(&daemon, "session-next", &json!({ "title": n }));
+        assert!(next(4).allow);
+        assert!(next(5).allow);
+        denied_for(&next(6), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_per_utc_day_with_no_sprint_open() {
+        use chrono::{TimeZone, Utc};
+
+        let daemon = TestDaemon::new("hook-allowance-day", |_| {});
+        allowing_github(&daemon, 2);
+        let yesterday = Utc
+            .with_ymd_and_hms(2026, 9, 21, 23, 59, 0)
+            .single()
+            .expect("a time");
+        let today = Utc
+            .with_ymd_and_hms(2026, 9, 22, 0, 1, 0)
+            .single()
+            .expect("a time");
+        called_at(
+            &daemon,
+            "dev-a",
+            "github",
+            "mcp__github__create_issue",
+            yesterday,
+        );
+        called_at(
+            &daemon,
+            "dev-a",
+            "github",
+            "mcp__github__create_issue",
+            today,
+        );
+        assert!(
+            issue(&daemon, 1).allow,
+            "yesterday's call does not count, today's does"
+        );
+        denied_for(&issue(&daemon, 2), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_from_the_sprints_end_on_the_day_it_ended() {
+        use chrono::{TimeZone, Utc};
+
+        let at_hour = |hour| {
+            Utc.with_ymd_and_hms(2026, 9, 22, hour, 0, 0)
+                .single()
+                .expect("a time")
+        };
+        let daemon = TestDaemon::new("hook-allowance-ended", |_| {}).on_the_clock(at_hour(17));
+        allowing_github(&daemon, 2);
+        daemon.project.record_at(
+            at_hour(8),
+            "",
+            "sprint.started",
+            &json!({ "sprint_id": "S1", "budget_usd": null, "started_by": "human" }),
+        );
+        called_at(
+            &daemon,
+            "dev-a",
+            "github",
+            "mcp__github__create_issue",
+            at_hour(9),
+        );
+        called_at(
+            &daemon,
+            "dev-a",
+            "github",
+            "mcp__github__create_issue",
+            at_hour(10),
+        );
+        daemon.project.record_at(
+            at_hour(15),
+            "",
+            "sprint.ended",
+            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
+        );
+        called_at(
+            &daemon,
+            "dev-a",
+            "github",
+            "mcp__github__create_issue",
+            at_hour(16),
+        );
+        assert!(
+            issue(&daemon, 1).allow,
+            "the sprint's two calls are not today's"
+        );
+        denied_for(&issue(&daemon, 2), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_restart_reads_the_count_from_the_log() {
+        let daemon = TestDaemon::new("hook-allowance-restart", |_| {});
+        allowing_github(&daemon, 2);
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        // A daemon started afresh over the same log.
+        let restarted = std::sync::Arc::new(crate::daemon::DaemonState::new(
+            std::sync::Arc::clone(&daemon.project.deps),
+        ));
+        let again = TestDaemon {
+            state: restarted,
+            ..daemon
+        };
+        allowing_github(&again, 2);
+        denied_for(&issue(&again, 3), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_by_server_and_full_tool_name() {
+        let daemon = TestDaemon::new("hook-allowance-server", |_| {});
+        allowing_github(&daemon, 2);
+        // gitlab's tool of the same bare name, and a bare name that is no connector's.
+        for _ in 0..2 {
+            called_at(
+                &daemon,
+                "dev-a",
+                "gitlab",
+                "mcp__gitlab__create_issue",
+                at(),
+            );
+            called_at(&daemon, "dev-a", "github", "create_issue", at());
+        }
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        denied_for(&issue(&daemon, 3), "approval_needed");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_a_call_a_grant_allowed() {
+        let daemon = TestDaemon::new("hook-allowance-grant", |_| {});
+        allowing_github(&daemon, 2);
+        assert!(issue(&daemon, 1).allow);
+        assert!(issue(&daemon, 2).allow);
+        // Beyond it, the human allows one more, which is made and counted too.
+        let asked_for = json!({ "title": 3 });
+        let approval = asked(&daemon, "session-github", &asked_for);
+        grant(&daemon, approval);
+        allowing_session(&daemon, "session-next", "dev-a", "FRK-1", Some(3));
+        let allowed = create_issue(&daemon, "session-next", &asked_for);
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(used(&daemon), Some(approval));
+        // Three calls made: the allowance of 3 is spent, so a fourth asks.
+        asked(&daemon, "session-next", &json!({ "title": 4 }));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lets_one_of_two_calls_at_the_last_place_run() {
+        let daemon = TestDaemon::new("hook-allowance-race", |_| {})
+            .slowed(std::time::Duration::from_millis(50));
+        allowing_github(&daemon, 2);
+        assert!(issue(&daemon, 1).allow);
+        let (first, second) = (
+            daemon.call(
+                "session-github",
+                "mcp__github__create_issue",
+                &json!({ "title": "a" }),
+            ),
+            daemon.call(
+                "session-github",
+                "mcp__github__create_issue",
+                &json!({ "title": "b" }),
+            ),
+        );
+        let barrier = std::sync::Barrier::new(2);
+        let decisions: Vec<HookDecision> = std::thread::scope(|scope| {
+            let calls: Vec<_> = [&first, &second]
+                .into_iter()
+                .map(|request| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        decide_pre_tool_use(request, &daemon.state)
+                    })
+                })
+                .collect();
+            calls
+                .into_iter()
+                .map(|call| call.join().expect("the call ends"))
+                .collect()
+        });
+        assert_eq!(
+            decisions.iter().filter(|decision| decision.allow).count(),
+            1,
+            "{decisions:?}"
+        );
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 2);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_different_input_is_not_approved() {
+        let daemon = TestDaemon::new("hook-grant-input", |_| {});
+        with_github(&daemon);
+        let approval = asked(&daemon, "session-github", &json!({ "title": "x", "n": 1 }));
+        grant(&daemon, approval);
+        github_session(&daemon, "session-next", "dev-a");
+        asked(&daemon, "session-next", &json!({ "title": "x", "n": 2 }));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_is_for_the_asking_agent_only() {
+        let daemon = TestDaemon::new("hook-grant-agent", |_| {});
+        with_github(&daemon);
+        // A session of dev-a's started before the grant is not its next session.
+        github_session(&daemon, "session-earlier", "dev-a");
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        asked(&daemon, "session-earlier", &input);
+        github_session(&daemon, "session-dev-b", "dev-b");
+        asked(&daemon, "session-dev-b", &input);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_is_for_its_task_server_and_tool_only() {
+        let daemon = TestDaemon::new("hook-grant-key", |_| {});
+        daemon
+            .project
+            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+                wire["assignee"] = json!("dev-a");
+            });
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        task_session(&daemon, "session-frk-2", "dev-a", "FRK-2");
+        denied_for(
+            &create_issue(&daemon, "session-frk-2", &input),
+            "approval_needed",
+        );
+        for (session, tool) in [
+            ("session-close", "mcp__github__close_issue"),
+            ("session-gitlab", "mcp__gitlab__create_issue"),
+        ] {
+            github_session(&daemon, session, "dev-a");
+            let decision = decide_pre_tool_use(&daemon.call(session, tool, &input), &daemon.state);
+            denied_for(&decision, "approval_needed");
+        }
+        // The grant is still there for the call it was given for.
+        github_session(&daemon, "session-next", "dev-a");
+        let allowed = create_issue(&daemon, "session-next", &input);
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(used(&daemon), Some(approval));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_lapses_with_the_next_session() {
+        let daemon = TestDaemon::new("hook-grant-lapse", |_| {});
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        github_session(&daemon, "session-next", "dev-a");
+        // A session of another agent's ending takes nothing from dev-a's grant.
+        github_session(&daemon, "session-dev-b", "dev-b");
+        session_event(
+            &daemon,
+            "session-dev-b",
+            "dev-b",
+            "session.ended",
+            &json!({ "reason": "completed", "detail": "done" }),
+        );
+        session_event(
+            &daemon,
+            "session-next",
+            "dev-a",
+            "session.ended",
+            &json!({ "reason": "completed", "detail": "done" }),
+        );
+        github_session(&daemon, "session-later", "dev-a");
+        asked(&daemon, "session-later", &input);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_outlives_another_agents_session() {
+        let daemon = TestDaemon::new("hook-grant-other-ends", |_| {});
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        grant(&daemon, approval);
+        github_session(&daemon, "session-dev-b", "dev-b");
+        session_event(
+            &daemon,
+            "session-dev-b",
+            "dev-b",
+            "session.ended",
+            &json!({ "reason": "completed", "detail": "done" }),
+        );
+        // The asking session's own end, recorded after the grant, lapses nothing either.
+        session_event(
+            &daemon,
+            "session-github",
+            "dev-a",
+            "session.ended",
+            &json!({ "reason": "aborted", "detail": "approval_needed" }),
+        );
+        github_session(&daemon, "session-next", "dev-a");
+        let allowed = create_issue(&daemon, "session-next", &input);
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(used(&daemon), Some(approval));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_grant_an_agent_recorded_is_no_grant() {
+        let daemon = TestDaemon::new("hook-grant-forged", |_| {});
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        // Only a command records a decision, with no agent or session on it.
+        session_event(
+            &daemon,
+            "session-github",
+            "dev-a",
+            "tool_approval.granted",
+            &json!({ "approval": approval }),
+        );
+        github_session(&daemon, "session-next", "dev-a");
+        asked(&daemon, "session-next", &input);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_refused_call_asks_again() {
+        let daemon = TestDaemon::new("hook-refused", |_| {});
+        with_github(&daemon);
+        let input = json!({ "title": "x" });
+        let approval = asked(&daemon, "session-github", &input);
+        daemon.project.record(
+            "FRK-1",
+            "tool_approval.refused",
+            &json!({ "approval": approval }),
+        );
+        github_session(&daemon, "session-next", "dev-a");
+        asked(&daemon, "session-next", &input);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_unknown_mcp_server_is_still_not_in_session() {
+        let daemon = TestDaemon::new("hook-custom-unknown", |_| {});
+        with_github(&daemon);
+        denied_for(
+            &github_call(&daemon, "mcp__linear__create_issue", &json!({})),
+            "connector_not_in_session",
+        );
+        assert_eq!(last_denied_server(&daemon).as_deref(), Some("linear"));
     }
 
     #[test]
@@ -1348,5 +3254,542 @@ mod tests {
             serde_json::to_value(&allow).expect("serialises"),
             shape("allow", "allowed")
         );
+    }
+
+    /// The fixture's team with the Procurement Specialist `proc` and the Marketing Specialist
+    /// `kai` as well, written to the project.
+    fn with_buyers(name: &str) -> TestDaemon {
+        use crate::tools::fixtures::{
+            with_the_marketing_specialist, with_the_procurement_specialist,
+        };
+
+        let daemon = TestDaemon::new(name, |_| {});
+        let team = a_team_of_three(|wire| {
+            with_the_procurement_specialist(wire);
+            with_the_marketing_specialist(wire);
+        });
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&team)
+            .expect("the team is written");
+        daemon
+    }
+
+    /// `session` of `agent`, on FRK-1 or on no task, registered as a session of `purpose`.
+    fn browsing(
+        daemon: &TestDaemon,
+        session: &str,
+        agent: &str,
+        task: Option<&str>,
+        purpose: crate::session::SessionPurpose,
+    ) {
+        daemon.register(session, agent, task, DEFAULT_SESSION_LIMITS);
+        daemon
+            .state
+            .sessions()
+            .get_mut(session)
+            .expect("registered")
+            .registration
+            .purpose = purpose;
+    }
+
+    /// `session`'s `WebFetch` of `address`.
+    fn fetch(daemon: &TestDaemon, session: &str, address: &str) -> HookDecision {
+        decide_pre_tool_use(
+            &daemon.call(
+                session,
+                "WebFetch",
+                &json!({ "url": address, "prompt": "Read the prices." }),
+            ),
+            &daemon.state,
+        )
+    }
+
+    /// One of Farik's own hosts, from the shipped list, so that the launch review edits the YAML
+    /// alone.
+    fn a_farik_host() -> String {
+        farik_roles::sites::farik_sites()[0].host.clone()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_farik_site_is_open_from_the_start() {
+        use crate::session::SessionPurpose::Implement;
+
+        let daemon = with_buyers("hook-sites-farik");
+        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        let farik = a_farik_host();
+
+        for address in [
+            format!("https://www.{farik}/"),
+            format!("https://{farik}/x?y=1"),
+        ] {
+            let allowed = fetch(&daemon, "session-proc", &address);
+            assert!(allowed.allow, "{address}: {allowed:?}");
+        }
+        denied_for(
+            &fetch(&daemon, "session-proc", "https://shop.example/"),
+            "site_not_approved",
+        );
+        assert!(
+            daemon.events(EventKind::SiteApproved).is_empty(),
+            "no site event was needed"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn procurement_fetches_only_approved_sites() {
+        use crate::session::SessionPurpose::Implement;
+
+        let daemon = with_buyers("hook-sites-approved");
+        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        daemon
+            .project
+            .record("", "site.approved", &json!({ "host": "shop.example" }));
+
+        for address in ["https://www.shop.example/prices", "https://shop.example/"] {
+            let allowed = fetch(&daemon, "session-proc", address);
+            assert!(allowed.allow, "{address}: {allowed:?}");
+        }
+        let other = fetch(&daemon, "session-proc", "https://other.example/");
+        denied_for(&other, "site_not_approved");
+        assert!(
+            other
+                .reason
+                .contains("other.example is not a site the owner allowed")
+                && other
+                    .reason
+                    .ends_with("ask with farik_request_sites, then end your turn"),
+            "{other:?}"
+        );
+        assert_eq!(
+            daemon.state.stop_reason("session-proc"),
+            None,
+            "the session goes on"
+        );
+        // What is not exactly the site is not the site.
+        for address in [
+            "http://shop.example/",
+            "https://shop.example:8443/",
+            "https://user:pass@shop.example/",
+            "https://sub.shop.example/",
+            "https://shop.example.evil.net/",
+            "https://evilshop.example/",
+            "https://127.0.0.1/",
+            "shop.example",
+            "",
+        ] {
+            let denied = fetch(&daemon, "session-proc", address);
+            denied_for(&denied, "site_not_approved");
+        }
+        let unnamed = fetch(&daemon, "session-proc", "http://a.com/");
+        assert!(
+            unnamed
+                .reason
+                .contains("http://a.com/ is not an https address on a named site"),
+            "{unnamed:?}"
+        );
+        for input in [json!({ "prompt": "no address" }), json!({ "url": 7 })] {
+            let decision = decide_pre_tool_use(
+                &daemon.call("session-proc", "WebFetch", &input),
+                &daemon.state,
+            );
+            denied_for(&decision, "site_not_approved");
+        }
+        // An agent's own event approves nothing.
+        daemon.project.record_by(
+            Some("proc"),
+            at(),
+            "FRK-1",
+            "site.approved",
+            &json!({ "host": "agent.example" }),
+        );
+        denied_for(
+            &fetch(&daemon, "session-proc", "https://agent.example/"),
+            "site_not_approved",
+        );
+        // A removal takes effect at the next call.
+        daemon
+            .project
+            .record("", "site.removed", &json!({ "host": "shop.example" }));
+        denied_for(
+            &fetch(&daemon, "session-proc", "https://shop.example/prices"),
+            "site_not_approved",
+        );
+        // So does turning off one of Farik's, and turning it on again.
+        let farik = a_farik_host();
+        assert!(fetch(&daemon, "session-proc", &format!("https://{farik}/")).allow);
+        daemon
+            .project
+            .record("", "site.removed", &json!({ "host": farik }));
+        denied_for(
+            &fetch(&daemon, "session-proc", &format!("https://{farik}/")),
+            "site_not_approved",
+        );
+        daemon
+            .project
+            .record("", "site.approved", &json!({ "host": farik }));
+        assert!(fetch(&daemon, "session-proc", &format!("https://{farik}/")).allow);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_conversation_is_held_too() {
+        use crate::session::SessionPurpose::{Conversation, Implement};
+
+        let daemon = with_buyers("hook-sites-conversation");
+        // A mention in the channel: a conversation about no task, which holds `network`.
+        browsing(&daemon, "session-chat", "proc", None, Conversation);
+        let denied = fetch(&daemon, "session-chat", "https://shop.example/");
+        denied_for(&denied, "site_not_approved");
+        assert!(
+            denied
+                .reason
+                .ends_with("you can ask for it only while working on a task"),
+            "{denied:?}"
+        );
+        assert!(
+            fetch(
+                &daemon,
+                "session-chat",
+                &format!("https://{}/", a_farik_host())
+            )
+            .allow
+        );
+        // An implement session about no task cannot wait for the owner either.
+        browsing(&daemon, "session-no-task", "proc", None, Implement);
+        assert!(
+            fetch(&daemon, "session-no-task", "https://shop.example/")
+                .reason
+                .ends_with("you can ask for it only while working on a task")
+        );
+        // A conversation about a task is not the session that can wait for the owner.
+        browsing(
+            &daemon,
+            "session-about",
+            "proc",
+            Some("FRK-1"),
+            Conversation,
+        );
+        assert!(
+            fetch(&daemon, "session-about", "https://shop.example/")
+                .reason
+                .ends_with("you can ask for it only while working on a task")
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn other_roles_fetch_as_before() {
+        use crate::session::SessionPurpose::Implement;
+
+        // A guard: the Marketing Specialist holds `network` and no list of sites.
+        let daemon = with_buyers("hook-sites-others");
+        browsing(&daemon, "session-kai", "kai", Some("FRK-1"), Implement);
+        for address in [
+            "https://shop.example/",
+            "https://anything.example/a?b=c",
+            "http://x.example/",
+        ] {
+            let allowed = fetch(&daemon, "session-kai", address);
+            assert!(allowed.allow, "{address}: {allowed:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn procurement_searches_freely() {
+        use crate::session::SessionPurpose::Implement;
+
+        // A guard: a search reaches the one service Claude Code uses, whatever the list holds.
+        let daemon = with_buyers("hook-sites-search");
+        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        let search = decide_pre_tool_use(
+            &daemon.call(
+                "session-proc",
+                "WebSearch",
+                &json!({ "query": "corrugated shipping boxes 12x9x6" }),
+            ),
+            &daemon.state,
+        );
+        assert!(search.allow, "{search:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_site_request_is_not_held_to_the_sites() {
+        use crate::session::SessionPurpose::Implement;
+
+        // A guard: `farik_request_sites` names the addresses it asks about, which are not yet
+        // approved, and a Farik tool is no connector.
+        let daemon = with_buyers("hook-sites-request");
+        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        let asked = decide_pre_tool_use(
+            &daemon.call(
+                "session-proc",
+                "mcp__farik__farik_request_sites",
+                &json!({ "sites": [{ "url": "https://new.example/", "why": "A maker." }] }),
+            ),
+            &daemon.state,
+        );
+        assert!(asked.allow, "{asked:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_connector_s_addresses_are_held_too() {
+        let daemon = with_buyers("hook-sites-connector");
+        let farik = a_farik_host();
+        let approved = format!("https://www.{farik}/boxes");
+        // A user's server given to the Procurement Specialist, and the same to a Developer.
+        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        registering(&daemon, "session-dev", "dev-a", "FRK-1", None, &[]);
+        let call = |session: &str, tool: &str, input: &Value| {
+            decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
+        };
+        let search = "mcp__github__search_issues";
+
+        denied_for(
+            &call(
+                "session-proc",
+                search,
+                &json!({ "url": "https://other.example/" }),
+            ),
+            "site_not_approved",
+        );
+        for input in [
+            json!({ "url": approved }),
+            json!({ "urls": [approved, format!("https://{farik}/")] }),
+            json!({ "q": "no address at all" }),
+            json!({ "deep": [{ "url": approved }] }),
+        ] {
+            let allowed = call("session-proc", search, &input);
+            assert!(allowed.allow, "{input}: {allowed:?}");
+        }
+        for input in [
+            json!({ "urls": [approved, "https://other.example/"] }),
+            json!({ "deep": [{ "url": "https://other.example/" }] }),
+            json!({ "url": 7 }),
+            json!({ "urls": "https://other.example/" }),
+        ] {
+            denied_for(&call("session-proc", search, &input), "site_not_approved");
+        }
+        let developers = call(
+            "session-dev",
+            search,
+            &json!({ "url": "https://other.example/" }),
+        );
+        assert!(
+            developers.allow,
+            "the same call of a Developer's: {developers:?}"
+        );
+
+        // A connector the session was not given, with an address that is not approved, is refused
+        // for the address first.
+        let not_given = call(
+            "session-proc",
+            "mcp__nowhere__fetch",
+            &json!({ "url": "https://other.example/" }),
+        );
+        denied_for(&not_given, "site_not_approved");
+        let given_nothing = call(
+            "session-proc",
+            "mcp__nowhere__fetch",
+            &json!({ "url": approved }),
+        );
+        denied_for(&given_nothing, "connector_not_in_session");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn serpapis_image_addresses_are_held() {
+        // A guard (step 10d): SerpApi fetches `image_url` and a lens `url` itself, so an address it
+        // is given off the approved sites is refused before the connector is looked up.
+        let daemon = with_buyers("hook-sites-serpapi");
+        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        for params in [
+            json!({ "engine": "google_reverse_image", "image_url": "https://unapproved.example/a.jpg" }),
+            json!({ "engine": "google_lens", "url": "https://unapproved.example/a.jpg" }),
+        ] {
+            let refused = decide_pre_tool_use(
+                &daemon.call(
+                    "session-proc",
+                    "mcp__serpapi__search",
+                    &json!({ "params": params }),
+                ),
+                &daemon.state,
+            );
+            denied_for(&refused, "site_not_approved");
+            assert!(
+                refused.reason.contains("unapproved.example"),
+                "{params}: {refused:?}"
+            );
+        }
+        // A search that names no address is not held by the sites.
+        let search = decide_pre_tool_use(
+            &daemon.call(
+                "session-proc",
+                "mcp__serpapi__search",
+                &json!({ "params": { "engine": "google_shopping", "q": "rear-facing baby car mirror" } }),
+            ),
+            &daemon.state,
+        );
+        assert_ne!(
+            search.reason.split(": ").next(),
+            Some("site_not_approved"),
+            "{search:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_approved_address_goes_to_serpapi_whatever_it_redirects_to() {
+        use farik_core::governor::permissions::{ConnectorTag, SessionConnector};
+
+        // A guard that pins a decision (the founder, 2026-10-08, "Keep it, say so"; spec 8.6): the
+        // hook judges the site the agent named, and SerpApi fetches that address on its own
+        // servers, where a redirect from an approved shop to another site is out of Farik's sight.
+        // The address is allowed, and the spec says what it leaves open.
+        let daemon = with_buyers("hook-sites-serpapi-redirect");
+        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        daemon
+            .state
+            .sessions()
+            .get_mut("session-proc")
+            .expect("registered")
+            .registration
+            .connectors
+            .push(SessionConnector {
+                server: "serpapi".to_string(),
+                origin: None,
+                tools: [("search".to_string(), ConnectorTag::ExternalEffect)].into(),
+                allowances: [("search".to_string(), 50)].into(),
+                plan_tools: std::collections::BTreeSet::new(),
+            });
+        let redirect = format!(
+            "https://www.{}/gp/redirect.html?location=https://unapproved.example/a.jpg",
+            a_farik_host()
+        );
+        for params in [
+            json!({ "engine": "google_reverse_image", "image_url": redirect }),
+            json!({ "engine": "google_lens", "url": redirect }),
+        ] {
+            let allowed = decide_pre_tool_use(
+                &daemon.call(
+                    "session-proc",
+                    "mcp__serpapi__search",
+                    &json!({ "params": params }),
+                ),
+                &daemon.state,
+            );
+            assert!(allowed.allow, "{params}: {allowed:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_external_call_to_an_unapproved_address_asks_for_nothing() {
+        let daemon = with_buyers("hook-sites-external");
+        let farik = a_farik_host();
+        let approved = format!("https://www.{farik}/boxes");
+        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        let call = |session: &str, tool: &str, input: &Value| {
+            decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
+        };
+
+        // An `external_effect` call to an address that is not approved is refused, not asked
+        // about, whether a grant matches it or an allowance remains.
+        let input = json!({ "title": "x", "url": "https://other.example/" });
+        let refused = call("session-proc", "mcp__github__create_issue", &input);
+        denied_for(&refused, "site_not_approved");
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+        // A grant for exactly this input, given by the owner to a session of the same agent that
+        // was not held, and a session of the held role that starts after it.
+        daemon.register(
+            "session-open",
+            "proc",
+            Some("FRK-1"),
+            DEFAULT_SESSION_LIMITS,
+        );
+        daemon
+            .state
+            .sessions()
+            .get_mut("session-open")
+            .expect("registered")
+            .registration
+            .web = farik_core::governor::sites::WebAccess::Open;
+        registering(&daemon, "session-asking", "proc", "FRK-1", None, &[]);
+        daemon
+            .state
+            .sessions()
+            .get_mut("session-asking")
+            .expect("registered")
+            .registration
+            .web = farik_core::governor::sites::WebAccess::Open;
+        let approval = asked(&daemon, "session-asking", &input);
+        grant(&daemon, approval);
+        registering(&daemon, "session-held", "proc", "FRK-1", Some(5), &[]);
+        let still_refused = call("session-held", "mcp__github__create_issue", &input);
+        denied_for(&still_refused, "site_not_approved");
+        assert_eq!(
+            daemon.events(EventKind::ToolApprovalRequested).len(),
+            1,
+            "nothing was asked for the refused call"
+        );
+        assert!(
+            daemon
+                .events(EventKind::ToolCalled)
+                .iter()
+                .all(|event| matches!(&event.body, EventBody::ToolCalled(body) if body.approval.is_none() && body.allowance.is_none())),
+            "no grant and no allowance was used"
+        );
+        // The same call to an approved address uses its allowance, which the refused one did not.
+        let allowed = call(
+            "session-held",
+            "mcp__github__create_issue",
+            &json!({ "title": "x", "url": approved }),
+        );
+        assert!(allowed.allow, "{allowed:?}");
+        assert_eq!(ran_inside(&daemon), Some(5));
+        let ran: Vec<_> = daemon
+            .events(EventKind::ToolCalled)
+            .into_iter()
+            .filter(|event| matches!(&event.body, EventBody::ToolCalled(body) if body.tool == "mcp__github__create_issue"))
+            .collect();
+        assert_eq!(ran.len(), 1, "only the call that ran was counted");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_log_that_cannot_be_read_denies() {
+        let daemon = with_buyers("hook-sites-unreadable");
+        let broken = daemon.with_a_log_that_cannot_be_read();
+        let deps = broken.deps().expect("a project");
+        let sessions = broken.sessions();
+        let session = sessions.get("session-proc").expect("registered");
+        for (tool, input) in [
+            (
+                "WebFetch",
+                json!({ "url": format!("https://{}/", a_farik_host()), "prompt": "read" }),
+            ),
+            (
+                "mcp__github__search_issues",
+                json!({ "url": format!("https://{}/", a_farik_host()) }),
+            ),
+        ] {
+            let request = daemon.call("session-proc", tool, &input);
+            let verdict = super::judge(&request, &session.registration, 0, deps, &broken);
+            let Err(denial) = verdict else {
+                panic!("{tool} is allowed while the sites cannot be read");
+            };
+            assert!(
+                denial.reason.starts_with("sites_unreadable: "),
+                "{tool}: {}",
+                denial.reason
+            );
+        }
     }
 }

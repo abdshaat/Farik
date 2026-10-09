@@ -97,6 +97,14 @@ fn warned(err: &str) -> bool {
     err.contains("~/.git-credentials")
         && err.contains("a git hidden in a script")
         && err.contains(".farik/local/daemon.json, whose token lets them act as you through farik")
+        // ADR 0030: the token also gets a connector's keys, as does its process's environment.
+        // ADR 0034: a command that reads the token can also send `skill_save`, which counts as the
+        // person's confirmation of a skill.
+        // Step 10c: it can also send `purchase_order_place` and `purchase_order_receive`, which an
+        // order's fold counts as the owner's own marking of it placed and received.
+        && err.contains("approve, accept, answer, add skills, mark orders placed and received, and integrate")
+        && err.contains("and get the keys you gave a connector")
+        && err.contains("/proc/<pid>/environ")
 }
 
 fn lock_is_free(repository: &TempRepo) {
@@ -754,6 +762,83 @@ fn lists_what_waits_on_the_human() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn lists_a_connector_calls_whole_input_escaped() {
+    let repository = a_team("run-waiting-input");
+    let task = a_small_request(&repository);
+    // A call's input holding a raw escape sequence and a right-to-left override, which a
+    // terminal would obey or reorder, ahead of text the human must still be able to read.
+    let input = "{\"body\":\"\u{1b}[2Jpay \u{202e}100\u{200b}0\",\"to\":\"a@example.com\"}";
+    let n = record_as(
+        &repository,
+        &task,
+        Some(("theo", "session-1")),
+        "tool_approval.requested",
+        &json!({
+            "server": "mail", "tool": "send", "input": input, "input_sha256": "0".repeat(64)
+        }),
+    )
+    .envelope
+    .seq;
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(
+        !ran.out.contains('\u{1b}') && !ran.out.contains('\u{202e}'),
+        "{:?}",
+        ran.out
+    );
+    let expected =
+        "  input: {\"body\":\"\\u001b[2Jpay \\u202e100\\u200b0\",\"to\":\"a@example.com\"}";
+    assert!(ran.out.lines().any(|line| line == expected), "{}", ran.out);
+    assert!(
+        ran.out
+            .contains(&format!("farik tool approve {n}, or farik tool refuse {n}")),
+        "{}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn lists_a_marketing_plan_that_waits_with_its_commands() {
+    let repository = a_team("run-waiting-plan");
+    let task = a_small_request(&repository);
+    let mut body = farik_protocol::event::fixtures::a_body_wire(
+        farik_protocol::event::EventKind::MarketingPlanProposed,
+    );
+    body["title"] = json!("Spring launch");
+    record_as(
+        &repository,
+        &task,
+        Some(("kai", "session-1")),
+        "marketing_plan.proposed",
+        &body,
+    );
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let line = format!(
+        "{task} waits: kai proposes a marketing plan: Spring launch: farik marketing plan approve \
+         MP-1, or farik marketing plan return MP-1 --reason <text>"
+    );
+    assert!(ran.out.lines().any(|found| found == line), "{}", ran.out);
+
+    let ran = run_with(&repository.path, &["--json", "run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
+    assert_eq!(last["waiting_on_you"][0]["plan"], "MP-1", "{last}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn says_the_backlog_waits() {
     let repository = a_team_with("run-backlog", |wire| {
         wire["policy"]["plan_in_sprints"] = json!(true);
@@ -858,4 +943,84 @@ fn lists_a_high_risk_result_and_no_answered_question() {
         "{}",
         ran.out
     );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn gives_a_session_the_connectors_kept_where_this_computer_keeps_them() {
+    use farik_core::team::{custom_server, spec_sha256, validate_team};
+    use farik_runtime::claude::Secret;
+    use farik_runtime::connectors::{
+        ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
+    };
+    use farik_runtime::recorded::fixtures::tool_runner;
+    use farik_runtime::{RecordedAdapter, SessionSpec};
+
+    let mut team = Value::Null;
+    let repository = a_team_with("run-custom-connector", |wire| {
+        wire["agents"][0]["mcp_servers"] = json!([{
+            "name": "github", "source": "custom", "transport": "stdio",
+            "command": "github-mcp", "args": [], "credential_keys": [],
+            "tools": { "search_issues": "network" }
+        }]);
+        team = wire.clone();
+    });
+    let task = a_small_request(&repository);
+    let server = validate_team(&team).expect("a team").agents[0]
+        .mcp_servers
+        .iter()
+        .flatten()
+        .find_map(custom_server)
+        .expect("a custom server");
+    // `XDG_CONFIG_HOME`, outside the repository: its `farik` folder keeps the project's id.
+    let config = PathBuf::from(format!("{}-config", repository.path.display()));
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    store
+        .save(
+            &SecretAt::of(&config.join("farik"), &repository.path, "pm", "github")
+                .expect("an address"),
+            &ConnectorEntry {
+                spec_sha256: spec_sha256(&server),
+                keys: std::collections::BTreeMap::<String, Secret>::new(),
+                oauth: None,
+            },
+        )
+        .expect("kept");
+    let started: Arc<std::sync::Mutex<Option<Arc<RecordedAdapter>>>> = Arc::default();
+    let kept = Arc::clone(&started);
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.connector_secrets = store;
+        io.env
+            .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
+        io.engine = Engine::Given(Arc::new(move |daemon| {
+            let adapter = Arc::new(RecordedAdapter::with_tools(
+                vec![refine_writes_task_frk_1()],
+                tool_runner(daemon),
+            ));
+            *kept.lock().expect("not poisoned") = Some(Arc::clone(&adapter));
+            let adapter: Arc<dyn RuntimeAdapter> = adapter;
+            adapter
+        }));
+    });
+
+    let adapter = started
+        .lock()
+        .expect("not poisoned")
+        .clone()
+        .expect("an engine");
+    let specs: Vec<SessionSpec> = adapter.started();
+    assert_eq!(
+        specs[0].purpose,
+        farik_runtime::SessionPurpose::Refine,
+        "{}\n{}",
+        ran.out,
+        ran.err
+    );
+    let servers: Vec<&str> = specs[0]
+        .mcp_servers
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    assert_eq!(servers, ["github"], "{task}");
 }

@@ -120,9 +120,11 @@ impl Served {
             git: repo.adapter(),
             clock,
             ids,
+            kits: Arc::new(farik_roles::load_kit),
         })));
         state.register_session(SessionRegistration {
             session_id: SESSION.to_string(),
+            web: farik_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             cwd: repo.path.clone(),
@@ -135,6 +137,8 @@ impl Served {
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
+            skills: Vec::new(),
+            skills_root: None,
         });
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

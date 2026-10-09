@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
+use farik_core::governor::gates::DesignerBrowser;
 use farik_protocol::clock::FixedClock;
 use farik_protocol::event::{EventBody, EventKind};
 use farik_runtime::recorded::fixtures::{refine_asks_frk_1, triage_frk_1_large};
@@ -28,17 +29,15 @@ use serde_json::{Value, json};
 use tokio::sync::Semaphore;
 
 use project::{
-    Ran, a_team, events, filed, hold_the_run_lock, joined, recorded, run, run_with, scratch,
+    Ran, a_team, events, filed, hold_the_run_lock, joined, record, recorded, run, run_with, scratch,
 };
 
-/// A port the operating system gave out and nothing holds now.
+#[path = "../../runtime/tests/support/ports.rs"]
+mod ports;
+
+/// A port nothing holds now, from below the ephemeral range, as text for `--port`.
 fn free_port() -> String {
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("a port is bound");
-    listener
-        .local_addr()
-        .expect("an address")
-        .port()
-        .to_string()
+    ports::free_port().to_string()
 }
 
 fn daemon_file(repository: &TempRepo) -> std::path::PathBuf {
@@ -264,6 +263,58 @@ fn waits_on_the_injected_clock_when_idle() {
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
 }
 
+/// A campaign Farik made for a plan, recorded in the project's log: the watch on the ad spend has
+/// something to look at once it is there.
+fn a_campaign_was_made(repository: &TempRepo) {
+    record(
+        repository,
+        "",
+        "marketing_campaign.created",
+        &json!({
+            "plan": "MP-1", "key": "search-launch", "account": "123-456-7890",
+            "campaign": "customers/1234567890/campaigns/11",
+            "budget": "customers/1234567890/campaignBudgets/12",
+            "budget_kind": "total", "amount": "500.00"
+        }),
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn watches_the_ad_spend_beside_its_ticks() {
+    let repository = a_team("serve-ad-watch");
+    a_campaign_was_made(&repository);
+    let now = project::at() + chrono::Duration::days(365);
+    let (entered, waiting) = channel();
+    let gate = Arc::new(Semaphore::new(0));
+    let sleeper = Arc::new(GatedSleeper {
+        entered: Mutex::new(entered),
+        gate: Arc::clone(&gate),
+    });
+    let root = repository.path.clone();
+    let port = free_port();
+    let serving = std::thread::spawn(move || {
+        run_with(&root, &["serve", "--port", &port], |io| {
+            io.engine = recorded(Vec::new());
+            io.clock = Arc::new(FixedClock::new(now));
+            io.sleeper = Some(sleeper);
+        })
+    });
+
+    // Two waits on the sleeper, both a minute from the clock serve was given: the board's idle
+    // wait, and the watch's, which has looked at the campaign and waits for its next wake.
+    for _ in 0..2 {
+        let until = waiting
+            .recv_timeout(Duration::from_secs(30))
+            .expect("serve and its ad watch each wait on the sleeper");
+        assert_eq!(until, now + chrono::Duration::seconds(60));
+    }
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+}
+
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn stops_on_farik_stop() {
@@ -443,6 +494,135 @@ fn serve_status_has_no_credential_under_a_given_engine() {
     );
 }
 
+/// What `team.get` says `sandboxed` is while `farik serve` runs in `repository`.
+fn sandboxed_while_serving(repository: &TempRepo) -> Value {
+    let out = SharedOut::default();
+    let serving = serving_into(&repository.path, &out);
+    until("the link is printed", || !links(&out.text()).is_empty());
+    let (port, code) = links(&out.text()).remove(0);
+    let cookie = connected(port, &code);
+    let got = call(
+        port,
+        &cookie,
+        "query",
+        json!({ "name": "team.get", "params": {} }),
+    );
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    got["result"]["sandboxed"].clone()
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn tells_the_page_whether_it_runs_in_the_sandbox_by_the_setting() {
+    // The setting, not Docker's answer: the Docker daemon may not be there at all, and the page
+    // is not held up asking it.
+    let unsandboxed = a_team("serve-sandboxed-none");
+    assert_eq!(sandboxed_while_serving(&unsandboxed), json!(false));
+
+    let sandboxed = a_team("serve-sandboxed-docker");
+    std::fs::write(
+        sandboxed.path.join(".farik/local/settings.json"),
+        r#"{"sandbox":"docker"}"#,
+    )
+    .expect("the settings are written");
+    assert_eq!(sandboxed_while_serving(&sandboxed), json!(true));
+}
+
+/// What the governor's door says, asked by `ask` in a project whose sandbox setting is `docker`,
+/// the moment the engine is made: once the daemon listens, which is as soon as a page that
+/// reconnects can ask it anything.
+fn told_at_listen<T: Send + 'static>(
+    test: &str,
+    ask: impl Fn(&farik_runtime::tools::ToolContext) -> T + Send + Sync + 'static,
+) -> T {
+    use farik::Engine;
+    use farik_core::budget::DEFAULT_SESSION_LIMITS;
+    use farik_runtime::SessionPurpose;
+    use farik_runtime::daemon::SessionRegistration;
+
+    let repository = a_team(test);
+    std::fs::write(
+        repository.path.join(".farik/local/settings.json"),
+        r#"{"sandbox":"docker"}"#,
+    )
+    .expect("the settings are written");
+    let seen: Arc<Mutex<Option<T>>> = Arc::default();
+    let kept = Arc::clone(&seen);
+    let port = free_port();
+    let root = repository.path.clone();
+    let serving = std::thread::spawn(move || {
+        run_with(&root, &["serve", "--port", &port], |io| {
+            let Engine::Given(engine) = recorded(Vec::new()) else {
+                unreachable!("`recorded` is a given engine");
+            };
+            io.engine = Engine::Given(Arc::new(move |daemon| {
+                // The engine is made once the daemon listens; what the governor's door knows
+                // then is what a page asked first would be told.
+                daemon.register_session(SessionRegistration {
+                    session_id: "probe".to_string(),
+                    web: farik_core::governor::sites::WebAccess::Open,
+                    agent_id: "probe".to_string(),
+                    task_id: None,
+                    purpose: SessionPurpose::Triage,
+                    in_reply_to: None,
+                    thread: None,
+                    skills: Vec::new(),
+                    skills_root: None,
+                    cwd: std::path::PathBuf::new(),
+                    executor: None,
+                    limits: DEFAULT_SESSION_LIMITS,
+                    farik_tools: Vec::new(),
+                    tiers: Vec::new(),
+                    connectors: Vec::new(),
+                    preview: None,
+                });
+                let told = daemon.tool_context("probe").map(|context| ask(&context));
+                daemon.end_session("probe");
+                *kept.lock().expect("the answer") = told;
+                engine(daemon)
+            }));
+        })
+    });
+    until("the engine is made", || {
+        seen.lock().expect("the answer").is_some()
+    });
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    seen.lock()
+        .expect("the answer")
+        .take()
+        .expect("the probe was told")
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn knows_the_sandbox_setting_from_the_moment_it_listens() {
+    // A tab that reconnects asks `team.get` the moment the daemon listens, and the engine is made
+    // right after that: a setting told only later would let that tab read `false` in between.
+    let sandboxed = told_at_listen("serve-sandbox-at-listen", |context| {
+        context.deps.transitions.sandboxed()
+    });
+    assert!(sandboxed);
+}
+
+#[test]
+#[ignore = "needs the git program and Docker: cargo xtask check --integration"]
+fn knows_what_runs_previews_from_the_moment_it_listens() {
+    // `task.get` of a task in `verifying` and `team.propose` ask whether the Designer can have a
+    // browser, and read `NoSandbox` until the driver has said what runs previews: with Docker
+    // answering and no preview in the starter team, the answer is `NoPreview`.
+    let browser = told_at_listen("serve-previews-at-listen", |context| {
+        let team = context.deps.files.read_team().expect("the team is read");
+        context.deps.transitions.designer_browser(&team)
+    });
+    assert_eq!(browser, DesignerBrowser::NoPreview);
+}
+
 /// `farik serve <extra>` on a thread whose opener records what it is asked to open, and answers
 /// `opened`.
 fn serving_opening(
@@ -567,6 +747,85 @@ fn the_e2e_binary_serves_with_recorded_sessions() {
     let stopped = run(&repository.path, &["stop"]);
     let status = child.wait().expect("the binary ends");
     assert!(answer.starts_with("HTTP/1.1 401"), "{answer}");
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    assert!(status.success());
+}
+
+#[cfg(feature = "e2e")]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn answers_the_setup_page_while_docker_info_hangs() {
+    use std::io::{BufRead as _, BufReader};
+    use std::process::{Command, Stdio};
+
+    // A `docker` whose `info` never answers by itself: Farik gives it 10 seconds.
+    let directory = scratch("serve-docker-hangs-bin");
+    let source = directory.join("docker.txt");
+    std::fs::write(
+        &source,
+        "#!/bin/sh\n[ \"$1\" = info ] && exec sleep 60\nexit 1\n",
+    )
+    .expect("written");
+    // Copied rather than written in place, as `a_claude_saying` says.
+    let program = directory.join("docker");
+    let copied = Command::new("cp")
+        .arg(&source)
+        .arg(&program)
+        .status()
+        .expect("cp runs");
+    assert!(copied.success());
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let repository = a_team("serve-docker-hangs");
+    std::fs::write(
+        repository.path.join(".farik/local/settings.json"),
+        r#"{"sandbox":"docker"}"#,
+    )
+    .expect("the settings are written");
+
+    let port = free_port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_farik-e2e-serve"))
+        .args(["--port", &port, "--sandbox-image", "farik-sandbox-unused"])
+        .env("PATH", path)
+        .current_dir(&repository.path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("the binary starts");
+    let mut lines = BufReader::new(child.stdout.take().expect("stdout")).lines();
+    let (port, code) = loop {
+        let line = lines.next().expect("the link is printed").expect("a line");
+        if let Some(link) = link_of(&line) {
+            break link;
+        }
+    };
+    let cookie = connected(port, &code);
+    let asked = Instant::now();
+    let proposed = call(
+        port,
+        &cookie,
+        "query",
+        json!({ "name": "team.propose", "params": {} }),
+    );
+    let waited = asked.elapsed();
+    let stopped = run(&repository.path, &["stop"]);
+    let status = child.wait().expect("the binary ends");
+
+    // `docker info` is asked before the daemon listens and never on a request's path: the page is
+    // answered at once, with the Designer as it is without the Docker that did not answer.
+    assert!(
+        waited < Duration::from_secs(5),
+        "team.propose took {waited:?}"
+    );
+    assert_eq!(
+        proposed["result"]["unavailable"],
+        json!([{ "agent_id": "iris", "reason": "designer_needs_sandbox" }]),
+        "{proposed}"
+    );
     assert_eq!(stopped.code, 0, "{}", stopped.err);
     assert!(status.success());
 }
@@ -1201,6 +1460,8 @@ fn refuses_paths_outside_home_and_bad_names() {
     let shop = home.join("shop");
     std::fs::create_dir_all(shop.join("src")).expect("the folders");
     farik_store::git::fixtures::git_in(&shop, &["init", "-b", "main"]);
+    // Home a git project itself, as some keep their dotfiles: Farik's settings would be in it.
+    farik_store::git::fixtures::git_in(&home, &["init", "-b", "main"]);
     // No credential kept, and none in the environment.
     let serving = serving_in(&cwd, setup_env(&home, &state), true);
     let description = "A shop for bread, with an order page and a daily menu.";
@@ -1218,6 +1479,11 @@ fn refuses_paths_outside_home_and_bad_names() {
             "project.open",
             open("../"),
             "that folder is outside your home folder",
+        ),
+        (
+            "project.open",
+            open(""),
+            "your home folder itself cannot be a project; choose a folder inside it",
         ),
         ("project.create", create("", &escaped), named),
         ("project.create", create("", "Bad Name"), named),
@@ -1259,6 +1525,7 @@ fn refuses_paths_outside_home_and_bad_names() {
             .exists()
     );
     assert!(!shop.join(".farik/team.yaml").exists());
+    assert!(!home.join(".farik").exists());
     assert!(!state.join("farik/state.json").exists());
     assert_eq!(ran.code, 130, "{out}\n{err}");
 }
@@ -1373,4 +1640,85 @@ impl Prober {
         self.done.store(true, std::sync::atomic::Ordering::SeqCst);
         self.thread.join().expect("the prober ends")
     }
+}
+
+/// The web app's Connect lists Farik's own connector by starting the program the process was
+/// found at (ADR 0038).
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn connector_tools_runs_farik_s_own_connector() {
+    use futures_util::{SinkExt as _, StreamExt as _};
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+
+    let repository = a_team("serve-own-connector");
+    let state = scratch("serve-own-connector-state");
+    let out = SharedOut::default();
+    let root = repository.path.clone();
+    let (port_to_use, shared) = (free_port(), out.clone());
+    let serving = std::thread::spawn(move || {
+        run_with(&root, &["serve", "--port", &port_to_use], |io| {
+            io.engine = recorded(Vec::new());
+            io.stdout = Box::new(shared);
+            io.own_program = Some(std::path::PathBuf::from(env!("CARGO_BIN_EXE_farik")));
+            io.env
+                .insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
+        })
+    });
+    until("the link is printed", || !links(&out.text()).is_empty());
+    let (port, code) = links(&out.text()).remove(0);
+    let cookie = connected(port, &code);
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let answer = runtime.block_on(async {
+        let mut request = format!("ws://127.0.0.1:{port}/rpc")
+            .into_client_request()
+            .expect("a request");
+        let headers = request.headers_mut();
+        headers.insert(
+            "Origin",
+            format!("http://127.0.0.1:{port}")
+                .parse()
+                .expect("a header"),
+        );
+        headers.insert("Cookie", cookie.parse().expect("a header"));
+        let (mut socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .expect("the socket opens");
+        let asked = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "connector.tools",
+            "params": { "agent": "dev-a", "server": {
+                "name": "osv", "transport": "stdio", "command": "farik",
+                "args": ["connector", "osv"], "credential_keys": []
+            } }
+        });
+        socket
+            .send(Message::Text(asked.to_string().into()))
+            .await
+            .expect("sent");
+        let frame = tokio::time::timeout(Duration::from_secs(60), socket.next())
+            .await
+            .expect("an answer in time")
+            .expect("the socket is open")
+            .expect("a frame");
+        serde_json::from_str::<Value>(frame.to_text().expect("text")).expect("JSON")
+    });
+
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let names: Vec<&str> = answer["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{answer}"))
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["query_package", "query_packages", "get_vulnerability"]
+    );
 }
