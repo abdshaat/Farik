@@ -181,7 +181,7 @@ Tests:
 - `it('opens on click and closes on a second click or Escape')` — `aria-expanded` goes `false` → `true` on click, `false` on a second click; after reopening, Escape sets it `false`.
 - `it('has no axe violations open or closed')` — `expectNoAxeViolations` on both states.
 
-- [ ] `feat(ui): add an info button that shows a tip on hover, focus or tap`
+- [x] `feat(ui): add an info button that shows a tip on hover, focus or tap`
 
 ### Task 2: `info` on Switch and Choice
 

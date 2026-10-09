@@ -32,6 +32,7 @@ export const uiStrings = {
 	stepOf: (n: number, m: number) => `Step ${n} of ${m}`,
 	required: "required",
 	busy: "Working…",
+	infoLabel: "More about this",
 	roleShort,
 	roleName,
 };

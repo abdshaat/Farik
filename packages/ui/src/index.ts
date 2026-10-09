@@ -5,6 +5,7 @@ export { ChatList } from "./ChatList.tsx";
 export { Choice } from "./Choice.tsx";
 export { Dialog } from "./Dialog.tsx";
 export { DiffView } from "./DiffView.tsx";
+export { InfoTip } from "./InfoTip.tsx";
 export { KanbanColumn } from "./KanbanColumn.tsx";
 export { List } from "./List.tsx";
 export { type DiffFile, parseDiff } from "./parse-diff.ts";

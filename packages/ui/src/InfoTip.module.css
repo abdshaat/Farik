@@ -1,0 +1,42 @@
+.wrap {
+	position: relative;
+	display: inline-block;
+	font:
+		var(--farik-type-small-weight) var(--farik-type-small-size) /
+		var(--farik-type-small-line-height) var(--farik-type-small-family);
+}
+
+.button {
+	padding: 0 var(--farik-space-1);
+	border: 0;
+	background: none;
+	font: inherit;
+	color: var(--farik-color-ink-muted);
+	cursor: pointer;
+}
+
+.button:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.tip {
+	position: absolute;
+	inset-inline-start: 0;
+	inset-block-start: 100%;
+	z-index: 1;
+	width: max-content;
+	max-width: 20rem;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+	background: var(--farik-color-surface);
+	color: var(--farik-color-ink);
+	visibility: hidden;
+}
+
+.wrap:hover .tip,
+.wrap:focus-within .tip,
+.wrap.open .tip {
+	visibility: visible;
+}
