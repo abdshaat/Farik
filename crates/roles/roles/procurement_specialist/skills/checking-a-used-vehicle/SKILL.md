@@ -12,6 +12,16 @@ and say what you could not check.
 
 Find the vehicle identification number in the listing. If it is missing, say so and ask the founder
 to get it from the seller: do not go on without it. Then:
+
+If "Safety recalls" is connected, it covers vehicles sold in the United States:
+- **Decode it** with `decode_vin`, and compare the year, make, model and engine it gives with the
+  listing. If its `ErrorCode` is not 0, read its `ErrorText` and say the VIN did not decode cleanly.
+- For the decoded make, model and year, read `vehicle_recalls` (open recalls, and any that say to
+  stop driving the car or to park it outside), `vehicle_complaints` (how many, by component, and the
+  newest, which are owners' words and not findings) and `vehicle_safety_ratings` (the crash-test
+  stars of each version of the car).
+
+Without it, or for a car sold elsewhere:
 - **Decode it** on the national vehicle regulator's decoder, such as the United States' at
   `vpic.nhtsa.dot.gov`, and compare the year, make, model and engine it gives with the listing.
 - **Look up its open recalls** on the regulator's recall lookup, such as `nhtsa.gov` in the United
@@ -42,8 +52,10 @@ inspection should cover for this car's age and mileage.
 ## 5. Comparable prices
 
 Find listings for the same year, make, model and mileage band, and write their asking prices, with
-the address of each page and the day you read it. A listing price is what a seller asks, not what a
-car sells for; say so.
+the address of each page and the day you read it. If "eBay listings" is connected, `search_items`
+gives eBay's fixed-price asking prices, with `condition` `used` and a `min_price` and `max_price` to
+keep to the band; read eBay through it and never by opening ebay.com pages. A listing price is what
+a seller asks, not what a car sells for; say so.
 
 ## 6. What you write
 
