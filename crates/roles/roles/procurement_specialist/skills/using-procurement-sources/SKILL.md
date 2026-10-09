@@ -51,10 +51,11 @@ which needs no setup.
 Never put the business's own data or a secret in a query, an objective or an address: they leave
 for a service the founder does not control.
 
-Without "eBay listings", say eBay was not checked, and suggest to the founder that they connect it;
-it needs a free eBay developer account.
-
 ## 4. When none is connected
 
-With no service connected, use the sellers' public pages on the sites you may read, and say in your
-note that you did, and that a search service would have found more.
+With no service connected, use the sellers' public pages on the sites you may read, but never
+ebay.com's (section 1), and say in your note that you did, and that a search service would have
+found more.
+
+Without "eBay listings", say eBay was not checked, and suggest to the founder that they connect it;
+it needs a free eBay developer account.

@@ -1333,6 +1333,70 @@ mod tests {
         safety_skill_searches_by_name_then_type_then_maker();
         vehicle_skill_decodes_then_reads_recalls_complaints_ratings_then_prices();
         sources_skill_says_ebay_is_read_only_through_ebay();
+        ebay_is_never_opened_where_no_connector_is_needed_to_read_the_rule();
+    }
+
+    /// The founder's rule, eBay read only through `ebay`, is said where it holds with no
+    /// connector: in the role's own skill, which is in every prompt and sends the agent to the
+    /// approved sites, ebay.com among them; in the used-car skill whether or not eBay is
+    /// connected; and in the sources skill's section for when no service is connected.
+    fn ebay_is_never_opened_where_no_connector_is_needed_to_read_the_rule() {
+        let sourcing = crate::load_role(Role::ProcurementSpecialist)
+            .expect("the role")
+            .skills
+            .into_iter()
+            .find(|skill| skill.name == "sourcing-a-product")
+            .expect("the role's own skill")
+            .text
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_holds(
+            "sourcing-a-product",
+            &sourcing,
+            &[
+                "Read eBay only through \"eBay listings\" (`ebay`): never open an ebay.com page",
+                "never use SerpApi's `ebay` engine",
+                "Without it, say eBay was not checked",
+            ],
+        );
+        assert_before(
+            "sourcing-a-product",
+            &sourcing,
+            "## 2. Sites you may read",
+            "Read eBay only through",
+        );
+        assert_before(
+            "sourcing-a-product",
+            &sourcing,
+            "Read eBay only through",
+            "## 3. Orders",
+        );
+        assert_holds(
+            "checking-a-used-vehicle",
+            &flat_skill("checking-a-used-vehicle"),
+            &[
+                "Read eBay only through it, never by opening ebay.com pages; without it, say eBay was not checked",
+            ],
+        );
+        let sources = flat_skill("using-procurement-sources");
+        assert_holds(
+            "using-procurement-sources",
+            &sources,
+            &["but never ebay.com's"],
+        );
+        assert_before(
+            "using-procurement-sources",
+            &sources,
+            "## 4. When none is connected",
+            "but never ebay.com's",
+        );
+        assert_before(
+            "using-procurement-sources",
+            &sources,
+            "## 4. When none is connected",
+            "Without \"eBay listings\", say eBay was not checked",
+        );
     }
 
     /// Step 10f: after 10d's twelve and 10e's data pipeline the Procurement Specialist's kit

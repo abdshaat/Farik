@@ -33,7 +33,9 @@ You search the whole web, but you open a page, with `WebFetch` or a connector, o
 approved or the owner allowed. Call `farik_read_sites` first: it lists the sites you may read,
 Farik's with each shop's kind, then the owner's, and, for this task, the sites that wait for the
 owner and the ones the owner did not allow, with their notes. A page on any other site is refused,
-and the refusal names the site.
+and the refusal names the site. Read eBay only through "eBay listings" (`ebay`): never open an
+ebay.com page, though it is an approved site, and never use SerpApi's `ebay` engine. Without it,
+say eBay was not checked.
 
 To read another site, call `farik_request_sites` with one to ten entries, each the first page you
 want, as an `https://` address, and why in one line: what the site sells and why it is worth the

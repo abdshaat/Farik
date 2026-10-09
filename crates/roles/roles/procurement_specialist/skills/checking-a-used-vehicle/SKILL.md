@@ -54,8 +54,8 @@ inspection should cover for this car's age and mileage.
 Find listings for the same year, make, model and mileage band, and write their asking prices, with
 the address of each page and the day you read it. If "eBay listings" is connected, `search_items`
 gives eBay's fixed-price asking prices, with `condition` `used` and a `min_price` and `max_price` to
-keep to the band; read eBay through it and never by opening ebay.com pages. A listing price is what
-a seller asks, not what a car sells for; say so.
+keep to the band. Read eBay only through it, never by opening ebay.com pages; without it, say eBay
+was not checked. A listing price is what a seller asks, not what a car sells for; say so.
 
 ## 6. What you write
 
