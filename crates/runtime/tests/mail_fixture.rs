@@ -459,3 +459,34 @@ async fn reads_each_reply_once() {
     assert_eq!(later.replies.len(), 1);
     assert_eq!(later.replies[0].subject, "Re: later");
 }
+
+#[tokio::test]
+#[ignore = "needs Docker and the GreenMail image: cargo xtask check --integration"]
+async fn cuts_a_long_text_at_64_kib() {
+    let (fixture, settings, trust, ledger) = connected("long").await;
+    let long = format!("{}end", "\u{00e9}".repeat(40_000));
+    fixture.deliver(
+        BUYING.address,
+        &Mime {
+            text: Some(&long),
+            ..dana_replies("r1@pieboxpros.test", "Re: long")
+        }
+        .build(),
+    );
+    let fetched = fetch_replies(
+        &settings,
+        &secret(BUYING.password),
+        &trust,
+        &ledger,
+        &known(),
+    )
+    .await
+    .expect("the replies are read");
+    let text = &fetched.replies[0].text;
+    assert!(
+        text.len() <= 64 * 1024 && text.len() > 64 * 1024 - 4,
+        "{}",
+        text.len()
+    );
+    assert!(!text.ends_with("end"), "cut, not whole");
+}

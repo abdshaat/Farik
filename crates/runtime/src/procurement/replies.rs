@@ -459,7 +459,9 @@ mod tests {
     use farik_protocol::event::{EventBody, EventKind};
     use serde_json::{Value, json};
 
-    use super::{Mailer, check_now, finished_checks, reply_attachment, seller_replies_list};
+    use super::{
+        Mailer, check_now, finished_checks, reply_attachment, seller_replies_list, start_check,
+    };
     use crate::greenmail::{BUYING, Mime};
     use crate::mailbox::MailboxSecrets as _;
     use crate::orchestrator::{TickRules, TickScope};
@@ -612,6 +614,24 @@ mod tests {
         // A second check records nothing.
         assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 0);
         assert_eq!(story.events(&[EventKind::SellerReplyReceived]).len(), 1);
+
+        // A reply's number is one more than the highest the log and the folders hold.
+        std::fs::create_dir_all(story.harness.procurement_folder().join("mail/in/2026-01/7"))
+            .expect("a folder left by an older reply");
+        story.fixture.deliver(
+            BUYING.address,
+            &answer(&id, "r2@pieboxpros.test", "Re: Quote again").build(),
+        );
+        assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 1);
+        let numbers: Vec<u64> = story
+            .events(&[EventKind::SellerReplyReceived])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::SellerReplyReceived(body) => Some(body.reply.get()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(numbers, [1, 8]);
     }
 
     #[tokio::test]
@@ -760,6 +780,10 @@ mod tests {
         assert_eq!(file["media_type"], "image/png");
         assert_eq!(file["name"], "1-1.png");
         assert_eq!(base64_decode(file["base64"].as_str().expect("base64")), png);
+        assert!(
+            reply_attachment(deps, 1, 0).is_none(),
+            "attachments count from 1"
+        );
         assert!(reply_attachment(deps, 1, 2).is_none(), "not kept");
         assert!(reply_attachment(deps, 1, 3).is_none(), "no such index");
         assert!(reply_attachment(deps, 9, 1).is_none(), "no such reply");
@@ -841,6 +865,50 @@ mod tests {
         check_now(deps, &mailer(&story)).await.expect("checked");
         let listed = seller_replies_list(deps).expect("the list");
         assert_eq!(listed["replies"][0]["order"], 12);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    async fn a_reply_with_no_reference_goes_to_the_latest_message_sent_to_its_sender() {
+        let story = Story::new("latest").await;
+        let (first, _) = sent(&story).await;
+        let (second, _) = sent(&story).await;
+        assert_eq!((first, second), (1, 2));
+        story.fixture.deliver(
+            BUYING.address,
+            &Mime {
+                in_reply_to: None,
+                ..answer("unused", "r1@pieboxpros.test", "Quote?")
+            }
+            .build(),
+        );
+        let deps = &story.harness.project.deps;
+        assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 1);
+        let listed = seller_replies_list(deps).expect("the list");
+        assert_eq!(listed["replies"][0]["message"], second);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    async fn at_most_one_check_runs_at_a_time() {
+        let story = Story::new("one-at-a-time").await;
+        let (_, id) = sent(&story).await;
+        story.fixture.deliver(
+            BUYING.address,
+            &answer(&id, "r1@pieboxpros.test", "Re: Quote").build(),
+        );
+        let deps = &story.harness.project.deps;
+        assert!(
+            start_check(deps, &story.harness.daemon),
+            "a check is due and starts"
+        );
+        assert!(!start_check(deps, &story.harness.daemon), "one is running");
+        finished_checks().await;
+        assert_eq!(story.events(&[EventKind::SellerReplyReceived]).len(), 1);
+        assert!(
+            !start_check(deps, &story.harness.daemon),
+            "it was read a moment ago, so none is due"
+        );
     }
 
     fn base64_decode(text: &str) -> Vec<u8> {
