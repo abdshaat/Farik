@@ -125,3 +125,9 @@
 		width: 100%;
 	}
 }
+
+.open {
+	justify-self: start;
+	color: var(--catervas-color-ink-muted);
+	font-size: var(--catervas-type-small-size);
+}

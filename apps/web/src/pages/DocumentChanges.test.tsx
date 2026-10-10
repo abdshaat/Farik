@@ -167,4 +167,20 @@ describe("the product plan's changes on Today", () => {
 			"One of these files has changes of yours that are not committed. Commit or undo them, then approve.",
 		);
 	});
+
+	it("opens a changed document in files", async () => {
+		await todayWithDocs({});
+		const region = await card();
+		const link = (list: string) =>
+			within(
+				within(region).getByRole("list", { name: list })
+					.parentElement as HTMLElement,
+			).getByRole("link", { name: en.filesOpen });
+		expect(link("Roadmap").getAttribute("href")).toBe(
+			"/files/product/roadmap.md",
+		);
+		expect(link("Product description").getAttribute("href")).toBe(
+			"/files/product/spec.md",
+		);
+	});
 });

@@ -2495,4 +2495,37 @@ export const en = {
 	filesChangedIn: ", in ",
 	filesYou: "you",
 	filesJustNow: "just now",
+	filesOpen: "Open in Files",
+	filesEditing: "You are changing the version for you.",
+	filesEditOrPreview: "Edit or preview",
+	filesWrite: "Write",
+	filesPreview: "Preview",
+	filesHint:
+		"A line starting with # is a heading, one starting with - is a list item, and **two stars** make words bold.",
+	filesText: "{name} text",
+	filesSave: "Save",
+	filesCancel: "Cancel",
+	filesSaveAuto: "Saving keeps your change at once.",
+	filesSavePullRequest:
+		"Saving puts your change in a pull request; it is in your project once that is merged.",
+	filesSaveManual:
+		"Saving puts your change on a branch for you to add with catervas integrate.",
+	filesThenAuto: "{owner} will update the team’s version.",
+	filesThen: "Then {owner} updates the team’s version.",
+	filesWaitingAuto: "Saved. Catervas adds it to your project in a moment.",
+	filesWaitingPullRequest: "Saved. It goes out with a pull request.",
+	filesWaitingManual:
+		"Saved. It goes out when you run catervas integrate folder-{change}.",
+	filesChangedWhile:
+		"This file changed while you were editing. Your text is still here; copy it, then reload to see the new version.",
+	filesReload: "Reload",
+	refuseFileBusy:
+		"This file was also changed on your computer, outside Catervas. Finish or undo that change, then save here again.",
+	refuseMarketingPlan:
+		"A marketing plan changes through a new version on its page.",
+	refuseChangeWaiting:
+		"An earlier change to this file is not in your project yet. Edit it once it is.",
+	refuseIsALink: "This file is a link, which Catervas does not write through.",
+	refuseTooLarge:
+		"This is too long to save here: a document can be at most about 256 KB.",
 };

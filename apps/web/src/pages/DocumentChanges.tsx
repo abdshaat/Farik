@@ -1,9 +1,11 @@
 import { Avatar, type AvatarKey, Button, TextArea } from "@catervas/ui";
 import { useId, useState } from "react";
+import { Link } from "react-router";
 import { t } from "../strings/t.ts";
 import styles from "./DocumentChanges.module.css";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import { visibly } from "./dialogs/ToolApproval.tsx";
+import { fileRoute } from "./files.ts";
 
 /** The team's integration policy, which says what approving does. */
 export type Integration = "auto_merge" | "pull_request" | "manual";
@@ -108,6 +110,13 @@ export function DocumentChanges({
 						<p id={`${id}-doc-${one.proposal}`} className={styles.docName}>
 							{named ? t(named) : visibly(one.path)}
 						</p>
+						<Link
+							to={fileRoute(one.path)}
+							aria-describedby={`${id}-doc-${one.proposal}`}
+							className={styles.open}
+						>
+							{t("filesOpen")}
+						</Link>
 						{one.lines.length === 0 ? (
 							<p className={styles.muted}>{t("docChangesTeamOnly")}</p>
 						) : (

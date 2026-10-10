@@ -13,7 +13,7 @@ export function Files() {
 	const splat = useParams()["*"];
 	const wide = useWide();
 	const { data: team } = useQuery<{ team: Team }>("team.get", {});
-	const { data: tree } = useQuery<FilesTree>("files.tree", {});
+	const { data: tree, again } = useQuery<FilesTree>("files.tree", {});
 	const agents = team?.team.agents;
 	// Nothing shows until the team and the tree are both here: the owner's face is part of every row.
 	if (!tree || !agents) return null;
@@ -29,6 +29,7 @@ export function Files() {
 			tree={tree}
 			path={open.document.path}
 			agents={agents}
+			onSaved={again}
 		/>
 	) : (
 		splat && <h2 className={styles.none}>{t("filesNoSuch")}</h2>

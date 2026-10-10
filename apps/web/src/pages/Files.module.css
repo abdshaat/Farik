@@ -262,3 +262,32 @@ details[open] > summary.fold::before {
 	color: var(--catervas-color-status-working);
 	font-weight: 600;
 }
+
+/* The editor. */
+.alert {
+	margin: 0;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
+	background: var(--catervas-color-page);
+}
+
+.alertRow {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--catervas-space-2) var(--catervas-space-4);
+}
+
+.editActs {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--catervas-space-3);
+}
+
+.editActs p {
+	flex: 1 1 16rem;
+	margin: 0 0 0 var(--catervas-space-2);
+	color: var(--catervas-color-ink-muted);
+	font-size: var(--catervas-type-small-size);
+}

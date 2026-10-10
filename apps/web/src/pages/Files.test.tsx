@@ -11,7 +11,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { media } from "../test/media.ts";
-import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import {
+	answerQuery,
+	answerStatus,
+	eventArrives,
+	renderApp,
+} from "../test/render-app.tsx";
 
 const WIDE = "(min-width: 1024px)";
 const NOW = new Date("2026-10-10T12:00:00Z");
@@ -367,5 +372,233 @@ describe("Files", () => {
 		const narrow = await files("/files/product/roadmap.md");
 		await screen.findByRole("heading", { name: "Roadmap" });
 		await expectNoAxeViolations(narrow.container);
+	});
+
+	describe("editing", () => {
+		const draftText = "# New heading\n\nWords of mine.";
+		const SAVED = { change: 1, branch: "docs/folder-1" };
+		const box = () => screen.getByRole("textbox", { name: "Roadmap text" });
+		const queries = (s: FakeSocket, name: string) =>
+			s.calls("query").filter((q) => q.params.name === name);
+		const press = (name: string) =>
+			fireEvent.click(screen.getByRole("button", { name }));
+
+		/** The roadmap's editor open, with `draftText` typed into it. */
+		async function typed(fields: { read?: unknown; tree?: unknown } = {}) {
+			media.set(WIDE, true);
+			const opened = await files("/files/product/roadmap.md", fields);
+			await screen.findByRole("heading", { name: "Roadmap" });
+			press(en.filesEdit);
+			fireEvent.change(box(), { target: { value: draftText } });
+			return opened;
+		}
+
+		it("edits and saves the version for you", async () => {
+			media.set(WIDE, true);
+			const { s } = await files("/files/product/roadmap.md");
+			await screen.findByRole("heading", { name: "Roadmap" });
+			press(en.filesEdit);
+			expect(screen.getByText(en.filesEditing)).toBeTruthy();
+			expect(
+				screen
+					.getByRole("button", { name: en.filesWrite })
+					.getAttribute("aria-pressed"),
+			).toBe("true");
+			expect(screen.getByText(en.filesHint)).toBeTruthy();
+			expect((box() as HTMLTextAreaElement).value).toBe(read().document.text);
+			expect(
+				screen.getByText(
+					"Saving keeps your change at once. Mira will update the team’s version.",
+				),
+			).toBeTruthy();
+
+			fireEvent.change(box(), { target: { value: draftText } });
+			press(en.filesPreview);
+			expect(screen.getByRole("heading", { name: "New heading" })).toBeTruthy();
+			expect(screen.queryByRole("textbox")).toBeNull();
+
+			const before = [
+				queries(s, "files.read").length,
+				queries(s, "files.tree").length,
+			];
+			press(en.filesSave);
+			const [frame, ...more] = s.calls("files.save");
+			expect(more).toEqual([]);
+			expect(frame?.params).toEqual({
+				path: ROADMAP,
+				text: draftText,
+				base: read().document.blob,
+			});
+			await s.reply(frame as never, SAVED);
+			await waitFor(() =>
+				expect(screen.queryByText(en.filesEditing)).toBeNull(),
+			);
+			expect(screen.getByRole("button", { name: en.filesEdit })).toBeTruthy();
+			expect(queries(s, "files.read").length).toBeGreaterThan(before[0] ?? 0);
+			expect(queries(s, "files.tree").length).toBeGreaterThan(before[1] ?? 0);
+		});
+
+		it("says what saving does under each policy", async () => {
+			for (const [integration, words] of [
+				[
+					"pull_request",
+					"Saving puts your change in a pull request; it is in your project once that is merged. Then Mira updates the team’s version.",
+				],
+				[
+					"manual",
+					"Saving puts your change on a branch for you to add with catervas integrate. Then Mira updates the team’s version.",
+				],
+			] as const) {
+				media.set(WIDE, true);
+				await files("/files/product/roadmap.md", { tree: tree(integration) });
+				await screen.findByRole("heading", { name: "Roadmap" });
+				press(en.filesEdit);
+				expect(screen.getByText(words)).toBeTruthy();
+				expect(document.body.textContent).not.toContain("at once");
+				cleanup();
+			}
+		});
+
+		it("says a saved change is on its way", async () => {
+			for (const [integration, words] of [
+				["auto_merge", "Saved. Catervas adds it to your project in a moment."],
+				["pull_request", "Saved. It goes out with a pull request."],
+				[
+					"manual",
+					"Saved. It goes out when you run catervas integrate folder-3.",
+				],
+			] as const) {
+				media.set(WIDE, true);
+				const { s } = await files("/files/product/roadmap.md", {
+					tree: tree(integration),
+					read: read({ waiting: { change: 3, branch: "docs/folder-3" } }),
+				});
+				await screen.findByText(words);
+				expect(screen.queryByRole("button", { name: en.filesEdit })).toBeNull();
+				expect(document.body.textContent).not.toContain("at once");
+				if (integration === "auto_merge") {
+					await eventArrives(s, 9);
+					await answerQuery(s, "files.read", read());
+					expect(
+						await screen.findByRole("button", { name: en.filesEdit }),
+					).toBeTruthy();
+					expect(screen.queryByText(words)).toBeNull();
+				}
+				cleanup();
+			}
+		});
+
+		it("keeps the draft while events arrive", async () => {
+			const { s } = await typed();
+			await eventArrives(s, 9);
+			await answerQuery(
+				s,
+				"files.read",
+				read({ document: version(ROADMAP, "Changed meanwhile", null) }),
+			);
+			await screen.findByRole("textbox", { name: "Roadmap text" });
+			expect((box() as HTMLTextAreaElement).value).toBe(draftText);
+			press(en.filesSave);
+			expect(s.calls("files.save")[0]?.params).toMatchObject({
+				text: draftText,
+				base: read().document.blob,
+			});
+		});
+
+		it("keeps the owner's text when the file changed", async () => {
+			const { s } = await typed();
+			press(en.filesSave);
+			await s.fail(s.calls("files.save")[0] as never, -32005, "refused", {
+				errors: [{ path: "/base", code: "file_changed", message: "changed" }],
+			});
+			const alert = await screen.findByRole("alert");
+			expect(alert.textContent).toContain(en.filesChangedWhile);
+			expect((box() as HTMLTextAreaElement).value).toBe(draftText);
+
+			const asked = queries(s, "files.read").length;
+			fireEvent.click(
+				within(alert).getByRole("button", { name: en.filesReload }),
+			);
+			await waitFor(() =>
+				expect(queries(s, "files.read").length).toBeGreaterThan(asked),
+			);
+			const fresh = read({
+				document: version(ROADMAP, "Changed on the other side", null),
+			});
+			await answerQuery(s, "files.read", fresh);
+			await waitFor(() =>
+				expect((box() as HTMLTextAreaElement).value).toBe(
+					"Changed on the other side",
+				),
+			);
+			expect(screen.queryByRole("alert")).toBeNull();
+			press(en.filesSave);
+			expect(s.calls("files.save")[1]?.params).toMatchObject({
+				base: fresh.document.blob,
+			});
+		});
+
+		it("says any other refusal and keeps the draft", async () => {
+			const { s } = await typed();
+			let sent = 0;
+			for (const [path, code, words] of [
+				[
+					"/path",
+					"change_waiting",
+					"An earlier change to this file is not in your project yet. Edit it once it is.",
+				],
+				[
+					"/path",
+					"file_busy",
+					"This file was also changed on your computer, outside Catervas. Finish or undo that change, then save here again.",
+				],
+				[
+					"/text",
+					"too_large",
+					"This is too long to save here: a document can be at most about 256 KB.",
+				],
+			] as const) {
+				press(en.filesSave);
+				await s.fail(
+					s.calls("files.save")[sent++] as never,
+					-32005,
+					"refused",
+					{
+						errors: [{ path, code, message: "raw words" }],
+					},
+				);
+				expect((await screen.findByRole("alert")).textContent).toBe(words);
+				expect((box() as HTMLTextAreaElement).value).toBe(draftText);
+			}
+		});
+
+		it("cancels without saving", async () => {
+			const { s } = await typed();
+			press(en.filesCancel);
+			expect(screen.queryByRole("textbox")).toBeNull();
+			expect(screen.getByText("Pie pre-orders")).toBeTruthy();
+			expect(s.calls("files.save")).toEqual([]);
+		});
+
+		it("offers no edit of the team's version", async () => {
+			media.set(WIDE, true);
+			await files("/files/product/roadmap.md");
+			await screen.findByRole("heading", { name: "Roadmap" });
+			press(en.filesForTeam);
+			expect(screen.queryByRole("button", { name: en.filesEdit })).toBeNull();
+			cleanup();
+
+			await files(`/files/${OVERVIEW.slice(ROOT.length)}`, {
+				read: read({
+					document: version(OVERVIEW, "Text", MIRA_FIVE_DAYS),
+					twin: null,
+				}),
+			});
+			await screen.findByRole("heading", { name: "Overview" });
+			press(en.filesEdit);
+			expect(screen.queryByText(en.filesEditing)).toBeNull();
+			// The whole footnote is the policy's sentence: no owner follows it.
+			expect(screen.getByText(en.filesSaveAuto)).toBeTruthy();
+		});
 	});
 });

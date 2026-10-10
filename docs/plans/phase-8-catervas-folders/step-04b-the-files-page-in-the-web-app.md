@@ -119,7 +119,7 @@ Files: `FileDocument.tsx` (the editor, the waiting line), `Files.test.tsx`, `en.
 - `cancels without saving` — "Cancel" closes the editor, the version's text shows, and no `files.save` was sent. RED.
 - `offers no edit of the team's version` — on "For the team" there is no "Edit"; a one-file document's editor has no "You are changing the version for you." and no owner line. RED.
 
-- [ ] `feat(web): edit a document and save it as the owner's change`
+- [x] `feat(web): edit a document and save it as the owner's change`
 
 ### Task 4: The journey
 

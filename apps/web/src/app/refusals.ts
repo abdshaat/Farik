@@ -121,6 +121,12 @@ const WORDS: Record<string, keyof typeof en> = {
 	folder_doc_busy: "refuseFolderDocBusy",
 	folder_doc_link: "refuseFolderDocLink",
 	folder_doc_waiting: "refuseFolderDocWaiting",
+	// The owner's save of a document in a role's folder (SPEC 4.5).
+	file_busy: "refuseFileBusy",
+	marketing_plan: "refuseMarketingPlan",
+	change_waiting: "refuseChangeWaiting",
+	is_a_link: "refuseIsALink",
+	too_large: "refuseTooLarge",
 	// A skill's refusals (SPEC 6.7), said at the field they belong to.
 	skill_runs_commands: "skillRunsCommands",
 	skill_attaches_files: "skillAttachesFiles",
