@@ -3141,6 +3141,7 @@ mod tests {
             json!({
                 "project_root": null, "paused": false, "credential": null,
                 "port": PORT, "take_on_error": null, "setup_pending": false,
+                "leaving": null, "keys_copied": null,
             })
         );
         let account = setup_query(&state, "account.status", &json!({})).await;
