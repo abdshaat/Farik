@@ -130,6 +130,44 @@ impl TestDaemon {
         limits: SessionLimits,
         catervas_tools: &[&str],
     ) {
+        self.register_as(
+            session_id,
+            agent,
+            task,
+            limits,
+            catervas_tools,
+            SessionPurpose::Implement,
+        );
+    }
+
+    /// Registers a session of `agent` for `purpose`, given every Catervas tool, so that its tiers
+    /// and its purpose alone decide which it may call.
+    pub(crate) fn register_for(
+        &self,
+        session_id: &str,
+        agent: &str,
+        task: Option<&str>,
+        purpose: SessionPurpose,
+    ) {
+        self.register_as(
+            session_id,
+            agent,
+            task,
+            DEFAULT_SESSION_LIMITS,
+            &every_catervas_tool(),
+            purpose,
+        );
+    }
+
+    fn register_as(
+        &self,
+        session_id: &str,
+        agent: &str,
+        task: Option<&str>,
+        limits: SessionLimits,
+        catervas_tools: &[&str],
+        purpose: SessionPurpose,
+    ) {
         self.state.register_session(SessionRegistration {
             session_id: session_id.to_string(),
             web: self.web_of(agent),
@@ -142,7 +180,7 @@ impl TestDaemon {
             tiers: tiers_of(&self.project.deps, agent),
             connectors: Vec::new(),
             preview: None,
-            purpose: SessionPurpose::Implement,
+            purpose,
             in_reply_to: None,
             thread: None,
             skills: Vec::new(),

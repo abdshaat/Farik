@@ -36,7 +36,7 @@ use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
 use crate::channel::post_system;
 use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
-use crate::daemon::SessionRegistration;
+use crate::daemon::{SessionRegistration, builtin_tool_tier};
 use crate::exec::Executor;
 use crate::preview::{
     PLAYWRIGHT, PreviewError, RunningPreview, connector_server, designer_browser, disallowed_tools,
@@ -48,11 +48,11 @@ use crate::prompt::{
 };
 use crate::session::{
     EndReason, McpServerConfig, McpTransport, SessionEvent, SessionHandle, SessionPurpose,
-    SessionSpec, session_model,
+    SessionSpec, session_model, works_on_a_task,
 };
 use crate::sessions::{record_session_ended, record_session_started};
 use crate::skills::{SessionSkills, confirmed_skills, session_skills};
-use crate::tools::{CatervasTool, tool_descriptors};
+use crate::tools::{CatervasTool, tool_descriptors, writes_the_project};
 use crate::transitions::TransitionAsk;
 
 /// The one tool a triage session is given.
@@ -74,9 +74,10 @@ pub(super) struct SessionAsk<'a> {
     pub(super) cwd: PathBuf,
     /// Where its commands run, when it runs any.
     pub(super) executor: Option<Arc<dyn Executor>>,
-    /// Whether it gets the read tier's built-ins alone, whatever the agent's tiers, and no Catervas
-    /// tool that runs a command or writes to git: a verify session reads the work and does not
-    /// change it.
+    /// Whether it gets the read tier's built-ins alone, whatever the agent's tiers: a verify
+    /// session reads the work and does not change it. The Catervas tools that change the project
+    /// are withheld from every session that does not work on a task (`works_on_a_task`), not from
+    /// this one alone.
     pub(super) read_only: bool,
     /// The one Catervas tool it is given, when it is given one alone and no built-in tool: triage's
     /// `catervas_triage_request`, the judgment's `catervas_record_judgment`.
@@ -845,10 +846,6 @@ const DRAFT_SELLER_MESSAGE_TOOL: &str = "catervas_draft_seller_message";
 const READ_SELLER_MESSAGES_TOOL: &str = "catervas_read_seller_messages";
 const READ_SELLER_REPLIES_TOOL: &str = "catervas_read_seller_replies";
 
-/// The Catervas tools a read-only session is not offered: the command runner, which has no
-/// executor there, and the git writes, which only the assignee may make.
-const NOT_FOR_READ_ONLY: [&str; 3] = ["catervas_exec", "catervas_git_commit", "catervas_git_push"];
-
 /// The Catervas tools `ask`'s session is offered, before its tiers are applied.
 fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> Vec<CatervasTool> {
     // The page check is the Designer's, in a session that has the preview open (step 12).
@@ -862,9 +859,12 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
         .is_some();
     tool_descriptors()
         .into_iter()
-        // A verify session judges the work and does not change it (step 12): it has no executor,
-        // and the git writes are refused to all but the assignee, so it is not offered them.
-        .filter(|tool| !(ask.read_only && NOT_FOR_READ_ONLY.contains(&tool.name)))
+        // Only an implement session about a task changes the project, so no other is offered a
+        // tool that does (a verify session judges the work and does not change it, step 12).
+        .filter(|tool| {
+            works_on_a_task(ask.purpose, ask.contract.is_some())
+                || !writes_the_project(tool.name, tool.tier)
+        })
         .filter(|tool| checks_pages || tool.name != CHECK_PAGE_TOOL)
         // A chat's reply is its session's alone (ADR 0026).
         .filter(|tool| tool.name != CHAT_REPLY_TOOL || ask.purpose == SessionPurpose::Chat)
@@ -872,8 +872,7 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
         .filter(|tool| {
             (tool.name != PROPOSE_MARKETING_PLAN_TOOL && tool.name != SCHEDULE_POST_TOOL)
                 || (ask.agent.role == RoleWire::MarketingSpecialist
-                    && ask.purpose == SessionPurpose::Implement
-                    && ask.contract.is_some())
+                    && works_on_a_task(ask.purpose, ask.contract.is_some()))
         })
         // The books are the Finance Specialist's, and the register the Procurement Specialist's:
         // a role with a private folder reads the workbooks in any session and writes one in the
@@ -884,8 +883,7 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
             READ_COSTS_TOOL => ask.agent.role == RoleWire::FinanceSpecialist,
             WRITE_SHEET_TOOL => {
                 private_folder(Role::from(ask.agent.role)).is_some()
-                    && ask.purpose == SessionPurpose::Implement
-                    && ask.contract.is_some()
+                    && works_on_a_task(ask.purpose, ask.contract.is_some())
             }
             // A comparison is written, an order suggested from it, and a data pipeline asked for,
             // in the implement session of the task they belong to.
@@ -895,8 +893,7 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
             | REQUEST_DATA_PIPELINE_TOOL
             | DRAFT_SELLER_MESSAGE_TOOL => {
                 ask.agent.role == RoleWire::ProcurementSpecialist
-                    && ask.purpose == SessionPurpose::Implement
-                    && ask.contract.is_some()
+                    && works_on_a_task(ask.purpose, ask.contract.is_some())
             }
             // The orders and the data pipeline requests are read where the role works on a task and
             // where it is asked about them.
@@ -905,14 +902,13 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
             | READ_SELLER_MESSAGES_TOOL
             | READ_SELLER_REPLIES_TOOL => {
                 ask.agent.role == RoleWire::ProcurementSpecialist
-                    && ((ask.purpose == SessionPurpose::Implement && ask.contract.is_some())
+                    && (works_on_a_task(ask.purpose, ask.contract.is_some())
                         || ask.purpose == SessionPurpose::Chat)
             }
             // The sites are the held role's: it asks in the implement session of a task, the one
             // session that can wait for the owner, and reads the list there and in its chat.
             REQUEST_SITES_TOOL | READ_SITES_TOOL => {
-                let in_its_task =
-                    ask.purpose == SessionPurpose::Implement && ask.contract.is_some();
+                let in_its_task = works_on_a_task(ask.purpose, ask.contract.is_some());
                 web_access(Role::from(ask.agent.role)) == WebAccess::ApprovedSites
                     && (in_its_task
                         || (tool.name == READ_SITES_TOOL && ask.purpose == SessionPurpose::Chat))
@@ -951,6 +947,25 @@ fn closing_instruction(ask: &SessionAsk<'_>) -> Option<&'static str> {
         (None, Some(DECIDE_PIPELINE_TOOL)) => Some(PIPELINE_DECISION_INSTRUCTION),
         (None, _) => None,
     }
+}
+
+/// The program's own tools `ask`'s session is given: none for a session given one tool, the read
+/// tier's for a read-only one, otherwise those of the agent's tiers, without the ones that change
+/// the project unless the session works on a task.
+fn builtins_of(ask: &SessionAsk<'_>, tiers: &BTreeSet<PermissionTier>) -> Vec<String> {
+    if ask.only_tool.is_some() {
+        return Vec::new();
+    }
+    if ask.read_only {
+        return allowed_builtins(&BTreeSet::from([PermissionTier::Read]));
+    }
+    let works = works_on_a_task(ask.purpose, ask.contract.is_some());
+    allowed_builtins(tiers)
+        .into_iter()
+        .filter(|name| {
+            works || !builtin_tool_tier(name).is_some_and(|tier| writes_the_project(name, tier))
+        })
+        .collect()
 }
 
 /// The spec of the session `ask` describes, its prompt assembled from the files as they are now,
@@ -999,13 +1014,7 @@ fn session_spec_without(
     let criteria = files.read_criteria()?;
     let tiers: BTreeSet<PermissionTier> =
         ask.agent.tiers(&team.permissions()).into_iter().collect();
-    let builtin_tools = if ask.only_tool.is_some() {
-        Vec::new()
-    } else if ask.read_only {
-        allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
-    } else {
-        allowed_builtins(&tiers)
-    };
+    let builtin_tools = builtins_of(ask, &tiers);
     let tools = offered_tools(deps, team, ask);
     // A session given one tool has it whatever the agent's tiers.
     let catervas_tools = tools
@@ -2050,6 +2059,63 @@ mod tests {
             initial_prompt: String::new(),
             pipeline: None,
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_no_write_outside_a_tasks_implement_session() {
+        let harness = Harness::new("session-no-write", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "pm");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("an id"))
+            .expect("the contract");
+        let spec = |purpose| {
+            session_spec(
+                deps,
+                &team,
+                &dev_asks(&harness, &team, &contract, purpose, None),
+            )
+            .expect("the spec")
+        };
+
+        let refine = spec(SessionPurpose::Refine);
+        for builtin in ["Edit", "Write", "MultiEdit", "NotebookEdit"] {
+            assert!(
+                !refine.builtin_tools.iter().any(|tool| tool == builtin),
+                "{builtin}: {:?}",
+                refine.builtin_tools
+            );
+        }
+        assert!(
+            refine.builtin_tools.iter().any(|tool| tool == "Read"),
+            "{:?}",
+            refine.builtin_tools
+        );
+        assert!(
+            refine
+                .catervas_tools
+                .contains(&"catervas_git_diff".to_string())
+        );
+        for tool in ["catervas_exec", "catervas_git_commit", "catervas_git_push"] {
+            assert!(
+                !refine.catervas_tools.contains(&tool.to_string()),
+                "{tool}: {:?}",
+                refine.catervas_tools
+            );
+        }
+
+        let implement = spec(SessionPurpose::Implement);
+        assert!(implement.builtin_tools.contains(&"Write".to_string()));
+        assert!(
+            implement
+                .catervas_tools
+                .contains(&"catervas_git_commit".to_string())
+        );
     }
 
     #[test]

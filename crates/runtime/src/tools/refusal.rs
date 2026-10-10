@@ -25,6 +25,9 @@ pub(crate) enum Refusal {
     /// The Catervas tool is not one the session was given: a triage session has
     /// `catervas_triage_request` alone (5.16), whatever its agent's tiers allow.
     ToolNotInSession { tool: String },
+    /// The tool changes the project, and only an `implement` session about a task changes it.
+    /// `tool` is a Catervas tool's name without its prefix, or a built-in's own name.
+    NoTaskNoWrite { tool: String },
     /// The tool acts on the session's task and the session has none.
     NoTask,
     /// A triage was asked with no reason.
@@ -154,6 +157,12 @@ impl Refusal {
             Self::ToolNotInSession { tool } => (
                 "tool_not_in_session",
                 format!("{tool} is not one of the tools this session was given"),
+            ),
+            Self::NoTaskNoWrite { tool } => (
+                "no_task_no_write",
+                format!(
+                    "{tool} changes the project, and only an implement session working on a task changes it"
+                ),
             ),
             Self::NoTask => (
                 "no_task",

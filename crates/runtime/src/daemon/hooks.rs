@@ -24,11 +24,11 @@ use serde_json::{Value, json};
 
 use super::{DaemonError, DaemonState, SessionRegistration};
 use crate::allowances::allowance_period;
-use crate::session::SessionPurpose;
+use crate::session::works_on_a_task;
 use crate::tools::design::design_plan_gate;
 use crate::tools::refusal::Refusal;
 use crate::tools::sites::{approved_set, shown};
-use crate::tools::{ToolDeps, ToolError, paths_of, tool_descriptors};
+use crate::tools::{ToolDeps, ToolError, paths_of, tool_descriptors, writes_the_project};
 
 /// What Claude Code sends a hook on its standard input, the fields Catervas reads.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -124,7 +124,9 @@ pub fn builtin_tool_tier(tool: &str) -> Option<PermissionTier> {
 /// tool that is neither Catervas's nor a built-in with a tier (`tool_not_allowed`); a Catervas tool the
 /// session was not given (`tool_not_in_session`); a built-in's path
 /// outside the session's worktree (`path_outside_workspace`); whatever `evaluate_tool_call`
-/// refuses; and, for a session held to approved sites, a `WebFetch` of any other site
+/// refuses; the Designer's plan gate (`design_plan_not_approved`); a tool that changes the project
+/// in a session that is not an implement session about a task (`no_task_no_write`); and, for a
+/// session held to approved sites, a `WebFetch` of any other site
 /// (`site_not_approved`). A decision the log cannot record is a deny (`record_failed`). Only an allowed call
 /// counts towards the limit, and the count is checked and raised under one lock, because Claude
 /// Code runs read tools in parallel.
@@ -311,7 +313,8 @@ fn judge(
 }
 
 /// Whether an active agent's call of a Catervas tool or a built-in may go ahead, or the reason it may
-/// not: by the tiers the session started with (spec 4.4).
+/// not: by the tiers the session started with (spec 4.4), then the Designer's plan gate, then
+/// whether the session works on a task when the call changes the project (`no_task_no_write`).
 fn judge_call(
     request: &HookRequest,
     registration: &SessionRegistration,
@@ -378,6 +381,18 @@ fn judge_call(
     )
     .map_err(|refusal| Refusal::Tool(refusal).reason())?;
     plan_gate(deps, team, registration, tier)?;
+    let name = request
+        .tool_name
+        .strip_prefix(CATERVAS_PREFIX)
+        .unwrap_or(&request.tool_name);
+    if writes_the_project(name, tier)
+        && !works_on_a_task(registration.purpose, registration.task_id.is_some())
+    {
+        return Err(Refusal::NoTaskNoWrite {
+            tool: name.to_string(),
+        }
+        .reason());
+    }
     // A held session's page read, after its tier: Claude Code's own direct fetch follows a
     // redirect only to the same site, so what it reads next is judged again (spec 8.6).
     if registration.web == WebAccess::ApprovedSites && request.tool_name == FETCH_TOOL {
@@ -389,7 +404,7 @@ fn judge_call(
 /// How a session held to approved sites is told to get another: in the implement session of a
 /// task, the one that can wait for the owner, it asks with `catervas_request_sites`; no other can.
 fn how_to_ask(registration: &SessionRegistration) -> &'static str {
-    if registration.purpose == SessionPurpose::Implement && registration.task_id.is_some() {
+    if works_on_a_task(registration.purpose, registration.task_id.is_some()) {
         "ask with catervas_request_sites, then end your turn"
     } else {
         "you can ask for it only while working on a task"
@@ -944,6 +959,7 @@ fn cut(text: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::session::SessionPurpose;
     use catervas_core::budget::DEFAULT_SESSION_LIMITS;
     use catervas_core::budget::SessionLimits;
     use catervas_protocol::event::{EventBody, EventKind};
@@ -3185,6 +3201,52 @@ mod tests {
             .tool_context("session-iris-none")
             .expect("the session is registered");
         not_approved(crate::tools::fixtures::run(&no_task, "catervas_exec", exec));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn denies_a_write_outside_a_tasks_implement_session() {
+        let daemon = TestDaemon::new("hook-no-task-no-write", |_| {});
+        let write = json!({ "file_path": daemon.inside("src/login/form.ts"), "content": "x" });
+        let commit = json!({ "message": "feat: x", "paths": ["src/login/form.ts"] });
+        let read = json!({ "file_path": daemon.inside("src/a.rs") });
+        for purpose in [
+            SessionPurpose::Triage,
+            SessionPurpose::Refine,
+            SessionPurpose::Plan,
+            SessionPurpose::Explore,
+            SessionPurpose::Verify,
+            SessionPurpose::Ceremony,
+            SessionPurpose::Conversation,
+            SessionPurpose::Chat,
+        ] {
+            let session = format!("session-{purpose:?}");
+            daemon.register_for(&session, "dev-a", Some("CTV-1"), purpose);
+            let decide = |tool: &str, input: &Value| {
+                decide_pre_tool_use(&daemon.call(&session, tool, input), &daemon.state)
+            };
+            denied_for(&decide("Write", &write), "no_task_no_write");
+            denied_for(
+                &decide("mcp__catervas__catervas_git_commit", &commit),
+                "no_task_no_write",
+            );
+            let reading = decide("Read", &read);
+            assert!(reading.allow, "{purpose:?}: {reading:?}");
+            let diff = decide("mcp__catervas__catervas_git_diff", &json!({}));
+            assert!(diff.allow, "{purpose:?}: {diff:?}");
+        }
+        let implement = decide_pre_tool_use(&daemon.dev_call("Write", &write), &daemon.state);
+        assert!(implement.allow, "{implement:?}");
+        daemon.register_for("session-no-task", "dev-a", None, SessionPurpose::Implement);
+        let none = decide_pre_tool_use(
+            &daemon.call(
+                "session-no-task",
+                "mcp__catervas__catervas_git_commit",
+                &commit,
+            ),
+            &daemon.state,
+        );
+        denied_for(&none, "no_task_no_write");
     }
 
     #[test]

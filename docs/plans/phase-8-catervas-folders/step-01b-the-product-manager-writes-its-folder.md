@@ -77,7 +77,7 @@ Produces: `works_on_a_task`, `writes_the_project`, `Refusal::NoTaskNoWrite`, `re
 - `offers_no_write_outside_a_tasks_implement_session` (`orchestrator/session.rs`, integration) — `dev-a`'s session about CTV-1 for `refine`, asked with `read_only: false`: `builtin_tools` holds none of `Edit`, `Write`, `MultiEdit`, `NotebookEdit`; `catervas_tools` holds `catervas_git_diff` and none of `catervas_exec`, `catervas_git_commit`, `catervas_git_push`. Its `implement` session holds `Write` and `catervas_git_commit`. RED: `Write` is offered to `refine`.
 - `offers_a_verify_session_no_tool_that_runs_or_writes` (`rules.rs:5222`) holds unchanged with `NOT_FOR_READ_ONLY` gone.
 
-- [ ] `feat(runtime): change the project only in a task's implement session`
+- [x] `feat(runtime): change the project only in a task's implement session`
 
 ### Task 2: The Product Manager's docs tasks
 

@@ -1080,7 +1080,7 @@ mod tests {
             let reason =
                 refused(kai(purpose, task).expect_err("not an implement session of a task"));
             assert!(
-                reason.starts_with("marketing_plan_refused"),
+                reason.starts_with("no_task_no_write: catervas_propose_marketing_plan "),
                 "{purpose:?}: {reason}"
             );
         }

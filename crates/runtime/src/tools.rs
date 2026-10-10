@@ -24,7 +24,7 @@ use serde_json::Value;
 
 use crate::exec::Executor;
 use crate::preview::RunningPreview;
-use crate::session::SessionPurpose;
+use crate::session::{SessionPurpose, works_on_a_task};
 use crate::transitions::Transitions;
 
 mod channel;
@@ -432,6 +432,18 @@ pub fn tool_descriptors() -> Vec<CatervasTool> {
     TOOLS.clone()
 }
 
+/// Whether a tool changes the project: one of tier `write_workspace`, `execute` or `git_remote`,
+/// and `catervas_git_commit`, whose `git_local` tier it shares with the reads `catervas_git_status`
+/// and `catervas_git_diff`. Catervas's `read`-tier tools that write under `.catervas/` keep their
+/// own rules, and a connector is judged by its tag.
+#[must_use]
+pub(crate) fn writes_the_project(name: &str, tier: PermissionTier) -> bool {
+    matches!(
+        tier,
+        PermissionTier::WriteWorkspace | PermissionTier::Execute | PermissionTier::GitRemote
+    ) || name == "catervas_git_commit"
+}
+
 /// Whether an agent of `status` works in a session for `purpose`: an active agent in any, and a
 /// paused one in its chat alone, since a paused agent still answers its chat (ADR 0026).
 pub(crate) fn may_work(status: AgentStatus, purpose: SessionPurpose) -> bool {
@@ -637,7 +649,8 @@ impl Call<'_> {
             })
     }
 
-    /// The tier check and the path checks of 5.6 for this tool and these paths.
+    /// The tier check and the path checks of 5.6 for this tool and these paths, then the
+    /// Designer's plan gate and the rule that only a task's implement session changes the project.
     fn permit(&self, tool: &CatervasTool, paths: Vec<String>) -> Result<(), ToolError> {
         let allowed_paths = match &self.context.task_id {
             Some(task) => self
@@ -676,7 +689,16 @@ impl Call<'_> {
             self.role(),
             tool.tier,
             self.context.task_id.as_ref(),
-        )
+        )?;
+        if writes_the_project(tool.name, tool.tier)
+            && !works_on_a_task(self.context.purpose, self.context.task_id.is_some())
+        {
+            return Err(Refusal::NoTaskNoWrite {
+                tool: tool.name.to_string(),
+            }
+            .into());
+        }
+        Ok(())
     }
 
     /// The ids an event of this call is stamped with: the agent, the session, and `task`.
@@ -721,8 +743,43 @@ mod tests {
     use serde_json::json;
 
     use super::fixtures::{TestProject, a_team_of_three};
-    use super::{ToolError, tool_descriptors};
+    use super::{ToolError, tool_descriptors, writes_the_project};
+    use crate::daemon::builtin_tool_tier;
     use catervas_core::governor::permissions::PermissionTier;
+
+    #[test]
+    fn writes_the_project_names_the_tools_that_change_it() {
+        let writing: Vec<&str> = tool_descriptors()
+            .iter()
+            .filter(|tool| writes_the_project(tool.name, tool.tier))
+            .map(|tool| tool.name)
+            .collect();
+        assert_eq!(
+            writing,
+            [
+                "catervas_exec",
+                "catervas_git_commit",
+                "catervas_git_push",
+                "catervas_propose_marketing_plan",
+            ]
+        );
+        for builtin in ["Edit", "Write", "MultiEdit", "NotebookEdit"] {
+            let tier = builtin_tool_tier(builtin).expect("a built-in with a tier");
+            assert!(writes_the_project(builtin, tier), "{builtin}");
+        }
+        for builtin in [
+            "Read",
+            "Glob",
+            "Grep",
+            "LS",
+            "ToolSearch",
+            "WebFetch",
+            "WebSearch",
+        ] {
+            let tier = builtin_tool_tier(builtin).expect("a built-in with a tier");
+            assert!(!writes_the_project(builtin, tier), "{builtin}");
+        }
+    }
 
     #[test]
     fn lists_every_tool_with_its_tier() {
