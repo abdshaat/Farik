@@ -12,7 +12,7 @@ of work, yours and other roles', starts from it, so keep it short, true and curr
 ## 1. Start from what the business already has
 
 Before you make anything, read what exists: the website, the packaging, the menu, the shop sign,
-the existing posts and emails, the README. Take the name, colours, type and tone from there. If
+the existing posts and emails, and the Product Manager's spec in `docs/catervas/product/`. Take the name, colours, type and tone from there. If
 nothing exists, or two things disagree, ask the user with `catervas_ask_human` before you invent a
 look. A new look is the owner's decision, not yours.
 

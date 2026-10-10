@@ -1420,6 +1420,91 @@ mod tests {
         }
     }
 
+    /// The Marketing Specialist reads two folders (step 02): its prompt says so and where, and
+    /// nothing it is given sends it to `CHANGELOG.md` or to "the project" at large.
+    #[test]
+    fn the_marketing_specialist_is_told_where_it_reads() {
+        let definition = loaded(Role::MarketingSpecialist);
+        let prompt = flattened(&definition.system_prompt);
+        for needle in [
+            "Catervas refuses a `Read`, `Grep` or `Glob` anywhere else",
+            "`docs/catervas/product/`",
+        ] {
+            assert!(prompt.contains(needle), "{needle}: {prompt}");
+        }
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("roles/marketing_specialist");
+        let mut skills = Vec::new();
+        for entry in std::fs::read_dir(root.join("skills")).expect("the skills folder") {
+            let file = entry.expect("an entry").path().join("SKILL.md");
+            skills.push((
+                file.clone(),
+                std::fs::read_to_string(&file).expect("a skill"),
+            ));
+        }
+        assert!(!skills.is_empty());
+        let mut texts: Vec<(std::path::PathBuf, String)> = skills.clone();
+        for name in ["system.md", "role.yaml"] {
+            let file = root.join(name);
+            texts.push((
+                file.clone(),
+                std::fs::read_to_string(&file).expect("a file"),
+            ));
+        }
+        for (file, text) in &texts {
+            let text = flattened(text);
+            for gone in ["CHANGELOG.md", "in the project"] {
+                assert!(!text.contains(gone), "{} holds {gone}", file.display());
+            }
+        }
+        for (file, text) in &skills {
+            let text = flattened(text);
+            for gone in ["the README", "README,"] {
+                assert!(!text.contains(gone), "{} holds {gone}", file.display());
+            }
+        }
+        let ships = definition
+            .skills
+            .iter()
+            .find(|skill| skill.name == "marketing-what-ships")
+            .expect("the skill");
+        assert!(flattened(&ships.body).contains("`docs/catervas/product/`"));
+        let contracts = loaded(Role::ProductManager);
+        let contracts = contracts
+            .skills
+            .iter()
+            .find(|skill| skill.name == "writing-task-contracts")
+            .expect("the skill");
+        assert!(
+            flattened(&contracts.body).contains(
+                "A Marketing Specialist's task names paths under docs/catervas/marketing/ alone: it reads only that folder and docs/catervas/product/, so it cannot change any other file."
+            ),
+            "{}",
+            contracts.body
+        );
+    }
+
+    /// `CHANGELOG.md` is the Product Manager's (step 02): filed as a docs task at each sprint
+    /// review.
+    #[test]
+    fn the_product_manager_keeps_the_changelog() {
+        let definition = loaded(Role::ProductManager);
+        let sentence = "At each sprint review, file a docs task of yours whose `allowed_paths` name `CHANGELOG.md`";
+        assert!(
+            flattened(&definition.system_prompt).contains(sentence),
+            "{}",
+            definition.system_prompt
+        );
+        let kit = load_kit(Role::ProductManager).expect("the Product Manager's kit");
+        let release = kit
+            .skills
+            .iter()
+            .find(|skill| skill.name == "scoping-a-release")
+            .expect("the skill");
+        let release = &release.session_files["SKILL.md"];
+        assert!(flattened(release).contains(sentence), "{release}");
+    }
+
     /// `text` with every run of whitespace made one space.
     fn flattened(text: &str) -> String {
         text.split_whitespace().collect::<Vec<_>>().join(" ")

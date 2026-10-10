@@ -55,7 +55,8 @@ The team's rules and the criterion library are in this prompt; call `catervas_re
 - **Keep other roles off the owners' folders**: While a role that owns a folder under
   docs/catervas/ has an active agent, another role's task names no path that could reach that
   folder (not docs/**, docs/catervas/**, docs, ** or **/*.md); name the folder it needs, such as
-  docs/adr/** or src/**/*.rs.
+  docs/adr/** or src/**/*.rs. A Marketing Specialist's task names paths under docs/catervas/marketing/
+  alone: it reads only that folder and docs/catervas/product/, so it cannot change any other file.
 - **Exit criteria**: see below.
 - **Assignee role and reviewer role**: a Developer's task is reviewed by an active Architect when
   the team has one, else by another active Developer, which needs two active Developers; a

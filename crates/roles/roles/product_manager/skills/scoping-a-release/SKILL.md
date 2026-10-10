@@ -29,3 +29,5 @@ written down comes back as an argument.
 
 Write the release notes from accepted tasks only, in the user's words: what changed for them. Do
 not list work that is still open or was sent back. The notes belong in your folder, `docs/catervas/product/`. Write them in a docs task of yours, `spec.md` and `spec.agent.md` (or the notes) changed and committed together.
+
+At each sprint review, file a docs task of yours whose `allowed_paths` name `CHANGELOG.md`; in it, add what the sprint's accepted tasks changed, in the user's words. The Marketing Specialist writes the customer-facing release notes from your roadmap and sprint reports.

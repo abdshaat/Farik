@@ -130,7 +130,7 @@ Text, exactly where it is quoted:
 - `the_product_manager_keeps_the_changelog` (`lib.rs`) — the Product Manager's prompt and `scoping-a-release` each hold "At each sprint review, file a docs task of yours whose `allowed_paths` name `CHANGELOG.md`". RED: neither names it.
 - `kit_skills_name_only_tools_catervas_lists` (`crates/runtime/src/daemon/team.rs:5354`) holds unchanged.
 
-- [ ] `feat(roles): tell the Marketing Specialist where it reads, and give the changelog to the Product Manager`
+- [x] `feat(roles): tell the Marketing Specialist where it reads, and give the changelog to the Product Manager`
 
 ### Task 5: Spec
 
