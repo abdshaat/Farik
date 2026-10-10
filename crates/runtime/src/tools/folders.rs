@@ -118,7 +118,8 @@ fn next_by(policy: Integration, branch: &str, into: &str) -> String {
 
 /// Makes `files` (`(path, text)`) a folder change: the first number above the log's highest for
 /// which git has no branch `docs/folder-<n>`, here or on `origin`, and that branch from the
-/// integration branch with one commit by `author`. The caller holds the integration lock.
+/// integration branch with one commit by `author`, or by the person git knows when there is none.
+/// The caller holds the integration lock.
 ///
 /// # Errors
 ///
@@ -130,7 +131,7 @@ pub(crate) fn land(
     team: &Team,
     files: &[(String, String)],
     message: &str,
-    author: &str,
+    author: Option<&str>,
 ) -> Result<Option<Landed>, LandRefusal> {
     let words = |error: &dyn std::fmt::Display| LandRefusal::Git(error.to_string());
     let into = integration_branch(team, &deps.git).map_err(|error| words(&error))?;
@@ -163,7 +164,7 @@ pub(crate) fn land(
     };
     match deps
         .git
-        .commit_files(&branch, &into, files, message, Some(author))
+        .commit_files(&branch, &into, files, message, author)
         .map_err(|error| words(&error))?
     {
         CommitOutcome::Committed { sha } => Ok(Some(Landed {
@@ -330,7 +331,7 @@ pub(super) fn write_folder_doc(
     let files = [(path.clone(), checked.text.to_string())];
     let message = folder_doc_message(checked.folder, &[path], &name, false);
     let author = folder_doc_author(&name, call.agent_id());
-    let landed = match land(deps, &call.team, &files, &message, &author) {
+    let landed = match land(deps, &call.team, &files, &message, Some(&author)) {
         Ok(Some(landed)) => landed,
         Ok(None) => {
             return Err(refused(

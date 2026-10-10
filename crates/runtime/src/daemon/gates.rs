@@ -809,7 +809,7 @@ async fn post_picture(deps: &ToolDeps, params: &Value) -> Result<Value, Failure>
 }
 
 /// `work`, which reads and writes the store, run where it cannot hold up the daemon's worker.
-async fn off_the_worker<T: Send + 'static>(
+pub(super) async fn off_the_worker<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, Failure> + Send + 'static,
 ) -> Result<T, Failure> {
     tokio::task::spawn_blocking(work)

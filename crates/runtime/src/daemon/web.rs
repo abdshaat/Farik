@@ -679,6 +679,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         && !gates::METHODS.contains(&method)
         && !team::METHODS.contains(&method)
         && !templates::METHODS.contains(&method)
+        && !documents::METHODS.contains(&method)
     {
         return failure(
             &id,
@@ -718,6 +719,9 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         method if team::METHODS.contains(&method) => team::call(state, method, params).await,
         method if templates::METHODS.contains(&method) => {
             templates::call(state, method, params).await
+        }
+        method if documents::METHODS.contains(&method) => {
+            documents::call(state, method, params).await
         }
         "account.connect" if state.host().is_none() => team::connect(state, params).await,
         "query" => {

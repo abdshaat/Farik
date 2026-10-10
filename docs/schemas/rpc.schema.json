@@ -522,6 +522,9 @@
           "$ref": "#/$defs/contractSaveRequest"
         },
         {
+          "$ref": "#/$defs/filesSaveRequest"
+        },
+        {
           "$ref": "#/$defs/teamSaveRequest"
         },
         {
@@ -2494,6 +2497,38 @@
             }
           }
         }
+      }
+    },
+    "filesSaveRequest": {
+      "title": "Files Save Request",
+      "description": "The owner's edit of a document of a role's folder (docs/SPEC.md 5.17): base is the blob files.read answered for the document, so that an edit made on a version the team has since changed is refused. The text is committed on a branch of its own as a folder change, which the team's integration policy adds to the project as it does an accepted task's branch. Refused with -32005 and data.errors, each with path (a JSON pointer: /path, /text or /base), message and code, in this order: outside_folders, not_markdown, agent_twin, marketing_plan (/path), too_large (/text, over 262144 bytes), then file_changed (/base: the integration branch has no file there, or its blob is not base), file_busy (/path: the project's checkout has an uncommitted change to it), is_a_link (/path) and change_waiting (/path: an earlier change of the document is not added yet). Saved text the file already holds answers null for both and records nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "files.save" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "text", "base"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "text": { "type": "string" },
+            "base": { "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$" }
+          }
+        }
+      }
+    },
+    "filesSaveResult": {
+      "description": "The folder change the save made and its branch, both null when the document already said this and nothing was made.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change", "branch"],
+      "properties": {
+        "change": { "type": ["integer", "null"], "minimum": 1 },
+        "branch": { "type": ["string", "null"] }
       }
     },
     "filesTreeQuery": {

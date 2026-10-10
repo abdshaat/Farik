@@ -605,7 +605,7 @@ impl Harness {
             &team,
             &[(path.to_string(), text.to_string())],
             "docs(delivery): cadence.md by Sol",
-            "Sol (Catervas) <catervas@localhost>",
+            Some("Sol (Catervas) <catervas@localhost>"),
         )
         .expect("the change is made")
         .expect("the files differ");

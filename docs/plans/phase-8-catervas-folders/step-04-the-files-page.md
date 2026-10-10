@@ -171,7 +171,7 @@ Files: `rpc.schema.json` (`filesSaveRequest { path, text, base }`, `base` 40 or 
 - `refuses_each_edit_the_owner_may_not_save` — each refusal by its code and its pointer (`/path`, `/text`, `/base`), nothing recorded and no branch made: `docs/catervas/../x.md`, `README.md` and `docs/catervas/delivery/x.md` on a team with no Scrum Master (`outside_folders`), `…/notes.txt`, `…/roadmap.agent.md`, `…/marketing/plans/MP-1.md` (`marketing_plan`), 262,145 bytes, a stale `base`, a deleted file (`file_changed`), `roadmap.md` changed uncommitted in the root checkout (`file_busy`), `docs/catervas` a link (`is_a_link`), and a second save of `overview.md` under `manual` while change 1 waits (`change_waiting`). RED.
 - `waits_for_an_integration_to_finish` — with `integration_lock` held by the test, a save on another thread is still running 300 ms in and has recorded nothing, as `waits_for_the_lock` (`tools/fixtures.rs:585`) checks a step for a mutex, and saves once the lock is let go. RED: no lock taken.
 
-- [ ] `feat(runtime): save the owner's edit as a folder change`
+- [x] `feat(runtime): save the owner's edit as a folder change`
 
 ### Task 8: The re-derive
 
