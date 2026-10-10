@@ -2847,6 +2847,30 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_refused_leave_is_answered_and_leaves_nothing_marked() {
+        let daemon = TestDaemon::new("rpc-leave-refused", |_| {});
+        daemon.state.set_command_handler(Arc::new(|_| {
+            Box::pin(async {
+                Err(crate::orchestrator::CommandError::Refused {
+                    reason: "a task is running".to_string(),
+                })
+            })
+        }));
+        let root = daemon.project.repo.path.clone();
+        let (handle, secret) = on_a_socket(&daemon.state, &root).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        let answer = call(&mut socket, 1, "project.leave", &json!({})).await;
+
+        assert_eq!(answer["error"]["code"], -32005, "{answer}");
+        assert_eq!(answer["error"]["message"], "a task is running", "{answer}");
+        assert_eq!(daemon.state.left(), None);
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn project_leave_needs_a_project() {
         let home = scratch("leave-setup");
         let (state, _) = in_setup(&home, "");
