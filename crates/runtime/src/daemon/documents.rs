@@ -943,6 +943,20 @@ mod tests {
             harness.project.events(&[EventKind::FolderDocEdited]).len(),
             1
         );
+
+        // A path with a `.` segment in it is saved as the path it names.
+        let dotted = save(
+            &harness,
+            "docs/catervas/architecture/./overview.md",
+            "the overview again\n",
+            &blob(&harness, OVERVIEW),
+        );
+        assert_eq!(dotted["result"]["change"], 2, "{dotted}");
+        let edited = harness.project.events(&[EventKind::FolderDocEdited]);
+        assert_eq!(
+            catervas_protocol::event::event_to_value(&edited[1])["body"]["path"],
+            OVERVIEW
+        );
     }
 
     /// The first error of `reply`: its code and its pointer.
