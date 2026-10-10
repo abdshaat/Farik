@@ -1929,7 +1929,11 @@ mod tests {
             prompt.contains("docs/catervas/design/ (UI/UX Designer)"),
             "{prompt}"
         );
-        assert!(!prompt.contains("docs/catervas/architecture/"), "{prompt}");
+        // The listing, not a skill's mention of the plans folder.
+        assert!(
+            !prompt.contains("docs/catervas/architecture/ (Architect)"),
+            "{prompt}"
+        );
     }
 
     #[test]
