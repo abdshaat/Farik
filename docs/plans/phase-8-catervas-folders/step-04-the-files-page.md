@@ -111,7 +111,7 @@ Files: `crates/core/src/folders.rs` (items and `mod tests`). Consumes: `normalis
 - `a_twin_is_stale_when_its_document_moved_past_it` — equal shas: not stale; different shas with 0 commits of the document's not in the twin's: not stale; with 1: stale. RED.
 - `says_which_twins_are_stale` — `stale_line(&[])` is `None`; for `[docs/catervas/product/roadmap.agent.md]` it is exactly the Decisions' line. RED.
 
-- [ ] `feat(core): name, check and date the owner's documents`
+- [x] `feat(core): name, check and date the owner's documents`
 
 ### Task 2: A stale twin may change alone
 

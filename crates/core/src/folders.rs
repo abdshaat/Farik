@@ -1,6 +1,7 @@
 //! The folder each role owns under `docs/catervas/`, and the documents in them that come as a pair
 //! (`docs/SPEC.md` section 5.17, ADR 0051). Pure: paths in, answers out.
 
+use crate::contract::TaskId;
 use crate::governor::paths::{PathRefusal, check_allowed_paths, normalise, stays_within};
 use crate::team::{Role, plain_role};
 
@@ -187,6 +188,172 @@ pub fn folder_doc_message(
         ""
     };
     format!("docs({scope}): {} by {agent_name}{owner}", names.join(", "))
+}
+
+/// The documents with a fixed name, in the order the Files page lists them. A step that adds a
+/// document adds its name here.
+pub const DOCUMENT_NAMES: [(&str, &str); 11] = [
+    ("docs/catervas/product/spec.md", "Product description"),
+    ("docs/catervas/product/roadmap.md", "Roadmap"),
+    ("docs/catervas/architecture/overview.md", "Overview"),
+    ("docs/catervas/architecture/features.md", "Features"),
+    ("docs/catervas/architecture/jobs.md", "Scheduled jobs"),
+    ("docs/catervas/architecture/structure.md", "Structure"),
+    ("docs/catervas/engineering/conventions.md", "Conventions"),
+    ("docs/catervas/engineering/workflow.md", "Workflow"),
+    ("docs/catervas/delivery/cadence.md", "Sprint rhythm"),
+    ("docs/catervas/marketing/brand/brand-kit.md", "Brand kit"),
+    ("docs/catervas/marketing/brand/persona.md", "Brand persona"),
+];
+
+/// A file stem or folder name as words: `-` and `_` as spaces, the first letter upper case.
+#[must_use]
+pub fn plain_name(stem: &str) -> String {
+    let spaced = stem.replace(['-', '_'], " ");
+    let mut chars = spaced.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
+/// What the Files page calls a document: its fixed name, "Plan: <title>" for a file directly in a
+/// folder's `plans/` whose stem `title_of` knows, else its file stem as [`plain_name`] has it.
+#[must_use]
+pub fn document_name(path: &str, title_of: &dyn Fn(&str) -> Option<String>) -> String {
+    let path = normalise(path).unwrap_or_else(|| path.to_string());
+    if let Some((_, name)) = DOCUMENT_NAMES.iter().find(|(known, _)| *known == path) {
+        return (*name).to_string();
+    }
+    let file = path.rsplit('/').next().unwrap_or(&path);
+    let stem = file.strip_suffix(".md").unwrap_or(file);
+    let in_plans = ROLE_FOLDERS
+        .iter()
+        .any(|(_, folder)| path == format!("{folder}/plans/{file}"));
+    if in_plans && let Some(title) = title_of(stem) {
+        return format!("Plan: {title}");
+    }
+    plain_name(stem)
+}
+
+/// The sort key of a document: its place in [`DOCUMENT_NAMES`], the others after, then its path.
+#[must_use]
+pub fn document_order(path: &str) -> (usize, String) {
+    let place = DOCUMENT_NAMES
+        .iter()
+        .position(|(known, _)| *known == path)
+        .unwrap_or(DOCUMENT_NAMES.len());
+    (place, path.to_string())
+}
+
+/// The most the owner may save in one document, in bytes.
+pub const OWNER_EDIT_LIMIT_BYTES: usize = 262_144;
+
+/// Why the owner may not save a document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnerEditRefusal {
+    /// The path climbs out, or is not under `docs/catervas/`.
+    OutsideFolders,
+    /// The path is not a `.md` file.
+    NotMarkdown,
+    /// The path is an `.agent.md` twin, which the team writes.
+    AgentTwin,
+    /// The path is a marketing plan, which changes through a new version on its page.
+    MarketingPlan,
+    /// The text is over [`OWNER_EDIT_LIMIT_BYTES`].
+    TooLarge,
+}
+
+impl OwnerEditRefusal {
+    /// The refusal's code on the wire.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::OutsideFolders => "outside_folders",
+            Self::NotMarkdown => "not_markdown",
+            Self::AgentTwin => "agent_twin",
+            Self::MarketingPlan => "marketing_plan",
+            Self::TooLarge => "too_large",
+        }
+    }
+}
+
+/// Holds the owner's edit of a document to a `.md` file under `docs/catervas/` that is not an
+/// `.agent.md` twin or a marketing plan, within [`OWNER_EDIT_LIMIT_BYTES`]. Whether a folder of
+/// an active role holds it is the caller's to check.
+///
+/// # Errors
+///
+/// The first [`OwnerEditRefusal`] that applies.
+pub fn check_owner_edit(path: &str, text_bytes: usize) -> Result<String, OwnerEditRefusal> {
+    let path = normalise(path)
+        .filter(|path| path.starts_with("docs/catervas/"))
+        .ok_or(OwnerEditRefusal::OutsideFolders)?;
+    if path.strip_suffix(".md").is_none() {
+        return Err(OwnerEditRefusal::NotMarkdown);
+    }
+    if path.ends_with(TWIN_SUFFIX) {
+        return Err(OwnerEditRefusal::AgentTwin);
+    }
+    if is_human_document(&path) && !OWNER_ACCEPTED.contains(&path.as_str()) {
+        return Err(OwnerEditRefusal::MarketingPlan);
+    }
+    if text_bytes > OWNER_EDIT_LIMIT_BYTES {
+        return Err(OwnerEditRefusal::TooLarge);
+    }
+    Ok(path)
+}
+
+/// What a commit's subject names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Named {
+    /// A task, as `CTV-<n>`.
+    Task(TaskId),
+    /// A folder change, as `folder-<n>` or `Folder change <n>`.
+    FolderChange(u64),
+}
+
+fn number_after<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix(prefix)?;
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    (end > 0).then(|| &rest[..end])
+}
+
+/// The first task or folder change a commit's subject names, in subject order; a name counts
+/// only at the start of a word.
+#[must_use]
+pub fn named_in_subject(subject: &str) -> Option<Named> {
+    subject
+        .char_indices()
+        .filter(|(i, _)| !subject[..*i].ends_with(char::is_alphanumeric))
+        .find_map(|(i, _)| {
+            let rest = &subject[i..];
+            if let Some(n) = number_after(rest, "CTV-") {
+                return format!("CTV-{n}").parse().ok().map(Named::Task);
+            }
+            let n =
+                number_after(rest, "folder-").or_else(|| number_after(rest, "Folder change "))?;
+            n.parse().ok().map(Named::FolderChange)
+        })
+}
+
+/// Whether a twin is behind its document: the document's last commit is neither the twin's last
+/// nor an ancestor of it (`human_commits_not_in_twin` is zero for an ancestor).
+#[must_use]
+pub fn twin_is_stale(human_last: &str, twin_last: &str, human_commits_not_in_twin: u32) -> bool {
+    human_last != twin_last && human_commits_not_in_twin > 0
+}
+
+/// The Team rules' line about stale twins, or nothing when none is.
+#[must_use]
+pub fn stale_line(stale_twins: &[String]) -> Option<String> {
+    (!stale_twins.is_empty()).then(|| {
+        format!(
+            "- stale twins: {}. Each is behind the document for people beside it, which the owner changed: read that document as well until the twin is brought up to date.",
+            stale_twins.join(", ")
+        )
+    })
 }
 
 /// What a role may read of the project (`docs/SPEC.md` section 5.6): everything, or only the
@@ -422,6 +589,10 @@ mod tests {
         is_human_document, pair_changed_alone, read_access, role_folder,
     };
     use super::{LineChange, ShownLine, changed_lines, may_change_an_owner_document};
+    use super::{
+        Named, OwnerEditRefusal, check_owner_edit, document_name, document_order, named_in_subject,
+        plain_name, stale_line, twin_is_stale,
+    };
     use crate::team::Role;
 
     const READ: &str = "Read any of them, and where a document has an .agent.md twin beside it, read the twin, which is written for agents.";
@@ -549,6 +720,165 @@ mod tests {
         assert_eq!(
             pair_changed_alone(&list(&[&spec, &roadmap_twin])),
             list(&[&spec, &roadmap_twin])
+        );
+    }
+
+    #[test]
+    fn names_the_known_documents_and_the_rest_plainly() {
+        let none = |_: &str| None;
+        let name = |path: &str| document_name(&format!("docs/catervas/{path}"), &none);
+        assert_eq!(name("product/spec.md"), "Product description");
+        assert_eq!(name("architecture/jobs.md"), "Scheduled jobs");
+        assert_eq!(name("marketing/brand/persona.md"), "Brand persona");
+        assert_eq!(name("delivery/cadence.md"), "Sprint rhythm");
+        assert_eq!(name("delivery/ceremony-notes.md"), "Ceremony notes");
+        assert_eq!(name("engineering/how_we_test.md"), "How we test");
+        assert_eq!(plain_name("product"), "Product");
+    }
+
+    #[test]
+    fn names_a_plan_by_its_title() {
+        let title_of = |stem: &str| match stem {
+            "CTV-12" => Some("pie pre-orders".to_string()),
+            "MP-3" => Some("Autumn at Corner Bakery".to_string()),
+            _ => None,
+        };
+        let name = |path: &str| document_name(&format!("docs/catervas/{path}"), &title_of);
+        assert_eq!(name("architecture/plans/CTV-12.md"), "Plan: pie pre-orders");
+        assert_eq!(
+            name("marketing/plans/MP-3.md"),
+            "Plan: Autumn at Corner Bakery"
+        );
+        assert_eq!(name("architecture/plans/CTV-99.md"), "CTV 99");
+        assert_eq!(name("architecture/plans/old/CTV-12.md"), "CTV 12");
+    }
+
+    #[test]
+    fn orders_the_known_documents_first() {
+        let mut paths = vec![
+            "docs/catervas/architecture/plans/CTV-9.md",
+            "docs/catervas/architecture/overview.md",
+            "docs/catervas/architecture/notes.md",
+            "docs/catervas/architecture/features.md",
+        ];
+        paths.sort_by_key(|path| document_order(path));
+        assert_eq!(
+            paths,
+            [
+                "docs/catervas/architecture/overview.md",
+                "docs/catervas/architecture/features.md",
+                "docs/catervas/architecture/notes.md",
+                "docs/catervas/architecture/plans/CTV-9.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn checks_the_owners_edit() {
+        let roadmap = "docs/catervas/product/roadmap.md";
+        assert_eq!(check_owner_edit(roadmap, 10), Ok(roadmap.to_string()));
+        assert_eq!(
+            check_owner_edit("./docs/catervas/product/roadmap.md", 10),
+            Ok(roadmap.to_string())
+        );
+        for outside in [
+            "docs/catervas/../../etc/x.md",
+            "/docs/catervas/x.md",
+            "docs/other/x.md",
+            "docs/Catervas/product/x.md",
+        ] {
+            assert_eq!(
+                check_owner_edit(outside, 10),
+                Err(OwnerEditRefusal::OutsideFolders),
+                "{outside}"
+            );
+        }
+        assert_eq!(
+            check_owner_edit("docs/catervas/product/notes.txt", 10),
+            Err(OwnerEditRefusal::NotMarkdown)
+        );
+        assert_eq!(
+            check_owner_edit("docs/catervas/product/roadmap.agent.md", 10),
+            Err(OwnerEditRefusal::AgentTwin)
+        );
+        assert_eq!(
+            check_owner_edit("docs/catervas/marketing/plans/MP-3.md", 10),
+            Err(OwnerEditRefusal::MarketingPlan)
+        );
+        assert!(check_owner_edit("docs/catervas/marketing/plans/notes.md", 10).is_ok());
+        assert_eq!(
+            check_owner_edit(roadmap, 262_145),
+            Err(OwnerEditRefusal::TooLarge)
+        );
+        assert!(check_owner_edit(roadmap, 262_144).is_ok());
+        let codes: Vec<&str> = [
+            OwnerEditRefusal::OutsideFolders,
+            OwnerEditRefusal::NotMarkdown,
+            OwnerEditRefusal::AgentTwin,
+            OwnerEditRefusal::MarketingPlan,
+            OwnerEditRefusal::TooLarge,
+        ]
+        .iter()
+        .map(|refusal| refusal.code())
+        .collect();
+        assert_eq!(
+            codes,
+            [
+                "outside_folders",
+                "not_markdown",
+                "agent_twin",
+                "marketing_plan",
+                "too_large"
+            ]
+        );
+    }
+
+    #[test]
+    fn finds_what_a_merge_subject_names() {
+        let task = |id: &str| Some(Named::Task(id.parse().expect("a task id")));
+        let change = |n| Some(Named::FolderChange(n));
+        assert_eq!(
+            named_in_subject("Merge CTV-12: Pie pre-orders"),
+            task("CTV-12")
+        );
+        assert_eq!(named_in_subject("CTV-7: Gift cards (#4)"), task("CTV-7"));
+        assert_eq!(
+            named_in_subject("Merge CTV-12: follow CTV-3"),
+            task("CTV-12")
+        );
+        assert_eq!(
+            named_in_subject("Merge docs/folder-3: product/roadmap.md"),
+            change(3)
+        );
+        assert_eq!(
+            named_in_subject("Folder change 4: product/spec.md (#9)"),
+            change(4)
+        );
+        assert_eq!(
+            named_in_subject("Merge pull request #4 from me/docs/folder-5"),
+            change(5)
+        );
+        assert_eq!(
+            named_in_subject("Merge docs/folder-3: architecture/plans/CTV-12.md"),
+            change(3)
+        );
+        assert_eq!(named_in_subject("docs(product): edit roadmap.md"), None);
+        assert_eq!(named_in_subject("folder-x and CTV-x"), None);
+    }
+
+    #[test]
+    fn a_twin_is_stale_when_its_document_moved_past_it() {
+        assert!(!twin_is_stale("a1", "a1", 3));
+        assert!(!twin_is_stale("a1", "b2", 0));
+        assert!(twin_is_stale("a1", "b2", 1));
+    }
+
+    #[test]
+    fn says_which_twins_are_stale() {
+        assert_eq!(stale_line(&[]), None);
+        assert_eq!(
+            stale_line(&["docs/catervas/product/roadmap.agent.md".to_string()]),
+            Some("- stale twins: docs/catervas/product/roadmap.agent.md. Each is behind the document for people beside it, which the owner changed: read that document as well until the twin is brought up to date.".to_string())
         );
     }
 
