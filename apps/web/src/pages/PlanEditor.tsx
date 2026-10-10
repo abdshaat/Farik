@@ -1,18 +1,11 @@
-import {
-	Button,
-	Choice,
-	Switch,
-	TextArea,
-	TextField,
-	uiStrings,
-} from "@catervas/ui";
+import { Button, Choice, TextArea, TextField, uiStrings } from "@catervas/ui";
 import { type ReactNode, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
-import { useAdvanced } from "../app/advanced.ts";
 import { useConnection } from "../app/connection.tsx";
 import { daemonSaid } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { active, sentence } from "../app/words.ts";
+import { ShowAdvanced } from "../components/ShowAdvanced.tsx";
 import { t } from "../strings/t.ts";
 import { Failed } from "./Failed.tsx";
 import own from "./PlanEditor.module.css";
@@ -114,7 +107,7 @@ function Editor({
 	reread: () => void;
 }) {
 	const { client } = useConnection();
-	const [advanced, setAdvanced] = useAdvanced();
+	const [advanced, setAdvanced] = useState(false);
 	// `base` is the plan the draft was last brought up to date with.
 	const [base, setBase] = useState(contract);
 	const [draft, setDraft] = useState(contract);
@@ -252,12 +245,7 @@ function Editor({
 				</h1>
 				<p className={styles.muted}>{id}</p>
 			</div>
-			<Switch
-				id="plan-advanced"
-				label={t("editAdvanced")}
-				checked={advanced}
-				onChange={setAdvanced}
-			/>
+			<ShowAdvanced open={advanced} onToggle={() => setAdvanced(!advanced)} />
 			{OVER.includes(contract.status) ? null : OPEN.includes(
 					contract.status,
 				) ? (

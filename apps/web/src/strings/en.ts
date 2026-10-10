@@ -596,7 +596,6 @@ export const en = {
 	planAskSend: "Send it back",
 	editTitle: "Edit the plan for {title}",
 	editBack: "Back to the plan",
-	editAdvanced: "Advanced view",
 	lockOpen: "{pm} can still change this plan",
 	lockOpenHint: "Lock it so that only you change it.",
 	lockButton: "Lock the plan",

@@ -391,7 +391,7 @@ describe("plan editor", () => {
 
 	it("saves_in_place_while_refining", async () => {
 		const { s } = await opened({ ...CONTRACT, status: "refining" });
-		// Without Advanced, no check can become a command Catervas runs.
+		// Without the advanced settings, no check can become a command Catervas runs.
 		expect(
 			await screen.findAllByRole("radio", { name: en.criterionReview }),
 		).not.toHaveLength(0);
@@ -414,5 +414,22 @@ describe("plan editor", () => {
 		).toEqual({ max_cost_usd: 20 });
 		await s.reply(save, { saved: true, back_to_refining: false });
 		expect((await screen.findByRole("status")).textContent).toBe(en.saved);
+	});
+
+	it("shows_the_plan's_advanced_fields_in_place_when_asked", async () => {
+		await opened({ ...CONTRACT, status: "refining" });
+		await screen.findAllByRole("radio", { name: en.criterionReview });
+		expect(
+			screen.queryByRole("radio", { name: en.criterionCommand }),
+		).toBeNull();
+		expect(screen.queryByRole("group", { name: en.fieldRisk })).toBeNull();
+		expect(screen.queryByRole("switch", { name: /advanced/i })).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
+		expect(
+			screen.getAllByRole("radio", { name: en.criterionCommand }).length,
+		).toBeGreaterThan(0);
+		expect(screen.getByRole("group", { name: en.fieldRisk })).toBeTruthy();
+		expect(screen.getByRole("button", { name: en.advancedHide })).toBeTruthy();
 	});
 });

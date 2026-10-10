@@ -93,7 +93,7 @@ Tests:
 - Any existing plan-editor test that turned `plan-advanced` on presses the button instead.
 - No file under `apps/web/src` names `useAdvanced`, and only `keeps_advanced_settings_to_their_own_section` names `catervas.advanced` (`grep -rn "useAdvanced\|catervas.advanced" apps/web/src` prints that one line).
 
-- [ ] `feat(web): open a plan's advanced fields with a button`
+- [x] `feat(web): open a plan's advanced fields with a button`
 
 ### Task 4: the spec and the design say so
 
