@@ -530,6 +530,10 @@ mod tests {
         repo.git(&["branch", "docs/folder-3", "main"]);
         let third = write(&context, "docs/catervas/delivery/more.md", "m\n").expect("a third");
         assert_eq!(third["change"], 4);
+        // Nor is a number a branch on `origin` already has.
+        repo.git(&["update-ref", "refs/remotes/origin/docs/folder-5", "main"]);
+        let fourth = write(&context, "docs/catervas/delivery/last.md", "l\n").expect("a fourth");
+        assert_eq!(fourth["change"], 6);
     }
 
     #[test]

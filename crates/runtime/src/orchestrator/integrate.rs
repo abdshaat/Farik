@@ -2372,6 +2372,8 @@ mod tests {
 
         // The human's word tries again, once the owner's file is out of the way.
         std::fs::remove_file(harness.project.repo.path.join(CADENCE)).expect("removed");
+        // An escalated change no longer holds its path: the next write of it is change 2.
+        assert_eq!(harness.folder_change(CADENCE, "b\n"), 2);
         orchestrator
             .handle(Command::FolderChangeIntegrate { change: 1 })
             .await
