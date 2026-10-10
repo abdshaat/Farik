@@ -1,10 +1,10 @@
 # Standalone: agent page polish
 
-Status: draft
+Status: ready
 Branch: `fix/agent-page-polish` (work outside a phase, its own pull request to `main`)
 Spec: `docs/SPEC.md` section 6.7 (the "Service logos and info buttons" paragraph, 0.79), F9 (the agent page)
 Depends on: `docs/plans/standalone/agent-page-logos.md` (merged in #27)
-Readiness confirmed by: <name>, <date> (one round, against `docs/standards/workflow.md` stage 2)
+Readiness confirmed by: a fresh Opus 5.5 session, 2026-10-09 (one round, against `docs/standards/workflow.md` stage 2)
 
 ## Goal
 
@@ -12,15 +12,15 @@ The founder looked at the agent page after #27 and approved three fixes on 2026-
 
 ## Decisions
 
-- `Switch` gains `icon?: ReactNode`, rendered inside the label span (`${id}-label`) before the label's text. An `<img alt="">` there adds nothing to the switch's accessible name, which stays exactly `label`. Rejected: a wrapper outside the switch (today's layout, which puts the logo left of the track).
-- A skill row's description goes into an `InfoTip` placed right after the skill's name in the row head, id `skill-${r.level}-${r.name}-info` (a name is unique within its level, and the same name can be at two levels). A missing skill's line, "to review" and "replaced" stay visible: they are statuses.
+- `Switch` gains `icon?: ReactNode`, rendered inside the label span (`${id}-label`) before the label's text. An `<img alt="">` there adds nothing to the switch's accessible name, which stays exactly `label`. `.label` (`Switch.module.css`) becomes `display: inline-flex; align-items: center; gap: var(--farik-space-1)` so the icon does not touch the word. Rejected: a wrapper outside the switch (today's layout, which puts the logo left of the track).
+- A skill row's description goes into an `InfoTip` inside the name's existing `<span>` in the row head, after `<strong>{r.name}</strong>`, holding `visibly(r.description)`, id `skill-${r.level}-${r.name}-info` (a name is unique within its level, and the same name can be at two levels); the `<p>{visibly(r.description)}</p>` is removed. (`.rowHead` is `space-between`, so a sibling would land mid-row.) A missing row has no InfoTip. A missing skill's line, "to review" and "replaced" stay visible: they are statuses.
 - The kit row's `about` and its `InfoTip` sit in one inline span (`styles.muted`), the InfoTip after the text, so the ⓘ follows the last word wherever the line breaks. `.titled` keeps its flex wrap for logo, title and that span.
-- The spec paragraph's list of what sits behind ⓘ adds "each skill's description".
+- Spec revision 0.80 (2026-10-09), a sentence in the header at `docs/SPEC.md:3` as every revision has: each skill's description sits behind an info button, and Playwright's logo sits inside its switch's label. The 6.7 paragraph adds "each skill's description" to what sits behind ⓘ and is marked "changed in 0.80".
 
 ## File map
 
 ```
-packages/ui/src/Switch.tsx                      modifies: optional `icon`
+packages/ui/src/Switch.tsx, Switch.module.css   modifies: optional `icon`; `.label` spacing
 packages/ui/src/Switch.test.tsx                 tests:    the `icon` prop
 apps/web/src/pages/AgentEdit.tsx                modifies: Playwright's icon (Task 2), skill rows (Task 3), kit row span (Task 4)
 apps/web/src/pages/connectors.test.tsx          tests:    Playwright's logo (Task 2), the kit row's ⓘ beside its line (Task 4)
@@ -42,7 +42,7 @@ Switch: props & { icon?: ReactNode }   // inside `${id}-label`, before the label
 
 ### Task 1: `icon` on Switch
 
-Files: modified `packages/ui/src/Switch.tsx`, `Switch.test.tsx`
+Files: modified `packages/ui/src/Switch.tsx`, `Switch.module.css`, `Switch.test.tsx`
 
 Tests:
 
@@ -63,7 +63,7 @@ Tests:
 
 ### Task 3: skill descriptions behind ⓘ
 
-Files: modified `AgentEdit.tsx` (`SkillsSection` rows), `skills.test.tsx`, `docs/SPEC.md` 6.7
+Files: modified `AgentEdit.tsx` (`SkillsSection` rows), `skills.test.tsx`, `docs/SPEC.md` (header and 6.7)
 Consumes: `InfoTip`
 
 Tests:
