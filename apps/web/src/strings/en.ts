@@ -296,6 +296,8 @@ export const en = {
 		"When the team reaches the limit, everyone pauses and you get a message. They carry on the next day, or sooner if you raise the limit.",
 	spendAmount: "Limit per day, in US dollars",
 	spendAmountWrong: "Enter an amount above zero, such as 10.",
+	spendExample: "For example",
+	spendExampleStop: "At {limit}, everyone pauses and you get a message.",
 	spendFixed:
 		"Some limits are always on, whatever you choose. No agent works on one thing for more than 30 minutes at a time, and a piece of work sent back three times comes to you.",
 	firstDay:

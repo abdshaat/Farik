@@ -1269,6 +1269,34 @@ describe("team setup", () => {
 		);
 	});
 
+	it("shows_an_example_of_the_limit", async () => {
+		const { socket } = await renderApp("/setup/spending");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerStatus(s, false, 1, { setup_pending: true });
+		await screen.findByRole("heading", { name: en.spendTitle });
+		expect(screen.queryByText(en.spendExample)).toBeNull();
+		fireEvent.click(screen.getByRole("radio", { name: /^Stop the team/ }));
+		fireEvent.change(screen.getByLabelText(en.spendAmount), {
+			target: { value: "20" },
+		});
+		expect(
+			screen.getByText("Today the team has spent $12.80, of $20.00 a day."),
+		).toBeTruthy();
+		expect(
+			screen.getByText("At $20.00, everyone pauses and you get a message."),
+		).toBeTruthy();
+		const meter = document.querySelector("meter") as HTMLMeterElement;
+		expect(meter.value).toBeCloseTo(12.8);
+		expect(meter.max).toBe(20);
+		fireEvent.change(screen.getByLabelText(en.spendAmount), {
+			target: { value: "0" },
+		});
+		expect(screen.queryByText(en.spendExample)).toBeNull();
+		fireEvent.click(screen.getByRole("radio", { name: /^No limit/ }));
+		expect(screen.queryByText(en.spendExample)).toBeNull();
+	});
+
 	it("chooses_how_work_is_finished", async () => {
 		const { container, socket } = await renderApp("/setup/finish");
 		const s = socket as FakeSocket;

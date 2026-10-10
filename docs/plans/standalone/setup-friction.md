@@ -157,7 +157,7 @@ Files: modified `SetupSpending.tsx`, `setup.module.css`, `en.ts`, `team.test.tsx
 
 - `shows_an_example_of_the_limit` — with "Stop the team after a set amount each day" and 20, the page shows "Today the team has spent $12.80, of $20.00 a day." and "At $20.00, everyone pauses and you get a message.", and a `meter` with `value` 12.8 and `max` 20; with "No limit", or with 0, no example.
 
-- [ ] `feat(web): show an example of a daily limit`
+- [x] `feat(web): show an example of a daily limit`
 
 ### Task 9: advanced settings open in place on Finish
 

@@ -2,11 +2,15 @@ import { Button, Choice, TextField } from "@catervas/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { t } from "../../strings/t.ts";
+import { dollars as money } from "../Gate.tsx";
 import styles from "./setup.module.css";
 import { PutBack, type Team, useDefaults, useSetup } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
 type Limit = "none" | "daily";
+
+/** The share of the limit the example says the team has spent so far today. */
+const EXAMPLE_SPENT = 0.64;
 
 /**
  * The daily limit's one control, for setup and the Costs page: no limit, or a daily one (the
@@ -44,6 +48,24 @@ export function useDailyLimit(kept: number | undefined) {
 					]}
 				/>
 			</div>
+			{limit === "daily" && !wrong && (
+				<figure className={styles.example}>
+					<figcaption>{t("spendExample")}</figcaption>
+					<p id="limit-example-line">
+						{t("costsTodayOf", {
+							spent: money(dollars * EXAMPLE_SPENT),
+							limit: money(dollars),
+						})}
+					</p>
+					<meter
+						min={0}
+						max={dollars}
+						value={dollars * EXAMPLE_SPENT}
+						aria-labelledby="limit-example-line"
+					/>
+					<p>{t("spendExampleStop", { limit: money(dollars) })}</p>
+				</figure>
+			)}
 			{limit === "daily" && (
 				<div className={styles.form}>
 					<TextField
