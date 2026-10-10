@@ -96,7 +96,7 @@ Files: `folders.rs` (`may_change_an_owner_document`), `done.rs` (`result_needs_t
 - `leaves_a_task_that_may_change_the_product_plan_for_the_human` and `accepts_it_after_the_human` (`rules.rs`, integration, as `leaves_a_high_risk_task_for_the_human` and `accepts_a_high_risk_task_after_the_human` at `:3889` and `:3913` with `allowed_paths: [docs/catervas/product/**]` in place of `risk: high`): after the review the tick is idle with no acceptance session; after `HumanAccept` the Product Manager's session accepts it. RED: the Product Manager accepts it at once.
 - `lists_a_product_plan_task_for_the_owner_to_accept` (`waiting.rs`, beside `lists_a_result_once_its_review_passed` at `:1048`) — such a task whose review passed is listed `acceptance`; with `reports/**` it is not. RED.
 
-- [ ] `feat(core): let the owner accept a task that may change the product plan`
+- [x] `feat(core): let the owner accept a task that may change the product plan`
 
 ### Task 3: The query, the band and what moved
 

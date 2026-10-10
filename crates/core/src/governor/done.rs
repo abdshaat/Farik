@@ -3,7 +3,10 @@
 //! contract and the evidence gathered for it.
 
 use crate::contract::{ExitCriterion, TaskContract, TaskStatus, wire_method};
-use crate::folders::{agent_twin, human_of_twin, pair_changed_alone as pairs_changed_alone};
+use crate::folders::{
+    agent_twin, human_of_twin, may_change_an_owner_document,
+    pair_changed_alone as pairs_changed_alone,
+};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
 use crate::governor::paths::{
@@ -119,13 +122,21 @@ pub fn requires_human_acceptance(contract: &TaskContract) -> bool {
     contract.risk == Risk::High || contract.kind == Kind::Epic
 }
 
+/// Whether the human must accept the finished result: [`requires_human_acceptance`], or a task
+/// (not an epic) that may change the product's `spec.md` or `roadmap.md`, which the owner accepts
+/// (5.4 item 5, 5.7).
+#[must_use]
+pub fn result_needs_the_human(contract: &TaskContract) -> bool {
+    requires_human_acceptance(contract) || may_change_an_owner_document(&contract.allowed_paths)
+}
+
 /// Whether the task's result waits on the human's acceptance (5.4): it is `verifying`, and it is an
-/// epic, risk `high`, or has a `human` criterion. The status is the contract's, which the caller
+/// epic, risk `high`, may change the product plan, or has a `human` criterion. The status is the contract's, which the caller
 /// takes from the board.
 #[must_use]
 pub fn result_awaits_human(contract: &TaskContract) -> bool {
     contract.status == TaskStatus::Verifying
-        && (requires_human_acceptance(contract)
+        && (result_needs_the_human(contract)
             || contract
                 .exit_criteria
                 .iter()
@@ -424,13 +435,15 @@ fn design_review_passed(_: &TaskContract, evidence: &DoneEvidence) -> Option<Don
 }
 
 fn human_accepted(contract: &TaskContract, evidence: &DoneEvidence) -> Option<DoneFailure> {
-    if !requires_human_acceptance(contract) || evidence.human_accepted {
+    if !result_needs_the_human(contract) || evidence.human_accepted {
         return None;
     }
     let why = if contract.kind == Kind::Epic {
         "an epic"
-    } else {
+    } else if contract.risk == Risk::High {
         "a high risk task"
+    } else {
+        "a task that may change the product's spec or roadmap"
     };
     Some(failure(
         DoneRule::HumanAccepted,
@@ -444,9 +457,9 @@ mod tests {
 
     use super::{
         CriterionResult, DesignReviewNeed, DoneEvidence, DoneRule as R, RunBy, evaluate_done,
-        requires_human_acceptance,
+        requires_human_acceptance, result_awaits_human,
     };
-    use crate::contract::{ExitCriterion, Role, TaskContract, VerificationWire};
+    use crate::contract::{ExitCriterion, Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::CatervasTaskContractKind as Kind;
     use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
     use crate::governor::readiness::fixtures::a_contract;
@@ -532,6 +545,8 @@ mod tests {
             contract.assignee_role = role;
             contract.allowed_paths = vec!["**".to_string()];
             let mut evidence = an_evidence();
+            // `**` may change the product plan, which the owner accepts (5.4 item 5).
+            evidence.human_accepted = true;
             evidence.changed_paths = vec![
                 "src/login/form.rs".to_string(),
                 ".catervas/decisions/0001-x.md".to_string(),
@@ -758,12 +773,12 @@ mod tests {
     fn refuses_allowed_paths_that_do_not_compile() {
         let mut contract = a_contract();
         contract.allowed_paths = vec!["src/[".to_string()];
+        // A glob that does not compile fails closed: the owner accepts the task (5.4 item 5).
+        let mut evidence = an_evidence();
+        evidence.human_accepted = true;
+        assert_eq!(failed_rules(&contract, &evidence), [R::PathsWithinAllowed]);
         assert_eq!(
-            failed_rules(&contract, &an_evidence()),
-            [R::PathsWithinAllowed]
-        );
-        assert_eq!(
-            message_of(&contract, &an_evidence(), R::PathsWithinAllowed),
+            message_of(&contract, &evidence, R::PathsWithinAllowed),
             "the contract's allowed path src/[ is not a valid glob: unclosed character class; missing ']'"
         );
     }
@@ -860,6 +875,47 @@ mod tests {
         assert_eq!(
             message_of(&a_contract(), &evidence, R::ReviewNotePresent),
             "the reviewer wrote no review note mapping each criterion to its evidence"
+        );
+    }
+
+    #[test]
+    fn the_human_accepts_a_task_that_may_change_the_product_plan() {
+        let mut contract = a_contract();
+        contract.status = TaskStatus::Verifying;
+        contract.allowed_paths = vec!["docs/catervas/product/**".to_string()];
+        let mut evidence = an_evidence();
+        evidence.changed_paths = vec!["docs/catervas/product/notes.md".to_string()];
+        assert!(result_awaits_human(&contract));
+        assert!(!requires_human_acceptance(&contract));
+        assert_eq!(failed_rules(&contract, &evidence), [R::HumanAccepted]);
+        assert_eq!(
+            message_of(&contract, &evidence, R::HumanAccepted),
+            "a task that may change the product's spec or roadmap is accepted by the human, and the human has not accepted"
+        );
+        evidence.human_accepted = true;
+        assert_eq!(evaluate_done(&contract, &evidence), Ok(()));
+
+        contract.allowed_paths = vec!["docs/catervas/product/reports/**".to_string()];
+        let mut evidence = an_evidence();
+        evidence.changed_paths = vec!["docs/catervas/product/reports/q3.md".to_string()];
+        assert!(!result_awaits_human(&contract));
+        assert_eq!(evaluate_done(&contract, &evidence), Ok(()));
+
+        let mut epic = a_contract();
+        epic.status = TaskStatus::Verifying;
+        epic.kind = Kind::Epic;
+        epic.allowed_paths = vec!["docs/catervas/product/**".to_string()];
+        assert!(result_awaits_human(&epic));
+        assert_eq!(
+            message_of(&epic, &an_evidence(), R::HumanAccepted),
+            "an epic is accepted by the human, and the human has not accepted"
+        );
+        let mut risky = a_contract();
+        risky.risk = Risk::High;
+        risky.allowed_paths = vec!["docs/catervas/product/**".to_string()];
+        assert_eq!(
+            message_of(&risky, &an_evidence(), R::HumanAccepted),
+            "a high risk task is accepted by the human, and the human has not accepted"
         );
     }
 
@@ -968,6 +1024,8 @@ mod tests {
         contract.allowed_paths = vec!["docs/catervas/**".to_string()];
         let changed = |paths: &[&str]| {
             let mut evidence = an_evidence();
+            // `docs/catervas/**` may change the product plan, which the owner accepts.
+            evidence.human_accepted = true;
             evidence.changed_paths = paths.iter().map(|path| (*path).to_string()).collect();
             evidence
         };

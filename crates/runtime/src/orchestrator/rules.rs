@@ -3958,6 +3958,63 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_task_that_may_change_the_product_plan_for_the_human() {
+        let harness = Harness::new("orch-verify-product-plan", |_| {});
+        harness.verifying_with("CTV-1", true, true, |wire| {
+            wire["allowed_paths"] = json!(["done.txt", "docs/catervas/product/**"]);
+        });
+        let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the review runs");
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
+            }
+        );
+        assert_eq!(
+            sessions(&adapter),
+            vec![("dev-b".to_string(), SessionPurpose::Verify)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn accepts_it_after_the_human() {
+        let harness = Harness::new("orch-verify-product-plan-accepted", |_| {});
+        harness.verifying_with("CTV-1", true, true, |wire| {
+            wire["allowed_paths"] = json!(["done.txt", "docs/catervas/product/**"]);
+        });
+        let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the review runs");
+        orchestrator
+            .handle(catervas_protocol::command::Command::HumanAccept {
+                task_id: "CTV-1".parse().expect("a task id"),
+                subject: catervas_protocol::command::AcceptSubject::Result,
+                message: None,
+            })
+            .await
+            .expect("the human accepts the result");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            sessions(&adapter),
+            vec![
+                ("dev-b".to_string(), SessionPurpose::Verify),
+                ("pm".to_string(), SessionPurpose::Verify),
+            ]
+        );
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn leaves_a_task_with_a_human_criterion_for_the_human() {
         let harness = Harness::new("orch-verify-human-criterion", |_| {});
         harness.verifying_with("CTV-1", true, true, |wire| {

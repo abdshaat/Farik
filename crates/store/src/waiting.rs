@@ -1094,6 +1094,37 @@ mod tests {
     }
 
     #[test]
+    fn lists_a_product_plan_task_for_the_owner_to_accept() {
+        let board = Board::new("waiting-product-plan");
+        let people = (Some("linus"), Some("grace"));
+        board.file("CTV-1", "Reword the roadmap", |wire| {
+            wire["allowed_paths"] = json!(["docs/catervas/product/**"]);
+        });
+        board.moved(at(9, 1), "CTV-1", ("draft", "verifying"), "linus", people);
+        reviewed(&board, "CTV-1");
+        board.file("CTV-2", "Write a report", |wire| {
+            wire["allowed_paths"] = json!(["docs/catervas/product/reports/**"]);
+        });
+        board.moved(at(9, 2), "CTV-2", ("draft", "verifying"), "linus", people);
+        reviewed(&board, "CTV-2");
+
+        let listed = waiting(&board.projections, &board.log, &board.files, &a_team())
+            .expect("the store reads");
+        let seen: Vec<(&str, WaitingKind, &str)> = listed
+            .iter()
+            .map(|item| (item.task_id.as_str(), item.kind, item.line.as_str()))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![(
+                "CTV-1",
+                WaitingKind::Acceptance,
+                "Linus finished it and Grace reviewed it"
+            )]
+        );
+    }
+
+    #[test]
     fn lists_what_waits_on_the_human() {
         let board = Board::new("waiting-five");
         let people = (Some("linus"), Some("grace"));
