@@ -8,6 +8,7 @@ use std::sync::Arc;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
 use catervas_core::contract::{Role, TaskContract, TaskStatus};
+use catervas_core::folders::read_access;
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
 use catervas_core::governor::sites::{WebAccess, web_access};
@@ -162,6 +163,7 @@ pub(super) async fn run_session(
     deps.daemon.register_session(SessionRegistration {
         session_id: spec.session_id.clone(),
         web: web_access(role),
+        reads: read_access(role),
         agent_id: spec.agent_id.clone(),
         task_id: spec.task_id.clone(),
         purpose: ask.purpose,

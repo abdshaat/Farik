@@ -8089,6 +8089,114 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_a_marketing_session_held_to_its_read_paths() {
+        // The registration's `reads` is the agent's role: the hook judges the implement session of
+        // the Marketing Specialist's task by its two folders.
+        let harness = Harness::new(
+            "orch-marketing-reads",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        harness.file("CTV-1", "ready", |wire| {
+            wire["assignee_role"] = json!("marketing_specialist");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["allowed_paths"] = json!(["docs/catervas/marketing/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1",
+                "text": "The notes are written.",
+                "satisfies": ["R1"],
+                "verification": { "method": "artifact", "path": "docs/catervas/marketing/notes.md" }
+            }]);
+        });
+        let people = json!({ "assignee": "kai", "reviewer": "pm" });
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
+        harness.project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "kai", "assignee": "kai", "reviewer": "pm" }),
+        );
+        harness
+            .project
+            .deps
+            .git
+            .create_worktree(&harness.worktree("CTV-1"), &harness.branch("CTV-1"), "main")
+            .expect("the task's worktree is made");
+        let probe = Arc::new(HookProbe {
+            inner: harness.recorded(vec![reads_a_file()]),
+            daemon: Arc::clone(&harness.daemon),
+            calls: vec![
+                ("Read", json!({ "file_path": "README.md" })),
+                ("Grep", json!({ "pattern": "x" })),
+                (
+                    "Read",
+                    json!({ "file_path": "docs/catervas/product/spec.md" }),
+                ),
+            ],
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+
+        harness
+            .orchestrator(probe.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let seen = probe
+            .seen
+            .lock()
+            .expect("no test panics holding it")
+            .clone();
+        assert_eq!(seen.len(), 1, "one implement session: {seen:?}");
+        let verdicts: Vec<(&str, &str)> = seen[0]
+            .0
+            .iter()
+            .map(|(tool, verdict)| (tool.as_str(), verdict.as_str()))
+            .collect();
+        assert_eq!(
+            verdicts,
+            [
+                ("Read", "read_not_allowed"),
+                ("Grep", "read_not_allowed"),
+                ("Read", "allow"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_marketing_chat_is_held_too() {
+        let harness = Harness::new(
+            "orch-marketing-chat-reads",
+            crate::tools::fixtures::with_the_marketing_specialist,
+        );
+        chatted(&harness, "kai", "human", "What do we say at launch?", None);
+        let probe = Arc::new(HookProbe {
+            inner: harness.recorded(vec![chat_answers_with_a_request()]),
+            daemon: Arc::clone(&harness.daemon),
+            calls: vec![("Read", json!({ "file_path": "README.md" }))],
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+
+        harness
+            .orchestrator(probe.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let seen = probe
+            .seen
+            .lock()
+            .expect("no test panics holding it")
+            .clone();
+        assert_eq!(seen.len(), 1, "one chat session: {seen:?}");
+        assert_eq!(
+            seen[0].0,
+            [("Read".to_string(), "read_not_allowed".to_string())]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn answers_through_the_recorded_transcript() {
         let harness = Harness::new("orch-chat-transcript", |_| {});
         let asked = chatted(
@@ -8273,6 +8381,7 @@ mod tests {
         harness.daemon.register_session(SessionRegistration {
             session_id: session_id.clone(),
             web: catervas_core::governor::sites::WebAccess::Open,
+            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: agent.to_string(),
             task_id: None,
             purpose,

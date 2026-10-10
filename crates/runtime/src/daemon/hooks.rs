@@ -125,9 +125,10 @@ pub fn builtin_tool_tier(tool: &str) -> Option<PermissionTier> {
 /// session was not given (`tool_not_in_session`); a built-in's path
 /// outside the session's worktree (`path_outside_workspace`); whatever `evaluate_tool_call`
 /// refuses; the Designer's plan gate (`design_plan_not_approved`); a tool that changes the project
-/// in a session that is not an implement session about a task (`no_task_no_write`); and, for a
+/// in a session that is not an implement session about a task (`no_task_no_write`); for a
 /// session held to approved sites, a `WebFetch` of any other site
-/// (`site_not_approved`). A decision the log cannot record is a deny (`record_failed`). Only an allowed call
+/// (`site_not_approved`); and, for a session held to read paths, a read outside them
+/// (`read_not_allowed`). A decision the log cannot record is a deny (`record_failed`). Only an allowed call
 /// counts towards the limit, and the count is checked and raised under one lock, because Claude
 /// Code runs read tools in parallel.
 #[must_use]
@@ -349,24 +350,28 @@ fn judge_call(
             None => return Err(not_allowed(&request.tool_name)),
         },
     };
-    let allowed_paths = match &registration.task_id {
-        Some(task) => deps
-            .files
-            .read_contract(task)
-            .map_err(|error| format!("contract_unreadable: {error}"))?
+    let contract = match &registration.task_id {
+        Some(task) => Some(
+            deps.files
+                .read_contract(task)
+                .map_err(|error| format!("contract_unreadable: {error}"))?,
+        ),
+        None => None,
+    };
+    let allowed_paths = contract.as_ref().map_or_else(Vec::new, |contract| {
+        contract
             .allowed_paths
             .iter()
             .map(ToString::to_string)
-            .collect(),
-        None => Vec::new(),
-    };
+            .collect()
+    });
     evaluate_tool_call(
         &ToolCallRequest {
             tool: ToolDescriptor {
                 name: request.tool_name.clone(),
                 tier,
             },
-            paths,
+            paths: paths.clone(),
             input_hash: String::new(),
         },
         &AgentGrants {
@@ -398,7 +403,68 @@ fn judge_call(
     if registration.web == WebAccess::ApprovedSites && request.tool_name == FETCH_TOOL {
         judge_fetch(&request.tool_input, registration, deps)?;
     }
-    Ok(())
+    let assignee = contract
+        .as_ref()
+        .and_then(|contract| contract.assignee.as_deref());
+    judge_reads(request, registration, &paths, assignee)
+}
+
+/// A session held to read paths (5.6), last of all: the built-ins that name a path, as
+/// `workspace_paths` read them into `paths` (empty for none, or for the repository's root),
+/// must stay within them, a `Glob` as `<path>/<pattern>`; `catervas_exec` is refused, and the diff
+/// and the status of a task whose `assignee` is not the session's agent. A read in the skills'
+/// folder asks about no path and stays allowed.
+fn judge_reads(
+    request: &HookRequest,
+    registration: &SessionRegistration,
+    paths: &[String],
+    assignee: Option<&str>,
+) -> Result<(), String> {
+    use catervas_core::folders::ReadAccess;
+
+    if registration.reads == ReadAccess::Open {
+        return Ok(());
+    }
+    let held = registration.reads.named();
+    let tool = request.tool_name.as_str();
+    if let Some(name) = tool.strip_prefix(CATERVAS_PREFIX) {
+        return match name {
+            "catervas_exec" => Err(format!(
+                "read_not_allowed: catervas_exec runs commands that can read the whole repository, outside what you may read ({held})"
+            )),
+            "catervas_git_diff" | "catervas_git_status"
+                if registration.task_id.is_some()
+                    && assignee != Some(registration.agent_id.as_str()) =>
+            {
+                Err(format!(
+                    "read_not_allowed: {name} shows a task that is not yours, outside what you may read ({held})"
+                ))
+            }
+            _ => Ok(()),
+        };
+    }
+    if !matches!(tool, "Read" | "Grep" | "Glob" | "LS") || in_skill_folder(request, registration) {
+        return Ok(());
+    }
+    let Some(path) = paths.first() else {
+        return Err(format!(
+            "read_not_allowed: {tool} names no path, or the whole repository; name a path inside what you may read ({held})"
+        ));
+    };
+    let judged = match (
+        tool,
+        request.tool_input.get("pattern").and_then(Value::as_str),
+    ) {
+        ("Glob", Some(pattern)) => format!("{path}/{pattern}"),
+        _ => path.clone(),
+    };
+    if registration.reads.allows(&judged) {
+        Ok(())
+    } else {
+        Err(format!(
+            "read_not_allowed: {judged} is outside what you may read ({held})"
+        ))
+    }
 }
 
 /// How a session held to approved sites is told to get another: in the implement session of a
@@ -1531,6 +1597,7 @@ mod tests {
         daemon.state.register_session(SessionRegistration {
             session_id: session.to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
+            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             purpose,
@@ -1669,6 +1736,7 @@ mod tests {
         daemon.state.register_session(SessionRegistration {
             session_id: "session-folder".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
+            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("CTV-2".parse().expect("a task id")),
             purpose: crate::session::SessionPurpose::Implement,
@@ -1766,6 +1834,7 @@ mod tests {
         daemon.state.register_session(SessionRegistration {
             session_id: "session-procurement".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
+            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("CTV-2".parse().expect("a task id")),
             purpose: crate::session::SessionPurpose::Implement,
@@ -1932,6 +2001,7 @@ mod tests {
         daemon.state.register_session(SessionRegistration {
             session_id: "session-browser".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
+            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("CTV-1".parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
@@ -2075,6 +2145,7 @@ mod tests {
         daemon.state.register_session(SessionRegistration {
             session_id: session.to_string(),
             web: daemon.web_of(agent),
+            reads: daemon.reads_of(agent),
             agent_id: agent.to_string(),
             task_id: Some(task.parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
@@ -2482,6 +2553,7 @@ mod tests {
         daemon.state.register_session(SessionRegistration {
             session_id: session.to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
+            reads: catervas_core::folders::ReadAccess::Open,
             agent_id: "kai".to_string(),
             task_id: Some("CTV-1".parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
@@ -3869,6 +3941,318 @@ mod tests {
                 "{tool}: {}",
                 denial.reason
             );
+        }
+    }
+
+    const READABLE: &str = "docs/catervas/product/ and docs/catervas/marketing/";
+
+    /// The fixture's team with the Marketing Specialist `kai` and the Product Manager `pm`, in a
+    /// repository holding, committed before the worktree is made, the files `kai` is tried on,
+    /// and two links out of its folder.
+    fn with_readers(name: &str) -> TestDaemon {
+        use crate::tools::fixtures::with_the_marketing_specialist;
+
+        let daemon = TestDaemon::new(name, |repo| {
+            for (path, text) in [
+                ("docs/catervas/product/spec.md", "spec"),
+                ("docs/catervas/product/spec.agent.md", "spec for agents"),
+                ("docs/catervas/marketing/brand/brand-kit.md", "brand"),
+                ("docs/catervas/architecture/overview.md", "overview"),
+                ("README.md", "readme"),
+                ("src/main.rs", "fn main() {}"),
+            ] {
+                repo.write(path, text);
+            }
+            for (link, target) in [
+                ("docs/catervas/marketing/code", "../../../src"),
+                ("docs/catervas/marketing/spec.md", "../product/spec.md"),
+            ] {
+                std::os::unix::fs::symlink(target, repo.path.join(link)).expect("a link is made");
+            }
+            repo.commit("docs: files to read");
+        });
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&a_team_of_three(with_the_marketing_specialist))
+            .expect("the team is written");
+        browsing(
+            &daemon,
+            "session-kai",
+            "kai",
+            Some("CTV-1"),
+            SessionPurpose::Implement,
+        );
+        daemon
+    }
+
+    /// `session`'s `tool` call with `input`.
+    fn decided(daemon: &TestDaemon, session: &str, tool: &str, input: &Value) -> HookDecision {
+        decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
+    }
+
+    /// `decision` is the denial `reason`, recorded as a `tool.denied` event carrying it.
+    fn refused_for(daemon: &TestDaemon, decision: &HookDecision, reason: &str) {
+        assert!(!decision.allow, "{decision:?}");
+        assert_eq!(decision.reason, reason);
+        let denied = daemon.events(EventKind::ToolDenied);
+        let EventBody::ToolDenied(body) = &denied.last().expect("a denial is recorded").body else {
+            panic!("a tool.denied body");
+        };
+        assert_eq!(body.reason, reason);
+    }
+
+    fn outside_reads(path: &str) -> String {
+        format!("read_not_allowed: {path} is outside what you may read ({READABLE})")
+    }
+
+    fn names_no_path(tool: &str) -> String {
+        format!(
+            "read_not_allowed: {tool} names no path, or the whole repository; name a path inside what you may read ({READABLE})"
+        )
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_marketing_specialist_reads_only_its_two_folders() {
+        let daemon = with_readers("hook-reads-folders");
+        let read = |file: &str| {
+            decided(
+                &daemon,
+                "session-kai",
+                "Read",
+                &json!({ "file_path": file }),
+            )
+        };
+        for file in [
+            "docs/catervas/product/spec.md".to_string(),
+            "docs/catervas/product/spec.agent.md".to_string(),
+            "docs/catervas/marketing/brand/brand-kit.md".to_string(),
+            "docs/catervas/marketing/new.md".to_string(),
+            daemon.inside("docs/catervas/product/spec.md"),
+        ] {
+            let allowed = read(&file);
+            assert!(allowed.allow, "{file}: {allowed:?}");
+        }
+        for file in [
+            "src/main.rs".to_string(),
+            daemon.inside("src/main.rs"),
+            "docs/catervas/product/../../../src/main.rs".to_string(),
+        ] {
+            refused_for(&daemon, &read(&file), &outside_reads("src/main.rs"));
+        }
+        for file in ["README.md", "docs/catervas/architecture/overview.md"] {
+            refused_for(&daemon, &read(file), &outside_reads(file));
+        }
+        let after = read("docs/catervas/product/spec.md");
+        assert!(after.allow, "{after:?}");
+        assert_eq!(daemon.state.stop_reason("session-kai"), None);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_held_search_names_a_path_inside_the_folders() {
+        let daemon = with_readers("hook-reads-search");
+        let ask = |tool: &str, input: Value| decided(&daemon, "session-kai", tool, &input);
+        for (tool, input) in [
+            (
+                "Grep",
+                json!({ "pattern": "launch", "path": "docs/catervas/marketing" }),
+            ),
+            (
+                "Grep",
+                json!({ "pattern": "x", "path": "docs/catervas/product/spec.agent.md" }),
+            ),
+            (
+                "Glob",
+                json!({ "pattern": "**/*.md", "path": "docs/catervas/product" }),
+            ),
+            (
+                "Glob",
+                json!({ "pattern": "catervas/marketing/*.md", "path": "docs" }),
+            ),
+        ] {
+            let allowed = ask(tool, input.clone());
+            assert!(allowed.allow, "{tool} {input}: {allowed:?}");
+        }
+        for (tool, input) in [
+            ("Grep", json!({ "pattern": "x" })),
+            ("Grep", json!({ "pattern": "x", "path": "." })),
+            ("Glob", json!({ "pattern": "docs/catervas/product/*.md" })),
+            ("LS", json!({})),
+        ] {
+            refused_for(&daemon, &ask(tool, input), &names_no_path(tool));
+        }
+        for (tool, input, named) in [
+            ("Grep", json!({ "pattern": "x", "path": "src" }), "src"),
+            ("LS", json!({ "path": "src" }), "src"),
+            (
+                "Glob",
+                json!({ "pattern": "*/spec.md", "path": "docs/catervas" }),
+                "docs/catervas/*/spec.md",
+            ),
+            (
+                "Glob",
+                json!({ "pattern": "{product,architecture}/*.md", "path": "docs/catervas" }),
+                "docs/catervas/{product,architecture}/*.md",
+            ),
+            (
+                "Glob",
+                json!({ "pattern": "**/*.rs", "path": "docs" }),
+                "docs/**/*.rs",
+            ),
+        ] {
+            refused_for(&daemon, &ask(tool, input), &outside_reads(named));
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_link_out_of_a_folder_is_judged_where_it_points() {
+        let daemon = with_readers("hook-reads-links");
+        let ask = |tool: &str, input: Value| decided(&daemon, "session-kai", tool, &input);
+        refused_for(
+            &daemon,
+            &ask(
+                "Read",
+                json!({ "file_path": "docs/catervas/marketing/code/main.rs" }),
+            ),
+            &outside_reads("src/main.rs"),
+        );
+        refused_for(
+            &daemon,
+            &ask(
+                "Grep",
+                json!({ "pattern": "x", "path": "docs/catervas/marketing/code" }),
+            ),
+            &outside_reads("src"),
+        );
+        let allowed = ask(
+            "Read",
+            json!({ "file_path": "docs/catervas/marketing/spec.md" }),
+        );
+        assert!(allowed.allow, "{allowed:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_held_session_runs_no_command_and_diffs_only_its_own_task() {
+        use catervas_core::governor::permissions::PermissionTier;
+
+        let daemon = with_readers("hook-reads-commands");
+        daemon
+            .project
+            .filed_with("CTV-2", "in_progress", "task", None, |wire| {
+                wire["assignee"] = json!("kai");
+                wire["assignee_role"] = json!("marketing_specialist");
+                wire["reviewer_role"] = json!("product_manager");
+                wire["allowed_paths"] = json!(["docs/catervas/marketing/**"]);
+            });
+        browsing(
+            &daemon,
+            "session-kai-2",
+            "kai",
+            Some("CTV-2"),
+            SessionPurpose::Implement,
+        );
+        for session in ["session-kai", "session-kai-2"] {
+            daemon
+                .state
+                .sessions()
+                .get_mut(session)
+                .expect("registered")
+                .registration
+                .tiers
+                .push(PermissionTier::Execute);
+        }
+        let ask = |session: &str, tool: &str, input: Value| {
+            decided(&daemon, session, &format!("mcp__catervas__{tool}"), &input)
+        };
+        refused_for(
+            &daemon,
+            &ask(
+                "session-kai-2",
+                "catervas_exec",
+                json!({ "command": "cat README.md" }),
+            ),
+            &format!(
+                "read_not_allowed: catervas_exec runs commands that can read the whole repository, outside what you may read ({READABLE})"
+            ),
+        );
+        for tool in ["catervas_git_diff", "catervas_git_status"] {
+            let own = ask("session-kai-2", tool, json!({}));
+            assert!(own.allow, "{tool}: {own:?}");
+            refused_for(
+                &daemon,
+                &ask("session-kai", tool, json!({})),
+                &format!(
+                    "read_not_allowed: {tool} shows a task that is not yours, outside what you may read ({READABLE})"
+                ),
+            );
+        }
+        let theirs = decided(
+            &daemon,
+            DEV_SESSION,
+            "mcp__catervas__catervas_git_diff",
+            &json!({}),
+        );
+        assert!(theirs.allow, "{theirs:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_marketing_specialist_reads_its_skills() {
+        use catervas_core::folders::read_access;
+
+        let daemon = with_readers("hook-reads-skills");
+        let plugin = register_with_skills(
+            &daemon,
+            "session-skills",
+            &daemon.worktree,
+            SessionPurpose::Implement,
+            DEFAULT_SESSION_LIMITS,
+        );
+        daemon
+            .state
+            .sessions()
+            .get_mut("session-skills")
+            .expect("registered")
+            .registration
+            .reads = read_access(catervas_core::contract::Role::MarketingSpecialist);
+        let skill = plugin.join("skills/api-style");
+        for (tool, input) in [
+            (
+                "Read",
+                json!({ "file_path": skill.join("SKILL.md").display().to_string() }),
+            ),
+            (
+                "Grep",
+                json!({ "pattern": "x", "path": skill.display().to_string() }),
+            ),
+        ] {
+            let allowed = decided(&daemon, "session-skills", tool, &input);
+            assert!(allowed.allow, "{tool}: {allowed:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn other_roles_read_as_before() {
+        let daemon = with_readers("hook-reads-others");
+        daemon.register("session-pm", "pm", Some("CTV-1"), DEFAULT_SESSION_LIMITS);
+        for (session, tool, input) in [
+            (DEV_SESSION, "Read", json!({ "file_path": "src/main.rs" })),
+            (DEV_SESSION, "Grep", json!({ "pattern": "x" })),
+            (DEV_SESSION, "Glob", json!({ "pattern": "**/*.rs" })),
+            (
+                "session-pm",
+                "Read",
+                json!({ "file_path": "docs/catervas/marketing/brand/brand-kit.md" }),
+            ),
+        ] {
+            let allowed = decided(&daemon, session, tool, &input);
+            assert!(allowed.allow, "{session} {tool}: {allowed:?}");
         }
     }
 }

@@ -109,7 +109,7 @@ The hook tests use a daemon whose team has `kai`, the Marketing Specialist (`Tes
 - `starts_a_marketing_session_held_to_its_read_paths` (`orchestrator/rules.rs`) — as `starts_a_procurement_session_held_to_approved_sites` (`rules.rs:8029`) does for `proc`: a harness whose team has `kai` (`with_the_marketing_specialist`) and its task `in_progress`, allowed paths `docs/catervas/marketing/**`, reviewed by the Product Manager; the one implement session's `Read` of `README.md` and `Grep { pattern: "x" }` are `read_not_allowed` and its `Read` of `docs/catervas/product/spec.md` is `allow`. RED: `allow` for all three, the registration's `reads` being `Open`.
 - `a_marketing_chat_is_held_too` (`orchestrator/rules.rs`) — `kai`'s one-to-one chat (`chatted(&harness, "kai", "human", …)`, `rules.rs:7599`) starts a `chat` session whose `Read` of `README.md` is `read_not_allowed`. RED: `allow`.
 
-- [ ] `feat(runtime): hold the Marketing Specialist's reading to its two folders`
+- [x] `feat(runtime): hold the Marketing Specialist's reading to its two folders`
 
 ### Task 4: The Marketing Specialist is told where it reads, and the changelog is the Product Manager's
 
