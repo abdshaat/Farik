@@ -311,8 +311,36 @@ async fn drive(
         printer.io.interrupts = Interrupts::Channel(interrupts);
     }
     let code = finish(&project, driver, &mut printer, ended, presses).await;
-    Ok(match left {
+    Ok(driven(left, code))
+}
+
+/// How a drive ended: back to the wizard only for a leave that finished cleanly; any other code
+/// (Ctrl-C pressed during the leave, a failed finish) ends serve with it.
+fn driven(left: Option<PathBuf>, code: i32) -> Driven {
+    match left {
         Some(root) if code == 0 => Driven::Left(root),
         _ => Driven::Ended(code),
-    })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_clean_leave_goes_back_to_the_wizard() {
+        let left = Some(PathBuf::from("/old"));
+        assert!(matches!(driven(left, 0), Driven::Left(root) if root == Path::new("/old")));
+    }
+
+    #[test]
+    fn a_leave_that_finishes_with_a_code_ends_serve_with_it() {
+        let left = Some(PathBuf::from("/old"));
+        assert!(matches!(driven(left, 130), Driven::Ended(130)));
+    }
+
+    #[test]
+    fn no_leave_ends_serve_with_its_code() {
+        assert!(matches!(driven(None, 0), Driven::Ended(0)));
+    }
 }
