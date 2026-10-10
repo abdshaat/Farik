@@ -85,16 +85,17 @@ export function Shell() {
 					</p>
 					<nav aria-label={t("navRail")}>{places}</nav>
 					<div className={styles.foot}>
-						{name && (
-							<p
-								className={styles.project}
-								title={data.projectRoot ?? undefined}
-							>
-								{name}
-							</p>
-						)}
 						{data.projectRoot && (
-							<ChangeProject root={data.projectRoot} short />
+							<ChangeProject
+								root={data.projectRoot}
+								short
+								rowClass={styles.nameRow}
+								lead={
+									<p className={styles.project} title={data.projectRoot}>
+										{name}
+									</p>
+								}
+							/>
 						)}
 						<p className={styles.conn}>
 							<span
@@ -109,8 +110,18 @@ export function Shell() {
 				</header>
 			) : (
 				<header className={styles.top}>
-					<span>{name ?? t("brand")}</span>
-					{data.projectRoot && <ChangeProject root={data.projectRoot} short />}
+					<div className={styles.topGroup}>
+						{data.projectRoot ? (
+							<ChangeProject
+								root={data.projectRoot}
+								short
+								rowClass={styles.nameRow}
+								lead={<span>{name}</span>}
+							/>
+						) : (
+							<span>{t("brand")}</span>
+						)}
+					</div>
 					{pause}
 				</header>
 			)}

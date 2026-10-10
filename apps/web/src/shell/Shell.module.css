@@ -103,6 +103,23 @@ each place's twice, and one line of text. */
 	overflow-wrap: anywhere;
 }
 
+/* The name and its Change button on one row (the rail's foot, the top bar). */
+.nameRow {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--catervas-space-2);
+}
+
+.nameRow button {
+	padding-inline: var(--catervas-space-2);
+}
+
+/* A quiet button takes the band's ink, as the Pause button does, not the page's. */
+.foot button[data-kind="quiet"] {
+	color: inherit;
+}
+
 .conn {
 	display: flex;
 	gap: var(--catervas-space-2);
@@ -176,6 +193,12 @@ It holds the calm green under reduced motion. */
 	gap: var(--catervas-space-3);
 	padding: var(--catervas-space-3) var(--catervas-space-4);
 	border-bottom: 1px solid var(--catervas-color-rule);
+}
+
+.topGroup {
+	display: grid;
+	gap: var(--catervas-space-2);
+	min-width: 0;
 }
 
 .top .resume button {

@@ -1,5 +1,5 @@
 import { Button } from "@catervas/ui";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 import { saidAll } from "../app/refusals.ts";
 import { t } from "../strings/t.ts";
@@ -13,9 +13,14 @@ import styles from "./pages.module.css";
 export function ChangeProject({
 	root,
 	short = false,
+	lead,
+	rowClass,
 }: {
 	root: string;
 	short?: boolean;
+	/** The project's name, shown on one row with the trigger (the rail and the top bar). */
+	lead?: ReactNode;
+	rowClass?: string | undefined;
 }) {
 	const { client, reopen } = useConnection();
 	const [asking, setAsking] = useState(false);
@@ -33,26 +38,31 @@ export function ChangeProject({
 			setMoving(false);
 		}
 	};
-	if (!asking)
-		return (
-			<div>
-				<Button
-					kind={short ? "quiet" : "secondary"}
-					onClick={() => setAsking(true)}
-				>
-					{short ? (
-						<>
-							{t("changeShort")}{" "}
-							<span className={styles.hidden}>{t("projectWord")}</span>
-						</>
-					) : (
-						t("changeProject")
-					)}
-				</Button>
-			</div>
-		);
+	const trigger = (
+		<Button
+			kind={short ? "quiet" : "secondary"}
+			onClick={() => setAsking(true)}
+		>
+			{short ? (
+				<>
+					{t("changeShort")}{" "}
+					<span className={styles.hidden}>{t("projectWord")}</span>
+				</>
+			) : (
+				t("changeProject")
+			)}
+		</Button>
+	);
+	const row = (
+		<div className={rowClass}>
+			{lead}
+			{!asking && trigger}
+		</div>
+	);
+	if (!asking) return row;
 	return (
 		<>
+			{row}
 			<p>
 				{t("changeProjectConfirm").replace(
 					"{name}",

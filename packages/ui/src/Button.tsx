@@ -21,6 +21,7 @@ export function Button({
 		<button
 			type={type}
 			className={`${styles.button} ${styles[kind]}`}
+			data-kind={kind}
 			disabled={disabled || busy}
 			aria-busy={busy || undefined}
 			onClick={onClick}

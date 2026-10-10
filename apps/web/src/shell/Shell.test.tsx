@@ -202,13 +202,15 @@ describe("shell", () => {
 		const s = await openOnOldRepo();
 		const name = await screen.findByText("old-repo");
 		const change = screen.getByRole("button", { name: en.changeProjectYes });
+		// Beside: the name and the button share one row, and that row is directly above Connected.
+		const row = name.parentElement;
+		expect(row?.contains(change)).toBe(true);
 		expect(
 			name.compareDocumentPosition(change) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
-		expect(
-			change.compareDocumentPosition(screen.getByText(en.connected)) &
-				Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
+		expect(row?.nextElementSibling).toBe(
+			screen.getByText(en.connected).closest("p"),
+		);
 		fireEvent.click(change);
 		const sentence = en.changeProjectConfirm.replace("{name}", "old-repo");
 		expect(screen.getByText(sentence)).toBeTruthy();
@@ -235,11 +237,14 @@ describe("shell", () => {
 	it("changes_the_project_from_the_top_bar", async () => {
 		media.set(WIDE, false);
 		const s = await openOnOldRepo();
-		const top = (await screen.findByText("old-repo")).closest("header");
+		const name = await screen.findByText("old-repo");
+		const top = name.closest("header");
 		if (!top) throw new Error("no top bar");
-		fireEvent.click(
-			within(top).getByRole("button", { name: en.changeProjectYes }),
-		);
+		const trigger = within(top).getByRole("button", {
+			name: en.changeProjectYes,
+		});
+		expect(name.parentElement?.contains(trigger)).toBe(true);
+		fireEvent.click(trigger);
 		expect(
 			screen.getByText(en.changeProjectConfirm.replace("{name}", "old-repo")),
 		).toBeTruthy();
