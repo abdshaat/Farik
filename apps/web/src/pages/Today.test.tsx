@@ -83,7 +83,7 @@ const TEAM = {
 };
 const ACTIVITY = {
 	activity: [
-		{ agent_id: "mira", state: "working", line: "Writing the plan for FRK-2" },
+		{ agent_id: "mira", state: "working", line: "Writing the plan for CTV-2" },
 		{
 			agent_id: "ada",
 			state: "resting",
@@ -138,7 +138,7 @@ describe("today", () => {
 			within(mira as HTMLElement).getByTitle("Product Manager"),
 		).toBeTruthy();
 		expect(
-			within(mira as HTMLElement).getByText("Writing the plan for FRK-2"),
+			within(mira as HTMLElement).getByText("Writing the plan for CTV-2"),
 		).toBeTruthy();
 		expect(
 			within(ada as HTMLElement).getByText("Resting until 15:40 UTC"),
@@ -201,13 +201,13 @@ describe("today", () => {
 		});
 		fireEvent.click(screen.getByRole("button", { name: en.requestSend }));
 		await waitFor(() => expect(s.calls("request.file")).toHaveLength(3));
-		await s.reply(s.calls("request.file")[2] as never, { task_id: "FRK-3" });
-		// The request's own page asks for FRK-3.
+		await s.reply(s.calls("request.file")[2] as never, { task_id: "CTV-3" });
+		// The request's own page asks for CTV-3.
 		await waitFor(() =>
 			expect(
 				s.calls("query").find((q) => q.params.name === "contract.get")?.params
 					.params,
-			).toEqual({ task_id: "FRK-3" }),
+			).toEqual({ task_id: "CTV-3" }),
 		);
 	});
 
@@ -272,11 +272,11 @@ describe("today", () => {
 		});
 		const { container, s } = await today({
 			waiting: [
-				row("FRK-1", "approval", "gift cards", "mira"),
-				row("FRK-2", "acceptance", "the new checkout page", "theo"),
-				row("FRK-3", "question", "the launch post", "mira"),
-				row("FRK-4", "help", "the menu page", "theo"),
-				row("FRK-5", "integration", "the photos", "theo"),
+				row("CTV-1", "approval", "gift cards", "mira"),
+				row("CTV-2", "acceptance", "the new checkout page", "theo"),
+				row("CTV-3", "question", "the launch post", "mira"),
+				row("CTV-4", "help", "the menu page", "theo"),
+				row("CTV-5", "integration", "the photos", "theo"),
 			],
 		});
 		// A key that works adds no row.
@@ -296,21 +296,21 @@ describe("today", () => {
 				"approval",
 				"Approve the plan for gift cards",
 				"Review",
-				"/tasks/FRK-1/plan",
+				"/tasks/CTV-1/plan",
 			],
 			[
 				"acceptance",
 				"Accept the new checkout page",
 				"Review",
-				"/tasks/FRK-2/accept",
+				"/tasks/CTV-2/accept",
 			],
-			["question", "Mira has a question", "Answer", "/tasks/FRK-3/questions"],
-			["help", "Theo needs your help", "Help", "/tasks/FRK-4/help"],
+			["question", "Mira has a question", "Answer", "/tasks/CTV-3/questions"],
+			["help", "Theo needs your help", "Help", "/tasks/CTV-4/help"],
 			[
 				"integration",
 				"Add the photos to your project",
 				"Add",
-				"/tasks/FRK-5/accept",
+				"/tasks/CTV-5/accept",
 			],
 		] as const;
 		expected.forEach(([kind, title, word, route], i) => {
@@ -338,7 +338,7 @@ describe("today", () => {
 				.calls("query")
 				.filter((q) => q.params.name === "task.checks")
 				.map((q) => q.params.params),
-		).toEqual([{ task_id: "FRK-2" }]);
+		).toEqual([{ task_id: "CTV-2" }]);
 		// Once one check fails, the row no longer says they passed.
 		await eventArrives(s, 40);
 		const checks = () =>
@@ -362,14 +362,14 @@ describe("today", () => {
 		const { container } = await today({
 			waiting: [
 				{
-					task_id: "FRK-3",
+					task_id: "CTV-3",
 					kind: "question",
 					agent_id: "mira",
 					title: "the launch post",
 					line: "question line",
 				},
 				{
-					task_id: "FRK-9",
+					task_id: "CTV-9",
 					kind: "not_a_kind",
 					agent_id: "mira",
 					title: "something new",
@@ -397,7 +397,7 @@ describe("today", () => {
 		const { container } = await today({
 			waiting: [
 				{
-					task_id: "FRK-14",
+					task_id: "CTV-14",
 					kind: "tool_approval",
 					agent_id: "theo",
 					title: "Sold-out badge on the menu",
@@ -414,7 +414,7 @@ describe("today", () => {
 		expect(within(row).getByText("Theo wants to use github")).toBeTruthy();
 		expect(
 			within(row).getByText(
-				"To create issue, for FRK-14 Sold-out badge on the menu. Theo waits until you decide.",
+				"To create issue, for CTV-14 Sold-out badge on the menu. Theo waits until you decide.",
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
@@ -431,9 +431,9 @@ describe("today", () => {
 		).toBeTruthy();
 		expect(
 			within(dialog)
-				.getByRole("link", { name: "FRK-14 Sold-out badge on the menu" })
+				.getByRole("link", { name: "CTV-14 Sold-out badge on the menu" })
 				.getAttribute("href"),
-		).toBe("/tasks/FRK-14");
+		).toBe("/tasks/CTV-14");
 		await expectNoAxeViolations(container);
 	});
 
@@ -441,14 +441,14 @@ describe("today", () => {
 		const { container } = await today({
 			waiting: [
 				{
-					task_id: "FRK-22",
+					task_id: "CTV-22",
 					kind: "preview_missing",
 					agent_id: "iris",
 					title: "The Order again button",
 					line: "iris needs to know how to open your app",
 				},
 				{
-					task_id: "FRK-23",
+					task_id: "CTV-23",
 					kind: "designer_needs_sandbox",
 					agent_id: "iris",
 					title: "A bigger basket",
@@ -498,7 +498,7 @@ describe("today", () => {
 		const { container } = await today({
 			waiting: [
 				{
-					task_id: "FRK-24",
+					task_id: "CTV-24",
 					kind: "designer_needs_browser",
 					agent_id: "iris",
 					title: "A bigger basket",
@@ -653,7 +653,7 @@ describe("today", () => {
 	});
 	/** The row `waiting.list` gives while Kai's marketing plan waits on the owner. */
 	const PLAN_ROW = {
-		task_id: "FRK-31",
+		task_id: "CTV-31",
 		kind: "marketing_plan",
 		agent_id: "kai",
 		title: TITLE,
@@ -1052,7 +1052,7 @@ describe("a site the Procurement Specialist asks to read", () => {
 			within(plain as HTMLElement)
 				.getAllByRole("link")
 				.map((link) => link.getAttribute("href")),
-		).toEqual(["/tasks/FRK-31"]);
+		).toEqual(["/tasks/CTV-31"]);
 		expect(container.querySelector("a[href*='pieboxpros']")).toBeNull();
 		expect(
 			within(plain as HTMLElement).getByText(/The task waits until you decide/),
@@ -1176,7 +1176,7 @@ describe("a marketing plan's ads and their budget", () => {
 
 		// While the owner's raise is open, the row says so, and only "End the plan" is left.
 		cleanup();
-		const raising = await rowOf({ ...BUDGET_ROW, raising: "FRK-40" });
+		const raising = await rowOf({ ...BUDGET_ROW, raising: "CTV-40" });
 		expect(raising.row.textContent).toContain(
 			"Catervas paused it. You asked Kai for a new version with a raised budget. It waits for you here when it is ready.",
 		);
@@ -1314,13 +1314,13 @@ describe("a purchase order the Procurement Specialist suggests", () => {
 			}),
 		).toBeTruthy();
 		expect(row.textContent).toContain(
-			"For FRK-31 Find a supplier for 500 pie boxes.",
+			"For CTV-31 Find a supplier for 500 pie boxes.",
 		);
 		expect(
 			within(row)
-				.getByRole("link", { name: "FRK-31 Find a supplier for 500 pie boxes" })
+				.getByRole("link", { name: "CTV-31 Find a supplier for 500 pie boxes" })
 				.getAttribute("href"),
-		).toBe("/tasks/FRK-31");
+		).toBe("/tasks/CTV-31");
 		expect(within(row).getByRole("img", { name: "Ivo" })).toBeTruthy();
 
 		// Every line, with its amounts and their currency.
@@ -1613,7 +1613,7 @@ describe("the renewals coming up", () => {
 
 	it("lists_the_renewals_after_what_waits", async () => {
 		const question = {
-			task_id: "FRK-2",
+			task_id: "CTV-2",
 			kind: "question",
 			agent_id: "mira",
 			title: "Pie week",
@@ -1863,7 +1863,7 @@ describe("the renewals coming up", () => {
 			text: "Is Vercel still worth $20 a month? Cancel it if not.",
 		});
 		expect(s.calls("command")).toHaveLength(0);
-		await s.reply(filed as never, { task_id: "FRK-40" });
+		await s.reply(filed as never, { task_id: "CTV-40" });
 		const dismissed = await sentCommand(s);
 		expect(dismissed.params).toEqual({
 			command: { command: "renewal_dismiss", body: { renewal: 7 } },
@@ -1949,7 +1949,7 @@ describe("the renewals coming up", () => {
 			if (asked.length < 2) throw new Error("not filed again");
 			return asked[1];
 		});
-		await s.reply(second as never, { task_id: "FRK-41" });
+		await s.reply(second as never, { task_id: "CTV-41" });
 		const dismissed = await sentCommand(s);
 		await s.reply(dismissed, { said: "dismissed", events: [82] });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -1975,7 +1975,7 @@ describe("the renewals coming up", () => {
 			if (asked.length === 0) throw new Error("no request was filed");
 			return asked[0];
 		});
-		await s.reply(filed as never, { task_id: "FRK-42" });
+		await s.reply(filed as never, { task_id: "CTV-42" });
 		const first = await sentCommand(s);
 		await s.reply(first, {
 			error: { kind: "failed", detail: "the log could not be written" },

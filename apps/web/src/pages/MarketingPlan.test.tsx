@@ -190,8 +190,8 @@ describe("marketing plan page", () => {
 		])
 			expect(within(about).getByText(text)).toBeTruthy();
 		expect(
-			within(about).getByRole("link", { name: "FRK-31" }).getAttribute("href"),
-		).toBe("/tasks/FRK-31");
+			within(about).getByRole("link", { name: "CTV-31" }).getAttribute("href"),
+		).toBe("/tasks/CTV-31");
 
 		// Everything the agent wrote is text: its markup and its markdown are shown as typed.
 		const whole = screen.getByRole("region", {

@@ -1839,7 +1839,7 @@ mod tests {
             session_id: "s-exec".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             cwd: daemon.worktree.clone(),
             executor: Some(Arc::clone(&executor)),
             limits: DEFAULT_SESSION_LIMITS,
@@ -1860,7 +1860,7 @@ mod tests {
         assert_eq!(context.agent_id, "dev-a");
         assert_eq!(
             context.task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert_eq!(context.session_id, "s-exec");
         assert!(
@@ -1887,9 +1887,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn answers_a_command_on_the_daemon() {
         let harness = Harness::new("daemon-command", |_| {});
-        harness.file("FRK-1", "refining", |_| {});
+        harness.file("CTV-1", "refining", |_| {});
         let question = harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "question.asked",
             &json!({ "question": "Should done.txt be empty?", "asked_by": "pm" }),
         );
@@ -1967,7 +1967,7 @@ mod tests {
         };
         let fixture = GreenMail::start("door", &[&BUYING, &DANA]);
         let harness = Harness::with_procurement("daemon-send-door");
-        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.procurement_task("CTV-1", Some("in_progress"));
         let store = Arc::new(crate::connectors::MemoryConnectorSecrets::default());
         assert!(harness.daemon.set_connector_secrets(store.clone()));
         assert!(
@@ -2011,7 +2011,7 @@ mod tests {
                     project
                         .call(
                             "proc",
-                            Some("FRK-1"),
+                            Some("CTV-1"),
                             "catervas_draft_seller_message",
                             json!({ "seller": "Pie Box Pros", "to": DANA.address,
                                     "subject": "Quote", "body": "Please quote.",

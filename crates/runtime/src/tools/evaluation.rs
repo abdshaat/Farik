@@ -125,7 +125,7 @@ mod tests {
     };
 
     /// A project with the Finance Specialist `fin` and the Procurement Specialist `proc`, whose
-    /// task FRK-1 is in progress, a finance task FRK-2 and a Developer's task FRK-3.
+    /// task CTV-1 is in progress, a finance task CTV-2 and a Developer's task CTV-3.
     fn a_project(name: &str) -> TestProject {
         let project = TestProject::new(
             name,
@@ -135,8 +135,8 @@ mod tests {
             }),
         );
         for (task, role, assignee, reviewer) in [
-            ("FRK-1", "procurement_specialist", "proc", "pm"),
-            ("FRK-2", "finance_specialist", "fin", "pm"),
+            ("CTV-1", "procurement_specialist", "proc", "pm"),
+            ("CTV-2", "finance_specialist", "fin", "pm"),
         ] {
             project.filed_with(task, "assigned", "task", None, |wire| {
                 wire["assignee_role"] = json!(role);
@@ -149,9 +149,9 @@ mod tests {
                 &json!({ "assignee": assignee, "reviewer": reviewer }),
             );
         }
-        project.filed("FRK-3", "assigned", "task", None);
+        project.filed("CTV-3", "assigned", "task", None);
         project.moved(
-            "FRK-3",
+            "CTV-3",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -163,11 +163,11 @@ mod tests {
         project.repo.path.join(".catervas/local/procurement")
     }
 
-    /// `catervas_write_evaluation` as `proc` in its implement session of FRK-1.
+    /// `catervas_write_evaluation` as `proc` in its implement session of CTV-1.
     fn write(project: &TestProject, name: &str, text: &str) -> Result<Value, ToolError> {
         project.call(
             "proc",
-            Some("FRK-1"),
+            Some("CTV-1"),
             "catervas_write_evaluation",
             json!({ "name": name, "text": text }),
         )
@@ -266,7 +266,7 @@ mod tests {
             project
                 .call(
                     "proc",
-                    Some("FRK-1"),
+                    Some("CTV-1"),
                     "catervas_write_sheet",
                     workbook.clone(),
                 )
@@ -361,15 +361,15 @@ mod tests {
         for (who, context) in [
             (
                 "the Finance Specialist in its own task",
-                context("fin", Some("FRK-2"), SessionPurpose::Implement),
+                context("fin", Some("CTV-2"), SessionPurpose::Implement),
             ),
             (
                 "the Product Manager",
-                context("pm", Some("FRK-1"), SessionPurpose::Implement),
+                context("pm", Some("CTV-1"), SessionPurpose::Implement),
             ),
             (
                 "a Developer",
-                context("dev-a", Some("FRK-3"), SessionPurpose::Implement),
+                context("dev-a", Some("CTV-3"), SessionPurpose::Implement),
             ),
             (
                 "the Procurement Specialist in a chat, with no task",
@@ -377,7 +377,7 @@ mod tests {
             ),
             (
                 "the Procurement Specialist in a chat about its task",
-                context("proc", Some("FRK-1"), SessionPurpose::Chat),
+                context("proc", Some("CTV-1"), SessionPurpose::Chat),
             ),
             (
                 "the Procurement Specialist in a session about no task",
@@ -385,11 +385,11 @@ mod tests {
             ),
             (
                 "the Procurement Specialist in a task that is not its own",
-                context("proc", Some("FRK-3"), SessionPurpose::Implement),
+                context("proc", Some("CTV-3"), SessionPurpose::Implement),
             ),
             (
                 "the Procurement Specialist when it is a task's reviewer",
-                context("proc", Some("FRK-1"), SessionPurpose::Verify),
+                context("proc", Some("CTV-1"), SessionPurpose::Verify),
             ),
         ] {
             let reason = refusal_of(run(&context, "catervas_write_evaluation", input.clone()));

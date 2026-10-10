@@ -54,11 +54,11 @@ describe("Today, messages to sellers", () => {
 		const first = within(rows[0] as HTMLElement);
 		// The row says which task the message is for, and the task's title is a link to it.
 		const task = await first.findByRole("link", {
-			name: "FRK-31 Find a supplier for 500 pie boxes",
+			name: "CTV-31 Find a supplier for 500 pie boxes",
 		});
-		expect(task.getAttribute("href")).toBe("/tasks/FRK-31");
+		expect(task.getAttribute("href")).toBe("/tasks/CTV-31");
 		expect(task.parentElement?.textContent).toBe(
-			"For FRK-31 Find a supplier for 500 pie boxes.",
+			"For CTV-31 Find a supplier for 500 pie boxes.",
 		);
 		// Everything the agent wrote is text: the markup shows as typed, the hidden character is
 		// written out, and the body sits in a frame that says whose words it is.
@@ -357,7 +357,7 @@ describe("Today, replies from sellers", () => {
 			within(asking).getByRole("button", { name: "Send to the team" }),
 		);
 		await waitFor(() => expect(s.calls("request.file")).toHaveLength(1));
-		await s.reply(s.calls("request.file")[0] as never, { task_id: "FRK-40" });
+		await s.reply(s.calls("request.file")[0] as never, { task_id: "CTV-40" });
 		const dismissed = await sentCommand(s);
 		expect(dismissed.params).toEqual({
 			command: { command: "seller_reply_dismiss", body: { reply: 2 } },

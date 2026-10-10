@@ -38,7 +38,7 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "pattern": "^FRK-[0-9]{1,6}$"
+        "pattern": "^CTV-[0-9]{1,6}$"
       },
       "description": "The tasks this sprint holds, each once: planned into it, or joined to it because their epic is in it (docs/SPEC.md 5.11)."
     },

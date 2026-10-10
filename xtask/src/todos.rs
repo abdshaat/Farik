@@ -1,7 +1,7 @@
 const MARKERS: [&str; 2] = ["TODO", "FIXME"];
 const SELF: &str = "xtask/src/";
 
-/// Reports every `TODO` or `FIXME` that does not carry a task id `(FRK-<n>)`, an issue `(#<n>)`,
+/// Reports every `TODO` or `FIXME` that does not carry a task id `(CTV-<n>)`, an issue `(#<n>)`,
 /// or a link `(http...)`, as `path:line`, skipping the xtask sources that describe the rule.
 #[must_use]
 pub fn find_bare_todos(files: &[(String, String)]) -> Vec<String> {
@@ -45,7 +45,7 @@ fn has_reference(rest: &str) -> bool {
         return false;
     };
     let is_task = reference
-        .strip_prefix("FRK-")
+        .strip_prefix("CTV-")
         .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
     let is_issue = reference
         .strip_prefix('#')
@@ -80,8 +80,17 @@ mod tests {
 
     #[test]
     fn accepts_a_marker_that_carries_a_task_id() {
-        let text = format!("// {}(FRK-12) fix this\n", marker());
+        let text = format!("// {}(CTV-12) fix this\n", marker());
         assert!(find_bare_todos(&files(&[("a.rs", text)])).is_empty());
+    }
+
+    #[test]
+    fn reports_a_marker_that_carries_an_frk_id() {
+        let text = format!("// {}(FRK-1) fix this\n", marker());
+        assert_eq!(
+            find_bare_todos(&files(&[("a.rs", text)])),
+            vec!["a.rs:1".to_string()]
+        );
     }
 
     #[test]

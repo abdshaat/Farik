@@ -99,13 +99,13 @@ describe("a reply from a seller, read", () => {
 		) as HTMLTextAreaElement;
 		// The draft is the owner's words and quotes nothing the seller wrote.
 		expect(text.value).toBe(
-			"Compare the sellers’ replies for FRK-31 Find a supplier for 500 pie boxes, and tell me which offer is best.",
+			"Compare the sellers’ replies for CTV-31 Find a supplier for 500 pie boxes, and tell me which offer is best.",
 		);
 		fireEvent.click(
 			within(asking).getByRole("button", { name: "Send to the team" }),
 		);
 		await waitFor(() => expect(s.calls("request.file")).toHaveLength(1));
-		await s.reply(s.calls("request.file")[0] as never, { task_id: "FRK-40" });
+		await s.reply(s.calls("request.file")[0] as never, { task_id: "CTV-40" });
 		const dismissed = await sentCommand(s);
 		expect(dismissed.params).toEqual({
 			command: { command: "seller_reply_dismiss", body: { reply: 7 } },

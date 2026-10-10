@@ -417,7 +417,7 @@ mod tests {
                 .as_ref()
                 .map(|id| id.to_string())
                 .as_deref(),
-            Some("FRK-1")
+            Some("CTV-1")
         );
     }
 
@@ -515,7 +515,7 @@ mod tests {
             "{called}"
         );
         assert_ne!(called["result"]["isError"], json!(true), "{called}");
-        assert!(text_of(&called).contains("FRK-1"), "{called}");
+        assert!(text_of(&called).contains("CTV-1"), "{called}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -525,7 +525,7 @@ mod tests {
         daemon.register_with_tools(
             "session-triage",
             "pm",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
             &["catervas_triage_request"],
         );
@@ -565,7 +565,7 @@ mod tests {
             session_id: "session-iris".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "iris".to_string(),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             cwd: daemon.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
@@ -607,7 +607,7 @@ mod tests {
         let answer = client.call("catervas_read_board", json!({})).await;
         assert_ne!(answer["result"]["isError"], json!(true), "{answer}");
         let board: Value = serde_json::from_str(&text_of(&answer)).expect("the board is JSON");
-        assert!(board.to_string().contains("FRK-1"), "{board}");
+        assert!(board.to_string().contains("CTV-1"), "{board}");
     }
 
     #[tokio::test(flavor = "multi_thread")]

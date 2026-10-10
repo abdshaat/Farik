@@ -97,7 +97,7 @@ pub fn join_open_sprint(deps: &ToolDeps, task: &TaskId) -> Result<Option<Sprint>
 
 ### Task 5: Deploying the fix and resolving
 
-- `an_integrated_fix_gets_its_deploy_session`: step `deploy`, offered `catervas_deploy`; the call deploys the fix's integration sha with `deployment.started { incident: 412, holds: [FRK-31] }` and `approved_by: incident`. RED.
+- `an_integrated_fix_gets_its_deploy_session`: step `deploy`, offered `catervas_deploy`; the call deploys the fix's integration sha with `deployment.started { incident: 412, holds: [CTV-31] }` and `approved_by: incident`. RED.
 - `deploys_the_fix_once`: a second call is `incident_step_used`; `catervas_deploy` in the restart step is `deploy_refused`; nothing is asked. RED.
 - `a_healthy_fix_resolves_the_incident`: after its settling, `incident.resolved { how: deploy }` and the channel line. RED.
 - `a_failed_fix_waits_on_the_human`: `incidents.list` says so, and no further session starts. RED.
@@ -107,8 +107,8 @@ pub fn join_open_sprint(deps: &ToolDeps, task: &TaskId) -> Result<Option<Sprint>
 
 ### Task 6: The deploy task the fix covers
 
-- `a_fix_that_holds_its_work_settles_the_deploy_task`: FRK-20's deploy of `aaa…` failed; the fix's deploy of `ccc…`, a descendant of `aaa…`, succeeded: `Transitions::work` gives FRK-20 `settled: true` and the watch moves it to `verifying`. RED.
-- `a_fix_that_does_not_hold_it_leaves_it`: the fix's commit not descending from `aaa…` leaves FRK-20 `in_progress`. RED.
+- `a_fix_that_holds_its_work_settles_the_deploy_task`: CTV-20's deploy of `aaa…` failed; the fix's deploy of `ccc…`, a descendant of `aaa…`, succeeded: `Transitions::work` gives CTV-20 `settled: true` and the watch moves it to `verifying`. RED.
+- `a_fix_that_does_not_hold_it_leaves_it`: the fix's commit not descending from `aaa…` leaves CTV-20 `in_progress`. RED.
 
 - [ ] `feat(runtime): move a deploy task on when an incident's fix ships its work`
 

@@ -21,8 +21,8 @@ use serde_json::json;
 
 const COMMAND: &str = "sh run_tests.sh";
 
-/// The branch of FRK-1, a Software Developer's feature (5.14).
-const BRANCH: &str = "feature/FRK-1";
+/// The branch of CTV-1, a Software Developer's feature (5.14).
+const BRANCH: &str = "feature/CTV-1";
 
 /// `main` with the code and a runner for `tests/*.sh`, and the task's branch checked out from it.
 fn fixture(name: &str) -> TempRepo {
@@ -38,7 +38,7 @@ fn fixture(name: &str) -> TempRepo {
 }
 
 fn task() -> TaskId {
-    TaskId::try_from("FRK-1").expect("an id")
+    TaskId::try_from("CTV-1").expect("an id")
 }
 
 fn input<'a>(
@@ -57,13 +57,13 @@ fn input<'a>(
 }
 
 fn base_worktree(repository: &TempRepo) -> PathBuf {
-    repository.path.join(".catervas/local/worktrees/FRK-1-base")
+    repository.path.join(".catervas/local/worktrees/CTV-1-base")
 }
 
 fn assert_base_gone(repository: &TempRepo) {
     assert!(!base_worktree(repository).exists(), "the directory is gone");
     let listed = repository.git_output(&["worktree", "list"]);
-    assert!(!listed.contains("FRK-1-base"), "{listed}");
+    assert!(!listed.contains("CTV-1-base"), "{listed}");
 }
 
 /// Host sandboxes, counting the base ones asked for.

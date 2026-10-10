@@ -372,7 +372,7 @@ pub(crate) mod fixtures {
         pub(crate) fn records(&self, kind: &str, body: &Value) -> u64 {
             self.harness
                 .project
-                .record_by(Some("kai"), at(), "FRK-1", kind, body)
+                .record_by(Some("kai"), at(), "CTV-1", kind, body)
                 .envelope
                 .seq
         }
@@ -394,7 +394,7 @@ pub(crate) mod fixtures {
             allowed["approved_by"] = json!("owner");
             self.harness
                 .project
-                .record("FRK-1", "social_post.scheduled", &allowed);
+                .record("CTV-1", "social_post.scheduled", &allowed);
         }
 
         /// One tick of the rules that start no session.
@@ -888,8 +888,8 @@ mod tests {
         handing
             .harness
             .project
-            .plan_proposed("FRK-1", "MP-1", "2026-10-20", "2026-11-03");
-        handing.harness.project.plan_approved("FRK-1", "MP-1", "");
+            .plan_proposed("CTV-1", "MP-1", "2026-10-20", "2026-11-03");
+        handing.harness.project.plan_approved("CTV-1", "MP-1", "");
         // The plan's last day, in the evening in New York, which is already the next day in UTC.
         let post = handing.schedules("2026-11-03T20:00:00-05:00");
         handing.now("2026-11-04T00:00:00Z".parse().expect("a time"));
@@ -926,8 +926,8 @@ mod tests {
             { "key": "post-x", "channel": "instagram", "on": "2026-11-20", "topic": "Later" },
             { "key": "post-yt", "channel": "instagram", "on": "2026-11-21", "topic": "With Buffer" },
         ]);
-        project.record_by(Some("kai"), at(), "FRK-1", "marketing_plan.proposed", &plan);
-        project.plan_approved("FRK-1", "MP-1", "");
+        project.record_by(Some("kai"), at(), "CTV-1", "marketing_plan.proposed", &plan);
+        project.plan_approved("CTV-1", "MP-1", "");
         let post_for = |slot: &str, day: &str| {
             let mut body = handing.a_post(&format!("{day}T15:00:00Z"));
             body["slot"] = json!(slot);
@@ -975,8 +975,8 @@ mod tests {
         // day and keeps the ones before it; a plan that merely expires stops none.
         let other = Handing::new("hand-over-plan-replaced").await;
         let project = &other.harness.project;
-        project.record_by(Some("kai"), at(), "FRK-1", "marketing_plan.proposed", &plan);
-        project.plan_approved("FRK-1", "MP-1", "");
+        project.record_by(Some("kai"), at(), "CTV-1", "marketing_plan.proposed", &plan);
+        project.plan_approved("CTV-1", "MP-1", "");
         let mut newer = plan.clone();
         newer["plan"] = json!("MP-2");
         newer["starts_on"] = json!("2026-11-10");
@@ -985,11 +985,11 @@ mod tests {
         project.record_by(
             Some("kai"),
             at(),
-            "FRK-1",
+            "CTV-1",
             "marketing_plan.proposed",
             &newer,
         );
-        project.plan_approved("FRK-1", "MP-2", "");
+        project.plan_approved("CTV-1", "MP-2", "");
         let early = {
             let mut body = other.a_post("2026-11-05T15:00:00Z");
             body["slot"] = json!("post-1");
@@ -1022,8 +1022,8 @@ mod tests {
 
         let expiring = Handing::new("hand-over-plan-expired").await;
         let project = &expiring.harness.project;
-        project.record_by(Some("kai"), at(), "FRK-1", "marketing_plan.proposed", &plan);
-        project.plan_approved("FRK-1", "MP-1", "");
+        project.record_by(Some("kai"), at(), "CTV-1", "marketing_plan.proposed", &plan);
+        project.plan_approved("CTV-1", "MP-1", "");
         let waiting = {
             let mut body = expiring.a_post("2026-11-30T23:00:00-05:00");
             body["slot"] = json!("post-2");
@@ -1060,7 +1060,7 @@ mod tests {
         asked["approved_by"] = json!("owner");
         handing.harness.project.record_at(
             at() - Duration::minutes(15),
-            "FRK-1",
+            "CTV-1",
             "social_post.scheduled",
             &asked,
         );

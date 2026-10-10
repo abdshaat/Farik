@@ -802,7 +802,7 @@ mod tests {
     async fn refusals_by_state() {
         // No fixture mail is sent here: the mailbox is a settings file and a password.
         let harness = Harness::with_procurement("send-refusals");
-        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.procurement_task("CTV-1", Some("in_progress"));
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let send = |message: u64| {
             orchestrator.handle(Command::SellerMessageSend {
@@ -858,7 +858,7 @@ mod tests {
         harness.project.record_in(
             Some("proc"),
             Some("session-1"),
-            "FRK-1",
+            "CTV-1",
             "purchase_order.drafted",
             &order_body(12),
         );
@@ -944,7 +944,7 @@ mod tests {
             harness.project.record_in(
                 Some("proc"),
                 Some("session-1"),
-                "FRK-1",
+                "CTV-1",
                 "seller_message.drafted",
                 &json!({
                     "message": message, "seller": "Pie Box Pros", "to": DANA.address,
@@ -1020,13 +1020,13 @@ mod tests {
         assert_eq!(story.events(&[EventKind::SellerMessageSent]).len(), 1);
     }
 
-    /// Ivo's order PO-12 on FRK-1, with its workbook, and the message that goes with it; answers
+    /// Ivo's order PO-12 on CTV-1, with its workbook, and the message that goes with it; answers
     /// the message's number.
     fn an_order_with_its_message(story: &Story, order: u64) -> u64 {
         story.harness.project.record_in(
             Some("proc"),
             Some("session-1"),
-            "FRK-1",
+            "CTV-1",
             "purchase_order.drafted",
             &order_body(order),
         );
@@ -1085,7 +1085,7 @@ mod tests {
             assert_eq!((&ids.agent_id, &ids.session_id), (&None, &None));
             assert_eq!(
                 ids.task_id.as_ref().map(|task| task.as_str()),
-                Some("FRK-1")
+                Some("CTV-1")
             );
         }
         let EventBody::PurchaseOrderApproved(approved) = &events[0].body else {
@@ -1171,7 +1171,7 @@ mod tests {
             .expect_err("not this order's");
         assert!(reason(wrong).starts_with("seller_message_not_this_order: "));
         story.harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.rejected",
             &json!({ "order": 13, "note": "" }),
         );
@@ -1185,7 +1185,7 @@ mod tests {
         story
             .harness
             .project
-            .record("FRK-1", "purchase_order.expired", &json!({ "order": 14 }));
+            .record("CTV-1", "purchase_order.expired", &json!({ "order": 14 }));
         let expired = story
             .orchestrator()
             .handle(send_order(14, closed_by_time))
@@ -1328,7 +1328,7 @@ mod tests {
         assert_eq!(row["subject"], SUBJECT);
         assert_eq!(row["body"], BODY);
         assert_eq!(row["purpose"], "quote_request");
-        assert_eq!(row["task_id"], "FRK-1");
+        assert_eq!(row["task_id"], "CTV-1");
         assert_eq!(row["agent_id"], "proc");
         assert!(row.get("purchase_order").is_none() && row.get("sent_at").is_none());
         story.send(first, SUBJECT, BODY).await.expect("sent");
@@ -1372,7 +1372,7 @@ mod tests {
         assert_eq!(row["send"]["subject"], "Order PO-12");
         assert_eq!(row["send"]["body"], "Please find our order attached.");
         story.harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.rejected",
             &json!({ "order": 12, "note": "" }),
         );

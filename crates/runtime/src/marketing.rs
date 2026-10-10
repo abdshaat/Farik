@@ -841,10 +841,10 @@ mod tests {
             "plans-lock",
             crate::tools::fixtures::with_the_marketing_specialist,
         );
-        harness.in_progress("FRK-1", "kai", "pm");
+        harness.in_progress("CTV-1", "kai", "pm");
         harness
             .project
-            .plan_proposed("FRK-1", "MP-1", "2026-09-22", "2026-10-20");
+            .plan_proposed("CTV-1", "MP-1", "2026-09-22", "2026-10-20");
         let deps = Arc::clone(&harness.project.deps);
         let recorded = |kind| harness.project.events(&[kind]).len();
 
@@ -1171,7 +1171,7 @@ mod tests {
             .ids;
         assert_eq!(
             ids.task_id.as_ref().map(|task| task.to_string()).as_deref(),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert!(
             ids.agent_id.is_none() && ids.session_id.is_none(),

@@ -17,9 +17,9 @@ import {
 	renderApp,
 } from "../test/render-app.tsx";
 
-/** The editor for FRK-1, with the team and the plan answered. */
+/** The editor for CTV-1, with the team and the plan answered. */
 async function opened(contract: object = CONTRACT) {
-	const { container, socket } = await renderApp("/tasks/FRK-1/plan/edit");
+	const { container, socket } = await renderApp("/tasks/CTV-1/plan/edit");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", { team: TEAM });
@@ -85,7 +85,7 @@ describe("plan editor", () => {
 			task_id: string;
 			contract: { intent: string; exit_criteria: unknown[] };
 		};
-		expect(asked.task_id).toBe("FRK-1");
+		expect(asked.task_id).toBe("CTV-1");
 		expect(asked.contract.intent).toBe("Cus");
 		expect(asked.contract.exit_criteria).toHaveLength(2);
 		await tick(500);
@@ -121,7 +121,7 @@ describe("plan editor", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Lock the plan" }));
 		const lock = await sent(s);
 		expect(lock.params).toEqual({
-			command: { command: "contract_lock", body: { task_id: "FRK-1" } },
+			command: { command: "contract_lock", body: { task_id: "CTV-1" } },
 		});
 		await s.reply(lock, { said: "locked", events: [30] });
 		// The page reads the plan again, now locked.
@@ -137,7 +137,7 @@ describe("plan editor", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
 		const unlock = await sent(s, 2);
 		expect(unlock.params).toEqual({
-			command: { command: "contract_unlock", body: { task_id: "FRK-1" } },
+			command: { command: "contract_unlock", body: { task_id: "CTV-1" } },
 		});
 		await s.reply(unlock, { said: "unlocked", events: [31] });
 		await waitFor(() => expect(gets(s)).toHaveLength(3));
@@ -160,7 +160,7 @@ describe("plan editor", () => {
 			task_id: string;
 			contract: { intent: string; locked: boolean; budget: object };
 		};
-		expect(params.task_id).toBe("FRK-1");
+		expect(params.task_id).toBe("CTV-1");
 		expect(params.contract.intent).toBe(
 			"Customers can send a gift card to a friend by email.",
 		);
@@ -246,7 +246,7 @@ describe("plan editor", () => {
 			command: {
 				command: "task_transition",
 				body: {
-					task_id: "FRK-1",
+					task_id: "CTV-1",
 					to: "escalated",
 					reason: "Held by you to change the plan",
 				},

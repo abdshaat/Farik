@@ -22,7 +22,7 @@ export const SUMMARY =
 	"Customers will be able to buy a gift card, send it to a friend by email, and use it when they order.";
 /** A plan awaiting approval, as `contract.get` answers it. */
 export const CONTRACT = {
-	id: "FRK-1",
+	id: "CTV-1",
 	title: "Gift cards",
 	kind: "epic",
 	intent: "Customers can give a gift card to a friend and use it to pay.",

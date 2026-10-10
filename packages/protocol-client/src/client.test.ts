@@ -193,11 +193,11 @@ describe("client", () => {
 		ws.receive({
 			jsonrpc: "2.0",
 			id: 2,
-			result: { tasks: [{ task_id: "FRK-1", backlog: true }] },
+			result: { tasks: [{ task_id: "CTV-1", backlog: true }] },
 		});
 		expect(await summary).toEqual({ planInSprints: true, count: 2 });
 		expect(await listed).toEqual({
-			tasks: [{ taskId: "FRK-1", backlog: true }],
+			tasks: [{ taskId: "CTV-1", backlog: true }],
 		});
 	});
 });

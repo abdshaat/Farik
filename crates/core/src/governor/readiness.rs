@@ -996,7 +996,7 @@ mod tests {
 
     fn a_task_under(parent: ParentState) -> (TaskContract, ReadinessContext) {
         let mut contract = a_contract();
-        contract.parent = Some("FRK-3".parse().expect("a task id"));
+        contract.parent = Some("CTV-3".parse().expect("a task id"));
         let mut context = a_ready_context();
         context.parent = Some(parent);
         (contract, context)
@@ -1172,16 +1172,16 @@ mod tests {
     #[test]
     fn refuses_a_dependency_that_is_unknown_or_not_yet_ready() {
         let mut contract = a_contract();
-        contract.dependencies = vec!["FRK-2".parse().expect("a task id")];
+        contract.dependencies = vec!["CTV-2".parse().expect("a task id")];
         let mut context = a_ready_context();
         assert_eq!(failed_rules(&contract, &context), [R::DependenciesReady]);
         context
             .dependency_statuses
-            .insert("FRK-2".to_string(), TaskStatus::Refining);
+            .insert("CTV-2".to_string(), TaskStatus::Refining);
         assert_eq!(failed_rules(&contract, &context), [R::DependenciesReady]);
         context
             .dependency_statuses
-            .insert("FRK-2".to_string(), TaskStatus::Ready);
+            .insert("CTV-2".to_string(), TaskStatus::Ready);
         assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
     }
 
@@ -1735,7 +1735,7 @@ mod tests {
         // A parent epic is refused: an epic's paths cannot name `.catervas/`, so no task under one is
         // within the folder.
         let mut under_an_epic = a_finance_task(folder, the_books_criteria());
-        under_an_epic.parent = Some("FRK-3".parse().expect("a task id"));
+        under_an_epic.parent = Some("CTV-3".parse().expect("a task id"));
         let mut context = a_context_without_marketing();
         context.parent = Some(ParentState {
             status: TaskStatus::InProgress,
@@ -1748,7 +1748,7 @@ mod tests {
         );
         assert!(
             message_of(&under_an_epic, &context, R::PrivateFolderTask)
-                .contains("it has a parent epic, FRK-3"),
+                .contains("it has a parent epic, CTV-3"),
         );
     }
 

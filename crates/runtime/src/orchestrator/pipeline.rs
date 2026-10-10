@@ -146,7 +146,7 @@ mod tests {
     /// A reason of a good length.
     const REASON: &str = "The plain pages answer this question, so the team needs no more.";
 
-    /// A harness with the Procurement Specialist `proc`, whose FRK-1 waits for the owner.
+    /// A harness with the Procurement Specialist `proc`, whose CTV-1 waits for the owner.
     fn a_harness(name: &str) -> Harness {
         let harness = Harness::new(name, |wire| {
             wire["policy"]["wip_limit_per_agent"] = json!(2);
@@ -154,18 +154,18 @@ mod tests {
         });
         // The task waits for the owner: no rule has anything to do for it, and a request is
         // decided whatever its task has become.
-        harness.procurement_task("FRK-1", Some("escalated"));
+        harness.procurement_task("CTV-1", Some("escalated"));
         harness
     }
 
-    /// `proc`'s request for `name` on FRK-1, which costs money; answers its number.
+    /// `proc`'s request for `name` on CTV-1, which costs money; answers its number.
     fn requested(harness: &Harness, name: &str) -> u64 {
         harness
             .project
             .record_in(
                 Some("proc"),
                 Some("session-proc"),
-                "FRK-1",
+                "CTV-1",
                 "data_pipeline.requested",
                 &json!({
                     "name": name,
@@ -181,7 +181,7 @@ mod tests {
             .seq
     }
 
-    /// The (sessions, dollars) the cost projection holds for FRK-1.
+    /// The (sessions, dollars) the cost projection holds for CTV-1.
     fn spent_on_the_task(harness: &Harness) -> (u32, f64) {
         harness
             .project
@@ -190,7 +190,7 @@ mod tests {
             .costs(CostScope::Task)
             .expect("the costs read")
             .iter()
-            .find(|cost| cost.key == "FRK-1")
+            .find(|cost| cost.key == "CTV-1")
             .map_or((0, 0.0), |cost| (cost.sessions, cost.usd))
     }
 
@@ -224,7 +224,7 @@ mod tests {
         // A tick scoped to a task, or running the planning rules alone, decides nothing.
         for scope in [
             TickScope {
-                task_id: Some("FRK-1".parse().expect("a task id")),
+                task_id: Some("CTV-1".parse().expect("a task id")),
                 ..TickScope::default()
             },
             TickScope {
@@ -256,7 +256,7 @@ mod tests {
         let TickReport::Acted { task_id, what } = &report else {
             panic!("a request was decided: {report:?}");
         };
-        assert_eq!(task_id.as_str(), "FRK-1");
+        assert_eq!(task_id.as_str(), "CTV-1");
         assert!(
             what.contains("pm's data pipeline decision session"),
             "{what}"

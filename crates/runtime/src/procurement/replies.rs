@@ -754,7 +754,7 @@ mod tests {
         deliver(4);
         clock.set(at() + Duration::minutes(45));
         let scope = TickScope {
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             rules: TickRules::Refining,
         };
         orchestrator.tick_within(&scope).await.expect("a tick");
@@ -821,7 +821,7 @@ mod tests {
         let row = &listed["replies"][0];
         assert_eq!(row["reply"], 1);
         assert_eq!(row["message"], message);
-        assert_eq!(row["task_id"], "FRK-1");
+        assert_eq!(row["task_id"], "CTV-1");
         assert_eq!(row["seller"], "Pie Box Pros");
         assert_eq!(row["sent_subject"], SUBJECT);
         assert_eq!(row["from"], "Dana Reyes <sales@pieboxpros.test>");
@@ -887,7 +887,7 @@ mod tests {
         story.harness.project.record_in(
             Some("proc"),
             Some("session-1"),
-            "FRK-1",
+            "CTV-1",
             "purchase_order.drafted",
             &json!({
                 "order": 12, "seller": "Pie Box Pros", "seller_contact": "",
@@ -900,12 +900,12 @@ mod tests {
         );
         // A follow-up: a question about a placed order, sent, and answered.
         story.harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.approved",
             &json!({ "order": 12, "note": "" }),
         );
         story.harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.placed",
             &json!({ "order": 12, "placed_on": "2026-09-28" }),
         );

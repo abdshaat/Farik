@@ -7,7 +7,7 @@ async function openTheGate(page: Page) {
 	await page.getByRole("link", { name: "Today" }).first().click();
 	await expect(page.getByText(/^Accept /)).toBeVisible({ timeout: 30_000 });
 	await page.getByRole("link", { name: "Review" }).click();
-	await expect(page).toHaveURL(/\/tasks\/FRK-1\/accept$/);
+	await expect(page).toHaveURL(/\/tasks\/CTV-1\/accept$/);
 }
 
 test("a high-risk plan is approved, its work sent back once, then accepted", async ({
@@ -18,13 +18,13 @@ test("a high-risk plan is approved, its work sent back once, then accepted", asy
 	const serve = await startServe({
 		team: "pm-architect-developer",
 		transcripts: [
-			"triage_frk_1_small_by_pm",
-			"refine_writes_high_risk_frk_1",
-			"judge_frk_1_by_architect",
-			"plan_assigns_frk_1_to_theo",
-			"implement_finishes_frk_1",
+			"triage_ctv_1_small_by_pm",
+			"refine_writes_high_risk_ctv_1",
+			"judge_ctv_1_by_architect",
+			"plan_assigns_ctv_1_to_theo",
+			"implement_finishes_ctv_1",
 			"review_writes_note",
-			"implement_after_send_back_frk_1",
+			"implement_after_send_back_ctv_1",
 			"review_writes_note",
 		],
 	});
@@ -36,7 +36,7 @@ test("a high-risk plan is approved, its work sent back once, then accepted", asy
 			.getByLabel("What should the team do next?")
 			.fill("Add a done.txt at the root, so a run can be checked for it");
 		await page.getByRole("button", { name: "Send to the team" }).click();
-		await expect(page).toHaveURL(/\/requests\/FRK-1$/);
+		await expect(page).toHaveURL(/\/requests\/CTV-1$/);
 
 		// A high-risk plan waits for the user's approval.
 		await page.getByRole("link", { name: "Today" }).first().click();

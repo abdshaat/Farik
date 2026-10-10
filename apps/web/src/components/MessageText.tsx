@@ -8,7 +8,7 @@ import styles from "./MessageText.module.css";
 export type WaitingRow = { taskId: string };
 
 // A mention as the runtime reads it (channel.rs `mentions_in`), or a task id.
-const TOKEN = /(^|[^\p{L}\p{N}])@([a-z0-9-]*[a-z0-9])|FRK-[0-9]{1,6}\b/gu;
+const TOKEN = /(^|[^\p{L}\p{N}])@([a-z0-9-]*[a-z0-9])|CTV-[0-9]{1,6}\b/gu;
 
 /**
  * A message's text as React elements, never as HTML (agent text is untrusted): task ids link to

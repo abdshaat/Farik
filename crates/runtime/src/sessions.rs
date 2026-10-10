@@ -160,7 +160,7 @@ mod tests {
 
     fn spec() -> SessionSpec {
         SessionSpec {
-            task_id: Some("FRK-7".parse().expect("a task id")),
+            task_id: Some("CTV-7".parse().expect("a task id")),
             ..a_session_spec()
         }
     }

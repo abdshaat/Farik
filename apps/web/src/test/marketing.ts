@@ -108,7 +108,7 @@ export const PLAN = {
 	google_ads_account: "482-193-7720",
 	replaces: null,
 	agent_id: "kai",
-	task_id: "FRK-31",
+	task_id: "CTV-31",
 	proposed_at: "2026-10-06T08:40:00Z",
 	decided: null,
 	ended: null,

@@ -279,14 +279,14 @@ fn in_sprint(sprint: Option<&str>) -> &str {
 
 /// The number in a task id, for ordering, so that the tenth task does not come before the ninth.
 ///
-/// The parse cannot fail: a `TaskId` is `FRK-` and one to six digits, which is what let it be built.
-/// The number is not unique, though: the schema allows a leading zero, so `FRK-01` and `FRK-1` are
+/// The parse cannot fail: a `TaskId` is `CTV-` and one to six digits, which is what let it be built.
+/// The number is not unique, though: the schema allows a leading zero, so `CTV-01` and `CTV-1` are
 /// two spellings of one number, and the caller breaks that tie with the id itself the way the board's
 /// own order does.
 fn number_in(task_id: &TaskId) -> u64 {
     task_id
         .as_str()
-        .trim_start_matches("FRK-")
+        .trim_start_matches("CTV-")
         .parse()
         .unwrap_or_default()
 }

@@ -1006,7 +1006,7 @@ mod tests {
         assert_eq!(ids.agent_id.as_deref(), Some("dev-a"));
         assert_eq!(
             ids.task_id.as_ref().map(|id| id.to_string()).as_deref(),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         let EventBody::ToolCalled(body) = &called[0].body else {
             panic!("a tool.called event carries a tool.called body");
@@ -1170,14 +1170,14 @@ mod tests {
         let daemon = TestDaemon::new("hook-home", |_| {});
         daemon
             .project
-            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+            .filed_with("CTV-2", "in_progress", "task", None, |wire| {
                 wire["allowed_paths"] = json!(["**"]);
                 wire["assignee"] = json!("dev-a");
             });
         daemon.register(
             "session-all",
             "dev-a",
-            Some("FRK-2"),
+            Some("CTV-2"),
             DEFAULT_SESSION_LIMITS,
         );
         for (tool, input) in [
@@ -1295,13 +1295,13 @@ mod tests {
         denied_for(&outside, "path_outside_allowed");
         daemon
             .project
-            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+            .filed_with("CTV-2", "in_progress", "task", None, |wire| {
                 wire["allowed_paths"] = json!(["docs/marketing/**"]);
             });
         daemon.register(
             "session-docs",
             "dev-a",
-            Some("FRK-2"),
+            Some("CTV-2"),
             DEFAULT_SESSION_LIMITS,
         );
         let inside = decide_pre_tool_use(
@@ -1322,7 +1322,7 @@ mod tests {
         daemon.register_with_tools(
             "session-triage",
             "pm",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
             &["catervas_triage_request"],
         );
@@ -1352,7 +1352,7 @@ mod tests {
         daemon.register_with_tools(
             "session-board",
             "dev-a",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
             &["catervas_read_board"],
         );
@@ -1480,7 +1480,7 @@ mod tests {
         daemon.register(
             "session-next",
             "dev-a",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
         );
         let next = decide_pre_tool_use(
@@ -1633,7 +1633,7 @@ mod tests {
         let daemon = TestDaemon::new("hook-private-folder", |_| {});
         daemon
             .project
-            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+            .filed_with("CTV-2", "in_progress", "task", None, |wire| {
                 wire["assignee_role"] = json!("finance_specialist");
                 wire["reviewer_role"] = json!("product_manager");
                 wire["allowed_paths"] = json!([".catervas/local/finance/**"]);
@@ -1654,7 +1654,7 @@ mod tests {
             session_id: "session-folder".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
-            task_id: Some("FRK-2".parse().expect("a task id")),
+            task_id: Some("CTV-2".parse().expect("a task id")),
             purpose: crate::session::SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -1683,7 +1683,7 @@ mod tests {
         assert!(allowed.allow, "{allowed:?}");
         // Another task's worktree, the project's database, and the files above the folder are not.
         for file in [
-            "../worktrees/FRK-1/x".to_string(),
+            "../worktrees/CTV-1/x".to_string(),
             daemon.worktree.join("x").display().to_string(),
             root.join(".catervas/local/catervas.db")
                 .display()
@@ -1703,17 +1703,17 @@ mod tests {
         );
         // The copy of the folder taken for the task cannot be written over, so what the task
         // changed is always judged against the state it started from.
-        std::fs::create_dir_all(folder.join(".history/FRK-2")).expect("the copy is made");
-        std::fs::write(folder.join(".history/FRK-2/books.xlsx"), "books").expect("written");
+        std::fs::create_dir_all(folder.join(".history/CTV-2")).expect("the copy is made");
+        std::fs::write(folder.join(".history/CTV-2/books.xlsx"), "books").expect("written");
         for tool in ["Write", "Edit"] {
             let refused = hook(
                 tool,
-                json!({ "file_path": ".history/FRK-2/books.xlsx", "content": "changed" }),
+                json!({ "file_path": ".history/CTV-2/books.xlsx", "content": "changed" }),
             );
             denied_for(&refused, "path_outside_allowed");
         }
         assert_eq!(
-            std::fs::read_to_string(folder.join(".history/FRK-2/books.xlsx")).ok(),
+            std::fs::read_to_string(folder.join(".history/CTV-2/books.xlsx")).ok(),
             Some("books".to_string())
         );
     }
@@ -1729,7 +1729,7 @@ mod tests {
         let daemon = TestDaemon::new("hook-procurement-folder", |_| {});
         daemon
             .project
-            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+            .filed_with("CTV-2", "in_progress", "task", None, |wire| {
                 wire["assignee_role"] = json!("procurement_specialist");
                 wire["reviewer_role"] = json!("product_manager");
                 wire["allowed_paths"] = json!([".catervas/local/procurement/**"]);
@@ -1751,7 +1751,7 @@ mod tests {
             session_id: "session-procurement".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
-            task_id: Some("FRK-2".parse().expect("a task id")),
+            task_id: Some("CTV-2".parse().expect("a task id")),
             purpose: crate::session::SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -1783,15 +1783,15 @@ mod tests {
             assert!(allowed.allow, "{file}: {allowed:?}");
         }
         // So is the copy taken when the task was assigned, which a reviewer reads a note beside.
-        std::fs::create_dir_all(folder.join(".history/FRK-2/evaluations")).expect("the copy");
+        std::fs::create_dir_all(folder.join(".history/CTV-2/evaluations")).expect("the copy");
         std::fs::write(
-            folder.join(".history/FRK-2/evaluations/email-sending.md"),
+            folder.join(".history/CTV-2/evaluations/email-sending.md"),
             "the note at assignment",
         )
         .expect("written");
         let allowed = hook(
             "Read",
-            json!({ "file_path": ".history/FRK-2/evaluations/email-sending.md" }),
+            json!({ "file_path": ".history/CTV-2/evaluations/email-sending.md" }),
         );
         assert!(allowed.allow, "{allowed:?}");
         // The finance folder is not, by a path that climbs, an absolute one, or one from the root.
@@ -1917,7 +1917,7 @@ mod tests {
             session_id: "session-browser".to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -2017,10 +2017,10 @@ mod tests {
         github_session(daemon, "session-github", "dev-a");
     }
 
-    /// Registers `session`, of `agent` on FRK-1, as `with_github` describes, and records its
+    /// Registers `session`, of `agent` on CTV-1, as `with_github` describes, and records its
     /// `session.started`.
     fn github_session(daemon: &TestDaemon, session: &str, agent: &str) {
-        task_session(daemon, session, agent, "FRK-1");
+        task_session(daemon, session, agent, "CTV-1");
     }
 
     /// `github_session` on `task`. `github` also has `close_issue`, and the session is given
@@ -2109,9 +2109,9 @@ mod tests {
         );
     }
 
-    /// Appends an event of `session`, of `agent` on FRK-1.
+    /// Appends an event of `session`, of `agent` on CTV-1.
     fn session_event(daemon: &TestDaemon, session: &str, agent: &str, kind: &str, body: &Value) {
-        task_event(daemon, "FRK-1", session, agent, kind, body);
+        task_event(daemon, "CTV-1", session, agent, kind, body);
     }
 
     /// Appends an event of `session`, of `agent` on `task`.
@@ -2167,7 +2167,7 @@ mod tests {
     /// The human allows `approval`, as the command records it.
     fn grant(daemon: &TestDaemon, approval: u64) {
         daemon.project.record(
-            "FRK-1",
+            "CTV-1",
             "tool_approval.granted",
             &json!({ "approval": approval }),
         );
@@ -2281,7 +2281,7 @@ mod tests {
         assert_eq!(ids.session_id.as_deref(), Some("session-github"));
         assert_eq!(
             ids.task_id.as_ref().map(|id| id.to_string()).as_deref(),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         let EventBody::ToolApprovalRequested(body) = &requested[0].body else {
             panic!("a tool_approval.requested body");
@@ -2352,12 +2352,12 @@ mod tests {
         assert_eq!(daemon.state.stop_reason("session-iris"), None);
         // Once the plan is approved, it asks.
         daemon.project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.proposed",
             &json!({ "plan": "A plan." }),
         );
         daemon.project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.approved",
             &json!({ "reason": "Go ahead." }),
         );
@@ -2420,7 +2420,7 @@ mod tests {
 
     /// `dev-a`'s `session-github`, allowed `calls` of `create_issue` each period unasked.
     fn allowing_github(daemon: &TestDaemon, calls: u32) {
-        allowing_session(daemon, "session-github", "dev-a", "FRK-1", Some(calls));
+        allowing_session(daemon, "session-github", "dev-a", "CTV-1", Some(calls));
     }
 
     /// The `allowance` the last `tool.called` ran inside.
@@ -2449,13 +2449,13 @@ mod tests {
         daemon.project.record_by(
             Some(agent),
             when,
-            "FRK-1",
+            "CTV-1",
             "tool.called",
             &json!({ "tool": tool, "input": "{}", "server": server, "tag": "external_effect" }),
         );
     }
 
-    /// `session`, of `kai` on FRK-1, given `server` as the kit wrote it for the agent, and its
+    /// `session`, of `kai` on CTV-1, given `server` as the kit wrote it for the agent, and its
     /// `session.started` recorded.
     fn kai_session(daemon: &TestDaemon, session: &str, server: &catervas_core::team::CustomServer) {
         use catervas_core::governor::permissions::{PermissionTier, SessionConnector};
@@ -2467,7 +2467,7 @@ mod tests {
             session_id: session.to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "kai".to_string(),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -2489,7 +2489,7 @@ mod tests {
         });
         task_event(
             daemon,
-            "FRK-1",
+            "CTV-1",
             session,
             "kai",
             "session.started",
@@ -2615,7 +2615,7 @@ mod tests {
             &daemon,
             "session-github",
             "dev-a",
-            "FRK-1",
+            "CTV-1",
             Some(5),
             &["close_issue"],
         );
@@ -2624,7 +2624,7 @@ mod tests {
         denied_for(&close(&daemon), "no_active_marketing_plan");
         daemon
             .project
-            .plan_proposed("FRK-1", "MP-1", "2026-09-20", "2026-10-10");
+            .plan_proposed("CTV-1", "MP-1", "2026-09-20", "2026-10-10");
         denied_for(&close(&daemon), "no_active_marketing_plan");
         assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
         assert!(daemon.events(EventKind::ToolCalled).is_empty());
@@ -2632,7 +2632,7 @@ mod tests {
 
         // Approved and in its dates: it runs, naming the plan, with no grant and no allowance,
         // and nothing is asked.
-        daemon.project.plan_approved("FRK-1", "MP-1", "");
+        daemon.project.plan_approved("CTV-1", "MP-1", "");
         let allowed = close(&daemon);
         assert!(allowed.allow, "{allowed:?}");
         assert_eq!(ran_for_plan(&daemon), Some("MP-1".to_string()));
@@ -2712,7 +2712,7 @@ mod tests {
         // The calls before the sprint started are not its.
         daemon.project.open_sprint("S1", None, &[]);
         // The ask stopped that session; the agent's next one makes its calls.
-        allowing_session(&daemon, "session-next", "dev-a", "FRK-1", Some(2));
+        allowing_session(&daemon, "session-next", "dev-a", "CTV-1", Some(2));
         let next = |n: u32| create_issue(&daemon, "session-next", &json!({ "title": n }));
         assert!(next(4).allow);
         assert!(next(5).allow);
@@ -2858,7 +2858,7 @@ mod tests {
         let asked_for = json!({ "title": 3 });
         let approval = asked(&daemon, "session-github", &asked_for);
         grant(&daemon, approval);
-        allowing_session(&daemon, "session-next", "dev-a", "FRK-1", Some(3));
+        allowing_session(&daemon, "session-next", "dev-a", "CTV-1", Some(3));
         let allowed = create_issue(&daemon, "session-next", &asked_for);
         assert!(allowed.allow, "{allowed:?}");
         assert_eq!(used(&daemon), Some(approval));
@@ -2941,16 +2941,16 @@ mod tests {
         let daemon = TestDaemon::new("hook-grant-key", |_| {});
         daemon
             .project
-            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+            .filed_with("CTV-2", "in_progress", "task", None, |wire| {
                 wire["assignee"] = json!("dev-a");
             });
         with_github(&daemon);
         let input = json!({ "title": "x" });
         let approval = asked(&daemon, "session-github", &input);
         grant(&daemon, approval);
-        task_session(&daemon, "session-frk-2", "dev-a", "FRK-2");
+        task_session(&daemon, "session-ctv-2", "dev-a", "CTV-2");
         denied_for(
-            &create_issue(&daemon, "session-frk-2", &input),
+            &create_issue(&daemon, "session-ctv-2", &input),
             "approval_needed",
         );
         for (session, tool) in [
@@ -3054,7 +3054,7 @@ mod tests {
         let input = json!({ "title": "x" });
         let approval = asked(&daemon, "session-github", &input);
         daemon.project.record(
-            "FRK-1",
+            "CTV-1",
             "tool_approval.refused",
             &json!({ "approval": approval }),
         );
@@ -3090,7 +3090,7 @@ mod tests {
         daemon.register(
             "session-iris",
             "iris",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
         );
         let edit = json!({
@@ -3121,7 +3121,7 @@ mod tests {
             Some(("design_plan.returned", &returned)),
         ] {
             if let Some((kind, body)) = before {
-                daemon.project.record("FRK-1", kind, body);
+                daemon.project.record("CTV-1", kind, body);
             }
             denied_for(&hook("Edit", &edit), "design_plan_not_approved");
             denied_for(
@@ -3148,9 +3148,9 @@ mod tests {
 
         daemon
             .project
-            .record("FRK-1", "design_plan.proposed", &proposed);
+            .record("CTV-1", "design_plan.proposed", &proposed);
         daemon.project.record(
-            "FRK-1",
+            "CTV-1",
             "design_plan.approved",
             &json!({ "reason": "Go ahead." }),
         );
@@ -3194,7 +3194,7 @@ mod tests {
         daemon.register(
             DEV_SESSION,
             "dev-a",
-            Some("FRK-1"),
+            Some("CTV-1"),
             SessionLimits {
                 max_tool_calls: 2,
                 ..DEFAULT_SESSION_LIMITS
@@ -3294,7 +3294,7 @@ mod tests {
         daemon
     }
 
-    /// `session` of `agent`, on FRK-1 or on no task, registered as a session of `purpose`.
+    /// `session` of `agent`, on CTV-1 or on no task, registered as a session of `purpose`.
     fn browsing(
         daemon: &TestDaemon,
         session: &str,
@@ -3336,7 +3336,7 @@ mod tests {
         use crate::session::SessionPurpose::Implement;
 
         let daemon = with_buyers("hook-sites-catervas");
-        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        browsing(&daemon, "session-proc", "proc", Some("CTV-1"), Implement);
         let catervas = a_catervas_host();
 
         for address in [
@@ -3362,7 +3362,7 @@ mod tests {
         use crate::session::SessionPurpose::Implement;
 
         let daemon = with_buyers("hook-sites-approved");
-        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        browsing(&daemon, "session-proc", "proc", Some("CTV-1"), Implement);
         daemon
             .project
             .record("", "site.approved", &json!({ "host": "shop.example" }));
@@ -3420,7 +3420,7 @@ mod tests {
         daemon.project.record_by(
             Some("proc"),
             at(),
-            "FRK-1",
+            "CTV-1",
             "site.approved",
             &json!({ "host": "agent.example" }),
         );
@@ -3488,7 +3488,7 @@ mod tests {
             &daemon,
             "session-about",
             "proc",
-            Some("FRK-1"),
+            Some("CTV-1"),
             Conversation,
         );
         assert!(
@@ -3505,7 +3505,7 @@ mod tests {
 
         // A guard: the Marketing Specialist holds `network` and no list of sites.
         let daemon = with_buyers("hook-sites-others");
-        browsing(&daemon, "session-kai", "kai", Some("FRK-1"), Implement);
+        browsing(&daemon, "session-kai", "kai", Some("CTV-1"), Implement);
         for address in [
             "https://shop.example/",
             "https://anything.example/a?b=c",
@@ -3523,7 +3523,7 @@ mod tests {
 
         // A guard: a search reaches the one service Claude Code uses, whatever the list holds.
         let daemon = with_buyers("hook-sites-search");
-        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        browsing(&daemon, "session-proc", "proc", Some("CTV-1"), Implement);
         let search = decide_pre_tool_use(
             &daemon.call(
                 "session-proc",
@@ -3543,7 +3543,7 @@ mod tests {
         // A guard: `catervas_request_sites` names the addresses it asks about, which are not yet
         // approved, and a Catervas tool is no connector.
         let daemon = with_buyers("hook-sites-request");
-        browsing(&daemon, "session-proc", "proc", Some("FRK-1"), Implement);
+        browsing(&daemon, "session-proc", "proc", Some("CTV-1"), Implement);
         let asked = decide_pre_tool_use(
             &daemon.call(
                 "session-proc",
@@ -3562,8 +3562,8 @@ mod tests {
         let catervas = a_catervas_host();
         let approved = format!("https://www.{catervas}/boxes");
         // A user's server given to the Procurement Specialist, and the same to a Developer.
-        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
-        registering(&daemon, "session-dev", "dev-a", "FRK-1", None, &[]);
+        registering(&daemon, "session-proc", "proc", "CTV-1", None, &[]);
+        registering(&daemon, "session-dev", "dev-a", "CTV-1", None, &[]);
         let call = |session: &str, tool: &str, input: &Value| {
             decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
         };
@@ -3626,7 +3626,7 @@ mod tests {
         // A guard (step 10d): SerpApi fetches `image_url` and a lens `url` itself, so an address it
         // is given off the approved sites is refused before the connector is looked up.
         let daemon = with_buyers("hook-sites-serpapi");
-        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        registering(&daemon, "session-proc", "proc", "CTV-1", None, &[]);
         for params in [
             json!({ "engine": "google_reverse_image", "image_url": "https://unapproved.example/a.jpg" }),
             json!({ "engine": "google_lens", "url": "https://unapproved.example/a.jpg" }),
@@ -3671,7 +3671,7 @@ mod tests {
         // servers, where a redirect from an approved shop to another site is out of Catervas's sight.
         // The address is allowed, and the spec says what it leaves open.
         let daemon = with_buyers("hook-sites-serpapi-redirect");
-        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        registering(&daemon, "session-proc", "proc", "CTV-1", None, &[]);
         daemon
             .state
             .sessions()
@@ -3712,7 +3712,7 @@ mod tests {
         let daemon = with_buyers("hook-sites-external");
         let catervas = a_catervas_host();
         let approved = format!("https://www.{catervas}/boxes");
-        registering(&daemon, "session-proc", "proc", "FRK-1", None, &[]);
+        registering(&daemon, "session-proc", "proc", "CTV-1", None, &[]);
         let call = |session: &str, tool: &str, input: &Value| {
             decide_pre_tool_use(&daemon.call(session, tool, input), &daemon.state)
         };
@@ -3728,7 +3728,7 @@ mod tests {
         daemon.register(
             "session-open",
             "proc",
-            Some("FRK-1"),
+            Some("CTV-1"),
             DEFAULT_SESSION_LIMITS,
         );
         daemon
@@ -3738,7 +3738,7 @@ mod tests {
             .expect("registered")
             .registration
             .web = catervas_core::governor::sites::WebAccess::Open;
-        registering(&daemon, "session-asking", "proc", "FRK-1", None, &[]);
+        registering(&daemon, "session-asking", "proc", "CTV-1", None, &[]);
         daemon
             .state
             .sessions()
@@ -3748,7 +3748,7 @@ mod tests {
             .web = catervas_core::governor::sites::WebAccess::Open;
         let approval = asked(&daemon, "session-asking", &input);
         grant(&daemon, approval);
-        registering(&daemon, "session-held", "proc", "FRK-1", Some(5), &[]);
+        registering(&daemon, "session-held", "proc", "CTV-1", Some(5), &[]);
         let still_refused = call("session-held", "mcp__github__create_issue", &input);
         denied_for(&still_refused, "site_not_approved");
         assert_eq!(

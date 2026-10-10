@@ -45,7 +45,7 @@ BEGIN
     SELECT RAISE(ABORT, 'the event log is append-only: an event cannot be deleted');
 END;
 
--- The next number for each task id prefix. One row, `FRK`, until a second prefix exists.
+-- The next number for each task id prefix. One row, `CTV`, until a second prefix exists.
 CREATE TABLE task_counters (
     prefix TEXT PRIMARY KEY,
     next   INTEGER NOT NULL

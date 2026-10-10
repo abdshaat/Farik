@@ -1133,22 +1133,22 @@ mod tests {
         with_the_marketing_specialist, with_the_procurement_specialist,
     };
 
-    /// A project with the Finance Specialist `fin`, whose task FRK-1 is in progress, and a
-    /// Developer's task FRK-2; and the Marketing Specialist `kai`.
+    /// A project with the Finance Specialist `fin`, whose task CTV-1 is in progress, and a
+    /// Developer's task CTV-2; and the Marketing Specialist `kai`.
     fn a_finance_project(name: &str) -> TestProject {
         a_project(name, false)
     }
 
-    /// `a_finance_project`, and the Procurement Specialist `proc` too, whose task FRK-3 is in
+    /// `a_finance_project`, and the Procurement Specialist `proc` too, whose task CTV-3 is in
     /// progress, reviewed by `pm`.
     fn a_procurement_project(name: &str) -> TestProject {
         let project = a_project(name, true);
-        project.filed_with("FRK-3", "assigned", "task", None, |wire| {
+        project.filed_with("CTV-3", "assigned", "task", None, |wire| {
             wire["assignee_role"] = json!("procurement_specialist");
             wire["reviewer_role"] = json!("product_manager");
         });
         project.moved(
-            "FRK-3",
+            "CTV-3",
             "assigned",
             "in_progress",
             &json!({ "assignee": "proc", "reviewer": "pm" }),
@@ -1167,19 +1167,19 @@ mod tests {
                 }
             }),
         );
-        project.filed_with("FRK-1", "assigned", "task", None, |wire| {
+        project.filed_with("CTV-1", "assigned", "task", None, |wire| {
             wire["assignee_role"] = json!("finance_specialist");
             wire["reviewer_role"] = json!("product_manager");
         });
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "fin", "reviewer": "pm" }),
         );
-        project.filed("FRK-2", "assigned", "task", None);
+        project.filed("CTV-2", "assigned", "task", None);
         project.moved(
-            "FRK-2",
+            "CTV-2",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -1197,14 +1197,14 @@ mod tests {
         project.repo.path.join(".catervas/local/procurement")
     }
 
-    /// `catervas_write_sheet` as `proc` in its implement session of FRK-3.
+    /// `catervas_write_sheet` as `proc` in its implement session of CTV-3.
     fn write_register(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
-        project.call("proc", Some("FRK-3"), "catervas_write_sheet", input.clone())
+        project.call("proc", Some("CTV-3"), "catervas_write_sheet", input.clone())
     }
 
-    /// `catervas_write_sheet` as `fin` in its implement session of FRK-1.
+    /// `catervas_write_sheet` as `fin` in its implement session of CTV-1.
     fn write(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
-        project.call("fin", Some("FRK-1"), "catervas_write_sheet", input.clone())
+        project.call("fin", Some("CTV-1"), "catervas_write_sheet", input.clone())
     }
 
     /// One sheet's JSON.
@@ -1806,14 +1806,14 @@ mod tests {
         let input = one_sheet("books.xlsx", &json!([["a", 1]]));
         let mut chat = project.context("fin", None);
         chat.purpose = SessionPurpose::Chat;
-        let mut chat_of_the_task = project.context("fin", Some("FRK-1"));
+        let mut chat_of_the_task = project.context("fin", Some("CTV-1"));
         chat_of_the_task.purpose = SessionPurpose::Chat;
-        let mut verifying = project.context("fin", Some("FRK-1"));
+        let mut verifying = project.context("fin", Some("CTV-1"));
         verifying.purpose = SessionPurpose::Verify;
-        // The Marketing Specialist is the assignee of FRK-4, so only its role keeps it out.
-        project.filed("FRK-4", "assigned", "task", None);
+        // The Marketing Specialist is the assignee of CTV-4, so only its role keeps it out.
+        project.filed("CTV-4", "assigned", "task", None);
         project.moved(
-            "FRK-4",
+            "CTV-4",
             "assigned",
             "in_progress",
             &json!({ "assignee": "kai", "reviewer": "pm" }),
@@ -1828,17 +1828,17 @@ mod tests {
             ),
             (
                 "another agent's task",
-                project.context("fin", Some("FRK-2")),
+                project.context("fin", Some("CTV-2")),
             ),
             (
                 "the Marketing Specialist",
-                project.context("kai", Some("FRK-1")),
+                project.context("kai", Some("CTV-1")),
             ),
             (
                 "the Marketing Specialist in its own task",
-                project.context("kai", Some("FRK-4")),
+                project.context("kai", Some("CTV-4")),
             ),
-            ("the Product Manager", project.context("pm", Some("FRK-1"))),
+            ("the Product Manager", project.context("pm", Some("CTV-1"))),
         ] {
             let reason = refusal_of(run(&context, "catervas_write_sheet", input.clone()));
             assert!(reason.starts_with("sheet_refused: "), "{who}: {reason}");
@@ -1993,7 +1993,7 @@ mod tests {
 
     /// `catervas_read_sheet` as `who` in its session `context` of `task`.
     fn read(project: &TestProject, who: &str, input: &Value) -> Result<Value, ToolError> {
-        project.call(who, Some("FRK-1"), "catervas_read_sheet", input.clone())
+        project.call(who, Some("CTV-1"), "catervas_read_sheet", input.clone())
     }
 
     /// 1,000 rows of `[n, "row n"]` at `path`.
@@ -2431,12 +2431,12 @@ mod tests {
         let project = a_finance_project("sheets-read-reviewer");
         write(&project, &one_sheet("books.xlsx", &json!([["rent", 2]]))).expect("a workbook");
         // A finance task a Developer reviews, and a Developer's task the Product Manager reviews.
-        project.filed_with("FRK-3", "verifying", "task", None, |wire| {
+        project.filed_with("CTV-3", "verifying", "task", None, |wire| {
             wire["assignee_role"] = json!("finance_specialist");
             wire["reviewer_role"] = json!("software_developer");
         });
         project.moved(
-            "FRK-3",
+            "CTV-3",
             "assigned",
             "verifying",
             &json!({ "assignee": "fin", "reviewer": "dev-b" }),
@@ -2450,15 +2450,15 @@ mod tests {
         for (who, context) in [
             (
                 "the reviewer",
-                context("dev-b", "FRK-3", SessionPurpose::Verify),
+                context("dev-b", "CTV-3", SessionPurpose::Verify),
             ),
             (
                 "the Product Manager",
-                context("pm", "FRK-1", SessionPurpose::Verify),
+                context("pm", "CTV-1", SessionPurpose::Verify),
             ),
             (
                 "the Product Manager of a task it does not review",
-                context("pm", "FRK-3", SessionPurpose::Verify),
+                context("pm", "CTV-3", SessionPurpose::Verify),
             ),
             ("the Finance Specialist in a chat", {
                 let mut chat = project.context("fin", None);
@@ -2473,27 +2473,27 @@ mod tests {
         for (who, context) in [
             (
                 "a verify session about a Developer's task",
-                context("pm", "FRK-2", SessionPurpose::Verify),
+                context("pm", "CTV-2", SessionPurpose::Verify),
             ),
             (
                 "the Developer's reviewer of its own task",
-                context("dev-b", "FRK-2", SessionPurpose::Verify),
+                context("dev-b", "CTV-2", SessionPurpose::Verify),
             ),
             (
                 "a bystander of the finance task",
-                context("dev-a", "FRK-3", SessionPurpose::Verify),
+                context("dev-a", "CTV-3", SessionPurpose::Verify),
             ),
             (
                 "a plan session",
-                context("pm", "FRK-1", SessionPurpose::Plan),
+                context("pm", "CTV-1", SessionPurpose::Plan),
             ),
             (
                 "an implement session of a reviewer",
-                context("dev-b", "FRK-3", SessionPurpose::Implement),
+                context("dev-b", "CTV-3", SessionPurpose::Implement),
             ),
             (
                 "a verify session of the Marketing Specialist",
-                context("kai", "FRK-1", SessionPurpose::Verify),
+                context("kai", "CTV-1", SessionPurpose::Verify),
             ),
             ("a session about no task", project.context("pm", None)),
         ] {
@@ -2508,11 +2508,11 @@ mod tests {
         let project = a_finance_project("sheets-read-baseline");
         write(&project, &one_sheet("books.xlsx", &json!([["rent", 2]]))).expect("a workbook");
         // The copy taken when the task was assigned, then the task's own change.
-        let task: catervas_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        let task: catervas_core::contract::TaskId = "CTV-1".parse().expect("a task id");
         catervas_store::baseline::copy_baseline(&folder(&project), &task).expect("the copy");
         write(&project, &one_sheet("books.xlsx", &json!([["rent", 3]]))).expect("changed");
         // A copy is there under the Developer's task too, so that only the rule keeps it out.
-        let other: catervas_core::contract::TaskId = "FRK-2".parse().expect("a task id");
+        let other: catervas_core::contract::TaskId = "CTV-2".parse().expect("a task id");
         catervas_store::baseline::copy_baseline(&folder(&project), &other).expect("the copy");
         let context = |who: &str, task: Option<&str>, purpose: SessionPurpose| {
             let mut context = project.context(who, task);
@@ -2527,11 +2527,11 @@ mod tests {
         for (who, context) in [
             (
                 "the reviewer",
-                context("pm", Some("FRK-1"), SessionPurpose::Verify),
+                context("pm", Some("CTV-1"), SessionPurpose::Verify),
             ),
             (
                 "the assignee",
-                context("fin", Some("FRK-1"), SessionPurpose::Implement),
+                context("fin", Some("CTV-1"), SessionPurpose::Implement),
             ),
         ] {
             let was = run(&context, "catervas_read_sheet", before.clone())
@@ -2549,7 +2549,7 @@ mod tests {
             ),
             (
                 "the Finance Specialist about a Developer's task",
-                context("fin", Some("FRK-2"), SessionPurpose::Implement),
+                context("fin", Some("CTV-2"), SessionPurpose::Implement),
             ),
         ] {
             let reason = refusal_of(run(&context, "catervas_read_sheet", before.clone()));
@@ -2564,7 +2564,7 @@ mod tests {
                 "{who}"
             );
         }
-        let context = context("pm", Some("FRK-1"), SessionPurpose::Verify);
+        let context = context("pm", Some("CTV-1"), SessionPurpose::Verify);
         let reason = refusal_of(run(
             &context,
             "catervas_read_sheet",
@@ -2575,7 +2575,7 @@ mod tests {
         let reason = refusal_of(run(
             &context,
             "catervas_read_sheet",
-            json!({ "path": ".history/FRK-1/books.xlsx", "baseline": true }),
+            json!({ "path": ".history/CTV-1/books.xlsx", "baseline": true }),
         ));
         assert!(reason.starts_with("private_path_refused: "), "{reason}");
     }
@@ -2601,7 +2601,7 @@ mod tests {
         let read = project
             .call(
                 "proc",
-                Some("FRK-3"),
+                Some("CTV-3"),
                 "catervas_read_sheet",
                 json!({ "path": "vendors.xlsx" }),
             )
@@ -2643,7 +2643,7 @@ mod tests {
         fs::write(evaluations.join("x.md"), "a comparison").expect("a note");
         write(&project, &one_sheet("books.xlsx", &json!([["rent", 2]]))).expect("the books");
         let finance =
-            |input: Value| project.call("fin", Some("FRK-1"), "catervas_read_sheet", input);
+            |input: Value| project.call("fin", Some("CTV-1"), "catervas_read_sheet", input);
 
         let answer = finance(json!({ "folder": "procurement", "path": "vendors.xlsx" }))
             .expect("the register is read");
@@ -2674,7 +2674,7 @@ mod tests {
         // in the finance folder.
         let mut input = the_register();
         input["folder"] = json!("procurement");
-        let refused = project.call("fin", Some("FRK-1"), "catervas_write_sheet", input);
+        let refused = project.call("fin", Some("CTV-1"), "catervas_write_sheet", input);
         assert!(
             matches!(&refused, Err(ToolError::InvalidInput { .. })),
             "{refused:?}"
@@ -2699,11 +2699,11 @@ mod tests {
         for (who, context) in [
             (
                 "the Product Manager",
-                context("pm", Some("FRK-1"), SessionPurpose::Implement),
+                context("pm", Some("CTV-1"), SessionPurpose::Implement),
             ),
             (
                 "a Developer",
-                context("dev-a", Some("FRK-2"), SessionPurpose::Implement),
+                context("dev-a", Some("CTV-2"), SessionPurpose::Implement),
             ),
             (
                 "the Marketing Specialist",
@@ -2711,22 +2711,22 @@ mod tests {
             ),
             (
                 "the Procurement Specialist, whose own folder it reads without asking",
-                context("proc", Some("FRK-3"), SessionPurpose::Implement),
+                context("proc", Some("CTV-3"), SessionPurpose::Implement),
             ),
             (
                 "the Product Manager reviewing a procurement task",
-                context("pm", Some("FRK-3"), SessionPurpose::Verify),
+                context("pm", Some("CTV-3"), SessionPurpose::Verify),
             ),
             (
                 "the reviewer of a Developer's task",
-                context("dev-b", Some("FRK-2"), SessionPurpose::Verify),
+                context("dev-b", Some("CTV-2"), SessionPurpose::Verify),
             ),
         ] {
             let reason = refusal_of(run(&context, "catervas_read_sheet", asking.clone()));
             assert!(reason.starts_with("sheet_refused: "), "{who}: {reason}");
         }
         // A reviewer's read resolves against the reviewed task's own folder, with no `folder`.
-        let verifying = context("pm", Some("FRK-3"), SessionPurpose::Verify);
+        let verifying = context("pm", Some("CTV-3"), SessionPurpose::Verify);
         let answer = run(
             &verifying,
             "catervas_read_sheet",
@@ -2737,7 +2737,7 @@ mod tests {
         // Another folder than the one `folder` names is no value of it.
         let finance = project.call(
             "fin",
-            Some("FRK-1"),
+            Some("CTV-1"),
             "catervas_read_sheet",
             json!({ "folder": "finance", "path": "vendors.xlsx" }),
         );
@@ -2765,24 +2765,24 @@ mod tests {
         .expect("the finance folder's workbook");
         // A finance task whose reviewer is the Procurement Specialist, which has a folder of its
         // own, and the copy taken when it was assigned, then the task's own change.
-        project.filed_with("FRK-4", "verifying", "task", None, |wire| {
+        project.filed_with("CTV-4", "verifying", "task", None, |wire| {
             wire["assignee_role"] = json!("finance_specialist");
             wire["reviewer_role"] = json!("procurement_specialist");
         });
         project.moved(
-            "FRK-4",
+            "CTV-4",
             "assigned",
             "verifying",
             &json!({ "assignee": "fin", "reviewer": "proc" }),
         );
-        let task: catervas_core::contract::TaskId = "FRK-4".parse().expect("a task id");
+        let task: catervas_core::contract::TaskId = "CTV-4".parse().expect("a task id");
         catervas_store::baseline::copy_baseline(&folder(&project), &task).expect("the copy");
         write(
             &project,
             &one_sheet("vendors.xlsx", &json!([["finance", 2]])),
         )
         .expect("the task's change");
-        let mut verifying = project.context("proc", Some("FRK-4"));
+        let mut verifying = project.context("proc", Some("CTV-4"));
         verifying.purpose = SessionPurpose::Verify;
         let first_row = |input: Value| {
             let answer = run(&verifying, "catervas_read_sheet", input)
@@ -2804,7 +2804,7 @@ mod tests {
         let own = project
             .call(
                 "proc",
-                Some("FRK-3"),
+                Some("CTV-3"),
                 "catervas_read_sheet",
                 json!({ "path": "vendors.xlsx" }),
             )
@@ -2827,17 +2827,17 @@ mod tests {
     fn the_register_is_never_read_as_a_copy() {
         let project = a_procurement_project("sheets-register-no-baseline");
         write_register(&project, &the_register()).expect("the register is written");
-        let task: catervas_core::contract::TaskId = "FRK-3".parse().expect("a task id");
+        let task: catervas_core::contract::TaskId = "CTV-3".parse().expect("a task id");
         catervas_store::baseline::copy_baseline(&procurement_folder(&project), &task)
             .expect("the copy");
         let input = json!({ "folder": "procurement", "path": "vendors.xlsx" });
         // Without `baseline` the Finance Specialist reads the register, in a session about the
         // procurement task as in any other.
-        let now = project.call("fin", Some("FRK-3"), "catervas_read_sheet", input.clone());
+        let now = project.call("fin", Some("CTV-3"), "catervas_read_sheet", input.clone());
         assert!(now.is_ok(), "{now:?}");
         let mut asking = input;
         asking["baseline"] = json!(true);
-        let reason = refusal_of(project.call("fin", Some("FRK-3"), "catervas_read_sheet", asking));
+        let reason = refusal_of(project.call("fin", Some("CTV-3"), "catervas_read_sheet", asking));
         assert!(reason.starts_with("sheet_refused: "), "{reason}");
         assert!(
             reason.contains("in your own folder, and not the procurement folder's"),
@@ -2870,7 +2870,7 @@ mod tests {
         );
         let reason = refusal_of(project.call(
             "proc",
-            Some("FRK-3"),
+            Some("CTV-3"),
             "catervas_read_sheet",
             json!({ "path": "evaluations/x.md" }),
         ));

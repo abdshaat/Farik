@@ -1595,7 +1595,7 @@ mod tests {
         ads.harness.project.record_by(
             Some("kai"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "marketing_campaign.created",
             &json!({
                 "plan": "MP-9", "key": "search-launch", "account": ACCOUNT,
@@ -2292,11 +2292,11 @@ mod tests {
         ads.harness.project.record_by(
             Some("kai"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "marketing_plan.proposed",
             &yen_plan("MP-2"),
         );
-        ads.harness.project.plan_approved("FRK-1", "MP-2", "");
+        ads.harness.project.plan_approved("CTV-1", "MP-2", "");
         ads.google.script(|script| {
             script.customers[0].1["currencyCode"] = json!("JPY");
         });
@@ -2354,11 +2354,11 @@ mod tests {
         ads.harness.project.record_by(
             Some("kai"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "marketing_plan.proposed",
             &yen,
         );
-        ads.harness.project.plan_approved("FRK-1", "MP-2", "");
+        ads.harness.project.plan_approved("CTV-1", "MP-2", "");
 
         for (tool, input) in [
             (

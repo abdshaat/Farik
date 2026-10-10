@@ -110,7 +110,7 @@ Anything that leaves a process or is written to disk uses `snake_case` keys. Rus
 | JSON and YAML keys | `snake_case` | `exit_criteria`, `allowed_paths` |
 | Status and enum values | `snake_case` | `in_progress` |
 | Event kind | `<entity>.<past_tense_verb>` | `task.transitioned`, `tool.called`, `tool.denied`, `budget.exhausted` |
-| Task id | `FRK-<n>` | `FRK-42` |
+| Task id | `CTV-<n>` | `CTV-42` |
 | Requirement id | `R<n>` within a contract | `R1` |
 | Exit criterion id | `C<n>` within a contract | `C3` |
 | Role id | `snake_case`, matches the schema enum | `product_manager` |

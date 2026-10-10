@@ -676,7 +676,7 @@ mod tests {
     };
 
     /// A project with the Finance Specialist `fin` and the Procurement Specialist `proc`, whose
-    /// tasks FRK-1 and FRK-4 are in progress, a finance task FRK-2 and a Developer's task FRK-3,
+    /// tasks CTV-1 and CTV-4 are in progress, a finance task CTV-2 and a Developer's task CTV-3,
     /// and the comparison `evaluations/mirrors.md` written.
     fn a_project(name: &str) -> TestProject {
         let project = TestProject::new(
@@ -687,9 +687,9 @@ mod tests {
             }),
         );
         for (task, role, assignee) in [
-            ("FRK-1", "procurement_specialist", "proc"),
-            ("FRK-2", "finance_specialist", "fin"),
-            ("FRK-4", "procurement_specialist", "proc"),
+            ("CTV-1", "procurement_specialist", "proc"),
+            ("CTV-2", "finance_specialist", "fin"),
+            ("CTV-4", "procurement_specialist", "proc"),
         ] {
             project.filed_with(task, "assigned", "task", None, |wire| {
                 wire["assignee_role"] = json!(role);
@@ -702,9 +702,9 @@ mod tests {
                 &json!({ "assignee": assignee, "reviewer": "pm" }),
             );
         }
-        project.filed("FRK-3", "assigned", "task", None);
+        project.filed("CTV-3", "assigned", "task", None);
         project.moved(
-            "FRK-3",
+            "CTV-3",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -712,7 +712,7 @@ mod tests {
         project
             .call(
                 "proc",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "catervas_write_evaluation",
                 json!({ "name": "mirrors", "text": "# Baby car mirrors\n\nAcme is the cheapest." }),
             )
@@ -750,11 +750,11 @@ mod tests {
         })
     }
 
-    /// `catervas_draft_purchase_order` as `proc` in its implement session of FRK-1.
+    /// `catervas_draft_purchase_order` as `proc` in its implement session of CTV-1.
     fn draft(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
         project.call(
             "proc",
-            Some("FRK-1"),
+            Some("CTV-1"),
             "catervas_draft_purchase_order",
             input.clone(),
         )
@@ -801,7 +801,7 @@ mod tests {
         let ids = &drafted[0].envelope.ids;
         assert_eq!(
             ids.task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert_eq!(ids.agent_id.as_deref(), Some("proc"));
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
@@ -911,7 +911,7 @@ mod tests {
         project.record_by(
             Some("proc"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "purchase_order.drafted",
             &json!({
                 "order": 9, "seller": "Old", "seller_contact": "",
@@ -1048,22 +1048,22 @@ mod tests {
 
         let mut chat = project.context("proc", None);
         chat.purpose = SessionPurpose::Chat;
-        let mut verify = project.context("proc", Some("FRK-1"));
+        let mut verify = project.context("proc", Some("CTV-1"));
         verify.purpose = SessionPurpose::Verify;
-        let mut chat_about_a_task = project.context("proc", Some("FRK-1"));
+        let mut chat_about_a_task = project.context("proc", Some("CTV-1"));
         chat_about_a_task.purpose = SessionPurpose::Chat;
         for (what, context) in [
             (
                 "the Finance Specialist",
-                project.context("fin", Some("FRK-2")),
+                project.context("fin", Some("CTV-2")),
             ),
-            ("a Developer", project.context("dev-a", Some("FRK-3"))),
+            ("a Developer", project.context("dev-a", Some("CTV-3"))),
             ("the Procurement Specialist's chat", chat),
             ("a chat about its task", chat_about_a_task),
             ("a verify session of its task", verify),
             (
                 "an implement session of a task another agent has",
-                project.context("proc", Some("FRK-3")),
+                project.context("proc", Some("CTV-3")),
             ),
             (
                 "an implement session of no task",
@@ -1470,13 +1470,13 @@ mod tests {
 
         // Approved, and then placed, it is open still.
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.approved",
             &json!({ "order": 1, "note": "" }),
         );
         assert!(refusal_of(draft(&project, &an_order("ACME"))).starts_with("purchase_order_open:"));
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.placed",
             &json!({ "order": 1, "placed_on": "2026-09-22" }),
         );
@@ -1486,7 +1486,7 @@ mod tests {
         let other = project
             .call(
                 "proc",
-                Some("FRK-4"),
+                Some("CTV-4"),
                 "catervas_draft_purchase_order",
                 an_order("Acme"),
             )
@@ -1508,11 +1508,11 @@ mod tests {
             } else {
                 json!({ "order": number, "note": "" })
             };
-            project.record("FRK-1", kind, &body);
+            project.record("CTV-1", kind, &body);
             draft(&project, &an_order(seller)).expect("a new order once it ended");
         }
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.received",
             &json!({ "order": 1, "received_on": "2026-09-23" }),
         );
@@ -1522,18 +1522,18 @@ mod tests {
         let drafted = draft(&project, &an_order("Dot")).expect("a new seller");
         let number = drafted["order"].as_u64().expect("a number");
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.approved",
             &json!({ "order": number, "note": "" }),
         );
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.placed",
             &json!({ "order": number, "placed_on": "2026-09-22" }),
         );
         assert!(refusal_of(draft(&project, &an_order("Dot"))).starts_with("purchase_order_open:"));
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.closed",
             &json!({ "order": number, "note": "It did not come." }),
         );
@@ -1560,7 +1560,7 @@ mod tests {
 
         // Orders approved are no longer waiting for the owner.
         project.record(
-            "FRK-1",
+            "CTV-1",
             "purchase_order.approved",
             &json!({ "order": 1, "note": "" }),
         );
@@ -1586,14 +1586,14 @@ mod tests {
 
     /// Records the owner's step on order `number`: an event with the order's task and no agent.
     fn owner(project: &TestProject, kind: &str, body: &Value) {
-        project.record("FRK-1", kind, body);
+        project.record("CTV-1", kind, body);
     }
 
-    /// `catervas_read_purchase_orders` as `proc` in its implement session of FRK-1.
+    /// `catervas_read_purchase_orders` as `proc` in its implement session of CTV-1.
     fn read_orders(project: &TestProject) -> Result<Value, ToolError> {
         project.call(
             "proc",
-            Some("FRK-1"),
+            Some("CTV-1"),
             "catervas_read_purchase_orders",
             json!({}),
         )
@@ -1641,7 +1641,7 @@ mod tests {
         project.record_by(
             Some("proc"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "purchase_order.updated",
             &json!({ "order": 4, "status": "shipped", "note": "Left the depot." }),
         );
@@ -1698,7 +1698,7 @@ mod tests {
         assert_eq!(first["lines"][0]["item"], "Baby car mirror");
         assert_eq!(first["lines"][0]["quantity"], 3);
         assert_eq!(first["lines"][0]["line_total"], "59.97");
-        assert_eq!(first["task_id"], "FRK-1");
+        assert_eq!(first["task_id"], "CTV-1");
         assert_eq!(first["overdue"], false);
         assert!(
             first.get("note").is_none() && first.get("status").is_none(),
@@ -1744,7 +1744,7 @@ mod tests {
         chat.purpose = SessionPurpose::Chat;
         let answer = run(&chat, "catervas_read_purchase_orders", json!({})).expect("a chat reads");
         assert_eq!(answer["orders"].as_array().map(Vec::len), Some(1));
-        for (who, task) in [("fin", "FRK-2"), ("dev-a", "FRK-3"), ("pm", "FRK-1")] {
+        for (who, task) in [("fin", "CTV-2"), ("dev-a", "CTV-3"), ("pm", "CTV-1")] {
             let reason = refusal_of(project.call(
                 who,
                 Some(task),
@@ -1758,8 +1758,8 @@ mod tests {
         }
     }
 
-    /// A project with a second Procurement Specialist, `proc-b`, whose task FRK-5 is in progress,
-    /// and the orders 1 to 5 of `proc` on FRK-1 in the states a follow-up meets: 1 drafted, 2
+    /// A project with a second Procurement Specialist, `proc-b`, whose task CTV-5 is in progress,
+    /// and the orders 1 to 5 of `proc` on CTV-1 in the states a follow-up meets: 1 drafted, 2
     /// approved, 3 placed, 4 received, 5 closed.
     fn a_project_with_orders(name: &str) -> TestProject {
         let project = TestProject::new(
@@ -1777,10 +1777,10 @@ mod tests {
             }),
         );
         for (task, role, assignee) in [
-            ("FRK-1", "procurement_specialist", "proc"),
-            ("FRK-4", "procurement_specialist", "proc"),
-            ("FRK-5", "procurement_specialist", "proc-b"),
-            ("FRK-2", "finance_specialist", "fin"),
+            ("CTV-1", "procurement_specialist", "proc"),
+            ("CTV-4", "procurement_specialist", "proc"),
+            ("CTV-5", "procurement_specialist", "proc-b"),
+            ("CTV-2", "finance_specialist", "fin"),
         ] {
             project.filed_with(task, "assigned", "task", None, |wire| {
                 wire["assignee_role"] = json!(role);
@@ -1796,7 +1796,7 @@ mod tests {
         project
             .call(
                 "proc",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "catervas_write_evaluation",
                 json!({ "name": "mirrors", "text": "# Mirrors" }),
             )
@@ -1831,11 +1831,11 @@ mod tests {
         project
     }
 
-    /// `catervas_update_purchase_order` as `proc` in its implement session of its follow-up task FRK-4.
+    /// `catervas_update_purchase_order` as `proc` in its implement session of its follow-up task CTV-4.
     fn follow_up(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
         project.call(
             "proc",
-            Some("FRK-4"),
+            Some("CTV-4"),
             "catervas_update_purchase_order",
             input.clone(),
         )
@@ -1863,7 +1863,7 @@ mod tests {
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
         assert_eq!(
             ids.task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         let EventBody::PurchaseOrderUpdated(body) = &updated[0].body else {
             panic!("a purchase_order.updated event carries its body");
@@ -1956,7 +1956,7 @@ mod tests {
         // Another Procurement Specialist's order is not this one's to follow up.
         let reason = refusal_of(project.call(
             "proc-b",
-            Some("FRK-5"),
+            Some("CTV-5"),
             "catervas_update_purchase_order",
             json!({ "order": 3, "status": "shipped", "note": "" }),
         ));
@@ -1968,11 +1968,11 @@ mod tests {
             ("its chat", chat),
             (
                 "the Finance Specialist",
-                project.context("fin", Some("FRK-2")),
+                project.context("fin", Some("CTV-2")),
             ),
             (
                 "a task another agent has",
-                project.context("proc", Some("FRK-5")),
+                project.context("proc", Some("CTV-5")),
             ),
             ("no task", project.context("proc", None)),
         ] {

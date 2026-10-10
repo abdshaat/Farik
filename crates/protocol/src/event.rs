@@ -1317,7 +1317,7 @@ mod tests {
         let event = event_from_value(&a_full_event_wire(EventKind::TaskCreated)).expect("valid");
         assert_eq!(
             event.envelope.ids.task_id.as_ref().map(|id| id.to_string()),
-            Some("FRK-1".to_string())
+            Some("CTV-1".to_string())
         );
         assert_eq!(event.envelope.ids.agent_id.as_deref(), Some("maya-chen"));
         assert_eq!(event.envelope.ids.session_id.as_deref(), Some("session-1"));
@@ -1545,11 +1545,13 @@ mod tests {
 
     #[test]
     fn refuses_a_task_id_that_is_not_one() {
-        let mut input = an_event_wire(EventKind::TaskCreated);
-        input["task_id"] = json!("TASK-1");
-        let errors = refusal(&input);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].path, "/task_id");
+        for id in ["TASK-1", "FRK-1"] {
+            let mut input = an_event_wire(EventKind::TaskCreated);
+            input["task_id"] = json!(id);
+            let errors = refusal(&input);
+            assert_eq!(errors.len(), 1, "{id}");
+            assert_eq!(errors[0].path, "/task_id");
+        }
     }
 
     #[test]
@@ -1586,7 +1588,7 @@ mod tests {
     fn reads_a_summary_that_names_a_parent() {
         let mut input = an_event_wire(EventKind::ContractWritten);
         let mut summary = a_contract_summary_wire();
-        summary["parent"] = json!("FRK-3");
+        summary["parent"] = json!("CTV-3");
         input["body"]["summary"] = summary;
         let event = event_from_value(&input).expect("valid");
         let EventBody::ContractWritten(body) = event.body else {
@@ -1594,7 +1596,7 @@ mod tests {
         };
         assert_eq!(
             body.summary.parent.as_ref().map(|id| id.to_string()),
-            Some("FRK-3".to_string())
+            Some("CTV-3".to_string())
         );
     }
 
@@ -1670,7 +1672,7 @@ mod tests {
     #[test]
     fn writes_a_summary_and_its_parent() {
         let mut input = an_event_wire(EventKind::ContractWritten);
-        input["body"]["summary"]["parent"] = json!("FRK-3");
+        input["body"]["summary"]["parent"] = json!("CTV-3");
         let event = event_from_value(&input).expect("valid");
         assert_eq!(event_to_value(&event), input);
     }
@@ -2159,7 +2161,7 @@ mod tests {
             .remove("request");
         assert!(!refusal(&approved).is_empty(), "an approval without it");
         let mut declined = an_event_wire(EventKind::DataPipelineDeclined);
-        declined["body"]["request"] = json!("FRK-9");
+        declined["body"]["request"] = json!("CTV-9");
         assert!(!refusal(&declined).is_empty(), "a decline with one");
         // Two deciders: the Product Manager and the owner. `auto` is phase 9 step 01's.
         for kind in [

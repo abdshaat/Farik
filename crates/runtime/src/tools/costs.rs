@@ -122,15 +122,15 @@ mod tests {
         TestProject, a_team_of_three, with_the_finance_specialist, with_the_procurement_specialist,
     };
 
-    /// A project whose finance agent `fin` can read the costs of `FRK-1`, spent by `dev-a` and
+    /// A project whose finance agent `fin` can read the costs of `CTV-1`, spent by `dev-a` and
     /// `dev-b` over two days, and of a sprint that holds it.
     fn a_project_with_costs(name: &str) -> TestProject {
         let project = TestProject::new(name, &a_team_of_three(with_the_finance_specialist));
-        project.filed("FRK-1", "in_progress", "task", None);
-        project.open_sprint("S1", None, &["FRK-1"]);
-        project.spent("dev-a", Some("FRK-1"), "s1", "2026-10-01", (1.0, 100));
-        project.spent("dev-a", Some("FRK-1"), "s2", "2026-10-02", (2.0, 200));
-        project.spent("dev-b", Some("FRK-1"), "s3", "2026-10-02", (4.0, 400));
+        project.filed("CTV-1", "in_progress", "task", None);
+        project.open_sprint("S1", None, &["CTV-1"]);
+        project.spent("dev-a", Some("CTV-1"), "s1", "2026-10-01", (1.0, 100));
+        project.spent("dev-a", Some("CTV-1"), "s2", "2026-10-02", (2.0, 200));
+        project.spent("dev-b", Some("CTV-1"), "s3", "2026-10-02", (4.0, 400));
         project
     }
 
@@ -165,7 +165,7 @@ mod tests {
             ]
         );
         for (by, key) in [
-            ("task", "FRK-1"),
+            ("task", "CTV-1"),
             ("sprint", "S1"),
             ("purpose", "implement"),
         ] {
@@ -200,9 +200,9 @@ mod tests {
                 with_the_procurement_specialist(wire);
             }),
         );
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         let before = project.event_count();
-        for task in [None, Some("FRK-1")] {
+        for task in [None, Some("CTV-1")] {
             let refused = project
                 .call(
                     "proc",

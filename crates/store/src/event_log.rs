@@ -24,7 +24,7 @@ use crate::migrations;
 pub mod fixtures;
 
 /// The prefix every task id this store hands out carries, from the contract schema's pattern.
-pub(crate) const TASK_ID_PREFIX: &str = "FRK";
+pub(crate) const TASK_ID_PREFIX: &str = "CTV";
 
 /// How many times a connection tries to put the file in write-ahead logging mode before it gives
 /// up, and how long it waits between tries. `busy_timeout` does not cover this one lock, so this is
@@ -583,7 +583,7 @@ mod tests {
             .lock()
             .expect("a fresh lock")
             .execute(
-                "INSERT INTO task_counters (prefix, next) VALUES ('FRK', ?1)
+                "INSERT INTO task_counters (prefix, next) VALUES ('CTV', ?1)
                  ON CONFLICT (prefix) DO UPDATE SET next = ?1",
                 (next,),
             )
@@ -741,7 +741,7 @@ mod tests {
         // The fixture names the contract on every kind that is about one, and `team.updated` is
         // not about one, so it is the one the filter leaves out.
         let by_task = EventQuery {
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             ..EventQuery::default()
         };
         assert_eq!(
@@ -753,7 +753,7 @@ mod tests {
             ]
         );
         let other_task = EventQuery {
-            task_id: Some("FRK-2".parse().expect("a task id")),
+            task_id: Some("CTV-2".parse().expect("a task id")),
             ..EventQuery::default()
         };
         assert_eq!(log.read(&other_task).expect("reads"), Vec::new());
@@ -761,7 +761,7 @@ mod tests {
         // from the end asks for nothing and is told nothing, rather than refused.
         let everything = EventQuery {
             after_seq: Some(1),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             agent_id: None,
             kinds: vec![EventKind::ContractWritten],
             limit: Some(10),
@@ -882,7 +882,7 @@ mod tests {
             .execute(
                 "INSERT INTO events
                      (recorded_at, team_id, project_id, task_id, agent_id, session_id, kind, body)
-                 VALUES ('2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-1', NULL, NULL,
+                 VALUES ('2026-09-17T10:00:00Z', 'catervas', 'catervas', 'CTV-1', NULL, NULL,
                          'contract.locked', ?1)",
                 (body,),
             )
@@ -954,7 +954,7 @@ mod tests {
         let ids: Vec<String> = (0..3)
             .map(|_| log.next_task_id().expect("an id").to_string())
             .collect();
-        assert_eq!(ids, ["FRK-1", "FRK-2", "FRK-3"]);
+        assert_eq!(ids, ["CTV-1", "CTV-2", "CTV-3"]);
     }
 
     #[test]
@@ -964,12 +964,12 @@ mod tests {
         let log = a_log();
         assert_eq!(
             log.next_task_id_above(4).expect("an id").to_string(),
-            "FRK-5"
+            "CTV-5"
         );
-        assert_eq!(log.next_task_id().expect("an id").to_string(), "FRK-6");
+        assert_eq!(log.next_task_id().expect("an id").to_string(), "CTV-6");
         assert_eq!(
             log.next_task_id_above(2).expect("an id").to_string(),
-            "FRK-7",
+            "CTV-7",
             "and a counter already past what is taken keeps counting"
         );
     }
@@ -979,16 +979,16 @@ mod tests {
         // A pull brings in contracts the counter has not seen: the counter's row already exists,
         // so this is the conflict branch, and it has to jump rather than count one on.
         let log = a_log();
-        assert_eq!(log.next_task_id().expect("an id").to_string(), "FRK-1");
+        assert_eq!(log.next_task_id().expect("an id").to_string(), "CTV-1");
         assert_eq!(
             log.next_task_id_above(10).expect("an id").to_string(),
-            "FRK-11"
+            "CTV-11"
         );
     }
 
     #[test]
     fn hands_out_the_last_id_the_contract_schema_can_spell_and_then_refuses() {
-        // The pattern is `^FRK-[0-9]{1,6}$`, so the counter has an end, and both sides of it matter:
+        // The pattern is `^CTV-[0-9]{1,6}$`, so the counter has an end, and both sides of it matter:
         // refusing a number early costs a project an id it was entitled to, and refusing none at
         // all hands back something that is not a task id.
         let log = a_log();
@@ -997,7 +997,7 @@ mod tests {
             log.next_task_id()
                 .expect("the last id there is")
                 .to_string(),
-            "FRK-999999"
+            "CTV-999999"
         );
         assert_eq!(
             log.next_task_id().expect_err("and none after it"),
@@ -1030,7 +1030,7 @@ mod tests {
         );
         let not_a_number = connection
             .execute(
-                "INSERT INTO task_counters (prefix, next) VALUES ('FRK', 'the next one')",
+                "INSERT INTO task_counters (prefix, next) VALUES ('CTV', 'the next one')",
                 (),
             )
             .expect_err("a word is not a counter");

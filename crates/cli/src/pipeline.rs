@@ -102,7 +102,7 @@ mod tests {
 
     fn a_request(cost: PipelineCost, account: bool, data: bool, reason: Option<&str>) -> Waiting {
         Waiting {
-            task_id: "FRK-1".parse::<TaskId>().expect("a task id"),
+            task_id: "CTV-1".parse::<TaskId>().expect("a task id"),
             kind: WaitingKind::DataPipeline,
             agent_id: Some("ivo".to_string()),
             title: "Price boxes".to_string(),

@@ -113,7 +113,7 @@ fn shows_the_board_one_line_per_task() {
     let ran = run_in(&repository.path, &["board"]);
 
     assert_eq!(ran.code, 0, "{}", ran.err);
-    assert!(ran.out.contains("FRK-1"), "{}", ran.out);
+    assert!(ran.out.contains("CTV-1"), "{}", ran.out);
     assert!(ran.out.contains("draft"), "{}", ran.out);
     assert!(ran.out.contains("Show the board"), "{}", ran.out);
     assert!(
@@ -148,10 +148,10 @@ fn shows_one_contract_and_what_happened_to_it() {
     let repository = a_project_with_a_task("read-show");
     run_in(
         &repository.path,
-        &["triage", "FRK-1", "small", "--reason", "one screen"],
+        &["triage", "CTV-1", "small", "--reason", "one screen"],
     );
 
-    let ran = run_in(&repository.path, &["task", "show", "FRK-1"]);
+    let ran = run_in(&repository.path, &["task", "show", "CTV-1"]);
 
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(ran.out.contains("Show the board"), "{}", ran.out);
@@ -172,10 +172,10 @@ fn shows_one_contract_and_what_happened_to_it() {
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn refuses_to_show_a_task_that_is_not_there() {
     let repository = a_project_with_a_task("read-show-missing");
-    let ran = run_in(&repository.path, &["task", "show", "FRK-9"]);
+    let ran = run_in(&repository.path, &["task", "show", "CTV-9"]);
 
     assert_eq!(ran.code, 1);
-    assert!(ran.err.contains("FRK-9"), "{}", ran.err);
+    assert!(ran.err.contains("CTV-9"), "{}", ran.err);
 }
 
 #[test]
@@ -194,7 +194,7 @@ fn shows_the_log_and_filters_it() {
         assert!(all.out.contains(kind), "{}", all.out);
     }
 
-    let one = run_in(&repository.path, &["log", "--task", "FRK-1"]);
+    let one = run_in(&repository.path, &["log", "--task", "CTV-1"]);
     assert_eq!(one.code, 0, "{}", one.err);
     assert!(one.out.contains("task.created"), "{}", one.out);
     assert!(
@@ -302,15 +302,15 @@ fn says_when_a_project_agrees_with_itself() {
 fn reports_a_contract_the_log_has_never_heard_of() {
     let repository = a_project_with_a_task("read-doctor-drift");
     std::fs::copy(
-        repository.path.join(".catervas/contracts/FRK-1.yaml"),
-        repository.path.join(".catervas/contracts/FRK-7.yaml"),
+        repository.path.join(".catervas/contracts/CTV-1.yaml"),
+        repository.path.join(".catervas/contracts/CTV-7.yaml"),
     )
     .expect("a second contract file");
-    let written = std::fs::read_to_string(repository.path.join(".catervas/contracts/FRK-7.yaml"))
+    let written = std::fs::read_to_string(repository.path.join(".catervas/contracts/CTV-7.yaml"))
         .expect("read")
-        .replace("id: FRK-1", "id: FRK-7");
+        .replace("id: CTV-1", "id: CTV-7");
     std::fs::write(
-        repository.path.join(".catervas/contracts/FRK-7.yaml"),
+        repository.path.join(".catervas/contracts/CTV-7.yaml"),
         written,
     )
     .expect("write");
@@ -318,7 +318,7 @@ fn reports_a_contract_the_log_has_never_heard_of() {
     let ran = run_in(&repository.path, &["doctor"]);
 
     assert_eq!(ran.code, 1, "doctor exits 1 when it found something");
-    assert!(ran.out.contains("FRK-7"), "{}", ran.out);
+    assert!(ran.out.contains("CTV-7"), "{}", ran.out);
     assert!(ran.out.contains("never heard of"), "{}", ran.out);
 
     let log = run_in(&repository.path, &["log", "--kind", "drift.detected"]);
@@ -576,12 +576,12 @@ fn shows_a_tasks_events_cost_and_children() {
     let repository = a_project_with_a_task("read-show-story");
     let sized = run_in(
         &repository.path,
-        &["triage", "FRK-1", "large", "--reason", "Three screens."],
+        &["triage", "CTV-1", "large", "--reason", "Three screens."],
     );
     assert_eq!(sized.code, 0, "{}", sized.err);
     project::walked(
         &repository,
-        "FRK-1",
+        "CTV-1",
         &["refining", "ready", "assigned", "in_progress"],
     );
     let log = project::log_of(&repository);
@@ -598,7 +598,7 @@ fn shows_a_tasks_events_cost_and_children() {
         catervas_store::files::yaml_value(&a_request("Show one row"), "child.yaml")
             .expect("the child is YAML"),
         "human",
-        Some(&"FRK-1".parse().expect("a task id")),
+        Some(&"CTV-1".parse().expect("a task id")),
         at(),
         &ids,
         None,
@@ -606,7 +606,7 @@ fn shows_a_tasks_events_cost_and_children() {
     .expect("the child is filed");
     project::record_as(
         &repository,
-        "FRK-1",
+        "CTV-1",
         Some(("pm", "s-1")),
         "cost.recorded",
         &json!({
@@ -622,22 +622,22 @@ fn shows_a_tasks_events_cost_and_children() {
         }),
     );
 
-    let ran = run_in(&repository.path, &["task", "show", "FRK-1"]);
+    let ran = run_in(&repository.path, &["task", "show", "CTV-1"]);
 
     assert_eq!(ran.code, 0, "{}", ran.err);
     for expected in [
         "request.triaged — large by human: ",
         "cost: $0.50 of $5.00; sessions: 1;",
         "children",
-        "  FRK-2 draft ",
+        "  CTV-2 draft ",
     ] {
         assert!(ran.out.contains(expected), "{expected:?} in {}", ran.out);
     }
-    let ran = run_in(&repository.path, &["--json", "task", "show", "FRK-1"]);
+    let ran = run_in(&repository.path, &["--json", "task", "show", "CTV-1"]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     let shown: Value = serde_json::from_str(ran.out.trim()).expect("JSON");
     assert_eq!(shown["cost"]["usd"], 0.5, "{shown}");
-    assert_eq!(shown["children"][0]["task_id"], "FRK-2", "{shown}");
+    assert_eq!(shown["children"][0]["task_id"], "CTV-2", "{shown}");
 }
 
 #[cfg(unix)]
@@ -647,7 +647,7 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     use serde_json::json;
 
     let repository = a_project_with_a_task("read-show-diff");
-    let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
+    let ran = run_in(&repository.path, &["task", "show", "CTV-1", "--diff"]);
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(ran.err.contains("has no branch yet"), "{}", ran.err);
 
@@ -659,8 +659,8 @@ fn shows_a_tasks_diff_before_and_after_integration() {
         repository.git(&["commit", "-q", "-m", &format!("Add {file}")]);
         repository.git(&["checkout", "-q", "main"]);
     };
-    branch_with("FRK-1", "done.txt");
-    let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
+    branch_with("CTV-1", "done.txt");
+    let ran = run_in(&repository.path, &["task", "show", "CTV-1", "--diff"]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(ran.out.contains("+++ b/done.txt"), "{}", ran.out);
 
@@ -669,36 +669,36 @@ fn shows_a_tasks_diff_before_and_after_integration() {
         "-q",
         "--no-ff",
         "-m",
-        "Merge FRK-1",
-        "feature/FRK-1",
+        "Merge CTV-1",
+        "feature/CTV-1",
     ]);
     let sha = repository.git_output(&["rev-parse", "HEAD"]);
     project::record(
         &repository,
-        "FRK-1",
+        "CTV-1",
         "task.integrated",
         &json!({ "sha": sha, "into": "main", "integrated_by": "human" }),
     );
-    let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
+    let ran = run_in(&repository.path, &["task", "show", "CTV-1", "--diff"]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(ran.out.contains("+++ b/done.txt"), "{}", ran.out);
 
     repository.write("second.yaml", &a_request("Show a second board"));
     let filed = run_in(&repository.path, &["task", "create", "second.yaml"]);
     assert_eq!(filed.code, 0, "{}", filed.err);
-    branch_with("FRK-2", "b.txt");
-    repository.git(&["merge", "-q", "--ff-only", "feature/FRK-2"]);
+    branch_with("CTV-2", "b.txt");
+    repository.git(&["merge", "-q", "--ff-only", "feature/CTV-2"]);
     let head = repository.git_output(&["rev-parse", "HEAD"]);
     project::record(
         &repository,
-        "FRK-2",
+        "CTV-2",
         "task.integrated",
         &json!({ "sha": head, "into": "main", "integrated_by": "human" }),
     );
-    let ran = run_in(&repository.path, &["task", "show", "FRK-2", "--diff"]);
+    let ran = run_in(&repository.path, &["task", "show", "CTV-2", "--diff"]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(
-        ran.out.contains("feature/FRK-2 is wholly in main"),
+        ran.out.contains("feature/CTV-2 is wholly in main"),
         "{}",
         ran.out
     );
@@ -708,10 +708,10 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     assert_eq!(filed.code, 0, "{}", filed.err);
     let sized = run_in(
         &repository.path,
-        &["triage", "FRK-3", "large", "--reason", "Many boards."],
+        &["triage", "CTV-3", "large", "--reason", "Many boards."],
     );
     assert_eq!(sized.code, 0, "{}", sized.err);
-    let ran = run_in(&repository.path, &["task", "show", "FRK-3", "--diff"]);
+    let ran = run_in(&repository.path, &["task", "show", "CTV-3", "--diff"]);
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(
         ran.err.contains("is an epic and has no branch"),
@@ -744,18 +744,18 @@ fn shows_no_diff_for_a_task_in_a_private_folder() {
     let folder = repository.path.join(".catervas/local/finance");
     std::fs::create_dir_all(&folder).expect("the folder is made");
     std::fs::write(folder.join("books.xlsx"), "books").expect("written");
-    let task = "FRK-1".parse().expect("a task id");
+    let task = "CTV-1".parse().expect("a task id");
     catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
     std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
 
-    let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
+    let ran = run_in(&repository.path, &["task", "show", "CTV-1", "--diff"]);
 
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(!ran.out.contains("diff --git"), "{}", ran.out);
     assert!(!ran.out.contains("edited books"), "{}", ran.out);
     let ran = run_in(
         &repository.path,
-        &["--json", "task", "show", "FRK-1", "--diff"],
+        &["--json", "task", "show", "CTV-1", "--diff"],
     );
     assert_eq!(ran.code, 0, "{}", ran.err);
     let shown: Value = serde_json::from_str(ran.out.trim()).expect("JSON");
@@ -765,8 +765,8 @@ fn shows_no_diff_for_a_task_in_a_private_folder() {
 /// `a_project_with_a_task` and a second request, both accepted, with every metric a different
 /// number so that no line or field can be printed from another's value:
 ///
-/// - FRK-1 (one `test` criterion) is verified twice, the human unblocking it once and one
-///   escalation raised; FRK-2 (a `command` and a `review` criterion) is verified once and accepted
+/// - CTV-1 (one `test` criterion) is verified twice, the human unblocking it once and one
+///   escalation raised; CTV-2 (a `command` and a `review` criterion) is verified once and accepted
 ///   first time, and escalated once after. So two accepted tasks, 50% first pass, 1.50
 ///   interventions each, and two criteria of three run by Catervas.
 /// - Three sessions cost $0.50 of implement, $1.00 of verify, and $0.50 of triage, each in an ISO
@@ -812,7 +812,7 @@ fn accepted_project(name: &str) -> TempRepo {
     );
     let filed = run_in(&repository.path, &["task", "create", "second.yaml"]);
     assert_eq!(filed.code, 0, "{}", filed.err);
-    assert!(filed.out.starts_with("FRK-2 "), "{}", filed.out);
+    assert!(filed.out.starts_with("CTV-2 "), "{}", filed.out);
 
     let by = |actor: &str| json!({ "actor": actor, "requested_by": actor });
     for (from, to, actor) in [
@@ -821,11 +821,11 @@ fn accepted_project(name: &str) -> TempRepo {
         ("in_progress", "verifying", "assignee"),
         ("verifying", "escalated", "governor"),
     ] {
-        project::moved(&repository, "FRK-1", from, to, &by(actor));
+        project::moved(&repository, "CTV-1", from, to, &by(actor));
     }
     project::record(
         &repository,
-        "FRK-1",
+        "CTV-1",
         "escalation.raised",
         &json!({ "reason": "iterations", "detail": "Two tries." }),
     );
@@ -834,25 +834,25 @@ fn accepted_project(name: &str) -> TempRepo {
         ("in_progress", "verifying", "assignee"),
         ("verifying", "accepted", "product_manager"),
     ] {
-        project::moved(&repository, "FRK-1", from, to, &by(actor));
+        project::moved(&repository, "CTV-1", from, to, &by(actor));
     }
     for (from, to, actor) in [
         ("in_progress", "verifying", "assignee"),
         ("verifying", "accepted", "product_manager"),
     ] {
-        project::moved(&repository, "FRK-2", from, to, &by(actor));
+        project::moved(&repository, "CTV-2", from, to, &by(actor));
     }
     project::record(
         &repository,
-        "FRK-2",
+        "CTV-2",
         "escalation.raised",
         &json!({ "reason": "integration", "detail": "A conflict." }),
     );
 
     for (task, session, purpose, usd, day) in [
-        ("FRK-1", "s1", "implement", 0.5, 7),
-        ("FRK-1", "s2", "verify", 1.0, 14),
-        ("FRK-2", "s3", "triage", 0.5, 21),
+        ("CTV-1", "s1", "implement", 0.5, 7),
+        ("CTV-1", "s2", "verify", 1.0, 14),
+        ("CTV-2", "s3", "triage", 0.5, 21),
     ] {
         project::record_on(
             &repository,
@@ -1032,29 +1032,29 @@ fn prints_the_metrics_of_a_sprint() {
     assert_eq!(started.code, 0, "{}", started.err);
     plan_sprint(
         &project::tool_deps(&repository),
-        &["FRK-1".parse().expect("a task id")],
+        &["CTV-1".parse().expect("a task id")],
         &PlannedBy::Governor,
     )
-    .expect("FRK-1 is planned into S1");
+    .expect("CTV-1 is planned into S1");
 
     let by = |actor: &str| json!({ "actor": actor, "requested_by": actor });
     project::moved(
         &repository,
-        "FRK-1",
+        "CTV-1",
         "in_progress",
         "verifying",
         &by("assignee"),
     );
     project::moved(
         &repository,
-        "FRK-1",
+        "CTV-1",
         "verifying",
         "accepted",
         &by("product_manager"),
     );
     project::record_on(
         &repository,
-        "FRK-1",
+        "CTV-1",
         Some(("dev-a", "s1")),
         "cost.recorded",
         &json!({
@@ -1142,12 +1142,12 @@ fn prints_the_control_characters_an_agent_wrote_escaped() {
     let repository = a_project_with_a_task("read-show-escaped");
     project::record(
         &repository,
-        "FRK-1",
+        "CTV-1",
         "question.asked",
         &json!({ "question": "Clear\u{1b}[2Jthe\u{7}screen?\tNo.", "asked_by": "pm" }),
     );
 
-    let shown = run_in(&repository.path, &["task", "show", "FRK-1"]);
+    let shown = run_in(&repository.path, &["task", "show", "CTV-1"]);
 
     assert_eq!(shown.code, 0, "{}", shown.err);
     assert!(!shown.out.contains(['\u{1b}', '\u{7}']), "{:?}", shown.out);
@@ -1183,13 +1183,13 @@ fn escapes_what_an_agent_wrote_in_the_channel() {
     let repository = a_project_with_a_task("read-channel-escaped");
     project::record_as(
         &repository,
-        "FRK-1",
+        "CTV-1",
         Some(("pm", "session-1")),
         "message.posted",
         &json!({
             "author": "pm",
             "kind": "reaction",
-            "text": "FRK-1 is \u{1b}[31mready",
+            "text": "CTV-1 is \u{1b}[31mready",
             "mentions": []
         }),
     );
@@ -1199,7 +1199,7 @@ fn escapes_what_an_agent_wrote_in_the_channel() {
     assert_eq!(shown.code, 0, "{}", shown.err);
     assert!(!shown.out.contains('\u{1b}'), "{:?}", shown.out);
     assert!(
-        shown.out.contains("pm FRK-1 is \\u001b[31mready"),
+        shown.out.contains("pm CTV-1 is \\u001b[31mready"),
         "{:?}",
         shown.out
     );

@@ -8,10 +8,10 @@ test("a Designer's plan waits for the Product Manager on its task page", async (
 	const serve = await startServe({
 		team: "pm-architect-developer-designer",
 		transcripts: [
-			"triage_frk_1_small_by_pm",
-			"refine_writes_task_for_iris_frk_1",
-			"plan_assigns_frk_1_to_iris",
-			"explore_plans_frk_1",
+			"triage_ctv_1_small_by_pm",
+			"refine_writes_task_for_iris_ctv_1",
+			"plan_assigns_ctv_1_to_iris",
+			"explore_plans_ctv_1",
 		],
 	});
 	try {
@@ -22,10 +22,10 @@ test("a Designer's plan waits for the Product Manager on its task page", async (
 			.getByLabel("What should the team do next?")
 			.fill("Give the sign-in page room on a phone");
 		await page.getByRole("button", { name: "Send to the team" }).click();
-		await expect(page).toHaveURL(/\/requests\/FRK-1$/);
+		await expect(page).toHaveURL(/\/requests\/CTV-1$/);
 
 		// Iris explores and plans; Mira's decision session then waits, unplayed.
-		await page.goto(`http://127.0.0.1:${serve.port}/tasks/FRK-1`);
+		await page.goto(`http://127.0.0.1:${serve.port}/tasks/CTV-1`);
 		await expect(
 			page.getByText("Waiting for Mira to approve the plan").first(),
 		).toBeVisible({ timeout: 20_000 });
