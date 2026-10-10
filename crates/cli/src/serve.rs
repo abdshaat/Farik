@@ -24,10 +24,22 @@ const DEFAULT_PORT: u16 = 7420;
 
 /// What `serve` does next.
 enum Mode {
-    /// Serve the wizard; with the project already chosen when it only waits on the credential.
-    Setup(Option<PathBuf>),
+    /// Serve the wizard; `waiting` is the project already chosen when it only waits on the
+    /// credential, `leaving` the root a drive just left through `project.leave`.
+    Setup {
+        waiting: Option<PathBuf>,
+        leaving: Option<PathBuf>,
+    },
     /// Drive this project.
     Drive(PathBuf),
+}
+
+/// How a drive ended.
+enum Driven {
+    /// With this exit code: serve ends.
+    Ended(i32),
+    /// The project at this root was left from the browser: serve goes back to the wizard.
+    Left(PathBuf),
 }
 
 /// Serves the project found here, else the one served last, else the wizard until it chooses one,
@@ -57,14 +69,18 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
         let (mut take_on_error, mut taking_on) = (None, false);
         // The project setup waits on the credential for, kept across a take-on that fails.
         let mut waited_on = None;
+        // The root a drive left, kept across a take-on that fails so Stay on still works.
+        let mut left_from = None;
         loop {
             mode = match mode {
-                Mode::Setup(waiting) => {
+                Mode::Setup { waiting, leaving } => {
                     waited_on.clone_from(&waiting);
+                    left_from.clone_from(&leaving);
                     let set_up = set_up(
                         io,
                         &held,
                         waiting,
+                        leaving,
                         take_on_error.take(),
                         no_open,
                         &mut linked,
@@ -79,7 +95,11 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
                     }
                 }
                 Mode::Drive(root) => match drive(&root, &held, no_open, &mut linked, io).await {
-                    Ok(code) => return code,
+                    Ok(Driven::Ended(code)) => return code,
+                    Ok(Driven::Left(root)) => Mode::Setup {
+                        waiting: None,
+                        leaving: Some(root),
+                    },
                     // A take-on that failed goes back to the wizard, which says why.
                     Err(error) if taking_on => {
                         taking_on = false;
@@ -88,7 +108,10 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
                             &format!("farik: the project could not be taken on: {error}"),
                         );
                         take_on_error = Some(error);
-                        Mode::Setup(waited_on.take())
+                        Mode::Setup {
+                            waiting: waited_on.take(),
+                            leaving: left_from.take(),
+                        }
                     }
                     Err(error) => return refuse(io, false, &error),
                 },
@@ -109,9 +132,15 @@ fn found(io: &CliIo<'_>) -> Mode {
     let no_account = matches!(io.engine, Engine::Claude)
         && load_credential(&io.env, &(io.credential_stores)()).is_none();
     match root {
-        Some(root) if no_account => Mode::Setup(Some(root)),
+        Some(root) if no_account => Mode::Setup {
+            waiting: Some(root),
+            leaving: None,
+        },
         Some(root) => Mode::Drive(root),
-        None => Mode::Setup(None),
+        None => Mode::Setup {
+            waiting: None,
+            leaving: None,
+        },
     }
 }
 
@@ -121,6 +150,7 @@ async fn set_up(
     io: &mut CliIo<'_>,
     held: &std::net::TcpListener,
     waiting: Option<PathBuf>,
+    leaving: Option<PathBuf>,
     take_on_error: Option<String>,
     no_open: bool,
     linked: &mut bool,
@@ -143,15 +173,26 @@ async fn set_up(
         stores: (io.credential_stores)(),
         chosen,
         waiting,
+        leaving: leaving.clone(),
     });
     let bound = port_of(held)?;
     let (mut web, code) = web(Path::new(""), io, None)?;
     web.port = bound;
     web.take_on_error = std::sync::Mutex::new(take_on_error);
+    web.leaving = std::sync::Mutex::new(leaving.clone());
     let state = Arc::new(DaemonState::setup(Arc::clone(&host), web));
     let handle = serve_held(held, None, state)
         .await
         .map_err(|error| error.to_string())?;
+    if let Some(root) = &leaving {
+        say(
+            &mut io.stdout,
+            &format!(
+                "the team left {}: choose its next project in the browser",
+                root.display()
+            ),
+        );
+    }
     say(&mut io.stdout, &format!("{lacks}, on 127.0.0.1:{bound}"));
     if !*linked {
         print_link(io, bound, &code, no_open);
@@ -207,7 +248,7 @@ async fn drive(
     no_open: bool,
     linked: &mut bool,
     io: &mut CliIo<'_>,
-) -> Result<i32, String> {
+) -> Result<Driven, String> {
     let project = open_project(root, io.clock.now())?;
     let options = StartOptions {
         listener: Some(held),
@@ -260,5 +301,17 @@ async fn drive(
         |_| {},
     )
     .await;
-    Ok(finish(&project, driver, &mut printer, ended, presses).await)
+    let left = driver.daemon.left();
+    if left.is_some() {
+        // The wizard after a leave listens on `io`: give it the receiver Ctrl-C reaches, as
+        // `start_holding` does on a refusal.
+        let dropped = tokio::sync::mpsc::unbounded_channel().1;
+        let interrupts = std::mem::replace(&mut driver.interrupts, dropped);
+        printer.io.interrupts = Interrupts::Channel(interrupts);
+    }
+    let code = finish(&project, driver, &mut printer, ended, presses).await;
+    Ok(match left {
+        Some(root) if code == 0 => Driven::Left(root),
+        _ => Driven::Ended(code),
+    })
 }

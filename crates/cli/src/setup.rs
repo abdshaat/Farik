@@ -49,6 +49,8 @@ pub(crate) struct CliHost {
     pub(crate) chosen: watch::Sender<Option<PathBuf>>,
     /// A project already chosen, which has no credential yet: `connect` takes it on.
     pub(crate) waiting: Option<PathBuf>,
+    /// The root the team just left from the browser: opening it again stays on it as it is.
+    pub(crate) leaving: Option<PathBuf>,
 }
 
 impl CliHost {
@@ -135,6 +137,20 @@ impl CliHost {
 
 impl SetupHost for CliHost {
     fn open(&self, path: &str, no_sandbox: bool) -> Result<PathBuf, SetupError> {
+        // Stay on: the old root, as it is; an old root outside home can be stayed on too.
+        if let Some(old) = self
+            .leaving
+            .as_ref()
+            .and_then(|old| std::fs::canonicalize(old).ok())
+            && std::fs::canonicalize(self.home.join(path)).is_ok_and(|asked| asked == old)
+        {
+            match try_lock(&old).map_err(failed)? {
+                Some(lock) => drop(lock),
+                None => return Err(refused(BUSY)),
+            }
+            self.has_account()?;
+            return Ok(self.choose(old));
+        }
         let folder = self.inside_home(path)?;
         let root = repository_root(&folder).map_err(|_| {
             refused("that folder is not a git project; choose another, or start a new project")

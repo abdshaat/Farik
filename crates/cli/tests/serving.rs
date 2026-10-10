@@ -29,7 +29,8 @@ use serde_json::{Value, json};
 use tokio::sync::Semaphore;
 
 use project::{
-    Ran, a_team, events, filed, hold_the_run_lock, joined, record, recorded, run, run_with, scratch,
+    Ran, a_team, events, filed, hold_the_run_lock, joined, record, recorded, run, run_with,
+    scratch, the_run_lock_frees,
 };
 
 #[path = "../../runtime/tests/support/ports.rs"]
@@ -1723,4 +1724,100 @@ fn connector_tools_runs_farik_s_own_connector() {
         names,
         ["query_package", "query_packages", "get_vulnerability"]
     );
+}
+
+/// Serves `a_team(name)` from its own folder, with `HOME` a scratch folder that does not hold it.
+fn serving_a_team(name: &str) -> (TempRepo, Serving) {
+    let repository = a_team(name);
+    let (home, state) = setup_folders(name);
+    let mut env = setup_env(&home, &state);
+    env.insert(
+        "ANTHROPIC_API_KEY".to_string(),
+        "sk-ant-api03-test".to_string(),
+    );
+    let serving = serving_in(&repository.path, env, true);
+    (repository, serving)
+}
+
+/// Leaves the project and waits until the wizard answers on the same port.
+fn left_for_the_wizard(serving: &Serving) -> Value {
+    let (left, closed) =
+        call_then_closed(serving.port, &serving.cookie, "project.leave", json!({}));
+    assert_eq!(left["result"], json!({}), "{left}");
+    assert!(closed, "the driver closes the socket");
+    let mut status = None;
+    until("the wizard answers", || {
+        status = serve_status_across_a_restart(serving.port, &serving.cookie)
+            .filter(|status| status["project_root"].is_null());
+        status.is_some()
+    });
+    status.expect("a status")
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn leaves_the_project_for_the_wizard_on_the_same_port() {
+    let (repository, serving) = serving_a_team("serve-leaves");
+    let root = repository.path.canonicalize().expect("the root");
+
+    let status = left_for_the_wizard(&serving);
+
+    assert_eq!(
+        status["leaving"],
+        json!(root.display().to_string()),
+        "{status}"
+    );
+    assert_eq!(status["port"], serving.port, "{status}");
+    assert_eq!(
+        links(&serving.out.text()).len(),
+        1,
+        "{}",
+        serving.out.text()
+    );
+    let said = format!(
+        "the team left {}: choose its next project in the browser",
+        root.display()
+    );
+    assert!(serving.out.text().contains(&said), "{}", serving.out.text());
+    the_run_lock_frees(&repository);
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn stays_on_the_project_it_left() {
+    let (repository, serving) = serving_a_team("serve-stays");
+    let root = repository.path.canonicalize().expect("the root");
+    let team = repository.path.join(".farik/team.yaml");
+    let before = std::fs::read(&team).expect("the team");
+
+    left_for_the_wizard(&serving);
+    let opened = call(
+        serving.port,
+        &serving.cookie,
+        "project.open",
+        json!({ "path": root.display().to_string(), "no_sandbox": false }),
+    );
+    assert_eq!(
+        opened["result"]["project_root"],
+        json!(root.display().to_string()),
+        "{opened}"
+    );
+    until("the team is driven again", || {
+        daemon_file(&repository).exists()
+    });
+
+    assert_eq!(std::fs::read(&team).expect("the team"), before);
+    assert!(!repository.path.join(".farik/local/setup-pending").exists());
+    assert!(
+        !repository
+            .path
+            .join(".farik/local/keys-copied.json")
+            .exists()
+    );
+    let stopped = run(&root, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
 }

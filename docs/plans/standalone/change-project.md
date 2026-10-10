@@ -172,7 +172,7 @@ Files: modified `crates/cli/src/serve.rs` (`Mode`, `Driven`, loop, `set_up` sets
 - `leaves_the_project_for_the_wizard_on_the_same_port` — serving `a_team`: `project.leave` answers `{}` and the socket closes; serve keeps running; `serve.status` across the restart has `project_root` `null`, `leaving` the root and the same `port`; the output holds one link; the run lock is free (`try_lock` on the root succeeds); then an interrupt (`serving.interrupted()`) ends serve with 130.
 - `stays_on_the_project_it_left` — with `HOME` a scratch folder that does not hold the root: after leaving, `project.open { path: <absolute root>, no_sandbox: false }` answers the root; `daemon.json` is back; `.farik/team.yaml` bytes are those before leaving; no `setup-pending` and no `keys-copied.json`; `farik stop` ends serve with 0.
 
-- [ ] `feat(cli): switch farik serve from a project back to the wizard`
+- [x] `feat(cli): switch farik serve from a project back to the wizard`
 
 ### Task 7: the carried take-on
 
