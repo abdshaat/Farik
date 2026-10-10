@@ -1,6 +1,6 @@
 # Phase 8, step 03b: Approving on Today
 
-Status: ready
+Status: done (executed and landing-reviewed 2026-10-10; lands after fixes a8949ff6, 6c2000fa, a8370416; spec 0.89)
 Branch: `phase/8-catervas-folders` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 4, 5.1, 5.4, 5.7, 6.1, 8.6; F3, F5
 Depends on: step 03 of this phase (planned, not yet executed: `OWNER_ACCEPTED`, `folder_docs`, `tools::folders`, `folder_doc_decide`, and an approval made a folder change integrated by the team's policy); steps 01 and 01b (planned, not yet executed: `catervas_core::folders`, the Product Manager's docs tasks); phase 6's Today (merged in #19); phase 7 and the Catervas rename (merged on main, 2c28b555).
