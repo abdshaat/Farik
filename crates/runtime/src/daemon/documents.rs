@@ -1059,6 +1059,14 @@ mod tests {
             "This file was also changed on your computer, outside Catervas. Finish or undo that change, then save here again."
         );
         git(&harness, &["checkout", "--", ROADMAP]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_save_over_a_waiting_change_or_a_link() {
+        let harness = project("files-save-waiting", "manual");
+        put_documents(&harness);
+        let overview = blob(&harness, OVERVIEW);
 
         // A change that waits to be added holds its document.
         let saved = save(&harness, OVERVIEW, "first\n", &overview);
