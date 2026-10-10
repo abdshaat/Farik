@@ -37,6 +37,9 @@ export function SetupProject() {
 	const [busy, setBusy] = useState(false);
 	const [refused, setRefused] = useState<string>();
 	const [opening, setOpening] = useState(false);
+	const [replacing, setReplacing] = useState<string>();
+	const leaving = serve?.leaving ?? undefined;
+	const base = (path: string) => path.split("/").filter(Boolean).at(-1) ?? path;
 
 	// Catervas restarts on the chosen project; once the page is connected to it again, it goes home.
 	useEffect(() => {
@@ -46,16 +49,23 @@ export function SetupProject() {
 	const take = async (
 		method: "project.open" | "project.create",
 		params: object,
+		sandbox = noSandbox(),
 	) => {
 		if (!client) return;
 		setBusy(true);
 		setRefused(undefined);
 		try {
-			await client.call(method, { ...params, noSandbox: noSandbox() });
+			await client.call(method, { ...params, noSandbox: sandbox });
 			reopen();
 			setOpening(true);
 		} catch (e) {
-			setRefused(daemonSaid(e, "setupRefused"));
+			const message = e instanceof Error ? e.message : "";
+			if (message.startsWith("has_team") && method === "project.open")
+				setReplacing((params as { path: string }).path);
+			else {
+				setReplacing(undefined);
+				setRefused(daemonSaid(e, "setupRefused"));
+			}
 			setBusy(false);
 		}
 	};
@@ -70,6 +80,31 @@ export function SetupProject() {
 		return (
 			<Wizard step={2} title={t("projectTitle")} lead={t("projectLead")}>
 				<p role="status">{t("opening")}</p>
+			</Wizard>
+		);
+	if (replacing !== undefined)
+		return (
+			<Wizard step={2} title={t("projectTitle")} lead={t("projectLead")}>
+				<p>{t("replaceTeam").replace("{target}", base(replacing))}</p>
+				<div className={styles.foot}>
+					<Button
+						onClick={() => {
+							setReplacing(undefined);
+							setView("project");
+						}}
+					>
+						{t("replaceNo")}
+					</Button>
+					<Button
+						kind="primary"
+						busy={busy}
+						onClick={() => {
+							take("project.open", { path: replacing, replace: true });
+						}}
+					>
+						{t("replaceYes")}
+					</Button>
+				</div>
 			</Wizard>
 		);
 	if (view !== "question")
@@ -99,6 +134,9 @@ export function SetupProject() {
 		);
 	return (
 		<Wizard step={2} title={t("projectTitle")} lead={t("projectLead")}>
+			{leaving && (
+				<p role="status">{t("movingFrom").replace("{name}", base(leaving))}</p>
+			)}
 			{stored && (
 				<p role="status">
 					{t(stored === "keychain" ? "storedKeychain" : "storedFile")}
@@ -159,7 +197,18 @@ export function SetupProject() {
 			)}
 			{refusal}
 			<div className={styles.foot}>
-				<Button onClick={() => navigate("/setup/account")}>{t("back")}</Button>
+				{leaving ? (
+					<Button
+						busy={busy}
+						onClick={() => take("project.open", { path: leaving }, false)}
+					>
+						{t("stayOn").replace("{name}", base(leaving))}
+					</Button>
+				) : (
+					<Button onClick={() => navigate("/setup/account")}>
+						{t("back")}
+					</Button>
+				)}
 				<Button
 					kind="primary"
 					busy={busy}

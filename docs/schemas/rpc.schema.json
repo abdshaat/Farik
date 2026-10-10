@@ -495,6 +495,12 @@
           "$ref": "#/$defs/sandboxBuildRequest"
         },
         {
+          "$ref": "#/$defs/projectLeaveRequest"
+        },
+        {
+          "$ref": "#/$defs/keysCopiedDismissRequest"
+        },
+        {
           "$ref": "#/$defs/browserPullRequest"
         },
         {
@@ -1161,6 +1167,42 @@
         "setup_pending": {
           "type": "boolean",
           "description": "Whether the project was just set up and waits for the team's setup (the marker .catervas/local/setup-pending)."
+        },
+        "leaving": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The root of the project being left while the page chooses another (ADR 0053), or null."
+        },
+        "keys_copied": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "from",
+                "count"
+              ]
+            }
+          ],
+          "description": "Where this project's connector keys were copied from and how many, until the user keeps or changes them; null when none were or after keys_copied.dismiss."
         }
       },
       "required": [
@@ -1169,7 +1211,9 @@
         "credential",
         "take_on_error",
         "port",
-        "setup_pending"
+        "setup_pending",
+        "leaving",
+        "keys_copied"
       ]
     },
     "taskProjection": {
@@ -1387,6 +1431,10 @@
             },
             "no_sandbox": {
               "type": "boolean"
+            },
+            "replace": {
+              "type": "boolean",
+              "description": "Replace a folder that already has a Catervas team: its .catervas/ is removed and the team of the project being left is carried over (ADR 0053). Without it such a folder is refused as has_team."
             }
           },
           "required": [
@@ -1503,6 +1551,62 @@
         },
         "method": {
           "const": "sandbox.build"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "projectLeaveRequest": {
+      "title": "Project Leave Request",
+      "description": "Stops the team's driver and lets go of the project, so that the page returns to choosing a project (ADR 0053). Waits, as catervas stop does, for a running session's tick to end. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "project.leave"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "keysCopiedDismissRequest": {
+      "title": "Keys Copied Dismiss Request",
+      "description": "Removes the notice that connector keys were copied from another project (.catervas/local/keys-copied.json) and records no event. Answers emptyResult, also when there is no notice.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "keys_copied.dismiss"
         },
         "params": {
           "type": "object",

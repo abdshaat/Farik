@@ -1,9 +1,18 @@
 import icon from "@catervas/brand/assets/icons/icon-48.png";
+import { Button } from "@catervas/ui";
 import { useSyncExternalStore } from "react";
-import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router";
+import {
+	Link,
+	Navigate,
+	NavLink,
+	Outlet,
+	useLocation,
+	useNavigate,
+} from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { landing } from "../app/landing.ts";
 import { type ServeStatus, useQuery } from "../app/store.ts";
+import { ChangeProject } from "../pages/ChangeProject.tsx";
 import { t } from "../strings/t.ts";
 import { PauseControl } from "./PauseControl.tsx";
 import styles from "./Shell.module.css";
@@ -33,8 +42,9 @@ export function useWide(): boolean {
 
 export function Shell() {
 	const wide = useWide();
-	const { status } = useConnection();
-	const { data } = useQuery<ServeStatus>("serve.status", {});
+	const { status, client } = useConnection();
+	const navigate = useNavigate();
+	const { data, again } = useQuery<ServeStatus>("serve.status", {});
 	const path = useLocation().pathname;
 	// Nothing shows, and nothing is asked of the project, until Catervas says where it stands.
 	if (!data) return null;
@@ -52,6 +62,18 @@ export function Shell() {
 			))}
 		</ul>
 	);
+	const dismissKeys = async (thenTeam: boolean) => {
+		try {
+			await client?.call("keys_copied.dismiss", {});
+			// The dismissal records no event, so nothing else asks the status again.
+			again();
+			if (thenTeam) navigate("/team");
+		} catch {
+			// Closed connection or a refusal: the notice stays, so the user can choose again.
+		}
+	};
+	const copied = data.keysCopied;
+	const name = data.projectRoot?.split(/[\\/]/).at(-1);
 	const pause = data && <PauseControl paused={data.paused} short={!wide} />;
 	return (
 		<div className={wide ? styles.wide : styles.narrow}>
@@ -63,6 +85,18 @@ export function Shell() {
 					</p>
 					<nav aria-label={t("navRail")}>{places}</nav>
 					<div className={styles.foot}>
+						{data.projectRoot && (
+							<ChangeProject
+								root={data.projectRoot}
+								short
+								rowClass={styles.nameRow}
+								lead={
+									<p className={styles.project} title={data.projectRoot}>
+										{name}
+									</p>
+								}
+							/>
+						)}
 						<p className={styles.conn}>
 							<span
 								className={`${styles.dot}${status === "open" ? ` ${styles.live}` : ""}`}
@@ -76,7 +110,18 @@ export function Shell() {
 				</header>
 			) : (
 				<header className={styles.top}>
-					<span>{data?.projectRoot?.split(/[\\/]/).at(-1) ?? t("brand")}</span>
+					<div className={styles.topGroup}>
+						{data.projectRoot ? (
+							<ChangeProject
+								root={data.projectRoot}
+								short
+								rowClass={styles.nameRow}
+								lead={<span>{name}</span>}
+							/>
+						) : (
+							<span>{t("brand")}</span>
+						)}
+					</div>
 					{pause}
 				</header>
 			)}
@@ -86,6 +131,18 @@ export function Shell() {
 						<strong>{t("pausedLead")}</strong> {t("pausedNothingNew")}
 						{wide && ` ${t("pausedStillYours")}`}
 					</p>
+				)}
+				{copied && (
+					<div role="status" className={styles.banner}>
+						<p>
+							{t(copied.count === 1 ? "keysCopiedOne" : "keysCopied", {
+								from: copied.from.split(/[\\/]/).at(-1) ?? copied.from,
+								count: copied.count,
+							})}
+						</p>
+						<Button onClick={() => dismissKeys(false)}>{t("keysKeep")}</Button>{" "}
+						<Button onClick={() => dismissKeys(true)}>{t("keysChoose")}</Button>
+					</div>
 				)}
 				<Outlet />
 				{!wide && path.startsWith("/team") && (

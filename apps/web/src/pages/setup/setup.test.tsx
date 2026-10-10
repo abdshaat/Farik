@@ -16,6 +16,7 @@ import {
 	answerStatus,
 	renderApp,
 } from "../../test/render-app.tsx";
+import { refusedBy } from "../../test/schema.ts";
 
 const READY = { state: "ready", version: "2.1.300" };
 const MISSING = { state: "missing" };
@@ -319,6 +320,85 @@ describe("setup", () => {
 			path: "Projects/corner-bakery",
 			no_sandbox: true,
 		});
+	});
+
+	it("moving_the_team_offers_to_stay", async () => {
+		const { socket } = await renderApp("/setup/project");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false, 1, {
+			project_root: null,
+			leaving: "/h/old-repo",
+		});
+		expect(
+			await screen.findByText("Moving your team from old-repo"),
+		).toBeTruthy();
+		expect(screen.queryByRole("button", { name: en.back })).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "Stay on old-repo" }));
+		const open = await sent(s, "project.open");
+		expect(open.params).toEqual({ path: "/h/old-repo", no_sandbox: false });
+		expect(refusedBy("projectOpenRequest", open.params)).toEqual([]);
+	});
+
+	it("asks_before_replacing_a_team", async () => {
+		sessionStorage.setItem("catervas.noSandbox", "true");
+		const { socket } = await renderApp("/setup/project");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false, 1, {
+			project_root: null,
+			leaving: "/h/old-repo",
+		});
+		fireEvent.click(await screen.findByRole("button", { name: en.continue }));
+		await answerQuery(s, "folders.list", {
+			path: "",
+			parent: null,
+			entries: [{ name: "new-repo", git: true }],
+		});
+		const folders = await screen.findByRole("group", { name: en.folders });
+		fireEvent.click(within(folders).getByRole("button", { name: /new-repo/ }));
+		fireEvent.click(screen.getByRole("button", { name: en.useFolder }));
+		const first = await sent(s, "project.open");
+		await s.fail(
+			first,
+			-32005,
+			"has_team: that folder already has a Catervas team",
+		);
+		expect(
+			await screen.findByText(
+				"new-repo already has a Catervas team. It will be replaced by yours, starting fresh; your code is not touched.",
+			),
+		).toBeTruthy();
+		// Choose another: back to the folder browser, nothing sent.
+		fireEvent.click(screen.getByRole("button", { name: en.replaceNo }));
+		await answerQuery(s, "folders.list", {
+			path: "",
+			parent: null,
+			entries: [{ name: "new-repo", git: true }],
+		});
+		expect(await screen.findByRole("group", { name: en.folders })).toBeTruthy();
+		expect(s.calls("project.open")).toHaveLength(1);
+
+		fireEvent.click(
+			within(screen.getByRole("group", { name: en.folders })).getByRole(
+				"button",
+				{ name: /new-repo/ },
+			),
+		);
+		fireEvent.click(screen.getByRole("button", { name: en.useFolder }));
+		await waitFor(() => expect(s.calls("project.open")).toHaveLength(2));
+		await s.fail(
+			s.calls("project.open")[1] as never,
+			-32005,
+			"has_team: that folder already has a Catervas team",
+		);
+		fireEvent.click(await screen.findByRole("button", { name: en.replaceYes }));
+		await waitFor(() => expect(s.calls("project.open")).toHaveLength(3));
+		const third = s.calls("project.open")[2];
+		expect(third?.params).toEqual({
+			path: "new-repo",
+			no_sandbox: true,
+			replace: true,
+		});
+		expect(refusedBy("projectOpenRequest", third?.params ?? {})).toEqual([]);
 	});
 
 	it("starts_a_new_project", async () => {

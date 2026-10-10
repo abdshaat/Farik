@@ -55,6 +55,9 @@ pub struct WebState {
     /// Why taking the chosen project on failed, which `serve` sets when it goes back to setup
     /// mode, and `serve.status` tells the page.
     pub take_on_error: Mutex<Option<String>>,
+    /// The project being left, which `project.leave` sets and `serve.status` tells the page; in
+    /// setup mode, the one the wizard was reached from, so **Stay on** can go back to it.
+    pub leaving: Mutex<Option<PathBuf>>,
     /// Where the AI account's credential is kept, in the order they are tried.
     pub stores: Vec<Arc<dyn CredentialStore>>,
     /// The environment `catervas serve` was given, which a credential may come from.
@@ -908,6 +911,10 @@ fn serve_status(state: &DaemonState) -> Result<Value, Failure> {
         .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))?;
     let setup_pending =
         state.deps().is_some() && web.project_root.join(team::SETUP_PENDING).exists();
+    let keys_copied = state
+        .deps()
+        .and_then(|_| crate::connectors::keys_copied(&web.project_root))
+        .map(|(from, count)| json!({ "from": from, "count": count }));
     let (project_root, paused, credential) = match state.deps() {
         Some(deps) => (
             json!(web.project_root.display().to_string()),
@@ -935,6 +942,8 @@ fn serve_status(state: &DaemonState) -> Result<Value, Failure> {
         "port": web.port,
         "take_on_error": *locked(&web.take_on_error),
         "setup_pending": setup_pending,
+        "leaving": locked(&web.leaving).as_ref().map(|root| root.display().to_string()),
+        "keys_copied": keys_copied,
     }))
 }
 
@@ -986,7 +995,13 @@ async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result
                     .map(|image| json!({ "image": image }))
                     .map_err(|sentence| Failure::new(REFUSED, sentence));
             }
-            "project.open" => host.open(text("path"), no_sandbox).map(root),
+            "project.open" => host
+                .open(
+                    text("path"),
+                    no_sandbox,
+                    params["replace"].as_bool().unwrap_or_default(),
+                )
+                .map(root),
             "project.create" => host
                 .create(
                     text("parent"),
@@ -1216,6 +1231,7 @@ mod tests {
             port: PORT,
             clock: Arc::new(FixedClock::new(now())),
             take_on_error: std::sync::Mutex::default(),
+            leaving: std::sync::Mutex::default(),
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
             in_use: None,
@@ -1671,6 +1687,7 @@ mod tests {
             port: handle.info.port,
             clock: Arc::clone(&state.deps().expect("a project").clock),
             take_on_error: std::sync::Mutex::default(),
+            leaving: std::sync::Mutex::default(),
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
             in_use: None,
@@ -2476,6 +2493,8 @@ mod tests {
                 "port": handle.info.port,
                 "take_on_error": null,
                 "setup_pending": false,
+                "leaving": null,
+                "keys_copied": null,
             })
         );
         let pause = json!({ "command": { "command": "team_pause", "body": {} } });
@@ -2794,6 +2813,127 @@ mod tests {
         handle.shutdown().await.expect("the daemon stops");
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn project_leave_stops_the_run_and_marks_the_project_left() {
+        let daemon = TestDaemon::new("rpc-leave", |_| {});
+        let handled: Arc<std::sync::Mutex<Vec<Command>>> = Arc::default();
+        let seen = Arc::clone(&handled);
+        daemon.state.set_command_handler(Arc::new(move |command| {
+            seen.lock().expect("the list").push(command);
+            Box::pin(async {
+                Ok(CommandReport {
+                    said: "handled".to_string(),
+                    events: Vec::new(),
+                })
+            })
+        }));
+        let root = daemon.project.repo.path.clone();
+        let (handle, secret) = on_a_socket(&daemon.state, &root).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        assert_eq!(daemon.state.left(), None);
+        let answer = call(&mut socket, 1, "project.leave", &json!({})).await;
+        assert_eq!(answer["result"], json!({}), "{answer}");
+        assert_eq!(*handled.lock().expect("the list"), [Command::RunStop]);
+        assert_eq!(daemon.state.left(), Some(root.clone()));
+        let status = call(
+            &mut socket,
+            2,
+            "query",
+            &json!({ "name": "serve.status", "params": {} }),
+        )
+        .await;
+        assert_eq!(
+            status["result"]["leaving"],
+            root.display().to_string(),
+            "{status}"
+        );
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_refused_leave_is_answered_and_leaves_nothing_marked() {
+        let daemon = TestDaemon::new("rpc-leave-refused", |_| {});
+        daemon.state.set_command_handler(Arc::new(|_| {
+            Box::pin(async {
+                Err(crate::orchestrator::CommandError::Refused {
+                    reason: "a task is running".to_string(),
+                })
+            })
+        }));
+        let root = daemon.project.repo.path.clone();
+        let (handle, secret) = on_a_socket(&daemon.state, &root).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        let answer = call(&mut socket, 1, "project.leave", &json!({})).await;
+
+        assert_eq!(answer["error"]["code"], -32005, "{answer}");
+        assert_eq!(answer["error"]["message"], "a task is running", "{answer}");
+        assert_eq!(daemon.state.left(), None);
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn project_leave_needs_a_project() {
+        let home = scratch("leave-setup");
+        let (state, _) = in_setup(&home, "");
+        let (_, answer) = asked(&state, "project.leave", &json!({})).await;
+        assert_eq!(answer["error"]["code"], -32004, "{answer}");
+        assert_eq!(state.left(), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn serve_status_names_the_project_being_left_in_setup() {
+        let home = scratch("leave-status");
+        let (state, _) = in_setup(&home, "");
+        *crate::locked(&state.web().expect("web").leaving) = Some(PathBuf::from("/h/old"));
+        let status = setup_query(&state, "serve.status", &json!({})).await;
+        conforms(&status["result"], "serveStatusResult");
+        assert_eq!(status["result"]["leaving"], "/h/old", "{status}");
+        assert_eq!(status["result"]["project_root"], Value::Null);
+        assert_eq!(status["result"]["keys_copied"], Value::Null);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn serve_status_reports_copied_keys_until_dismissed() {
+        let daemon = TestDaemon::new("rpc-keys-copied", |_| {});
+        let root = daemon.project.repo.path.clone();
+        let copied: Vec<crate::connectors::SecretAt> = ["a", "b", "c"]
+            .iter()
+            .map(|server| crate::connectors::SecretAt {
+                project_id: "new".to_string(),
+                agent_id: "theo".to_string(),
+                server: (*server).to_string(),
+            })
+            .collect();
+        crate::connectors::write_keys_copied(&root, std::path::Path::new("/h/old"), &copied)
+            .expect("noted");
+        let (handle, secret) = on_a_socket(&daemon.state, &root).await;
+        let mut socket = open(handle.info.port, &secret).await;
+        let query = json!({ "name": "serve.status", "params": {} });
+
+        let status = call(&mut socket, 1, "query", &query).await;
+        conforms(&status["result"], "serveStatusResult");
+        assert_eq!(
+            status["result"]["keys_copied"],
+            json!({ "from": "/h/old", "count": 3 })
+        );
+        let gone = call(&mut socket, 2, "keys_copied.dismiss", &json!({})).await;
+        assert_eq!(gone["result"], json!({}), "{gone}");
+        assert!(!root.join(crate::connectors::KEYS_COPIED).exists());
+        let status = call(&mut socket, 3, "query", &query).await;
+        assert_eq!(status["result"]["keys_copied"], Value::Null);
+        let again = call(&mut socket, 4, "keys_copied.dismiss", &json!({})).await;
+        assert_eq!(again["result"], json!({}), "{again}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
     // Setup mode: a daemon with no project, answering the wizard through a fake host.
 
     /// A setup host that records what it was asked and hands out paths under `home`.
@@ -2805,11 +2945,11 @@ mod tests {
     }
 
     impl SetupHost for FakeHost {
-        fn open(&self, path: &str, no_sandbox: bool) -> Result<PathBuf, SetupError> {
+        fn open(&self, path: &str, no_sandbox: bool, replace: bool) -> Result<PathBuf, SetupError> {
             self.calls
                 .lock()
                 .expect("the calls")
-                .push(json!({ "open": path, "no_sandbox": no_sandbox }));
+                .push(json!({ "open": path, "no_sandbox": no_sandbox, "replace": replace }));
             if path == "busy" {
                 return Err(SetupError::Refused(
                     "another catervas is already running this project".to_string(),
@@ -2874,6 +3014,7 @@ mod tests {
             port: PORT,
             clock: Arc::new(FixedClock::new(now())),
             take_on_error: std::sync::Mutex::default(),
+            leaving: std::sync::Mutex::default(),
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
             in_use: None,
@@ -2945,7 +3086,7 @@ mod tests {
         let (_, opened) = asked(
             &state,
             "project.open",
-            &json!({ "path": "code/a", "no_sandbox": true }),
+            &json!({ "path": "code/a", "no_sandbox": true, "replace": true }),
         )
         .await;
         conforms(&opened["result"], "projectOpenResult");
@@ -2981,9 +3122,9 @@ mod tests {
         assert_eq!(
             *host.calls.lock().expect("the calls"),
             [
-                json!({ "open": "code/a", "no_sandbox": true }),
+                json!({ "open": "code/a", "no_sandbox": true, "replace": true }),
                 json!({ "create": ["code", "bakery", description], "no_sandbox": false }),
-                json!({ "open": "busy", "no_sandbox": false }),
+                json!({ "open": "busy", "no_sandbox": false, "replace": false }),
             ]
         );
     }
@@ -3143,6 +3284,7 @@ mod tests {
             json!({
                 "project_root": null, "paused": false, "credential": null,
                 "port": PORT, "take_on_error": null, "setup_pending": false,
+                "leaving": null, "keys_copied": null,
             })
         );
         let account = setup_query(&state, "account.status", &json!({})).await;
