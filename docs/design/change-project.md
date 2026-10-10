@@ -18,6 +18,8 @@ The founder tests and improves Farik by running its team on real repositories. T
 
 Same team, fresh. Carried from the old project: `team.yaml` with retired agents dropped and every other agent active (names, roles, personas, pictures, models, grants, connectors, pinned skills, policy, budgets), the uploaded pictures under `.farik/team/avatars/`, and the sandbox setting (`local/settings.json`). Connector keys are copied: the keychain (or `connectors.json`) keeps each per project on this machine (`connector:<project_id>:<agent_id>:<server>`, and the Procurement Specialist's mailbox as `mailbox:<project_id>:procurement`), so each kept agent's entry, an OAuth sign-in included, is loaded under the old project's id and saved under the new one's. The old project keeps its own. One consequence: a service that rotates its refresh token on use (some OAuth sign-ins) may ask the other project to sign in again after one of them refreshes.
 
+Pinned skills' folders (`.farik/skills/`, `.farik/agents/<id>/skills/`) are copied, but each pinned skill asks to be confirmed again in the new project: a confirmation is recorded in the project's own log (ADR 0034), and a new folder is a new place to trust it.
+
 Not carried: the criteria (the new repository keeps the checks its own `init` scan found; the founder, 2026-10-09), memory, the channel and its summary, one-to-one chats, tasks, contracts, sprints, decisions, the retro, sessions, costs, worktrees. The new project starts with its own `init` (a fresh event log and a scan of the new repository) and no setup marker, so no team setup screens.
 
 ## The folders
