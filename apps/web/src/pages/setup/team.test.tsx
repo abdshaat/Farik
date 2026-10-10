@@ -869,6 +869,31 @@ describe("team setup", () => {
 		expect("preview" in again.team).toBe(false);
 	});
 
+	it("gives each designer's card its own info button", async () => {
+		const { container, socket } = await renderApp("/setup/team");
+		const ines = agent("ines", "Ines", "ui_ux_designer", "extra-2");
+		await answerQuery(socket as FakeSocket, "team.propose", {
+			...proposed((team) => {
+				team.agents = [...SIX, ines];
+			}),
+			unavailable: [],
+		});
+		for (const name of ["Iris", "Ines"]) {
+			const card = await screen.findByRole("region", {
+				name: `${name} needs to know how to open your app`,
+			});
+			for (const button of within(card).getAllByRole("button", {
+				name: "More about this",
+			})) {
+				const tip = document.getElementById(
+					button.getAttribute("aria-describedby") ?? "",
+				);
+				expect(card.contains(tip)).toBe(true);
+			}
+		}
+		await expectNoAxeViolations(container);
+	});
+
 	it("unticks_the_designer_without_a_sandbox", async () => {
 		const { container, socket } = await renderApp("/setup/team");
 		const s = socket as FakeSocket;
