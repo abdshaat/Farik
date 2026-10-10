@@ -1634,9 +1634,9 @@ mod tests {
     };
     use crate::orchestrator::{OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
-        accept_frk_1, chat_answers_with_a_request, credential_refused, hits_the_turn_limit,
-        implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1,
-        planning_ceremony_frk_1, provider_limit_429, provider_limit_rejected, reads_a_file,
+        accept_ctv_1, chat_answers_with_a_request, credential_refused, hits_the_turn_limit,
+        implement_finishes_ctv_1, implement_stops_early, plan_assigns_ctv_1,
+        planning_ceremony_ctv_1, provider_limit_429, provider_limit_rejected, reads_a_file,
         replays_catervas_read_board, reply_to_a_mention, retro, review, review_answers_nothing,
         review_writes_note, standup, success_with_is_error,
     };
@@ -1684,37 +1684,37 @@ mod tests {
         let harness = Harness::new("orch-scope-task", |wire| {
             wire["policy"]["wip_limit_per_agent"] = json!(2);
         });
-        harness.ready("FRK-1");
-        harness.assigned("FRK-2", "dev-b", "dev-a");
+        harness.ready("CTV-1");
+        harness.assigned("CTV-2", "dev-b", "dev-a");
         // Accepted with its worktree left, which the cleanup rule, first of all, would remove.
-        harness.accepted_with_worktree("FRK-3");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.accepted_with_worktree("CTV-3");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator
             .tick_within(&TickScope {
-                task_id: Some("FRK-1".parse().expect("a task id")),
+                task_id: Some("CTV-1".parse().expect("a task id")),
                 rules: TickRules::All,
             })
             .await
             .expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         let started = adapter.started();
         assert_eq!(started.len(), 1);
         assert_eq!(started[0].purpose, SessionPurpose::Plan);
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Assigned);
-        assert!(harness.worktree("FRK-3").exists());
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Assigned);
+        assert!(harness.worktree("CTV-3").exists());
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn refines_and_nothing_else_under_the_refining_rules() {
         let harness = Harness::new("orch-scope-refining", |_| {});
-        harness.ready("FRK-1");
-        harness.file("FRK-2", "draft", |_| {});
-        triaged_small(&harness, "FRK-2");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        harness.file("CTV-2", "draft", |_| {});
+        triaged_small(&harness, "CTV-2");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let refining = TickScope {
             task_id: None,
@@ -1726,10 +1726,10 @@ mod tests {
             .await
             .expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Refining);
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Refining);
         harness.project.record(
-            "FRK-2",
+            "CTV-2",
             "question.asked",
             &json!({ "question": "Should done.txt be empty?", "asked_by": "pm" }),
         );
@@ -1739,7 +1739,7 @@ mod tests {
             .expect("the tick runs");
         assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
         assert!(adapter.started().is_empty());
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
     }
 
     #[tokio::test]
@@ -1749,33 +1749,33 @@ mod tests {
             wire["policy"]["wip_limit_per_agent"] = json!(3);
             wire["policy"]["integration"] = json!("auto_merge");
         });
-        harness.verifying("FRK-1");
-        harness.accepted("FRK-2");
-        harness.assigned("FRK-3", "dev-b", "dev-a");
-        harness.ready("FRK-4");
+        harness.verifying("CTV-1");
+        harness.accepted("CTV-2");
+        harness.assigned("CTV-3", "dev-b", "dev-a");
+        harness.ready("CTV-4");
         // A task in progress, whose implement session is work, and an epic in progress whose one
         // task was cancelled, whose breakdown is planning. One session is all the epic has room
         // for, so that its breakdown, which files nothing here, is not asked for again.
-        harness.in_progress("FRK-5", "dev-b", "dev-a");
+        harness.in_progress("CTV-5", "dev-b", "dev-a");
         harness
             .project
-            .filed_with("FRK-6", "ready", "epic", None, |wire| {
+            .filed_with("CTV-6", "ready", "epic", None, |wire| {
                 wire["assignee_role"] = json!("product_manager");
                 wire["reviewer_role"] = json!("human");
                 wire["budget"]["max_sessions"] = json!(1);
             });
         let pm = json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "pm" });
-        harness.project.moved("FRK-6", "ready", "assigned", &pm);
+        harness.project.moved("CTV-6", "ready", "assigned", &pm);
         harness
             .project
-            .moved("FRK-6", "assigned", "in_progress", &pm);
-        harness.file_under("FRK-7", "ready", Some("FRK-6"), |_| {});
+            .moved("CTV-6", "assigned", "in_progress", &pm);
+        harness.file_under("CTV-7", "ready", Some("CTV-6"), |_| {});
         harness
             .project
-            .moved("FRK-7", "ready", "cancelled", &json!({}));
+            .moved("CTV-7", "ready", "cancelled", &json!({}));
         let adapter = harness.recorded(vec![
             replays_catervas_read_board(),
-            rewritten(&plan_assigns_frk_1(), "FRK-1", "FRK-4"),
+            rewritten(&plan_assigns_ctv_1(), "CTV-1", "CTV-4"),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let planning = TickScope {
@@ -1809,29 +1809,29 @@ mod tests {
         assert_eq!(
             started,
             [
-                ("FRK-6".to_string(), SessionPurpose::Plan),
-                ("FRK-4".to_string(), SessionPurpose::Plan)
+                ("CTV-6".to_string(), SessionPurpose::Plan),
+                ("CTV-4".to_string(), SessionPurpose::Plan)
             ]
         );
-        assert_eq!(harness.row("FRK-4").status, TaskStatus::Assigned);
-        assert_eq!(harness.row("FRK-5").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-4").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("CTV-5").status, TaskStatus::InProgress);
         assert!(harness.events(&[EventKind::CriterionRecorded]).is_empty());
         assert!(harness.events(&[EventKind::TaskIntegrated]).is_empty());
-        assert_eq!(harness.row("FRK-3").status, TaskStatus::Assigned);
-        assert!(!harness.worktree("FRK-3").exists());
+        assert_eq!(harness.row("CTV-3").status, TaskStatus::Assigned);
+        assert!(!harness.worktree("CTV-3").exists());
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn starts_the_assigners_plan_session_for_a_ready_task() {
         let harness = Harness::new("orch-plan-starts", |_| {});
-        harness.ready("FRK-1");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         let started = adapter.started();
         assert_eq!(started.len(), 1);
         let spec = &started[0];
@@ -1839,7 +1839,7 @@ mod tests {
         assert_eq!(spec.agent_id, "pm");
         assert_eq!(
             spec.task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert_eq!(spec.cwd, harness.project.repo.path);
         assert!(spec.mcp_servers.is_empty());
@@ -1863,11 +1863,11 @@ mod tests {
             )
         );
         assert!(
-            spec.initial_prompt.contains("FRK-1"),
+            spec.initial_prompt.contains("CTV-1"),
             "{}",
             spec.initial_prompt
         );
-        let row = harness.row("FRK-1");
+        let row = harness.row("CTV-1");
         assert_eq!(row.status, TaskStatus::Assigned);
         assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
         assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
@@ -1877,8 +1877,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn records_the_session_its_cost_and_its_end() {
         let harness = Harness::new("orch-plan-records", |_| {});
-        harness.ready("FRK-1");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
@@ -1919,7 +1919,7 @@ mod tests {
         assert_eq!(cost.agent_id.as_deref(), Some("pm"));
         assert_eq!(
             cost.task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert!(matches!(
             &events[4].body,
@@ -1932,10 +1932,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_free_assignee() {
         let harness = Harness::new("orch-plan-no-room", |_| {});
-        harness.ready("FRK-1");
-        harness.blocked("FRK-2", "dev-a", "dev-b");
-        harness.blocked("FRK-3", "dev-b", "dev-a");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        harness.blocked("CTV-2", "dev-a", "dev-b");
+        harness.blocked("CTV-3", "dev-b", "dev-a");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
@@ -1953,11 +1953,11 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn plans_no_second_assignment_in_the_folder() {
-        // FRK-1 holds the finance folder, blocked; two Finance Specialists have room for FRK-2,
+        // CTV-1 holds the finance folder, blocked; two Finance Specialists have room for CTV-2,
         // and it waits all the same (5.14, 6.6).
         let harness = Harness::with_finance("orch-plan-folder-busy");
-        harness.finance_task("FRK-1", Some("blocked"));
-        harness.finance_task("FRK-2", None);
+        harness.finance_task("CTV-1", Some("blocked"));
+        harness.finance_task("CTV-2", None);
         let adapter = harness.recorded(vec![reads_a_file()]);
 
         let report = harness
@@ -1974,9 +1974,9 @@ mod tests {
             }
         );
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-        // Cancelled, it holds nothing, and the same tick plans FRK-2.
+        // Cancelled, it holds nothing, and the same tick plans CTV-2.
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "blocked",
             "cancelled",
             &json!({ "assignee": "fin", "reviewer": "pm" }),
@@ -1987,7 +1987,7 @@ mod tests {
             .tick()
             .await
             .expect("the tick runs");
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
         assert_eq!(adapter.started().len(), 1);
     }
 
@@ -1996,10 +1996,10 @@ mod tests {
     async fn a_finance_session_runs_in_its_folder() {
         use std::os::unix::fs::PermissionsExt as _;
 
-        // FRK-2 is in review; FRK-1 is in progress. The folder is not made yet.
+        // CTV-2 is in review; CTV-1 is in progress. The folder is not made yet.
         let harness = Harness::with_finance("orch-folder-sessions");
         let folder = harness.project.repo.path.join(".catervas/local/finance");
-        harness.file("FRK-2", "ready", |wire| {
+        harness.file("CTV-2", "ready", |wire| {
             wire["assignee_role"] = json!("finance_specialist");
             wire["reviewer_role"] = json!("product_manager");
             wire["allowed_paths"] = json!([".catervas/local/finance/**"]);
@@ -2016,10 +2016,10 @@ mod tests {
             ("assigned", "in_progress"),
             ("in_progress", "verifying"),
         ] {
-            harness.project.moved("FRK-2", from, to, &people);
+            harness.project.moved("CTV-2", from, to, &people);
         }
         assert!(!folder.exists());
-        let recorded = harness.recorded(vec![review_writes_note(), accept_frk_1(), reads_a_file()]);
+        let recorded = harness.recorded(vec![review_writes_note(), accept_ctv_1(), reads_a_file()]);
         let witness = Arc::new(ExecutorWitness::new(
             recorded.clone(),
             Arc::clone(&harness.daemon),
@@ -2040,7 +2040,7 @@ mod tests {
         harness.project.record_by(
             Some("pm"),
             at(),
-            "FRK-2",
+            "CTV-2",
             "criterion.recorded",
             &json!({ "criterion_id": "C1", "passed": true, "evidence": "Each number has its source.",
                      "run_by": "reviewer", "recorded_by": "pm" }),
@@ -2049,8 +2049,8 @@ mod tests {
         // The implement session of another task, with no sandbox made for it.
         harness
             .project
-            .moved("FRK-2", "verifying", "cancelled", &people);
-        harness.finance_task("FRK-1", Some("in_progress"));
+            .moved("CTV-2", "verifying", "cancelled", &people);
+        harness.finance_task("CTV-1", Some("in_progress"));
         orchestrator
             .tick()
             .await
@@ -2069,9 +2069,9 @@ mod tests {
             ]
         );
         assert_eq!(witness.had_executor(), vec![false, false, false]);
-        assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
-        assert!(!harness.worktree("FRK-1").exists());
-        assert!(!harness.worktree("FRK-2").exists());
+        assert!(!orchestrator.holds_sandbox(&"CTV-1".parse().expect("a task id")));
+        assert!(!harness.worktree("CTV-1").exists());
+        assert!(!harness.worktree("CTV-2").exists());
     }
 
     #[tokio::test]
@@ -2081,7 +2081,7 @@ mod tests {
         // no branch, which a task in a folder does not have, is read.
         for (present, passes) in [(true, true), (false, false)] {
             let harness = Harness::with_finance(&format!("orch-folder-artifact-{present}"));
-            harness.finance_task("FRK-1", Some("verifying"));
+            harness.finance_task("CTV-1", Some("verifying"));
             if present {
                 std::fs::create_dir_all(harness.finance_folder()).expect("the folder is made");
                 std::fs::write(harness.finance_folder().join("books.xlsx"), "books")
@@ -2093,7 +2093,7 @@ mod tests {
 
             let report = orchestrator.tick().await.expect("the tick runs");
 
-            assert_eq!(acted_on(&report), Some("FRK-1"), "{present}: {report:?}");
+            assert_eq!(acted_on(&report), Some("CTV-1"), "{present}: {report:?}");
             let events = harness.events(&[EventKind::CriterionRecorded]);
             let [event] = events.as_slice() else {
                 panic!("one criterion recorded, got {events:?}");
@@ -2106,9 +2106,9 @@ mod tests {
             assert_eq!(body.run_by, CriterionRecordedBodyRunBy::Reviewer);
             assert_eq!(body.recorded_by, "governor");
             assert!(body.evidence.contains("books.xlsx"), "{}", body.evidence);
-            assert_eq!(sandboxes.created("FRK-1"), 0);
-            assert_eq!(sandboxes.based("FRK-1"), 0);
-            assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
+            assert_eq!(sandboxes.created("CTV-1"), 0);
+            assert_eq!(sandboxes.based("CTV-1"), 0);
+            assert!(!orchestrator.holds_sandbox(&"CTV-1".parse().expect("a task id")));
             // The reviewer's session follows, in the folder.
             assert_eq!(recorded.started().len(), 1);
         }
@@ -2118,12 +2118,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn the_reviewer_is_told_what_changed() {
         let harness = Harness::with_finance("orch-folder-review");
-        harness.finance_task("FRK-1", Some("verifying"));
+        harness.finance_task("CTV-1", Some("verifying"));
         let folder = harness.finance_folder();
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "first books").expect("written");
         std::fs::write(folder.join("old.xlsx"), "an old one").expect("written");
-        let task = "FRK-1".parse().expect("a task id");
+        let task = "CTV-1".parse().expect("a task id");
         catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
         // What the task did: changed the books, added a forecast, removed an old workbook.
         std::fs::write(folder.join("books.xlsx"), "second books, longer").expect("written");
@@ -2155,7 +2155,7 @@ mod tests {
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "first books").expect("written");
         std::fs::write(folder.join("forecast.xlsx"), "first forecast").expect("written");
-        harness.finance_task("FRK-1", Some("assigned"));
+        harness.finance_task("CTV-1", Some("assigned"));
         let adapter = harness.recorded(vec![]);
 
         let report = harness
@@ -2164,19 +2164,19 @@ mod tests {
             .await
             .expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
-        let copy = folder.join(".history/FRK-1");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
+        let copy = folder.join(".history/CTV-1");
         let read = |name: &str| std::fs::read_to_string(copy.join(name)).ok();
         assert_eq!(read("books.xlsx").as_deref(), Some("first books"));
         assert_eq!(read("forecast.xlsx").as_deref(), Some("first forecast"));
         // It has no branch and no worktree, and no session started: the next tick's rule 6 does.
-        assert!(!harness.worktree("FRK-1").exists());
+        assert!(!harness.worktree("CTV-1").exists());
         assert!(adapter.started().is_empty());
         // Sent back, edited and assigned again, it keeps the first copy.
         std::fs::write(folder.join("books.xlsx"), "second books").expect("written");
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "in_progress",
             "assigned",
             &json!({ "assignee": "fin", "reviewer": "pm" }),
@@ -2195,10 +2195,10 @@ mod tests {
     async fn a_procurement_session_runs_in_its_folder() {
         use std::os::unix::fs::PermissionsExt as _;
 
-        // FRK-2 is in review; FRK-1 is in progress. The folder is not made yet.
+        // CTV-2 is in review; CTV-1 is in progress. The folder is not made yet.
         let harness = Harness::with_procurement("orch-procurement-sessions");
         let folder = harness.procurement_folder();
-        harness.file("FRK-2", "ready", |wire| {
+        harness.file("CTV-2", "ready", |wire| {
             wire["assignee_role"] = json!("procurement_specialist");
             wire["reviewer_role"] = json!("product_manager");
             wire["allowed_paths"] = json!([".catervas/local/procurement/**"]);
@@ -2215,7 +2215,7 @@ mod tests {
             ("assigned", "in_progress"),
             ("in_progress", "verifying"),
         ] {
-            harness.project.moved("FRK-2", from, to, &people);
+            harness.project.moved("CTV-2", from, to, &people);
         }
         assert!(!folder.exists());
         let recorded = harness.recorded(vec![review_writes_note(), reads_a_file()]);
@@ -2238,8 +2238,8 @@ mod tests {
         // The implement session of another task, with no sandbox made for it.
         harness
             .project
-            .moved("FRK-2", "verifying", "cancelled", &people);
-        harness.procurement_task("FRK-1", Some("in_progress"));
+            .moved("CTV-2", "verifying", "cancelled", &people);
+        harness.procurement_task("CTV-1", Some("in_progress"));
         orchestrator
             .tick()
             .await
@@ -2257,9 +2257,9 @@ mod tests {
             ]
         );
         assert_eq!(witness.had_executor(), vec![false, false]);
-        assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
-        assert!(!harness.worktree("FRK-1").exists());
-        assert!(!harness.worktree("FRK-2").exists());
+        assert!(!orchestrator.holds_sandbox(&"CTV-1".parse().expect("a task id")));
+        assert!(!harness.worktree("CTV-1").exists());
+        assert!(!harness.worktree("CTV-2").exists());
         // No exception was made for it: the team still protects `.catervas/local/**`, which the
         // session's `permissions.deny` is made from, and every other session is refused it.
         let team = harness.project.deps.files.read_team().expect("the team");
@@ -2280,7 +2280,7 @@ mod tests {
         std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
         std::fs::write(folder.join("vendors.xlsx"), "register").expect("written");
         std::fs::write(folder.join("evaluations/old.md"), "an old comparison").expect("written");
-        harness.procurement_task("FRK-1", Some("assigned"));
+        harness.procurement_task("CTV-1", Some("assigned"));
         let adapter = harness.recorded(vec![]);
 
         let report = harness
@@ -2289,26 +2289,26 @@ mod tests {
             .await
             .expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        let copy = folder.join(".history/FRK-1");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        let copy = folder.join(".history/CTV-1");
         let read = |name: &str| std::fs::read_to_string(copy.join(name)).ok();
         assert_eq!(read("vendors.xlsx").as_deref(), Some("register"));
         assert_eq!(
             read("evaluations/old.md").as_deref(),
             Some("an old comparison")
         );
-        assert!(!harness.worktree("FRK-1").exists());
+        assert!(!harness.worktree("CTV-1").exists());
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn the_procurement_reviewer_is_told_what_changed() {
         let harness = Harness::with_procurement("orch-procurement-review");
-        harness.procurement_task("FRK-1", Some("verifying"));
+        harness.procurement_task("CTV-1", Some("verifying"));
         let folder = harness.procurement_folder();
         std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
         std::fs::write(folder.join("vendors.xlsx"), "register").expect("written");
-        let task = "FRK-1".parse().expect("a task id");
+        let task = "CTV-1".parse().expect("a task id");
         catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
         // The task changed the register and wrote a note, and the reviewer's run of the criterion
         // finds it.
@@ -2338,15 +2338,15 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_dependency_to_be_integrated() {
-        // FRK-1's assignee is paused, so that no rule works FRK-1 and the tick reaches FRK-2.
+        // CTV-1's assignee is paused, so that no rule works CTV-1 and the tick reaches CTV-2.
         let harness = Harness::new("orch-plan-dependency", |wire| {
             wire["agents"][1]["status"] = json!("paused");
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        harness.file("FRK-2", "ready", |wire| {
-            wire["dependencies"] = json!(["FRK-1"]);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.file("CTV-2", "ready", |wire| {
+            wire["dependencies"] = json!(["CTV-1"]);
         });
-        let adapter = harness.recorded(vec![reads_a_file(), plan_assigns_frk_1()]);
+        let adapter = harness.recorded(vec![reads_a_file(), plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
@@ -2355,7 +2355,7 @@ mod tests {
             !adapter
                 .started()
                 .iter()
-                .any(|spec| spec.task_id.as_ref().map(|task| task.as_str()) == Some("FRK-2")),
+                .any(|spec| spec.task_id.as_ref().map(|task| task.as_str()) == Some("CTV-2")),
             "{:?}",
             adapter.started()
         );
@@ -2365,9 +2365,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_an_accepted_dependency_until_it_is_integrated() {
         let harness = Harness::new("orch-plan-dependency-integrated", |_| {});
-        harness.verifying("FRK-1");
+        harness.verifying("CTV-1");
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "verifying",
             "accepted",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -2376,10 +2376,10 @@ mod tests {
             .project
             .deps
             .git
-            .remove_worktree(&harness.worktree("FRK-1"))
+            .remove_worktree(&harness.worktree("CTV-1"))
             .expect("the worktree goes");
-        harness.file("FRK-2", "ready", |wire| {
-            wire["dependencies"] = json!(["FRK-1"]);
+        harness.file("CTV-2", "ready", |wire| {
+            wire["dependencies"] = json!(["CTV-1"]);
         });
         let adapter = harness.recorded(vec![reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -2395,12 +2395,12 @@ mod tests {
         assert!(adapter.started().is_empty());
 
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "task.integrated",
             &json!({ "sha": "abc", "into": "main", "integrated_by": "human" }),
         );
         let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
         assert_eq!(adapter.started().len(), 1);
     }
 
@@ -2408,8 +2408,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_dependency_the_board_does_not_hold() {
         let harness = Harness::new("orch-plan-dependency-missing", |_| {});
-        harness.file("FRK-2", "ready", |wire| {
-            wire["dependencies"] = json!(["FRK-1"]);
+        harness.file("CTV-2", "ready", |wire| {
+            wire["dependencies"] = json!(["CTV-1"]);
         });
         let adapter = harness.recorded(vec![reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -2438,8 +2438,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn cleans_up_a_task_once_it_is_accepted() {
         let harness = Harness::new("orch-cleanup", |_| {});
-        harness.accepted_with_worktree("FRK-1");
-        let base = harness.worktree("FRK-1-base");
+        harness.accepted_with_worktree("CTV-1");
+        let base = harness.worktree("CTV-1-base");
         harness
             .project
             .deps
@@ -2456,7 +2456,7 @@ mod tests {
             .read_team()
             .expect("the team reads");
         orchestrator
-            .sandbox_for(&"FRK-1".parse().expect("a task id"), &team)
+            .sandbox_for(&"CTV-1".parse().expect("a task id"), &team)
             .expect("a sandbox is made");
         // What the task's browser sessions saved goes with the task.
         let browser = harness
@@ -2464,37 +2464,37 @@ mod tests {
             .deps
             .files
             .root()
-            .join(".catervas/local/browser/FRK-1");
+            .join(".catervas/local/browser/CTV-1");
         std::fs::create_dir_all(browser.join("s-1/.cache")).expect("the folder is made");
         std::fs::write(browser.join("s-1/page.png"), "png").expect("written");
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(sandboxes.removed("FRK-1"), 1);
-        assert!(!harness.worktree("FRK-1").exists());
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(sandboxes.removed("CTV-1"), 1);
+        assert!(!harness.worktree("CTV-1").exists());
         assert!(!base.exists());
         assert!(!browser.exists());
         let listed = worktrees_listed(&harness);
-        assert!(!listed.contains("FRK-1"), "{listed}");
+        assert!(!listed.contains("CTV-1"), "{listed}");
         assert_eq!(
             git_output_in(
                 &harness.project.repo.path,
-                &["branch", "--list", &harness.branch("FRK-1")]
+                &["branch", "--list", &harness.branch("CTV-1")]
             )
             .trim(),
-            harness.branch("FRK-1")
+            harness.branch("CTV-1")
         );
-        assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
+        assert!(!orchestrator.holds_sandbox(&"CTV-1".parse().expect("a task id")));
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn cleans_up_a_task_once_it_is_cancelled() {
         let harness = Harness::new("orch-cleanup-cancelled", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "in_progress",
             "cancelled",
             &json!({ "actor": "human", "requested_by": "human" }),
@@ -2505,16 +2505,16 @@ mod tests {
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(sandboxes.removed("FRK-1"), 1);
-        assert!(!harness.worktree("FRK-1").exists());
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(sandboxes.removed("CTV-1"), 1);
+        assert!(!harness.worktree("CTV-1").exists());
         assert_eq!(
             git_output_in(
                 &harness.project.repo.path,
-                &["branch", "--list", &harness.branch("FRK-1")]
+                &["branch", "--list", &harness.branch("CTV-1")]
             )
             .trim(),
-            harness.branch("FRK-1")
+            harness.branch("CTV-1")
         );
     }
 
@@ -2522,8 +2522,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn cleans_up_a_base_worktree_left_on_its_own() {
         let harness = Harness::new("orch-cleanup-base", |_| {});
-        harness.accepted("FRK-1");
-        let base = harness.worktree("FRK-1-base");
+        harness.accepted("CTV-1");
+        let base = harness.worktree("CTV-1-base");
         harness
             .project
             .deps
@@ -2534,69 +2534,69 @@ mod tests {
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         assert!(!base.exists());
         let listed = worktrees_listed(&harness);
-        assert!(!listed.contains("FRK-1-base"), "{listed}");
+        assert!(!listed.contains("CTV-1-base"), "{listed}");
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn removes_the_tasks_own_worktree_last() {
         let harness = Harness::new("orch-cleanup-order", |_| {});
-        harness.accepted_with_worktree("FRK-1");
+        harness.accepted_with_worktree("CTV-1");
         // A file where the base worktree would be, which cannot be removed as a directory.
-        std::fs::write(harness.worktree("FRK-1-base"), "").expect("written");
+        std::fs::write(harness.worktree("CTV-1-base"), "").expect("written");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let ticked = orchestrator.tick().await;
 
         assert!(ticked.is_err(), "{ticked:?}");
         // What brings the rule back next time is still there.
-        assert!(harness.worktree("FRK-1").exists());
+        assert!(harness.worktree("CTV-1").exists());
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn goes_on_with_the_board_while_a_container_cannot_be_removed() {
         let harness = Harness::new("orch-cleanup-docker-down", |_| {});
-        harness.accepted_with_worktree("FRK-1");
-        harness.ready("FRK-2");
+        harness.accepted_with_worktree("CTV-1");
+        harness.ready("CTV-2");
         let adapter = harness.recorded(vec![reads_a_file()]);
         let sandboxes = Arc::new(UnremovableSandboxFactory::new(1));
         let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
         let started = adapter.started();
         assert_eq!(started.len(), 1);
         assert_eq!(started[0].purpose, SessionPurpose::Plan);
-        assert_eq!(sandboxes.counting.removed("FRK-1"), 1);
+        assert_eq!(sandboxes.counting.removed("CTV-1"), 1);
         // Left for a later tick, which removes it once docker answers.
-        assert!(harness.worktree("FRK-1").exists());
+        assert!(harness.worktree("CTV-1").exists());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(sandboxes.counting.removed("FRK-1"), 2);
-        assert!(!harness.worktree("FRK-1").exists());
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(sandboxes.counting.removed("CTV-1"), 2);
+        assert!(!harness.worktree("CTV-1").exists());
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn cleans_up_a_worktree_git_no_longer_knows() {
         let harness = Harness::new("orch-cleanup-unknown", |_| {});
-        harness.accepted("FRK-1");
-        std::fs::create_dir_all(harness.worktree("FRK-1").join("left"))
+        harness.accepted("CTV-1");
+        std::fs::create_dir_all(harness.worktree("CTV-1").join("left"))
             .expect("a directory is left behind");
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter);
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert!(!harness.worktree("FRK-1").exists());
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert!(!harness.worktree("CTV-1").exists());
         assert_eq!(
             orchestrator.tick().await.expect("the tick runs"),
             TickReport::Idle {
@@ -2610,7 +2610,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn fails_the_tick_when_a_session_cannot_start() {
         let harness = Harness::new("orch-plan-no-start", |_| {});
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter);
 
@@ -2638,7 +2638,7 @@ mod tests {
                         .task_id
                         .as_ref()
                         .map(|task| task.as_str()),
-                    Some("FRK-1")
+                    Some("CTV-1")
                 );
             }
             other => panic!("expected a cost, got {other:?}"),
@@ -2670,18 +2670,18 @@ mod tests {
                 "status": "active"
             }));
         });
-        harness.ready("FRK-1");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         let started = adapter.started();
         assert_eq!(started.len(), 1);
         assert_eq!(started[0].purpose, SessionPurpose::Plan);
         assert_eq!(started[0].agent_id, "sam");
-        let row = harness.row("FRK-1");
+        let row = harness.row("CTV-1");
         assert_eq!(row.status, TaskStatus::Assigned);
         assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
         assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
@@ -2691,18 +2691,18 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn starts_an_assigned_task_in_its_worktree() {
         let harness = Harness::new("orch-start", |_| {});
-        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("CTV-1", "dev-a", "dev-b");
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        let worktree = harness.worktree("FRK-1");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        let worktree = harness.worktree("CTV-1");
         assert!(worktree.is_dir());
         assert_eq!(
             git_output_in(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]),
-            "feature/FRK-1"
+            "feature/CTV-1"
         );
         assert_eq!(
             git_output_in(
@@ -2738,12 +2738,12 @@ mod tests {
                     "status": "active"
                 }));
         });
-        harness.file("FRK-1", "ready", |wire| {
+        harness.file("CTV-1", "ready", |wire| {
             wire["assignee_role"] = json!("architect");
             wire["allowed_paths"] = json!(["docs/adr/**"]);
         });
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "ready",
             "assigned",
             &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "arch", "reviewer": "dev-b" }),
@@ -2752,13 +2752,13 @@ mod tests {
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         assert_eq!(
             git_output_in(
-                &harness.worktree("FRK-1"),
+                &harness.worktree("CTV-1"),
                 &["rev-parse", "--abbrev-ref", "HEAD"]
             ),
-            "docs/FRK-1"
+            "docs/CTV-1"
         );
     }
 
@@ -2766,33 +2766,33 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn runs_the_implement_session_in_the_worktree_with_the_sandbox() {
         let harness = Harness::new("orch-implement", |_| {});
-        harness.assigned("FRK-1", "dev-a", "dev-b");
-        let adapter = harness.recorded(vec![implement_finishes_frk_1()]);
+        harness.assigned("CTV-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_finishes_ctv_1()]);
         let sandboxes = Arc::new(CountingSandboxFactory::default());
         let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes.clone());
 
         orchestrator.tick().await.expect("the task starts");
         let report = orchestrator.tick().await.expect("the session runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         let started = adapter.started();
         assert_eq!(started.len(), 1);
         assert_eq!(started[0].purpose, SessionPurpose::Implement);
         assert_eq!(started[0].agent_id, "dev-a");
-        assert_eq!(started[0].cwd, harness.worktree("FRK-1"));
-        assert_eq!(sandboxes.created("FRK-1"), 1);
+        assert_eq!(started[0].cwd, harness.worktree("CTV-1"));
+        assert_eq!(sandboxes.created("CTV-1"), 1);
         let git = &harness.project.deps.git;
         assert_eq!(
-            git.commit_count("main", &harness.branch("FRK-1"))
+            git.commit_count("main", &harness.branch("CTV-1"))
                 .expect("git counts"),
             1
         );
         assert_eq!(
-            git.changed_paths("main", &harness.branch("FRK-1"))
+            git.changed_paths("main", &harness.branch("CTV-1"))
                 .expect("git lists"),
             vec!["done.txt".to_string()]
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
         assert!(harness.events(&[EventKind::CriterionRecorded]).iter().any(|event| matches!(
             &event.body,
             EventBody::CriterionRecorded(body) if body.run_by == CriterionRecordedBodyRunBy::Assignee
@@ -2812,13 +2812,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn resumes_an_implement_session_that_stopped_early() {
         let harness = Harness::new("orch-resume", |_| {});
-        harness.assigned("FRK-1", "dev-a", "dev-b");
-        let adapter = harness.recorded(vec![implement_stops_early(), implement_finishes_frk_1()]);
+        harness.assigned("CTV-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_stops_early(), implement_finishes_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the task starts");
         orchestrator.tick().await.expect("the first session runs");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
         orchestrator.tick().await.expect("the second session runs");
 
         let started = adapter.started();
@@ -2830,7 +2830,7 @@ mod tests {
         );
         let head = git_output_in(
             &harness.project.repo.path,
-            &["rev-parse", &harness.branch("FRK-1")],
+            &["rev-parse", &harness.branch("CTV-1")],
         );
         let prompt = &started[1].initial_prompt;
         assert!(
@@ -2866,7 +2866,7 @@ mod tests {
     )]
     async fn the_agent_hears_of_a_missed_or_failed_post() {
         let harness = Harness::new("orch-posts-heard", |_| {});
-        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("CTV-1", "dev-a", "dev-b");
         let project = &harness.project;
         let body = |at: &str| {
             let mut body =
@@ -2876,7 +2876,7 @@ mod tests {
         };
         let wrote = |kind: &str, body: &serde_json::Value| {
             project
-                .record_by(Some("dev-a"), at(), "FRK-1", kind, body)
+                .record_by(Some("dev-a"), at(), "CTV-1", kind, body)
                 .envelope
                 .seq
         };
@@ -2925,7 +2925,7 @@ mod tests {
             .record_by(
                 Some("dev-b"),
                 at(),
-                "FRK-1",
+                "CTV-1",
                 "social_post.scheduled",
                 &body("2026-11-09T09:00:00-05:00"),
             )
@@ -2935,7 +2935,7 @@ mod tests {
             "social_post.failed",
             &json!({ "post": others, "reason": "Not yours" }),
         );
-        let adapter = harness.recorded(vec![implement_stops_early(), implement_finishes_frk_1()]);
+        let adapter = harness.recorded(vec![implement_stops_early(), implement_finishes_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the task starts");
@@ -3018,22 +3018,22 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn works_nearest_to_done_first() {
         let harness = Harness::new("orch-order-assigned", |_| {});
-        harness.ready("FRK-1");
-        harness.assigned("FRK-2", "dev-a", "dev-b");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        harness.assigned("CTV-2", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
         assert!(adapter.started().is_empty());
 
         let harness = Harness::new("orch-order-in-progress", |_| {});
-        harness.ready("FRK-1");
-        harness.in_progress("FRK-2", "dev-a", "dev-b");
-        harness.assigned("FRK-3", "dev-b", "dev-a");
+        harness.ready("CTV-1");
+        harness.in_progress("CTV-2", "dev-a", "dev-b");
+        harness.assigned("CTV-3", "dev-b", "dev-a");
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
         assert_eq!(adapter.started()[0].purpose, SessionPurpose::Implement);
     }
 
@@ -3041,15 +3041,15 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn stops_between_ticks() {
         let harness = Harness::new("orch-stop", |_| {});
-        harness.ready("FRK-1");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.stop();
         orchestrator.run_until_idle().await.expect("nothing runs");
 
         assert!(adapter.started().is_empty());
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
     }
 
     fn last_move(harness: &Harness) -> catervas_protocol::event::TaskTransitionedBody {
@@ -3079,20 +3079,20 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn returns_a_rejected_task_to_its_assignee() {
         let harness = Harness::new("orch-rejected", |_| {});
-        harness.rejected("FRK-1", 0, "done.txt is missing");
+        harness.rejected("CTV-1", 0, "done.txt is missing");
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         assert!(adapter.started().is_empty());
         let moved = last_move(&harness);
         assert_eq!(moved.from.to_string(), "rejected");
         assert_eq!(moved.to.to_string(), "in_progress");
         assert_eq!(moved.requested_by, "governor");
         assert_eq!(moved.iteration, 1);
-        assert_eq!(harness.row("FRK-1").iteration, 1);
+        assert_eq!(harness.row("CTV-1").iteration, 1);
 
         orchestrator
             .tick()
@@ -3113,22 +3113,22 @@ mod tests {
         // Returned after its rejection, then blocked and resumed: the resumed session answers
         // no rejection.
         let harness = Harness::new("orch-rejection-forgotten", |_| {});
-        harness.rejected("FRK-1", 0, "done.txt is missing");
+        harness.rejected("CTV-1", 0, "done.txt is missing");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b", "iteration": 1 });
         harness
             .project
-            .moved("FRK-1", "rejected", "in_progress", &people);
+            .moved("CTV-1", "rejected", "in_progress", &people);
         let mut blocking = people.clone();
         blocking["blocker"] = json!({ "description": "the API is down", "needed": "the API" });
         harness
             .project
-            .moved("FRK-1", "in_progress", "blocked", &blocking);
+            .moved("CTV-1", "in_progress", "blocked", &blocking);
         let mut resuming = people;
         resuming["actor"] = json!("human");
         resuming["requested_by"] = json!("human");
         harness
             .project
-            .moved("FRK-1", "blocked", "in_progress", &resuming);
+            .moved("CTV-1", "blocked", "in_progress", &resuming);
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -3147,14 +3147,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_task_rejected_too_often() {
         let harness = Harness::new("orch-rejected-too-often", |_| {});
-        harness.rejected("FRK-1", 3, "C1: done.txt missing");
+        harness.rejected("CTV-1", 3, "C1: done.txt missing");
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         assert_eq!(
             escalation_reasons(&harness),
             vec![EscalationRaisedBodyReason::Iterations]
@@ -3166,13 +3166,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_block_past_its_limit() {
         let harness = Harness::new("orch-blocked-old", |_| {});
-        harness.blocked_hours_ago("FRK-1", "dev-a", "dev-b", 25);
+        harness.blocked_hours_ago("CTV-1", "dev-a", "dev-b", 25);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         assert_eq!(
             escalation_reasons(&harness),
             vec![EscalationRaisedBodyReason::BlockerAge]
@@ -3180,15 +3180,15 @@ mod tests {
 
         // Exactly the limit is old enough.
         let harness = Harness::new("orch-blocked-at-limit", |_| {});
-        harness.blocked_hours_ago("FRK-1", "dev-a", "dev-b", 24);
+        harness.blocked_hours_ago("CTV-1", "dev-a", "dev-b", 24);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
 
         let harness = Harness::new("orch-blocked-young", |_| {});
-        harness.blocked_hours_ago("FRK-1", "dev-a", "dev-b", 1);
+        harness.blocked_hours_ago("CTV-1", "dev-a", "dev-b", 1);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let report = orchestrator.tick().await.expect("the tick runs");
@@ -3200,7 +3200,7 @@ mod tests {
                 until: None,
             }
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Blocked);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Blocked);
     }
 
     /// A `transition.refused` of `task`'s move from `from` to `to`, asked by `actor` as
@@ -3224,28 +3224,28 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn passes_over_a_move_that_was_refused() {
         let harness = Harness::new("orch-refused-start", |_| {});
-        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("CTV-1", "dev-a", "dev-b");
         refused(
             &harness,
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             "assignee",
             "dev-a",
         );
-        harness.rejected("FRK-2", 3, "C1: done.txt missing");
+        harness.rejected("CTV-2", 3, "C1: done.txt missing");
         refused(
             &harness,
-            "FRK-2",
+            "CTV-2",
             "rejected",
             "escalated",
             "governor",
             "governor",
         );
-        harness.blocked_hours_ago("FRK-3", "dev-b", "dev-a", 25);
+        harness.blocked_hours_ago("CTV-3", "dev-b", "dev-a", 25);
         refused(
             &harness,
-            "FRK-3",
+            "CTV-3",
             "blocked",
             "escalated",
             "governor",
@@ -3264,9 +3264,9 @@ mod tests {
             }
         );
         assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 3);
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Assigned);
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Rejected);
-        assert_eq!(harness.row("FRK-3").status, TaskStatus::Blocked);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Rejected);
+        assert_eq!(harness.row("CTV-3").status, TaskStatus::Blocked);
     }
 
     #[tokio::test]
@@ -3274,10 +3274,10 @@ mod tests {
     async fn asks_again_after_another_refusal() {
         // A human's refused request to resume a blocked task says nothing about its escalation.
         let harness = Harness::new("orch-refused-other", |_| {});
-        harness.blocked_hours_ago("FRK-1", "dev-a", "dev-b", 25);
+        harness.blocked_hours_ago("CTV-1", "dev-a", "dev-b", 25);
         refused(
             &harness,
-            "FRK-1",
+            "CTV-1",
             "blocked",
             "in_progress",
             "human",
@@ -3287,15 +3287,15 @@ mod tests {
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
 
         // Nor does a refusal from before the task last blocked.
         let harness = Harness::new("orch-refused-earlier", |_| {});
-        harness.blocked_hours_ago("FRK-1", "dev-a", "dev-b", 25);
+        harness.blocked_hours_ago("CTV-1", "dev-a", "dev-b", 25);
         refused(
             &harness,
-            "FRK-1",
+            "CTV-1",
             "blocked",
             "escalated",
             "governor",
@@ -3304,12 +3304,12 @@ mod tests {
         let people = json!({ "actor": "human", "requested_by": "human" });
         harness
             .project
-            .moved("FRK-1", "blocked", "in_progress", &people);
+            .moved("CTV-1", "blocked", "in_progress", &people);
         let mut body = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
         body["blocker"] = json!({ "description": "the API is down again", "needed": "the API" });
         harness.project.moved_at(
             at() - chrono::Duration::hours(25),
-            "FRK-1",
+            "CTV-1",
             "in_progress",
             "blocked",
             &body,
@@ -3318,19 +3318,19 @@ mod tests {
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn runs_until_a_tick_is_idle() {
         let harness = Harness::new("orch-run-until-idle", |_| {});
-        harness.file("FRK-1", "ready", |wire| {
+        harness.file("CTV-1", "ready", |wire| {
             wire["budget"]["max_sessions"] = json!(1);
         });
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "ready",
             "assigned",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -3341,21 +3341,21 @@ mod tests {
         run_until_idle_within_ten_seconds(Arc::new(orchestrator)).expect("the run is idle");
 
         assert_eq!(adapter.started().len(), 1);
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn picks_a_rejected_task_before_a_ready_one() {
         let harness = Harness::new("orch-order-rejected", |_| {});
-        harness.ready("FRK-1");
-        harness.rejected("FRK-2", 0, "C1: done.txt missing");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        harness.rejected("CTV-2", 0, "C1: done.txt missing");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
         assert!(adapter.started().is_empty());
     }
 
@@ -3363,14 +3363,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn picks_a_rejected_task_before_a_verifying_one() {
         let harness = Harness::new("orch-order-rejected-verifying", |_| {});
-        harness.verifying("FRK-1");
-        harness.rejected("FRK-2", 0, "done.txt is missing");
+        harness.verifying("CTV-1");
+        harness.rejected("CTV-2", 0, "done.txt is missing");
         let adapter = harness.recorded(vec![review_writes_note()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
         assert!(adapter.started().is_empty());
     }
 
@@ -3378,14 +3378,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn picks_a_verifying_task_before_one_in_progress() {
         let harness = Harness::new("orch-order-verifying-in-progress", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        harness.verifying("FRK-2");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.verifying("CTV-2");
         let adapter = harness.recorded(vec![review_writes_note()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
         assert_eq!(
             sessions(&adapter),
             vec![("dev-b".to_string(), SessionPurpose::Verify)]
@@ -3461,7 +3461,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn runs_the_criteria_as_the_reviewer_before_the_review() {
         let harness = Harness::new("orch-verify-runs", |_| {});
-        harness.verifying("FRK-1");
+        harness.verifying("CTV-1");
         let recorded = harness.recorded(vec![review_writes_note()]);
         let witness = Arc::new(ExecutorWitness::new(
             recorded.clone(),
@@ -3471,7 +3471,7 @@ mod tests {
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         let events = harness.events(&[EventKind::CriterionRecorded, EventKind::SessionStarted]);
         let kinds: Vec<EventKind> = events.iter().map(|event| event.body.kind()).collect();
         assert_eq!(
@@ -3496,7 +3496,7 @@ mod tests {
         assert_eq!(started.len(), 1);
         assert_eq!(started[0].purpose, SessionPurpose::Verify);
         assert_eq!(started[0].agent_id, "dev-b");
-        assert_eq!(started[0].cwd, harness.worktree("FRK-1"));
+        assert_eq!(started[0].cwd, harness.worktree("CTV-1"));
         assert_eq!(
             started[0].builtin_tools,
             allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
@@ -3508,8 +3508,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn shows_the_reviewer_the_diff_and_the_note_and_not_the_transcript() {
         let harness = Harness::new("orch-verify-shows", |_| {});
-        harness.assigned("FRK-1", "dev-a", "dev-b");
-        let adapter = harness.recorded(vec![implement_finishes_frk_1(), review_writes_note()]);
+        harness.assigned("CTV-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_finishes_ctv_1(), review_writes_note()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         for _ in 0..3 {
@@ -3530,7 +3530,7 @@ mod tests {
             "{prompt}"
         );
         assert!(
-            !prompt.contains("FRK-1 is done and waiting for review."),
+            !prompt.contains("CTV-1 is done and waiting for review."),
             "{prompt}"
         );
     }
@@ -3539,7 +3539,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn does_not_run_the_criteria_twice_in_one_verification() {
         let harness = Harness::new("orch-verify-once", |_| {});
-        harness.verifying_with("FRK-1", true, true, with_a_review_criterion);
+        harness.verifying_with("CTV-1", true, true, with_a_review_criterion);
         let adapter = harness.recorded(vec![review_answers_nothing(), review_answers_nothing()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -3555,7 +3555,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn runs_only_the_criteria_catervas_has_not_run() {
         let harness = Harness::new("orch-verify-remaining", |_| {});
-        harness.verifying_with("FRK-1", true, true, |wire| {
+        harness.verifying_with("CTV-1", true, true, |wire| {
             push_criterion(
                 wire,
                 json!({
@@ -3578,7 +3578,7 @@ mod tests {
             );
         });
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "criterion.recorded",
             &json!({
                 "criterion_id": "C1",
@@ -3607,7 +3607,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn checks_that_a_tasks_new_tests_fail_on_the_integration_branch() {
         let harness = Harness::new("orch-verify-new-tests", |_| {});
-        harness.verifying_with("FRK-1", true, true, |wire| {
+        harness.verifying_with("CTV-1", true, true, |wire| {
             wire["exit_criteria"] = json!([
                 {
                     "id": "C1",
@@ -3629,7 +3629,7 @@ mod tests {
                 }
             ]);
         });
-        let worktree = harness.worktree("FRK-1");
+        let worktree = harness.worktree("CTV-1");
         std::fs::create_dir_all(worktree.join("tests")).expect("a directory");
         std::fs::write(worktree.join("tests/done_test.sh"), "test -f done.txt\n").expect("a test");
         std::fs::write(worktree.join("tests/always_test.sh"), "exit 0\n").expect("a test");
@@ -3661,17 +3661,17 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_task_out_of_sessions_before_running_its_criteria() {
         let harness = Harness::new("orch-verify-no-sessions", |_| {});
-        harness.verifying_with("FRK-1", true, true, |wire| {
+        harness.verifying_with("CTV-1", true, true, |wire| {
             wire["budget"]["max_sessions"] = json!(1);
         });
-        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        harness.spent(Some("CTV-1"), "s-0", 0.01);
         let adapter = harness.recorded(vec![review_writes_note()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         assert_eq!(
             escalation_reasons(&harness),
             vec![EscalationRaisedBodyReason::Sessions]
@@ -3685,13 +3685,13 @@ mod tests {
     async fn runs_a_criterion_whose_result_an_agent_recorded_as_the_governor() {
         // An agent may be called `governor`; what it records carries its id on the envelope.
         let harness = Harness::new("orch-verify-named-governor", |_| {});
-        harness.verifying("FRK-1");
+        harness.verifying("CTV-1");
         let wire = json!({
             "seq": 1,
             "recorded_at": at().to_rfc3339(),
             "team_id": "catervas",
             "project_id": "catervas",
-            "task_id": "FRK-1",
+            "task_id": "CTV-1",
             "agent_id": "dev-b",
             "kind": "criterion.recorded",
             "body": {
@@ -3724,8 +3724,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn rejects_a_failed_review_with_the_reviewers_note() {
         let harness = Harness::new("orch-verify-rejects", |_| {});
-        harness.verifying_with("FRK-1", false, true, |_| {});
-        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        harness.verifying_with("CTV-1", false, true, |_| {});
+        let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the review runs");
@@ -3787,7 +3787,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn posts_a_line_for_a_rejection_catervas_filed() {
         let harness = Harness::new("orch-verify-rejects-line", |_| {});
-        harness.verifying_with("FRK-1", false, true, |_| {});
+        harness.verifying_with("CTV-1", false, true, |_| {});
         let adapter = harness.recorded(vec![review_writes_note()]);
         let orchestrator = harness.orchestrator(adapter);
         orchestrator.tick().await.expect("the review runs");
@@ -3803,7 +3803,7 @@ mod tests {
         assert_eq!(line.kind, MessageKind::System);
         assert!(
             line.text
-                .starts_with("FRK-1 verifying → rejected (by dev-b): C1"),
+                .starts_with("CTV-1 verifying → rejected (by dev-b): C1"),
             "{}",
             line.text
         );
@@ -3813,7 +3813,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn asks_the_reviewer_again_for_an_unanswered_criterion() {
         let harness = Harness::new("orch-verify-again", |_| {});
-        harness.verifying_with("FRK-1", true, true, with_a_review_criterion);
+        harness.verifying_with("CTV-1", true, true, with_a_review_criterion);
         let adapter = harness.recorded(vec![review_answers_nothing(), review_answers_nothing()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -3848,8 +3848,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn hands_a_passed_review_to_the_product_manager() {
         let harness = Harness::new("orch-verify-hands-on", |_| {});
-        harness.verifying("FRK-1");
-        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        harness.verifying("CTV-1");
+        let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the review runs");
@@ -3880,16 +3880,16 @@ mod tests {
             "{prompt}"
         );
         assert!(prompt.contains("`accepted`"), "{prompt}");
-        assert_eq!(started[1].cwd, harness.worktree("FRK-1"));
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(started[1].cwd, harness.worktree("CTV-1"));
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn leaves_a_high_risk_task_for_the_human() {
         let harness = Harness::new("orch-verify-high-risk", |_| {});
-        harness.verifying_with("FRK-1", true, true, |wire| wire["risk"] = json!("high"));
-        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        harness.verifying_with("CTV-1", true, true, |wire| wire["risk"] = json!("high"));
+        let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the review runs");
@@ -3912,13 +3912,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn accepts_a_high_risk_task_after_the_human() {
         let harness = Harness::new("orch-verify-high-risk-accepted", |_| {});
-        harness.verifying_with("FRK-1", true, true, |wire| wire["risk"] = json!("high"));
-        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        harness.verifying_with("CTV-1", true, true, |wire| wire["risk"] = json!("high"));
+        let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         orchestrator.tick().await.expect("the review runs");
         orchestrator
             .handle(catervas_protocol::command::Command::HumanAccept {
-                task_id: "FRK-1".parse().expect("a task id"),
+                task_id: "CTV-1".parse().expect("a task id"),
                 subject: catervas_protocol::command::AcceptSubject::Result,
                 message: None,
             })
@@ -3934,14 +3934,14 @@ mod tests {
                 ("pm".to_string(), SessionPurpose::Verify),
             ]
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn leaves_a_task_with_a_human_criterion_for_the_human() {
         let harness = Harness::new("orch-verify-human-criterion", |_| {});
-        harness.verifying_with("FRK-1", true, true, |wire| {
+        harness.verifying_with("CTV-1", true, true, |wire| {
             push_criterion(
                 wire,
                 json!({
@@ -3954,7 +3954,7 @@ mod tests {
         let adapter = harness.recorded(vec![
             review_writes_note(),
             review_writes_note(),
-            accept_frk_1(),
+            accept_ctv_1(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -3986,8 +3986,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn passes_over_a_task_whose_request_was_refused() {
         let harness = Harness::new("orch-verify-refused", |_| {});
-        harness.verifying_with("FRK-1", true, false, |_| {});
-        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1(), accept_frk_1()]);
+        harness.verifying_with("CTV-1", true, false, |_| {});
+        let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1(), accept_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the review runs");
@@ -4006,15 +4006,15 @@ mod tests {
             }
         );
         assert_eq!(adapter.started().len(), 2);
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn runs_until_idle_past_a_refused_acceptance() {
         let harness = Harness::new("orch-verify-refused-run", |_| {});
-        harness.verifying_with("FRK-1", true, false, |_| {});
-        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1(), accept_frk_1()]);
+        harness.verifying_with("CTV-1", true, false, |_| {});
+        let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1(), accept_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         run_until_idle_within_ten_seconds(Arc::new(orchestrator)).expect("the run is idle");
@@ -4027,7 +4027,7 @@ mod tests {
             ]
         );
         assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 1);
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
     }
 
     #[tokio::test]
@@ -4036,7 +4036,7 @@ mod tests {
         // The first session writes no note, so the reviewer is asked again after every criterion
         // already has its result.
         let harness = Harness::new("orch-verify-review-once", |_| {});
-        harness.verifying("FRK-1");
+        harness.verifying("CTV-1");
         let adapter = harness.recorded(vec![reads_a_file(), review_writes_note()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4058,11 +4058,11 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn runs_the_criteria_in_a_fresh_sandbox() {
         let harness = Harness::new("orch-verify-fresh-sandbox", |_| {});
-        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("CTV-1", "dev-a", "dev-b");
         let adapter = harness.recorded(vec![
-            implement_finishes_frk_1(),
+            implement_finishes_ctv_1(),
             review_writes_note(),
-            accept_frk_1(),
+            accept_ctv_1(),
         ]);
         let sandboxes = Arc::new(CountingSandboxFactory::default());
         let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes.clone());
@@ -4072,24 +4072,24 @@ mod tests {
             .tick()
             .await
             .expect("the implement session runs");
-        assert_eq!(sandboxes.created("FRK-1"), 1);
+        assert_eq!(sandboxes.created("CTV-1"), 1);
         orchestrator.tick().await.expect("the review runs");
         // Not the assignee's: whatever its commands left outside the worktree is gone.
-        assert_eq!(sandboxes.created("FRK-1"), 2);
+        assert_eq!(sandboxes.created("CTV-1"), 2);
         orchestrator
             .tick()
             .await
             .expect("the Product Manager's session runs");
 
-        assert_eq!(sandboxes.created("FRK-1"), 2);
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(sandboxes.created("CTV-1"), 2);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn records_a_criterion_whose_container_went_as_failed() {
         let harness = Harness::new("orch-verify-container-gone", |_| {});
-        harness.verifying_with("FRK-1", true, true, |wire| {
+        harness.verifying_with("CTV-1", true, true, |wire| {
             push_criterion(
                 wire,
                 json!({
@@ -4109,7 +4109,7 @@ mod tests {
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         assert_eq!(
             governor_runs(&harness),
             vec![("C1".to_string(), false), ("C2".to_string(), true)]
@@ -4129,13 +4129,13 @@ mod tests {
             "{evidence:?}"
         );
         // C2 ran in a sandbox made after C1's went.
-        assert_eq!(sandboxes.created("FRK-1"), 2);
+        assert_eq!(sandboxes.created("CTV-1"), 2);
         assert_eq!(
             sessions(&adapter),
             vec![("dev-b".to_string(), SessionPurpose::Verify)]
         );
         orchestrator.tick().await.expect("the rejection is filed");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Rejected);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Rejected);
     }
 
     #[test]
@@ -4144,11 +4144,11 @@ mod tests {
         let harness = Harness::new("orch-verify-unrunnable", |wire| {
             wire["policy"]["wip_limit_per_agent"] = json!(2);
         });
-        harness.file("FRK-1", "ready", |wire| {
+        harness.file("CTV-1", "ready", |wire| {
             wire["budget"]["max_sessions"] = json!(1);
         });
-        harness.verifying("FRK-2");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.verifying("CTV-2");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let sandboxes = Arc::new(BrokenSandboxFactory::new(
             ExecError::SpawnFailed {
                 detail: "no shell".to_string(),
@@ -4159,7 +4159,7 @@ mod tests {
 
         run_until_idle_within_ten_seconds(Arc::new(orchestrator)).expect("the run is idle");
 
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Escalated);
         assert_eq!(
             escalation_reasons(&harness),
             vec![
@@ -4206,19 +4206,19 @@ mod tests {
             .collect()
     }
 
-    /// Files FRK-1 `in_progress` with dev-a and dev-b, allowed `max_sessions` sessions, `used` of
+    /// Files CTV-1 `in_progress` with dev-a and dev-b, allowed `max_sessions` sessions, `used` of
     /// them spent.
     fn in_progress_with_sessions(harness: &Harness, max_sessions: u64, used: u64) {
-        harness.file("FRK-1", "ready", |wire| {
+        harness.file("CTV-1", "ready", |wire| {
             wire["budget"]["max_sessions"] = json!(max_sessions);
         });
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
-        harness.project.moved("FRK-1", "ready", "assigned", &people);
+        harness.project.moved("CTV-1", "ready", "assigned", &people);
         harness
             .project
-            .moved("FRK-1", "assigned", "in_progress", &people);
+            .moved("CTV-1", "assigned", "in_progress", &people);
         for session in 0..used {
-            harness.spent(Some("FRK-1"), &format!("s-{session}"), 0.01);
+            harness.spent(Some("CTV-1"), &format!("s-{session}"), 0.01);
         }
     }
 
@@ -4232,8 +4232,8 @@ mod tests {
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         let moved = last_move(&harness);
         assert_eq!(moved.from.to_string(), "in_progress");
         assert_eq!(moved.requested_by, "governor");
@@ -4248,16 +4248,16 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_task_out_of_dollars() {
         let harness = Harness::new("orch-budget-dollars", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        harness.spent(Some("FRK-1"), "s-0", 3.0);
-        harness.spent(Some("FRK-1"), "s-0", 2.0);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.spent(Some("CTV-1"), "s-0", 3.0);
+        harness.spent(Some("CTV-1"), "s-0", 2.0);
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
 
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         assert_eq!(last_move(&harness).requested_by, "governor");
         assert_eq!(
             escalation_reasons(&harness),
@@ -4269,16 +4269,16 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_refining_contract_out_of_sessions() {
         let harness = Harness::new("orch-budget-refining", |_| {});
-        harness.file("FRK-1", "refining", |wire| {
+        harness.file("CTV-1", "refining", |wire| {
             wire["budget"]["max_sessions"] = json!(1);
         });
-        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        harness.spent(Some("CTV-1"), "s-0", 0.01);
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         assert_eq!(
             escalation_reasons(&harness),
             vec![EscalationRaisedBodyReason::Sessions]
@@ -4294,11 +4294,11 @@ mod tests {
         // review, the last implementation, and one session a provider's limit cut short are
         // twelve; the last review and the acceptance still start.
         let harness = Harness::new("orch-budget-last-iteration", with_a_scrum_master);
-        harness.verifying_with("FRK-1", true, true, |wire| wire["iteration"] = json!(3));
+        harness.verifying_with("CTV-1", true, true, |wire| wire["iteration"] = json!(3));
         for session in 0..12 {
-            harness.spent(Some("FRK-1"), &format!("s-{session}"), 0.01);
+            harness.spent(Some("CTV-1"), &format!("s-{session}"), 0.01);
         }
-        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        let adapter = harness.recorded(vec![review_writes_note(), accept_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the review runs");
@@ -4312,7 +4312,7 @@ mod tests {
                 ("pm".to_string(), SessionPurpose::Verify),
             ]
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
     }
 
     #[tokio::test]
@@ -4322,7 +4322,7 @@ mod tests {
         in_progress_with_sessions(&harness, 1, 1);
         refused(
             &harness,
-            "FRK-1",
+            "CTV-1",
             "in_progress",
             "escalated",
             "governor",
@@ -4340,7 +4340,7 @@ mod tests {
                 until: None,
             }
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
         assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 1);
         assert!(adapter.started().is_empty());
     }
@@ -4353,21 +4353,21 @@ mod tests {
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         orchestrator.tick().await.expect("the tick escalates it");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         orchestrator
             .handle(catervas_protocol::command::Command::EscalationResolve {
-                task_id: "FRK-1".parse().expect("a task id"),
+                task_id: "CTV-1".parse().expect("a task id"),
                 to: TaskStatus::InProgress,
                 message: "Carry on.".to_string(),
                 extra_tries: None,
             })
             .await
             .expect("the human resolves the escalation");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         assert_eq!(
             escalation_reasons(&harness),
             vec![
@@ -4382,10 +4382,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn leaves_the_budget_to_catervas_plan() {
         let harness = Harness::new("orch-budget-planning", |_| {});
-        harness.file("FRK-1", "refining", |wire| {
+        harness.file("CTV-1", "refining", |wire| {
             wire["budget"]["max_sessions"] = json!(1);
         });
-        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        harness.spent(Some("CTV-1"), "s-0", 0.01);
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4397,7 +4397,7 @@ mod tests {
             .await
             .expect("the tick runs");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Refining);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Refining);
         assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
         assert!(adapter.started().is_empty());
     }
@@ -4406,8 +4406,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn leaves_a_task_with_room_alone() {
         let harness = Harness::new("orch-budget-room", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.spent(Some("CTV-1"), "s-0", 0.01);
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4423,7 +4423,7 @@ mod tests {
         let harness = Harness::new("orch-budget-abort", |wire| {
             wire["budgets"]["session"] = json!({ "max_input_tokens": 100 });
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let adapter = Arc::new(UsageThenWaitAdapter::waiting(a_thousand_tokens()));
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4444,7 +4444,7 @@ mod tests {
             &ends[1].body,
             EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Aborted
         ));
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
         assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
         let notes = catervas_notes(&harness);
         assert_eq!(notes.len(), 1, "{notes:?}");
@@ -4482,7 +4482,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn leaves_a_note_when_a_session_hits_its_wall_clock() {
         let harness = Harness::new("orch-note-wall-clock", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let adapter = harness.recorded(vec![hits_its_wall_clock(), reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4493,7 +4493,7 @@ mod tests {
         assert!(notes[0].contains("a limit"), "{}", notes[0]);
         assert!(notes[0].contains(WALL_CLOCK), "{}", notes[0]);
         assert!(!notes[0].contains("Your last note"), "{}", notes[0]);
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
 
         orchestrator.tick().await.expect("the next session runs");
         let started = adapter.started();
@@ -4512,7 +4512,7 @@ mod tests {
         let harness = Harness::new("orch-note-tokens", |wire| {
             wire["budgets"]["session"] = json!({ "max_input_tokens": 100 });
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let adapter = Arc::new(UsageThenWaitAdapter::completing(a_thousand_tokens()));
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4536,7 +4536,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn keeps_the_agents_own_note_in_farks_note() {
         let harness = Harness::new("orch-note-quotes", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let limited = rewritten(
             &implement_stops_early(),
             r#""subtype":"success","is_error":false"#,
@@ -4561,7 +4561,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn leaves_no_note_for_a_verify_session() {
         let harness = Harness::new("orch-note-verify", |_| {});
-        harness.verifying("FRK-1");
+        harness.verifying("CTV-1");
         let adapter = harness.recorded(vec![hits_its_wall_clock()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4583,22 +4583,22 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn finishes_the_last_session_a_task_is_allowed() {
         let harness = Harness::new("orch-budget-last-session", |_| {});
-        harness.file("FRK-1", "ready", |wire| {
+        harness.file("CTV-1", "ready", |wire| {
             wire["budget"]["max_sessions"] = json!(2);
         });
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "ready",
             "assigned",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
         );
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
         );
-        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        harness.spent(Some("CTV-1"), "s-0", 0.01);
         let adapter = Arc::new(UsageThenWaitAdapter::completing(a_thousand_tokens()));
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4610,8 +4610,8 @@ mod tests {
             vec![BudgetExhaustedBodyScope::TaskSessions]
         );
         let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         assert_eq!(
             escalation_reasons(&harness),
             vec![EscalationRaisedBodyReason::Sessions]
@@ -4623,7 +4623,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn counts_a_session_that_reported_no_usage() {
         let harness = Harness::new("orch-budget-no-usage", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let recorded = reads_a_file();
         let without_result: Vec<&str> = recorded
             .lines()
@@ -4691,7 +4691,7 @@ mod tests {
         let harness = Harness::new("orch-session-fails", |wire| {
             wire["budgets"]["session"] = json!({ "max_input_tokens": 100 });
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let adapter = Arc::new(UsageThenWaitAdapter::failing_to_abort(a_thousand_tokens()));
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4717,7 +4717,7 @@ mod tests {
         // A model no table prices is recorded, not refused (ADR 0015), so the cost that fails is
         // one the log cannot hold: more tokens than its integer counts.
         let harness = Harness::new("orch-session-uncosted", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let adapter = Arc::new(UsageThenWaitAdapter::waiting(Usage {
             input_tokens: u64::MAX,
             ..a_thousand_tokens()
@@ -4745,7 +4745,7 @@ mod tests {
     async fn ends_a_session_that_cannot_start_on_a_model_no_table_prices() {
         let harness = Harness::new("orch-session-no-start-unpriced", |_| {});
         prices_without_the_teams_models(&harness);
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let ticked = orchestrator.tick().await;
@@ -4766,7 +4766,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ends_a_session_that_cannot_start_when_its_zero_cost_is_refused() {
         let harness = Harness::new("orch-session-no-start-no-cost", |_| {});
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         refuse_appends_of(&harness.project.deps.log, EventKind::CostRecorded);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
@@ -4786,7 +4786,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ends_a_session_that_reported_no_usage_when_its_zero_cost_is_refused() {
         let harness = Harness::new("orch-session-no-usage-no-cost", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         refuse_appends_of(&harness.project.deps.log, EventKind::CostRecorded);
         let init = implement_stops_early()
             .lines()
@@ -4813,8 +4813,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn records_the_task_on_every_sessions_cost() {
         let harness = Harness::new("orch-budget-task-costs", |_| {});
-        harness.ready("FRK-1");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1(), implement_finishes_frk_1()]);
+        harness.ready("CTV-1");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1(), implement_finishes_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter);
 
         for _ in 0..3 {
@@ -4826,7 +4826,7 @@ mod tests {
         for cost in &costs {
             assert_eq!(
                 cost.envelope.ids.task_id.as_ref().map(|task| task.as_str()),
-                Some("FRK-1")
+                Some("CTV-1")
             );
         }
     }
@@ -4836,14 +4836,14 @@ mod tests {
     async fn starts_nothing_when_the_day_is_spent() {
         let harness = Harness::new("orch-budget-day", |_| {});
         harness.spent(None, "s-0", 20.0);
-        harness.ready("FRK-1");
-        harness.assigned("FRK-2", "dev-a", "dev-b");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1(), implement_stops_early()]);
+        harness.ready("CTV-1");
+        harness.assigned("CTV-2", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1(), implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let first = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(acted_on(&first), Some("FRK-2"), "{first:?}");
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::InProgress);
+        assert_eq!(acted_on(&first), Some("CTV-2"), "{first:?}");
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::InProgress);
         let second = orchestrator.tick().await.expect("the tick runs");
         assert_eq!(
             second,
@@ -4860,14 +4860,14 @@ mod tests {
     async fn starts_sessions_whatever_the_day_cost_without_a_daily_budget() {
         let harness = Harness::new("orch-budget-no-day", |wire| wire["budgets"] = json!({}));
         harness.spent(None, "s-0", 20.0);
-        harness.ready("FRK-1");
-        harness.assigned("FRK-2", "dev-a", "dev-b");
-        // Rule 6 comes before rule 8, so FRK-2's implement session is the first one started.
-        let adapter = harness.recorded(vec![implement_stops_early(), plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        harness.assigned("CTV-2", "dev-a", "dev-b");
+        // Rule 6 comes before rule 8, so CTV-2's implement session is the first one started.
+        let adapter = harness.recorded(vec![implement_stops_early(), plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let first = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(acted_on(&first), Some("FRK-2"), "{first:?}");
+        assert_eq!(acted_on(&first), Some("CTV-2"), "{first:?}");
         let second = orchestrator.tick().await.expect("the tick runs");
         assert_ne!(
             second,
@@ -4879,7 +4879,7 @@ mod tests {
         let started = adapter.started();
         assert_eq!(
             started[0].task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-2")
+            Some("CTV-2")
         );
         assert_eq!(started[0].purpose, SessionPurpose::Implement);
     }
@@ -4893,27 +4893,27 @@ mod tests {
             wire["budgets"] = json!({});
         });
         harness.spent(None, "s-0", 25.0);
-        harness.ready("FRK-1");
-        let orchestrator = harness.orchestrator(harness.recorded(vec![plan_assigns_frk_1()]));
+        harness.ready("CTV-1");
+        let orchestrator = harness.orchestrator(harness.recorded(vec![plan_assigns_ctv_1()]));
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn breaks_ties_by_the_number_in_the_task_id() {
         // Filed tenth first, so that neither the order of filing nor the order of the ids as text
-        // puts FRK-2 first.
+        // puts CTV-2 first.
         let harness = Harness::new("orch-order-number", |_| {});
-        harness.assigned("FRK-10", "dev-b", "dev-a");
-        harness.assigned("FRK-2", "dev-a", "dev-b");
+        harness.assigned("CTV-10", "dev-b", "dev-a");
+        harness.assigned("CTV-2", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
     }
 
     #[tokio::test]
@@ -4922,7 +4922,7 @@ mod tests {
         let harness = Harness::new("orch-sandbox-network", |wire| {
             wire["agents"][1]["grants"] = json!(["network"]);
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let adapter = harness.recorded(vec![implement_stops_early(), implement_stops_early()]);
         let sandboxes = Arc::new(CountingSandboxFactory::default());
         let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes.clone());
@@ -4931,10 +4931,10 @@ mod tests {
         orchestrator.tick().await.expect("the second session runs");
 
         assert_eq!(adapter.started().len(), 2);
-        assert_eq!(sandboxes.networks("FRK-1"), vec![true]);
+        assert_eq!(sandboxes.networks("CTV-1"), vec![true]);
 
         let harness = Harness::new("orch-sandbox-no-network", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let sandboxes = Arc::new(CountingSandboxFactory::default());
         let orchestrator = harness.orchestrator_with(
             harness.recorded(vec![implement_stops_early()]),
@@ -4943,7 +4943,7 @@ mod tests {
 
         orchestrator.tick().await.expect("the session runs");
 
-        assert_eq!(sandboxes.networks("FRK-1"), vec![false]);
+        assert_eq!(sandboxes.networks("CTV-1"), vec![false]);
     }
 
     /// A role held to approved sites keeps `network` (6.10), and its `execute`, if the owner turns
@@ -4959,7 +4959,7 @@ mod tests {
             let agents = wire["agents"].as_array_mut().expect("a list of agents");
             agents.last_mut().expect("the specialist")["grants"] = json!(["execute"]);
         });
-        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.procurement_task("CTV-1", Some("in_progress"));
         let sandboxes = Arc::new(CountingSandboxFactory::default());
         let orchestrator =
             harness.orchestrator_with(harness.recorded(Vec::new()), sandboxes.clone());
@@ -4981,29 +4981,29 @@ mod tests {
         );
 
         orchestrator
-            .sandbox_for(&"FRK-1".parse().expect("a task id"), &team)
+            .sandbox_for(&"CTV-1".parse().expect("a task id"), &team)
             .expect("a sandbox is made");
 
-        assert_eq!(sandboxes.networks("FRK-1"), vec![false]);
+        assert_eq!(sandboxes.networks("CTV-1"), vec![false]);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn reuses_an_assigned_tasks_worktree() {
         let harness = Harness::new("orch-start-reuse", |_| {});
-        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("CTV-1", "dev-a", "dev-b");
         harness
             .project
             .deps
             .git
-            .create_worktree(&harness.worktree("FRK-1"), &harness.branch("FRK-1"), "main")
+            .create_worktree(&harness.worktree("CTV-1"), &harness.branch("CTV-1"), "main")
             .expect("the worktree is made");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
     }
 
     #[tokio::test]
@@ -5012,8 +5012,8 @@ mod tests {
         let harness = Harness::new("orch-paused-assignee", |wire| {
             wire["agents"][1]["status"] = json!("paused");
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        harness.assigned("FRK-2", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.assigned("CTV-2", "dev-a", "dev-b");
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -5027,16 +5027,16 @@ mod tests {
             }
         );
         assert!(adapter.started().is_empty());
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Assigned);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn forgets_a_note_from_before_the_task_started() {
         let harness = Harness::new("orch-resume-old-note", |_| {});
-        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("CTV-1", "dev-a", "dev-b");
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "note.written",
             &json!({ "kind": "progress", "text": "an old plan", "written_by": "pm" }),
         );
@@ -5057,7 +5057,7 @@ mod tests {
         let harness = Harness::new("orch-plan-child", |_| {});
         harness
             .project
-            .filed_with("FRK-1", "ready", "task", Some("FRK-9"), |_| {});
+            .filed_with("CTV-1", "ready", "task", Some("CTV-9"), |_| {});
         let adapter = harness.recorded(vec![reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -5077,7 +5077,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn leaves_cancelled_work_out_of_the_wip_limit() {
         let harness = Harness::new("orch-plan-cancelled", |_| {});
-        for (task, assignee, reviewer) in [("FRK-1", "dev-a", "dev-b"), ("FRK-2", "dev-b", "dev-a")]
+        for (task, assignee, reviewer) in [("CTV-1", "dev-a", "dev-b"), ("CTV-2", "dev-b", "dev-a")]
         {
             harness.assigned(task, assignee, reviewer);
             harness.project.moved(
@@ -5093,13 +5093,13 @@ mod tests {
             );
             assert_eq!(harness.row(task).assignee_id.as_deref(), Some(assignee));
         }
-        harness.ready("FRK-3");
+        harness.ready("CTV-3");
         let adapter = harness.recorded(vec![reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-3"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-3"), "{report:?}");
         assert_eq!(adapter.started()[0].purpose, SessionPurpose::Plan);
     }
 
@@ -5109,7 +5109,7 @@ mod tests {
         let harness = Harness::new("orch-session-model", |wire| {
             wire["agents"][1]["model"] = json!({ "id": "claude-sonnet-5", "effort": "low" });
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -5126,7 +5126,7 @@ mod tests {
         let harness = Harness::new("orch-session-unpriced", |wire| {
             wire["agents"][1]["model"] = json!({ "id": "claude-unknown-9" });
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -5156,19 +5156,19 @@ mod tests {
             .projections
             .costs(catervas_store::CostScope::Task)
             .expect("the costs read");
-        let frk_1 = costs
+        let ctv_1 = costs
             .iter()
-            .find(|row| row.key == "FRK-1")
-            .expect("FRK-1's cost");
-        assert_eq!(frk_1.sessions, 1);
+            .find(|row| row.key == "CTV-1")
+            .expect("CTV-1's cost");
+        assert_eq!(ctv_1.sessions, 1);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn gives_a_session_the_catervas_tools_of_its_tiers() {
         let harness = Harness::new("orch-session-tools", |_| {});
-        harness.ready("FRK-1");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the session runs");
@@ -5222,8 +5222,8 @@ mod tests {
     async fn offers_a_verify_session_no_tool_that_runs_or_writes() {
         const WITHHELD: [&str; 3] = ["catervas_exec", "catervas_git_commit", "catervas_git_push"];
         let harness = Harness::new("orch-verify-tools", |_| {});
-        harness.verifying("FRK-1");
-        let recorded = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        harness.verifying("CTV-1");
+        let recorded = harness.recorded(vec![review_writes_note(), accept_ctv_1()]);
         let witness = Arc::new(ExecutorWitness::new(
             recorded.clone(),
             Arc::clone(&harness.daemon),
@@ -5235,7 +5235,7 @@ mod tests {
             .await
             .expect("the run ends idle");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
         let started = recorded.started();
         let agents: Vec<&str> = started.iter().map(|spec| spec.agent_id.as_str()).collect();
         assert_eq!(agents, ["dev-b", "pm"]);
@@ -5289,7 +5289,7 @@ mod tests {
         let harness = Harness::new("orch-session-tool-calls", |wire| {
             wire["budgets"]["session"] = json!({ "max_tool_calls": 1 });
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(vec![implement_stops_early()]));
 
         orchestrator.tick().await.expect("the session runs");
@@ -5303,15 +5303,15 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ends_a_finished_sprint_by_itself() {
         let harness = Harness::new("orch-sprint-finished", |_| {});
-        harness.accepted("FRK-1");
-        harness.ready("FRK-2");
+        harness.accepted("CTV-1");
+        harness.ready("CTV-2");
         harness.project.moved(
-            "FRK-2",
+            "CTV-2",
             "ready",
             "cancelled",
             &json!({ "actor": "human", "requested_by": "human" }),
         );
-        harness.open_sprint("S1", &["FRK-1", "FRK-2"]);
+        harness.open_sprint("S1", &["CTV-1", "CTV-2"]);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let report = orchestrator.tick().await.expect("the tick runs");
@@ -5343,8 +5343,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn starts_no_session_while_paused() {
         let harness = Harness::new("orch-paused-no-session", |_| {});
-        harness.ready("FRK-1");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         orchestrator
             .handle(Command::TeamPause)
@@ -5376,8 +5376,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ends_no_finished_sprint_while_paused() {
         let harness = Harness::new("orch-paused-sprint", |_| {});
-        harness.accepted("FRK-1");
-        harness.open_sprint("S1", &["FRK-1"]);
+        harness.accepted("CTV-1");
+        harness.open_sprint("S1", &["CTV-1"]);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         orchestrator
             .handle(Command::TeamPause)
@@ -5447,8 +5447,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn plans_the_sprint_in_a_ceremony() {
         let harness = Harness::new("orch-sprint-plan", with_a_scrum_master);
-        harness.ready("FRK-1");
-        escalated(&harness, "FRK-2");
+        harness.ready("CTV-1");
+        escalated(&harness, "CTV-2");
         harness.open_sprint("S1", &[]);
         harness.project.record(
             "",
@@ -5466,14 +5466,14 @@ mod tests {
             .files
             .append_retro("S1", at().date_naive(), "Ask the human sooner.")
             .expect("the last retro is written");
-        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
+        let adapter = harness.recorded(vec![planning_ceremony_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
         assert!(
             matches!(&report, TickReport::Sprint { sprint_id, what }
-                if sprint_id == "S1" && what.contains("S1 holds FRK-1")),
+                if sprint_id == "S1" && what.contains("S1 holds CTV-1")),
             "{report:?}"
         );
         let started = adapter.started();
@@ -5503,9 +5503,9 @@ mod tests {
         );
         // The candidates, the escalation the digest lists, the last retro, and the channel.
         for fact in [
-            "FRK-1",
+            "CTV-1",
             "$5.00",
-            "FRK-2",
+            "CTV-2",
             "iterations",
             "three rejections",
             "Ask the human sooner.",
@@ -5529,14 +5529,14 @@ mod tests {
             posted[1..],
             vec![(MessageKind::Ceremony, Some(Thread::Planning)); 2]
         );
-        assert_eq!(harness.row("FRK-1").sprint.as_deref(), Some("S1"));
+        assert_eq!(harness.row("CTV-1").sprint.as_deref(), Some("S1"));
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn lists_the_spent_budgets_in_the_digest() {
         let harness = Harness::new("orch-sprint-spent-digest", with_a_scrum_master);
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let exhausted = |scope: &str, consequence: &str| {
             harness.project.record(
                 "",
@@ -5570,13 +5570,13 @@ mod tests {
             }),
         );
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "session.started",
             &json!({ "purpose": "plan", "model": "claude-opus-5", "effort": "high" }),
         );
         exhausted("task_usd", "escalate_task");
         harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
+        let adapter = harness.recorded(vec![planning_ceremony_ctv_1()]);
 
         harness
             .orchestrator(adapter.clone())
@@ -5602,33 +5602,33 @@ mod tests {
             + chrono::Duration::days(day)
     }
 
-    /// The Scrum Master to run the standup, and FRK-1 assigned to `dev-a` (asleep for ten days, so
+    /// The Scrum Master to run the standup, and CTV-1 assigned to `dev-a` (asleep for ten days, so
     /// that no implement session starts) and reviewed by `dev-b`, before S1 opens holding it at
     /// noon on its first day.
-    fn a_sprint_of_frk_1(name: &str) -> Harness {
+    fn a_sprint_of_ctv_1(name: &str) -> Harness {
         let harness = Harness::new(name, with_a_scrum_master);
-        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("CTV-1", "dev-a", "dev-b");
         harness.asleep("dev-a", at() + chrono::Duration::days(10));
-        harness.open_sprint("S1", &["FRK-1"]);
+        harness.open_sprint("S1", &["CTV-1"]);
         harness
     }
 
-    /// FRK-1 moved from `assigned` to `in_progress` by `dev-a` at 13:00 on S1's first day.
-    fn frk_1_started(harness: &Harness) {
+    /// CTV-1 moved from `assigned` to `in_progress` by `dev-a` at 13:00 on S1's first day.
+    fn ctv_1_started(harness: &Harness) {
         harness.project.moved_at(
             on(0, 13, 0),
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "actor": "assignee", "requested_by": "dev-a", "assignee": "dev-a", "reviewer": "dev-b" }),
         );
     }
 
-    /// FRK-1 moved from `in_progress` to `escalated` by the governor at `when`.
-    fn frk_1_escalated(harness: &Harness, when: chrono::DateTime<chrono::Utc>) {
+    /// CTV-1 moved from `in_progress` to `escalated` by the governor at `when`.
+    fn ctv_1_escalated(harness: &Harness, when: chrono::DateTime<chrono::Utc>) {
         harness
             .project
-            .moved_at(when, "FRK-1", "in_progress", "escalated", &json!({}));
+            .moved_at(when, "CTV-1", "in_progress", "escalated", &json!({}));
     }
 
     /// The first message of each standup the adapter started, oldest first.
@@ -5654,24 +5654,24 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_a_standup_when_the_sprint_moved() {
         let harness = Harness::new("orch-standup", with_a_scrum_master);
-        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("CTV-1", "dev-a", "dev-b");
         harness.asleep("dev-a", at() + chrono::Duration::days(10));
-        escalated(&harness, "FRK-2");
-        harness.project.filed("FRK-3", "in_progress", "task", None);
-        harness.open_sprint("S1", &["FRK-1", "FRK-2", "FRK-3"]);
-        frk_1_started(&harness);
+        escalated(&harness, "CTV-2");
+        harness.project.filed("CTV-3", "in_progress", "task", None);
+        harness.open_sprint("S1", &["CTV-1", "CTV-2", "CTV-3"]);
+        ctv_1_started(&harness);
         harness.project.moved_at(
             on(0, 23, 0),
-            "FRK-3",
+            "CTV-3",
             "in_progress",
             "blocked",
             &json!({ "blocker": { "description": "the API is down", "needed": "an API key" } }),
         );
-        // FRK-4, in no sprint, moved too.
-        harness.project.filed("FRK-4", "rejected", "task", None);
+        // CTV-4, in no sprint, moved too.
+        harness.project.filed("CTV-4", "rejected", "task", None);
         harness
             .project
-            .moved_at(on(0, 14, 0), "FRK-4", "rejected", "escalated", &json!({}));
+            .moved_at(on(0, 14, 0), "CTV-4", "rejected", "escalated", &json!({}));
         let clock = Arc::new(MovableClock::new(on(1, 12, 0)));
         let adapter = harness.recorded(vec![standup(), standup()]);
         let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
@@ -5683,7 +5683,7 @@ mod tests {
                 ..TickScope::default()
             },
             TickScope {
-                task_id: Some("FRK-1".parse().expect("a task id")),
+                task_id: Some("CTV-1".parse().expect("a task id")),
                 ..TickScope::default()
             },
         ] {
@@ -5702,15 +5702,15 @@ mod tests {
         );
         let first = &standups(&harness, &adapter)[0];
         for fact in [
-            "FRK-1: assigned -> in_progress, by dev-a",
-            "FRK-3: in_progress -> blocked, by governor",
-            "FRK-3 is blocked: the API is down; needed: an API key",
-            "FRK-2",
+            "CTV-1: assigned -> in_progress, by dev-a",
+            "CTV-3: in_progress -> blocked, by governor",
+            "CTV-3 is blocked: the API is down; needed: an API key",
+            "CTV-2",
             "three rejections",
         ] {
             assert!(first.contains(fact), "{fact}: {first}");
         }
-        assert!(!first.contains("FRK-4"), "{first}");
+        assert!(!first.contains("CTV-4"), "{first}");
         let posted: Vec<_> = harness
             .events(&[EventKind::MessagePosted])
             .into_iter()
@@ -5724,7 +5724,7 @@ mod tests {
         // The same day holds no second standup, and a move made today waits for tomorrow's.
         let again = orchestrator.tick().await.expect("the tick runs");
         assert!(!matches!(again, TickReport::Sprint { .. }), "{again:?}");
-        frk_1_escalated(&harness, on(1, 13, 0));
+        ctv_1_escalated(&harness, on(1, 13, 0));
         clock.set(on(1, 14, 0));
         let today = orchestrator.tick().await.expect("the tick runs");
         assert!(!matches!(today, TickReport::Sprint { .. }), "{today:?}");
@@ -5737,7 +5737,7 @@ mod tests {
         );
         let second = &standups(&harness, &adapter)[1];
         assert!(
-            second.contains("FRK-1: in_progress -> escalated, by governor"),
+            second.contains("CTV-1: in_progress -> escalated, by governor"),
             "{second}"
         );
         assert!(!second.contains("assigned -> in_progress"), "{second}");
@@ -5746,9 +5746,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_the_standup_before_work() {
-        let harness = a_sprint_of_frk_1("orch-standup-first");
-        frk_1_started(&harness);
-        harness.in_progress("FRK-2", "dev-b", "dev-a");
+        let harness = a_sprint_of_ctv_1("orch-standup-first");
+        ctv_1_started(&harness);
+        harness.in_progress("CTV-2", "dev-b", "dev-a");
         let adapter = harness.recorded(vec![standup(), implement_stops_early()]);
         let orchestrator = harness.orchestrator_at(adapter.clone(), on(1, 12, 0));
 
@@ -5769,7 +5769,7 @@ mod tests {
             started,
             vec![
                 (SessionPurpose::Ceremony, None),
-                (SessionPurpose::Implement, Some("FRK-2".to_string())),
+                (SessionPurpose::Implement, Some("CTV-2".to_string())),
             ]
         );
         assert_eq!(standups(&harness, &adapter).len(), 1);
@@ -5782,8 +5782,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_no_standup_on_a_still_day() {
-        let harness = a_sprint_of_frk_1("orch-standup-still");
-        frk_1_started(&harness);
+        let harness = a_sprint_of_ctv_1("orch-standup-still");
+        ctv_1_started(&harness);
         let clock = Arc::new(MovableClock::new(on(1, 9, 0)));
         let adapter = harness.recorded(vec![standup(), standup()]);
         let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
@@ -5799,13 +5799,13 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_the_next_days_standup() {
-        let harness = a_sprint_of_frk_1("orch-standup-next-day");
-        frk_1_started(&harness);
+        let harness = a_sprint_of_ctv_1("orch-standup-next-day");
+        ctv_1_started(&harness);
         let clock = Arc::new(MovableClock::new(on(1, 9, 0)));
         let adapter = harness.recorded(vec![standup(), standup()]);
         let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
         orchestrator.tick().await.expect("the tick runs");
-        frk_1_escalated(&harness, on(1, 10, 0));
+        ctv_1_escalated(&harness, on(1, 10, 0));
 
         clock.set(on(2, 9, 0));
         let report = orchestrator.tick().await.expect("the tick runs");
@@ -5813,7 +5813,7 @@ mod tests {
         assert!(matches!(&report, TickReport::Sprint { .. }), "{report:?}");
         let held = standups(&harness, &adapter);
         assert!(
-            held[1].contains("FRK-1: in_progress -> escalated, by governor"),
+            held[1].contains("CTV-1: in_progress -> escalated, by governor"),
             "{}",
             held[1]
         );
@@ -5822,9 +5822,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn reports_a_move_made_before_the_days_standup() {
-        let harness = a_sprint_of_frk_1("orch-standup-early-move");
-        frk_1_started(&harness);
-        frk_1_escalated(&harness, on(1, 0, 2));
+        let harness = a_sprint_of_ctv_1("orch-standup-early-move");
+        ctv_1_started(&harness);
+        ctv_1_escalated(&harness, on(1, 0, 2));
         let clock = Arc::new(MovableClock::new(on(1, 0, 5)));
         let adapter = harness.recorded(vec![standup(), standup()]);
         let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
@@ -5837,7 +5837,7 @@ mod tests {
         let held = standups(&harness, &adapter);
         assert!(!held[0].contains("in_progress -> escalated"), "{}", held[0]);
         assert!(
-            held[1].contains("FRK-1: in_progress -> escalated, by governor"),
+            held[1].contains("CTV-1: in_progress -> escalated, by governor"),
             "{}",
             held[1]
         );
@@ -5846,8 +5846,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn retries_a_standup_that_hit_its_limit() {
-        let harness = a_sprint_of_frk_1("orch-standup-limit");
-        frk_1_started(&harness);
+        let harness = a_sprint_of_ctv_1("orch-standup-limit");
+        ctv_1_started(&harness);
         let adapter = harness.recorded(vec![hits_the_turn_limit(), standup()]);
         let orchestrator = harness.orchestrator_at(adapter.clone(), on(1, 12, 0));
 
@@ -5890,8 +5890,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_no_standup_on_a_spent_day() {
-        let harness = a_sprint_of_frk_1("orch-standup-day");
-        frk_1_started(&harness);
+        let harness = a_sprint_of_ctv_1("orch-standup-day");
+        ctv_1_started(&harness);
         day_spent_at(&harness, on(1, 8, 0));
         let adapter = harness.recorded(vec![standup()]);
 
@@ -5908,8 +5908,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_no_standup_while_its_runner_sleeps() {
-        let harness = a_sprint_of_frk_1("orch-standup-asleep");
-        frk_1_started(&harness);
+        let harness = a_sprint_of_ctv_1("orch-standup-asleep");
+        ctv_1_started(&harness);
         harness.asleep("sm", on(1, 13, 0));
         let adapter = harness.recorded(vec![standup()]);
 
@@ -5927,9 +5927,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_no_standup_without_a_sprint() {
         let harness = Harness::new("orch-standup-no-sprint", with_a_scrum_master);
-        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("CTV-1", "dev-a", "dev-b");
         harness.asleep("dev-a", at() + chrono::Duration::days(10));
-        frk_1_started(&harness);
+        ctv_1_started(&harness);
         let adapter = harness.recorded(vec![standup()]);
 
         let report = harness
@@ -5946,14 +5946,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn runs_no_sprint_rule_in_a_scoped_or_refining_tick() {
         let harness = Harness::new("orch-sprint-scoped", with_a_scrum_master);
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
+        let adapter = harness.recorded(vec![planning_ceremony_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         for scope in [
             TickScope {
-                task_id: Some("FRK-1".parse().expect("a task id")),
+                task_id: Some("CTV-1".parse().expect("a task id")),
                 ..TickScope::default()
             },
             TickScope {
@@ -5969,7 +5969,7 @@ mod tests {
         }
 
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-        assert_eq!(harness.row("FRK-1").sprint, None);
+        assert_eq!(harness.row("CTV-1").sprint, None);
     }
 
     #[tokio::test]
@@ -5977,9 +5977,9 @@ mod tests {
     async fn asks_no_plan_on_a_spent_day() {
         let harness = Harness::new("orch-sprint-day", with_a_scrum_master);
         harness.spent(None, "s-0", 20.0);
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
+        let adapter = harness.recorded(vec![planning_ceremony_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
@@ -5998,10 +5998,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn asks_no_plan_of_a_sprint_that_holds_a_task() {
         let harness = Harness::new("orch-sprint-held", with_a_scrum_master);
-        harness.ready("FRK-1");
-        harness.ready("FRK-2");
-        harness.open_sprint("S1", &["FRK-1"]);
-        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        harness.ready("CTV-1");
+        harness.ready("CTV-2");
+        harness.open_sprint("S1", &["CTV-1"]);
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
@@ -6017,14 +6017,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn plans_once_per_sprint_as_a_ceremony() {
         let harness = Harness::new("orch-sprint-once", with_a_scrum_master);
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(vec![reads_a_file(), plan_assigns_frk_1()]);
+        let adapter = harness.recorded(vec![reads_a_file(), plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let first = orchestrator.tick().await.expect("the tick runs");
         assert!(matches!(&first, TickReport::Sprint { .. }), "{first:?}");
         assert_eq!(
-            harness.row("FRK-1").sprint,
+            harness.row("CTV-1").sprint,
             None,
             "the session planned nothing"
         );
@@ -6044,7 +6044,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn plans_a_sprint_at_most_three_times() {
         let harness = Harness::new("orch-sprint-thrice", with_a_scrum_master);
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         harness.open_sprint("S1", &[]);
         let adapter = harness.recorded(vec![
             hits_its_wall_clock(),
@@ -6070,9 +6070,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn assigns_only_the_open_sprints_tasks() {
         let harness = Harness::new("orch-sprint-assign", |_| {});
-        harness.ready("FRK-1");
-        harness.ready("FRK-2");
-        harness.open_sprint("S1", &["FRK-2"]);
+        harness.ready("CTV-1");
+        harness.ready("CTV-2");
+        harness.open_sprint("S1", &["CTV-2"]);
         let adapter = harness.recorded(vec![reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -6085,11 +6085,11 @@ mod tests {
                 started[0].purpose,
                 started[0].task_id.as_ref().map(|task| task.as_str())
             ),
-            (SessionPurpose::Plan, Some("FRK-2"))
+            (SessionPurpose::Plan, Some("CTV-2"))
         );
         assert!(
-            started[0].initial_prompt.contains("FRK-2")
-                && !started[0].initial_prompt.contains("FRK-1"),
+            started[0].initial_prompt.contains("CTV-2")
+                && !started[0].initial_prompt.contains("CTV-1"),
             "{}",
             started[0].initial_prompt
         );
@@ -6100,7 +6100,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn assigns_the_backlog_without_a_sprint() {
         let harness = Harness::new("orch-sprint-none", |_| {});
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let adapter = harness.recorded(vec![reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -6113,7 +6113,7 @@ mod tests {
                 started[0].purpose,
                 started[0].task_id.as_ref().map(|task| task.as_str())
             ),
-            (SessionPurpose::Plan, Some("FRK-1"))
+            (SessionPurpose::Plan, Some("CTV-1"))
         );
     }
 
@@ -6121,32 +6121,32 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn stops_assigning_once_the_sprint_budget_is_spent() {
         let harness = Harness::new("orch-sprint-spent", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        harness.ready("FRK-2");
-        harness.accepted("FRK-3");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.ready("CTV-2");
+        harness.accepted("CTV-3");
         harness
             .project
-            .open_sprint("S1", Some(5.0), &["FRK-1", "FRK-2", "FRK-3"]);
-        // Spent in S1 by a task already accepted, so that neither FRK-1's nor FRK-2's own budget
+            .open_sprint("S1", Some(5.0), &["CTV-1", "CTV-2", "CTV-3"]);
+        // Spent in S1 by a task already accepted, so that neither CTV-1's nor CTV-2's own budget
         // is what stops anything.
-        harness.spent(Some("FRK-3"), "s-0", 5.0);
+        harness.spent(Some("CTV-3"), "s-0", 5.0);
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let scoped = orchestrator
             .tick_within(&TickScope {
-                task_id: Some("FRK-2".parse().expect("a task id")),
+                task_id: Some("CTV-2".parse().expect("a task id")),
                 ..TickScope::default()
             })
             .await
             .expect("the tick runs");
         assert!(matches!(scoped, TickReport::Idle { .. }), "{scoped:?}");
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Ready);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Ready);
         assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
 
         let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         let started = adapter.started();
         assert_eq!(started.len(), 1, "{started:?}");
         assert_eq!(started[0].purpose, SessionPurpose::Implement);
@@ -6156,8 +6156,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn lets_a_session_finish_past_the_sprint_budget() {
         let harness = Harness::new("orch-sprint-finish", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        harness.project.open_sprint("S1", Some(0.001), &["FRK-1"]);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.project.open_sprint("S1", Some(0.001), &["CTV-1"]);
         let adapter = Arc::new(UsageThenWaitAdapter::completing(a_thousand_tokens()));
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -6209,7 +6209,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn puts_an_agent_to_sleep_at_its_providers_limit() {
         let harness = Harness::new("orch-sleep", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let team = team_file(&harness);
         let until = at() + chrono::Duration::hours(2);
         let orchestrator = harness.orchestrator(harness.recorded(vec![refused_until(until)]));
@@ -6224,7 +6224,7 @@ mod tests {
             notes[0]
         );
         assert_eq!(sleeps(&harness), vec![(Some("dev-a".to_string()), until)]);
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
         assert_eq!(team_file(&harness), team);
     }
 
@@ -6232,7 +6232,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn pauses_the_team_once_when_the_provider_refuses_the_key() {
         let harness = Harness::new("orch-key-refused", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let adapter = harness.recorded(vec![credential_refused(), reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -6264,14 +6264,14 @@ mod tests {
         assert_eq!(adapter.started().len(), 1);
         assert!(catervas_notes(&harness).is_empty());
         assert!(sleeps(&harness).is_empty());
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn pauses_the_team_for_no_other_error() {
         let harness = Harness::new("orch-key-other-errors", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let adapter = harness.recorded(vec![success_with_is_error(), provider_limit_429()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -6293,14 +6293,14 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(scopes_exhausted(&harness), vec![]);
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn sleeps_an_hour_without_a_reset_time() {
         let harness = Harness::new("orch-sleep-hour", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let orchestrator = harness.orchestrator(harness.recorded(vec![provider_limit_429()]));
 
         orchestrator.tick().await.expect("the tick runs");
@@ -6315,7 +6315,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ignores_a_reset_time_in_the_past() {
         let harness = Harness::new("orch-sleep-past", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let refused = refused_until(at() - chrono::Duration::hours(1));
         let orchestrator = harness.orchestrator(harness.recorded(vec![refused]));
 
@@ -6331,7 +6331,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn makes_no_sandbox_for_a_sleeping_agent() {
         let harness = Harness::new("orch-sleep-sandbox", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         harness.asleep("dev-a", at() + chrono::Duration::hours(1));
         let sandboxes = Arc::new(CountingSandboxFactory::default());
         let adapter = harness.recorded(vec![reads_a_file()]);
@@ -6339,7 +6339,7 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(sandboxes.created("FRK-1"), 0);
+        assert_eq!(sandboxes.created("CTV-1"), 0);
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
     }
 
@@ -6347,10 +6347,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn plans_a_sprint_again_after_its_planner_slept() {
         let harness = Harness::new("orch-sleep-sprint", with_a_scrum_master);
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         harness.open_sprint("S1", &[]);
         let until = at() + chrono::Duration::hours(2);
-        let adapter = harness.recorded(vec![refused_until(until), planning_ceremony_frk_1()]);
+        let adapter = harness.recorded(vec![refused_until(until), planning_ceremony_ctv_1()]);
         let first = harness
             .orchestrator(adapter.clone())
             .tick()
@@ -6366,7 +6366,7 @@ mod tests {
 
         assert!(
             matches!(&report, TickReport::Sprint { sprint_id, what }
-                if sprint_id == "S1" && what.contains("S1 holds FRK-1")),
+                if sprint_id == "S1" && what.contains("S1 holds CTV-1")),
             "{report:?}"
         );
         let planning = adapter
@@ -6375,15 +6375,15 @@ mod tests {
             .filter(|spec| spec.purpose == SessionPurpose::Ceremony && spec.agent_id == "sm")
             .count();
         assert_eq!(planning, 2);
-        assert_eq!(harness.row("FRK-1").sprint.as_deref(), Some("S1"));
+        assert_eq!(harness.row("CTV-1").sprint.as_deref(), Some("S1"));
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn starts_no_session_for_a_sleeping_agent() {
         let harness = Harness::new("orch-sleep-other", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        harness.in_progress("FRK-2", "dev-b", "dev-a");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-2", "dev-b", "dev-a");
         harness.asleep("dev-a", at() + chrono::Duration::hours(1));
         let adapter = harness.recorded(vec![reads_a_file(), reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -6391,7 +6391,7 @@ mod tests {
         let first = orchestrator.tick().await.expect("the tick runs");
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&first), Some("FRK-2"), "{first:?}");
+        assert_eq!(acted_on(&first), Some("CTV-2"), "{first:?}");
         let agents: Vec<String> = adapter
             .started()
             .iter()
@@ -6404,7 +6404,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn idles_until_the_first_agent_wakes() {
         let harness = Harness::new("orch-sleep-idle", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let until = at() + chrono::Duration::hours(1);
         harness.asleep("dev-a", until);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
@@ -6439,7 +6439,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn wakes_an_agent_when_its_sleep_ends() {
         let harness = Harness::new("orch-sleep-wake", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         let until = at() + chrono::Duration::hours(2);
         let adapter = harness.recorded(vec![refused_until(until), reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -6477,15 +6477,15 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn still_assigns_work_to_a_sleeping_agent() {
         let harness = Harness::new("orch-sleep-assign", with_a_scrum_master);
-        harness.blocked("FRK-2", "dev-b", "dev-a");
-        harness.ready("FRK-3");
+        harness.blocked("CTV-2", "dev-b", "dev-a");
+        harness.ready("CTV-3");
         harness.asleep("dev-a", at() + chrono::Duration::hours(1));
         let adapter = harness.recorded(vec![reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-3"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-3"), "{report:?}");
         let started = adapter.started();
         assert_eq!(
             (started[0].agent_id.as_str(), started[0].purpose),
@@ -6504,7 +6504,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_sleeping_reviewer() {
         let harness = Harness::new("orch-sleep-reviewer", |_| {});
-        harness.verifying("FRK-1");
+        harness.verifying("CTV-1");
         let until = at() + chrono::Duration::hours(1);
         harness.asleep("dev-b", until);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
@@ -6516,7 +6516,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_sleeping_product_manager_to_accept() {
         let harness = Harness::new("orch-sleep-accept", |_| {});
-        harness.verifying("FRK-1");
+        harness.verifying("CTV-1");
         let orchestrator = harness.orchestrator(harness.recorded(vec![review_writes_note()]));
         orchestrator.tick().await.expect("the review runs");
         let until = at() + chrono::Duration::hours(1);
@@ -6529,7 +6529,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_sleeping_assigner() {
         let harness = Harness::new("orch-sleep-assigner", |_| {});
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let until = at() + chrono::Duration::hours(1);
         harness.asleep("pm", until);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
@@ -6541,7 +6541,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_sleeping_sprint_planner() {
         let harness = Harness::new("orch-sleep-planner", with_a_scrum_master);
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         harness.open_sprint("S1", &[]);
         let until = at() + chrono::Duration::hours(1);
         harness.asleep("sm", until);
@@ -6554,8 +6554,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_the_agent_that_wakes_first() {
         let harness = Harness::new("orch-sleep-earliest", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        harness.in_progress("FRK-2", "dev-b", "dev-a");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-2", "dev-b", "dev-a");
         harness.asleep("dev-a", at() + chrono::Duration::hours(2));
         let until = at() + chrono::Duration::hours(1);
         harness.asleep("dev-b", until);
@@ -6570,7 +6570,7 @@ mod tests {
         let harness = Harness::new("orch-budget-question", |_| {});
         in_progress_with_sessions(&harness, 1, 1);
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "question.asked",
             &json!({ "question": "Should done.txt be empty?", "asked_by": "dev-a" }),
         );
@@ -6578,7 +6578,7 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
         assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
         assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
     }
@@ -6590,7 +6590,7 @@ mod tests {
         in_progress_with_sessions(&harness, 1, 1);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         orchestrator.tick().await.expect("the tick escalates it");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
 
         orchestrator.tick().await.expect("the tick runs");
 
@@ -6606,9 +6606,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn quotes_no_note_from_an_earlier_session() {
         let harness = Harness::new("orch-note-earlier", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "note.written",
             &json!({ "kind": "progress", "text": "An earlier session's note.", "written_by": "dev-a" }),
         );
@@ -6625,7 +6625,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn puts_an_agent_to_sleep_when_its_note_cannot_be_written() {
         let harness = Harness::new("orch-sleep-no-note", |_| {});
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
         refuse_appends_of(&harness.project.deps.log, EventKind::NoteWritten);
         let orchestrator = harness.orchestrator(harness.recorded(vec![provider_limit_429()]));
 
@@ -6745,7 +6745,7 @@ mod tests {
             &harness,
             "pm",
             MessageKind::Ceremony,
-            "@dev-a keep FRK-1 moving.",
+            "@dev-a keep CTV-1 moving.",
         );
         let adapter = harness.recorded(vec![reply_to_a_mention()]);
 
@@ -6907,7 +6907,7 @@ mod tests {
                 ..TickScope::default()
             },
             TickScope {
-                task_id: Some("FRK-1".parse().expect("a task id")),
+                task_id: Some("CTV-1".parse().expect("a task id")),
                 ..TickScope::default()
             },
         ] {
@@ -6941,13 +6941,13 @@ mod tests {
             .await
             .expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
 
         // The mention is answered before a rejected task goes back to its assignee.
         let harness = Harness::new("orch-mention-before-rejected", |_| {});
-        harness.rejected("FRK-1", 0, "done.txt is missing");
+        harness.rejected("CTV-1", 0, "done.txt is missing");
         said(&harness, "human", MessageKind::Human, "@dev-b status?");
         let adapter = harness.recorded(vec![reply_to_a_mention()]);
 
@@ -6961,7 +6961,7 @@ mod tests {
             matches!(&report, TickReport::Conversation { agent_id, .. } if agent_id == "dev-b"),
             "{report:?}"
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Rejected);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Rejected);
     }
 
     /// Session ids `session-1` and so on, the human posting `@dev-a and the tests?` each time
@@ -7099,17 +7099,17 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ages_an_escalation_past_its_limit() {
         let harness = Harness::new("orch-aged-past-limit", |_| {});
-        let raised_seq = harness.escalated_hours_ago("FRK-1", "iterations", 25);
+        let raised_seq = harness.escalated_hours_ago("CTV-1", "iterations", 25);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         let aged = harness.events(&[EventKind::EscalationAged]);
         assert_eq!(aged.len(), 1, "{aged:?}");
         assert_eq!(
             aged[0].envelope.ids.task_id.as_ref().map(|id| id.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         let EventBody::EscalationAged(body) = &aged[0].body else {
             panic!("an aged escalation");
@@ -7129,7 +7129,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ages_an_escalation_once() {
         let harness = Harness::new("orch-aged-once", |_| {});
-        harness.escalated_hours_ago("FRK-1", "iterations", 25);
+        harness.escalated_hours_ago("CTV-1", "iterations", 25);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         orchestrator.tick().await.expect("the first tick runs");
 
@@ -7150,14 +7150,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ages_one_escalation_per_tick() {
         let harness = Harness::new("orch-aged-two", |_| {});
-        let older = harness.escalated_hours_ago("FRK-1", "iterations", 30);
-        let newer = harness.escalated_hours_ago("FRK-2", "iterations", 26);
+        let older = harness.escalated_hours_ago("CTV-1", "iterations", 30);
+        let newer = harness.escalated_hours_ago("CTV-2", "iterations", 26);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let first = orchestrator.tick().await.expect("the first tick runs");
-        assert_eq!(acted_on(&first), Some("FRK-1"), "{first:?}");
+        assert_eq!(acted_on(&first), Some("CTV-1"), "{first:?}");
         let second = orchestrator.tick().await.expect("the second tick runs");
-        assert_eq!(acted_on(&second), Some("FRK-2"), "{second:?}");
+        assert_eq!(acted_on(&second), Some("CTV-2"), "{second:?}");
 
         let aged = harness.events(&[EventKind::EscalationAged]);
         assert_eq!(aged.len(), 2, "{aged:?}");
@@ -7175,12 +7175,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ages_a_new_escalation_of_the_same_task_again() {
         let harness = Harness::new("orch-aged-again", |_| {});
-        harness.escalated_hours_ago("FRK-1", "iterations", 50);
+        harness.escalated_hours_ago("CTV-1", "iterations", 50);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         orchestrator.tick().await.expect("the first tick runs");
 
         harness.project.moved(
-            "FRK-1",
+            "CTV-1",
             "escalated",
             "refining",
             &json!({ "actor": "human", "requested_by": "human" }),
@@ -7188,21 +7188,21 @@ mod tests {
         let raised_at = at() - chrono::Duration::hours(25);
         harness
             .project
-            .moved_at(raised_at, "FRK-1", "refining", "escalated", &json!({}));
+            .moved_at(raised_at, "CTV-1", "refining", "escalated", &json!({}));
         let second_seq = harness
             .project
             .record_at(
                 raised_at,
-                "FRK-1",
+                "CTV-1",
                 "escalation.raised",
-                &json!({ "reason": "iterations", "detail": "FRK-1 waits" }),
+                &json!({ "reason": "iterations", "detail": "CTV-1 waits" }),
             )
             .envelope
             .seq;
 
         let report = orchestrator.tick().await.expect("the second tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
         let aged = harness.events(&[EventKind::EscalationAged]);
         assert_eq!(aged.len(), 2, "{aged:?}");
         let EventBody::EscalationAged(body) = &aged[1].body else {
@@ -7215,7 +7215,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn leaves_a_young_escalation() {
         let harness = Harness::new("orch-aged-young", |_| {});
-        harness.escalated_hours_ago("FRK-1", "iterations", 23);
+        harness.escalated_hours_ago("CTV-1", "iterations", 23);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let report = orchestrator.tick().await.expect("the tick runs");
@@ -7230,14 +7230,14 @@ mod tests {
         assert_eq!(harness.events(&[EventKind::EscalationAged]).len(), 0);
     }
 
-    /// The Scrum Master, and S1 holding FRK-1, accepted, its completion note written and $1.25
+    /// The Scrum Master, and S1 holding CTV-1, accepted, its completion note written and $1.25
     /// spent on it while the sprint was open: the sprint the first tick ends.
     fn a_finished_sprint(name: &str) -> Harness {
         let harness = Harness::new(name, with_a_scrum_master);
-        harness.accepted("FRK-1");
-        harness.open_sprint("S1", &["FRK-1"]);
+        harness.accepted("CTV-1");
+        harness.open_sprint("S1", &["CTV-1"]);
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "note.written",
             &json!({
                 "kind": "completion",
@@ -7245,7 +7245,7 @@ mod tests {
                 "written_by": "dev-a"
             }),
         );
-        harness.spent(Some("FRK-1"), "s-1", 1.25);
+        harness.spent(Some("CTV-1"), "s-1", 1.25);
         harness
     }
 
@@ -7287,7 +7287,7 @@ mod tests {
             (spec.agent_id.as_str(), spec.purpose, spec.task_id.as_ref()),
             ("sm", SessionPurpose::Ceremony, None)
         );
-        for fact in ["FRK-1", "accepted", "The login page is done.", "$1.25"] {
+        for fact in ["CTV-1", "accepted", "The login page is done.", "$1.25"] {
             assert!(
                 spec.initial_prompt.contains(fact),
                 "{fact}: {}",
@@ -7350,7 +7350,7 @@ mod tests {
     async fn appends_the_retro() {
         let harness = a_finished_sprint("orch-retro");
         harness.project.record(
-            "FRK-1",
+            "CTV-1",
             "escalation.raised",
             &json!({ "reason": "iterations", "detail": "three rejections" }),
         );
@@ -7373,13 +7373,13 @@ mod tests {
             "{report:?}"
         );
         let prompt = &adapter.started()[1].initial_prompt;
-        for fact in ["FRK-1 escalated: iterations", "Ask the human sooner."] {
+        for fact in ["CTV-1 escalated: iterations", "Ask the human sooner."] {
             assert!(prompt.contains(fact), "{fact}: {prompt}");
         }
         assert_eq!(
             std::fs::read_to_string(&retro_file).expect("the retro reads"),
             "# Retro\n\n## S0 (2026-09-01)\n\nAsk the human sooner.\n\n## S1 (2026-09-22)\n\n\
-             Keep the tasks small: FRK-1 passed its review the first time.\n"
+             Keep the tasks small: CTV-1 passed its review the first time.\n"
         );
         let appended = harness.events(&[EventKind::RetroAppended]);
         assert_eq!(appended.len(), 1, "{appended:?}");
@@ -7394,7 +7394,7 @@ mod tests {
             ),
             (
                 "S1",
-                "Keep the tasks small: FRK-1 passed its review the first time.",
+                "Keep the tasks small: CTV-1 passed its review the first time.",
                 "sm"
             )
         );
@@ -7535,7 +7535,7 @@ mod tests {
                     ..TickScope::default()
                 },
                 TickScope {
-                    task_id: Some("FRK-1".parse().expect("a task id")),
+                    task_id: Some("CTV-1".parse().expect("a task id")),
                     ..TickScope::default()
                 },
             ] {
@@ -7648,7 +7648,7 @@ mod tests {
             with_a_scrum_master(wire);
             wire["agents"][2]["model"] = json!({ "id": "claude-opus-5", "effort": "high" });
         });
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         harness.open_sprint("S1", &[]);
         let older = chatted(&harness, "dev-b", "human", "What are you on?", None);
         chatted(&harness, "dev-a", "human", "And you?", None);
@@ -7732,7 +7732,7 @@ mod tests {
         // A tick scoped to a task answers no chat.
         let scoped = orchestrator
             .tick_within(&TickScope {
-                task_id: Some("FRK-1".parse().expect("a task id")),
+                task_id: Some("CTV-1".parse().expect("a task id")),
                 rules: TickRules::All,
             })
             .await
@@ -8031,7 +8031,7 @@ mod tests {
         // judges a `WebFetch` of the role's implement session by the list, and a Developer's
         // session, given `network`, by nothing.
         let harness = Harness::with_procurement("orch-procurement-held");
-        harness.procurement_task("FRK-1", Some("in_progress"));
+        harness.procurement_task("CTV-1", Some("in_progress"));
         let catervas = catervas_roles::sites::catervas_sites()[0].host.clone();
         let probe = Arc::new(HookProbe {
             inner: harness.recorded(vec![reads_a_file()]),
@@ -8173,9 +8173,9 @@ mod tests {
     async fn answers_while_the_team_is_paused() {
         let harness = Harness::new("orch-chat-paused-team", |_| {});
         // Planning would run first on a team at work: a paused one runs the chat rule alone.
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         chatted(&harness, "dev-a", "human", "Status?", None);
-        let adapter = harness.recorded(vec![chat_answers_with_a_request(), plan_assigns_frk_1()]);
+        let adapter = harness.recorded(vec![chat_answers_with_a_request(), plan_assigns_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         orchestrator
             .handle(Command::TeamPause)
@@ -8384,7 +8384,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_a_ready_task_until_a_sprint_opens() {
         let harness = Harness::new("orch-sprints-hold", in_sprints);
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -8394,7 +8394,7 @@ mod tests {
         }
 
         assert!(adapter.started().is_empty());
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
         assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
         assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
     }
@@ -8403,18 +8403,18 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn keeps_late_work_for_the_next_sprint() {
         let harness = Harness::new("orch-sprints-late", in_sprints);
-        harness.ready("FRK-1");
-        harness.open_sprint("S1", &["FRK-1"]);
-        harness.ready("FRK-3");
-        let adapter = harness.recorded(vec![plan_assigns_frk_1(), planning_ceremony_frk_1()]);
+        harness.ready("CTV-1");
+        harness.open_sprint("S1", &["CTV-1"]);
+        harness.ready("CTV-3");
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1(), planning_ceremony_ctv_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let first = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(acted_on(&first), Some("FRK-1"), "{first:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Assigned);
+        assert_eq!(acted_on(&first), Some("CTV-1"), "{first:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
         let late = orchestrator
             .tick_within(&TickScope {
-                task_id: Some("FRK-3".parse().expect("a task id")),
+                task_id: Some("CTV-3".parse().expect("a task id")),
                 ..TickScope::default()
             })
             .await
@@ -8427,9 +8427,9 @@ mod tests {
                 until: None
             }
         );
-        let row = harness.row("FRK-3");
+        let row = harness.row("CTV-3");
         assert_eq!((row.status, row.sprint), (TaskStatus::Ready, None));
-        assert!(in_the_backlog_now(&harness, "FRK-3"));
+        assert!(in_the_backlog_now(&harness, "CTV-3"));
 
         let deps = &harness.project.deps;
         end_sprint(deps, EndedBy::Human).expect("S1 ends");
@@ -8443,39 +8443,39 @@ mod tests {
         let planning = &adapter.started()[1];
         assert_eq!(planning.purpose, SessionPurpose::Ceremony);
         assert!(
-            planning.initial_prompt.contains("FRK-3"),
+            planning.initial_prompt.contains("CTV-3"),
             "{}",
             planning.initial_prompt
         );
-        // FRK-1, which S1 left for the Backlog, is planned again.
-        assert_eq!(harness.row("FRK-1").sprint.as_deref(), Some("S2"));
+        // CTV-1, which S1 left for the Backlog, is planned again.
+        assert_eq!(harness.row("CTV-1").sprint.as_deref(), Some("S2"));
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn a_raise_runs_during_a_sprint_it_is_not_in() {
         let harness = Harness::new("orch-sprints-raise", in_sprints);
-        harness.ready("FRK-1");
-        harness.open_sprint("S1", &["FRK-1"]);
+        harness.ready("CTV-1");
+        harness.open_sprint("S1", &["CTV-1"]);
         // The owner's request to raise a marketing plan's budget, refined and ready.
-        harness.ready_raising("FRK-3", "MP-1");
-        assert!(!in_the_backlog_now(&harness, "FRK-3"));
-        let adapter = harness.recorded(vec![rewritten(&plan_assigns_frk_1(), "FRK-1", "FRK-3")]);
+        harness.ready_raising("CTV-3", "MP-1");
+        assert!(!in_the_backlog_now(&harness, "CTV-3"));
+        let adapter = harness.recorded(vec![rewritten(&plan_assigns_ctv_1(), "CTV-1", "CTV-3")]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator
             .tick_within(&TickScope {
-                task_id: Some("FRK-3".parse().expect("a task id")),
+                task_id: Some("CTV-3".parse().expect("a task id")),
                 ..TickScope::default()
             })
             .await
             .expect("the tick runs");
 
         // Assigned at once, with S1 open and the policy on, and in no sprint.
-        assert_eq!(acted_on(&report), Some("FRK-3"), "{report:?}");
-        let row = harness.row("FRK-3");
+        assert_eq!(acted_on(&report), Some("CTV-3"), "{report:?}");
+        let row = harness.row("CTV-3");
         assert_eq!((row.status, row.sprint), (TaskStatus::Assigned, None));
-        // No plan of a sprint names it: the only one is S1's, with FRK-1.
+        // No plan of a sprint names it: the only one is S1's, with CTV-1.
         let planned: Vec<String> = harness
             .events(&[EventKind::SprintPlanned])
             .iter()
@@ -8488,17 +8488,17 @@ mod tests {
                 _ => Vec::new(),
             })
             .collect();
-        assert_eq!(planned, ["FRK-1"]);
+        assert_eq!(planned, ["CTV-1"]);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn stops_unfinished_work_of_an_ended_sprint() {
         let harness = Harness::new("orch-sprints-ended", in_sprints);
-        harness.assigned("FRK-1", "dev-b", "dev-a");
-        harness.rejected("FRK-2", 1, "done.txt is missing");
-        harness.in_progress("FRK-3", "dev-b", "dev-a");
-        harness.open_sprint("S1", &["FRK-1", "FRK-2", "FRK-3"]);
+        harness.assigned("CTV-1", "dev-b", "dev-a");
+        harness.rejected("CTV-2", 1, "done.txt is missing");
+        harness.in_progress("CTV-3", "dev-b", "dev-a");
+        harness.open_sprint("S1", &["CTV-1", "CTV-2", "CTV-3"]);
         let adapter = harness.recorded(vec![review(), retro()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let deps = &harness.project.deps;
@@ -8512,7 +8512,7 @@ mod tests {
         assert_eq!(body.backlog, Some(true));
         assert_eq!(
             body.left.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            ["FRK-1", "FRK-2", "FRK-3"]
+            ["CTV-1", "CTV-2", "CTV-3"]
         );
         // S1's review and look back run; then nothing, until a sprint plans what S1 left.
         for _ in 0..2 {
@@ -8523,9 +8523,9 @@ mod tests {
             let report = orchestrator.tick().await.expect("the tick runs");
             assert_idle_waiting_for_a_sprint(&report);
         }
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Assigned);
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::Rejected);
-        assert_eq!(harness.row("FRK-3").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Rejected);
+        assert_eq!(harness.row("CTV-3").status, TaskStatus::InProgress);
         assert_eq!(
             sessions(&adapter),
             vec![
@@ -8538,8 +8538,8 @@ mod tests {
         plan_sprint(
             deps,
             &[
-                "FRK-1".parse().expect("an id"),
-                "FRK-2".parse().expect("an id"),
+                "CTV-1".parse().expect("an id"),
+                "CTV-2".parse().expect("an id"),
             ],
             &PlannedBy::Assigner("pm".to_string()),
         )
@@ -8547,72 +8547,72 @@ mod tests {
         let reworked = orchestrator.tick().await.expect("the tick runs");
         let started = orchestrator
             .tick_within(&TickScope {
-                task_id: Some("FRK-1".parse().expect("a task id")),
+                task_id: Some("CTV-1".parse().expect("a task id")),
                 ..TickScope::default()
             })
             .await
             .expect("the tick runs");
 
-        assert_eq!(acted_on(&reworked), Some("FRK-2"), "{reworked:?}");
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::InProgress);
-        assert_eq!(acted_on(&started), Some("FRK-1"), "{started:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(acted_on(&reworked), Some("CTV-2"), "{reworked:?}");
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::InProgress);
+        assert_eq!(acted_on(&started), Some("CTV-1"), "{started:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn leaves_backlog_work_out_of_the_wip_limit() {
         // The landing review's stall: S1 ends early, its leftovers keep their assignees, and S2
-        // plans only FRK-3. A leftover waits, it is not being worked, so it fills no WIP limit.
+        // plans only CTV-3. A leftover waits, it is not being worked, so it fills no WIP limit.
         let harness = Harness::new("orch-sprints-wip", |wire| {
             in_sprints(wire);
             wire["policy"]["wip_limit_per_agent"] = json!(1);
         });
-        harness.assigned("FRK-1", "dev-a", "dev-b");
-        harness.assigned("FRK-2", "dev-b", "dev-a");
-        harness.open_sprint("S1", &["FRK-1", "FRK-2"]);
+        harness.assigned("CTV-1", "dev-a", "dev-b");
+        harness.assigned("CTV-2", "dev-b", "dev-a");
+        harness.open_sprint("S1", &["CTV-1", "CTV-2"]);
         let deps = &harness.project.deps;
         end_sprint(deps, EndedBy::Human).expect("S1 ends");
-        harness.ready("FRK-3");
+        harness.ready("CTV-3");
         start_sprint(deps, None, "human").expect("S2 starts");
         plan_sprint(
             deps,
-            &["FRK-3".parse().expect("an id")],
+            &["CTV-3".parse().expect("an id")],
             &PlannedBy::Assigner("pm".to_string()),
         )
-        .expect("S2 plans FRK-3");
-        let adapter = harness.recorded(vec![rewritten(&plan_assigns_frk_1(), "FRK-1", "FRK-3")]);
+        .expect("S2 plans CTV-3");
+        let adapter = harness.recorded(vec![rewritten(&plan_assigns_ctv_1(), "CTV-1", "CTV-3")]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator
             .tick_within(&TickScope {
-                task_id: Some("FRK-3".parse().expect("a task id")),
+                task_id: Some("CTV-3".parse().expect("a task id")),
                 ..TickScope::default()
             })
             .await
             .expect("the tick runs");
 
-        assert_eq!(acted_on(&report), Some("FRK-3"), "{report:?}");
-        let row = harness.row("FRK-3");
+        assert_eq!(acted_on(&report), Some("CTV-3"), "{report:?}");
+        let row = harness.row("CTV-3");
         assert_eq!(
             (row.status, row.assignee_id.as_deref()),
             (TaskStatus::Assigned, Some("dev-a"))
         );
-        assert!(harness.row("FRK-1").left_for_the_backlog);
+        assert!(harness.row("CTV-1").left_for_the_backlog);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn finishes_work_under_way_when_the_policy_turns_on() {
-        // Room for FRK-4, so that only the policy keeps it from being assigned.
+        // Room for CTV-4, so that only the policy keeps it from being assigned.
         let harness = Harness::new("orch-sprints-under-way", |wire| {
             wire["policy"]["wip_limit_per_agent"] = json!(3);
         });
-        harness.in_progress("FRK-1", "dev-a", "dev-b");
-        harness.rejected("FRK-2", 1, "done.txt is missing");
-        harness.assigned("FRK-3", "dev-b", "dev-a");
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.rejected("CTV-2", 1, "done.txt is missing");
+        harness.assigned("CTV-3", "dev-b", "dev-a");
         save_the_policy(&harness, true).await;
-        harness.ready("FRK-4");
+        harness.ready("CTV-4");
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let tick = async |task: &str| {
@@ -8625,24 +8625,24 @@ mod tests {
                 .expect("the tick runs")
         };
 
-        let implemented = tick("FRK-1").await;
-        let reworked = tick("FRK-2").await;
-        let started = tick("FRK-3").await;
-        let held = tick("FRK-4").await;
+        let implemented = tick("CTV-1").await;
+        let reworked = tick("CTV-2").await;
+        let started = tick("CTV-3").await;
+        let held = tick("CTV-4").await;
 
-        assert_eq!(acted_on(&implemented), Some("FRK-1"), "{implemented:?}");
+        assert_eq!(acted_on(&implemented), Some("CTV-1"), "{implemented:?}");
         assert_eq!(
             sessions(&adapter),
             vec![("dev-a".to_string(), SessionPurpose::Implement)]
         );
-        assert_eq!(acted_on(&reworked), Some("FRK-2"), "{reworked:?}");
-        assert_eq!(harness.row("FRK-2").status, TaskStatus::InProgress);
-        assert_eq!(acted_on(&started), Some("FRK-3"), "{started:?}");
-        assert_eq!(harness.row("FRK-3").status, TaskStatus::InProgress);
+        assert_eq!(acted_on(&reworked), Some("CTV-2"), "{reworked:?}");
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::InProgress);
+        assert_eq!(acted_on(&started), Some("CTV-3"), "{started:?}");
+        assert_eq!(harness.row("CTV-3").status, TaskStatus::InProgress);
         assert!(matches!(held, TickReport::Idle { .. }), "{held:?}");
-        let row = harness.row("FRK-4");
+        let row = harness.row("CTV-4");
         assert_eq!((row.status, row.assignee_id), (TaskStatus::Ready, None));
-        for task in ["FRK-1", "FRK-2", "FRK-3"] {
+        for task in ["CTV-1", "CTV-2", "CTV-3"] {
             assert!(!in_the_backlog_now(&harness, task), "{task}");
         }
     }
@@ -8651,21 +8651,21 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn forgets_the_backlog_when_the_policy_turns_off() {
         let harness = Harness::new("orch-sprints-off", in_sprints);
-        harness.assigned("FRK-1", "dev-a", "dev-b");
-        harness.open_sprint("S1", &["FRK-1"]);
+        harness.assigned("CTV-1", "dev-a", "dev-b");
+        harness.open_sprint("S1", &["CTV-1"]);
         end_sprint(&harness.project.deps, EndedBy::Human).expect("S1 ends");
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let tick = async || {
             orchestrator
                 .tick_within(&TickScope {
-                    task_id: Some("FRK-1".parse().expect("a task id")),
+                    task_id: Some("CTV-1".parse().expect("a task id")),
                     ..TickScope::default()
                 })
                 .await
                 .expect("the tick runs")
         };
-        assert!(harness.row("FRK-1").left_for_the_backlog);
+        assert!(harness.row("CTV-1").left_for_the_backlog);
         assert!(matches!(tick().await, TickReport::Idle { .. }));
 
         save_the_policy(&harness, false).await;
@@ -8675,10 +8675,10 @@ mod tests {
             panic!("a team.updated");
         };
         assert_eq!(body.plan_in_sprints, Some(false));
-        assert!(!harness.row("FRK-1").left_for_the_backlog);
+        assert!(!harness.row("CTV-1").left_for_the_backlog);
         let started = tick().await;
-        assert_eq!(acted_on(&started), Some("FRK-1"), "{started:?}");
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(acted_on(&started), Some("CTV-1"), "{started:?}");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
 
         save_the_policy(&harness, true).await;
 
@@ -8687,9 +8687,9 @@ mod tests {
             panic!("a team.updated");
         };
         assert_eq!(body.plan_in_sprints, Some(true));
-        assert!(!in_the_backlog_now(&harness, "FRK-1"));
+        assert!(!in_the_backlog_now(&harness, "CTV-1"));
         let implemented = tick().await;
-        assert_eq!(acted_on(&implemented), Some("FRK-1"), "{implemented:?}");
+        assert_eq!(acted_on(&implemented), Some("CTV-1"), "{implemented:?}");
         assert_eq!(
             sessions(&adapter),
             vec![("dev-a".to_string(), SessionPurpose::Implement)]
@@ -8703,17 +8703,17 @@ mod tests {
             in_sprints(wire);
             wire["policy"]["integration"] = json!("auto_merge");
         });
-        harness.verifying("FRK-1");
-        harness.accepted("FRK-2");
+        harness.verifying("CTV-1");
+        harness.accepted("CTV-2");
         let adapter = harness.recorded(vec![review_writes_note()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let integrated = orchestrator.tick().await.expect("the tick runs");
         let reviewed = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(acted_on(&integrated), Some("FRK-2"), "{integrated:?}");
+        assert_eq!(acted_on(&integrated), Some("CTV-2"), "{integrated:?}");
         assert_eq!(harness.events(&[EventKind::TaskIntegrated]).len(), 1);
-        assert_eq!(acted_on(&reviewed), Some("FRK-1"), "{reviewed:?}");
+        assert_eq!(acted_on(&reviewed), Some("CTV-1"), "{reviewed:?}");
         assert_eq!(
             sessions(&adapter),
             vec![("dev-b".to_string(), SessionPurpose::Verify)]
@@ -8729,18 +8729,18 @@ mod tests {
         );
         // Kai's task waits on a plan the owner has not decided, so no rule starts a session for
         // it: the ends below happen with no session, whatever the other plans' dates.
-        harness.in_progress("FRK-1", "kai", "pm");
+        harness.in_progress("CTV-1", "kai", "pm");
         let project = &harness.project;
         // The fixture's today is 2026-09-22. MP-1 ended on the 10th; MP-2 runs on through the
         // month; MP-3, approved after it, starts today and takes its place.
-        project.plan_proposed("FRK-1", "MP-1", "2026-09-01", "2026-09-10");
-        project.plan_approved("FRK-1", "MP-1", "");
-        project.plan_proposed("FRK-1", "MP-2", "2026-09-12", "2026-09-30");
-        project.plan_approved("FRK-1", "MP-2", "");
-        project.plan_proposed("FRK-1", "MP-3", "2026-09-22", "2026-10-30");
-        project.plan_approved("FRK-1", "MP-3", "");
-        project.plan_proposed("FRK-1", "MP-4", "2026-09-22", "2026-10-30");
-        assert!(harness.row("FRK-1").waiting_on_human);
+        project.plan_proposed("CTV-1", "MP-1", "2026-09-01", "2026-09-10");
+        project.plan_approved("CTV-1", "MP-1", "");
+        project.plan_proposed("CTV-1", "MP-2", "2026-09-12", "2026-09-30");
+        project.plan_approved("CTV-1", "MP-2", "");
+        project.plan_proposed("CTV-1", "MP-3", "2026-09-22", "2026-10-30");
+        project.plan_approved("CTV-1", "MP-3", "");
+        project.plan_proposed("CTV-1", "MP-4", "2026-09-22", "2026-10-30");
+        assert!(harness.row("CTV-1").waiting_on_human);
         let adapter = harness.recorded(Vec::new());
         let clock = Arc::new(MovableClock::new(at()));
         let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
@@ -8809,12 +8809,12 @@ mod tests {
             "rules-plan-waits",
             crate::tools::fixtures::with_the_marketing_specialist,
         );
-        harness.in_progress("FRK-1", "kai", "pm");
+        harness.in_progress("CTV-1", "kai", "pm");
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
         harness
             .project
-            .plan_proposed("FRK-1", "MP-1", "2026-09-22", "2026-10-20");
+            .plan_proposed("CTV-1", "MP-1", "2026-09-22", "2026-10-20");
 
         let report = orchestrator.tick().await.expect("the tick runs");
 

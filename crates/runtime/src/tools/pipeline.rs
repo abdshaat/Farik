@@ -505,7 +505,7 @@ mod tests {
     };
 
     /// A project with the Finance Specialist `fin` and the Procurement Specialist `proc`, whose
-    /// task FRK-1 is in progress, a finance task FRK-2 and a Developer's task FRK-3.
+    /// task CTV-1 is in progress, a finance task CTV-2 and a Developer's task CTV-3.
     fn a_project(name: &str) -> TestProject {
         let project = TestProject::new(
             name,
@@ -522,8 +522,8 @@ mod tests {
             }),
         );
         for (task, role, assignee) in [
-            ("FRK-1", "procurement_specialist", "proc"),
-            ("FRK-2", "finance_specialist", "fin"),
+            ("CTV-1", "procurement_specialist", "proc"),
+            ("CTV-2", "finance_specialist", "fin"),
         ] {
             project.filed_with(task, "assigned", "task", None, |wire| {
                 wire["assignee_role"] = json!(role);
@@ -536,9 +536,9 @@ mod tests {
                 &json!({ "assignee": assignee, "reviewer": "pm" }),
             );
         }
-        project.filed("FRK-3", "assigned", "task", None);
+        project.filed("CTV-3", "assigned", "task", None);
         project.moved(
-            "FRK-3",
+            "CTV-3",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -578,11 +578,11 @@ mod tests {
         input
     }
 
-    /// `catervas_request_data_pipeline` as `proc` in its implement session of FRK-1.
+    /// `catervas_request_data_pipeline` as `proc` in its implement session of CTV-1.
     fn ask(project: &TestProject, input: &Value) -> Result<Value, ToolError> {
         project.call(
             "proc",
-            Some("FRK-1"),
+            Some("CTV-1"),
             "catervas_request_data_pipeline",
             input.clone(),
         )
@@ -737,7 +737,7 @@ mod tests {
         let project = a_project("pipeline-approve");
         let pipeline = number_of(ask(&project, &azure()));
         // Its task is accepted meanwhile: an approval files a request, which needs no open task.
-        project.moved("FRK-1", "in_progress", "accepted", &json!({}));
+        project.moved("CTV-1", "in_progress", "accepted", &json!({}));
         let context = deciding(&project, "pm", "s-pm", Some(pipeline));
 
         let answer = decide(&context, pipeline, "approve", REASON).expect("an approval");
@@ -974,7 +974,7 @@ mod tests {
         unstarted.session_id = "s-unstarted".to_string();
         unstarted.purpose = SessionPurpose::Verify;
         // The agent that asked, in its own session.
-        let mut asker = project.context("proc", Some("FRK-1"));
+        let mut asker = project.context("proc", Some("CTV-1"));
         asker.session_id = "s-asker".to_string();
         for (context, what) in [
             (&verifying, "a verify session of a task"),
@@ -1028,7 +1028,7 @@ mod tests {
         project.record(
             "",
             "data_pipeline.approved",
-            &json!({ "pipeline": third, "by": "human", "reason": "", "request": "FRK-9" }),
+            &json!({ "pipeline": third, "by": "human", "reason": "", "request": "CTV-9" }),
         );
         assert!(
             refusal_of(decide(&session, third, "decline", REASON))
@@ -1097,7 +1097,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(answer["pipeline"], events[0].envelope.seq);
         let ids = &events[0].envelope.ids;
-        assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("FRK-1"));
+        assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("CTV-1"));
         assert_eq!(ids.agent_id.as_deref(), Some("proc"));
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
         let EventBody::DataPipelineRequested(body) = &events[0].body else {
@@ -1190,7 +1190,7 @@ mod tests {
         let name = "catervas_request_data_pipeline";
 
         // Another role, the role's chat, a session about no task, and a task another agent holds.
-        let finance = project.call("fin", Some("FRK-2"), name, firecrawl());
+        let finance = project.call("fin", Some("CTV-2"), name, firecrawl());
         assert!(
             refusal_of(finance).starts_with("pipeline_refused: "),
             "a Finance Specialist"
@@ -1207,14 +1207,14 @@ mod tests {
             "no task"
         );
         assert!(
-            refusal_of(project.call("proc", Some("FRK-3"), name, firecrawl()))
+            refusal_of(project.call("proc", Some("CTV-3"), name, firecrawl()))
                 .starts_with("pipeline_refused: "),
             "another agent's task"
         );
         // The session is judged before any field.
         let bad = with(firecrawl(), "name", json!(""));
         assert!(
-            refusal_of(project.call("fin", Some("FRK-2"), name, bad))
+            refusal_of(project.call("fin", Some("CTV-2"), name, bad))
                 .starts_with("pipeline_refused: ")
         );
 
@@ -1390,7 +1390,7 @@ mod tests {
         project.record(
             "",
             "data_pipeline.approved",
-            &json!({ "pipeline": second, "by": "human", "reason": "", "request": "FRK-9" }),
+            &json!({ "pipeline": second, "by": "human", "reason": "", "request": "CTV-9" }),
         );
         ask(&project, &named("Open Meteo")).expect("room after an approval");
         // An approved source is not asked for again, whatever its case: the founder's decision of
@@ -1439,7 +1439,7 @@ mod tests {
         project.record(
             "",
             "data_pipeline.approved",
-            &json!({ "pipeline": c, "by": "human", "reason": "Go, but only prices.", "request": "FRK-9" }),
+            &json!({ "pipeline": c, "by": "human", "reason": "Go, but only prices.", "request": "CTV-9" }),
         );
         // D: asked after C was decided, and declined by the Product Manager.
         let d = number(ask(
@@ -1462,7 +1462,7 @@ mod tests {
         let read = project
             .call(
                 "proc",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "catervas_read_data_pipelines",
                 json!({}),
             )
@@ -1507,7 +1507,7 @@ mod tests {
         );
         assert_eq!(rows[2]["decision"]["by"], "human");
         assert_eq!(rows[2]["decision"]["note"], "Go, but only prices.");
-        assert_eq!(rows[2]["request"], "FRK-9");
+        assert_eq!(rows[2]["request"], "CTV-9");
         assert!(!rows[2].to_string().contains("<untrusted"), "{}", rows[2]);
 
         assert_eq!(rows[3]["decision"]["by"], "product_manager");
@@ -1525,7 +1525,7 @@ mod tests {
         let in_chat =
             run(&chat, "catervas_read_data_pipelines", json!({})).expect("the chat reads");
         assert_eq!(in_chat, read);
-        let mut verifying = project.context("proc", Some("FRK-1"));
+        let mut verifying = project.context("proc", Some("CTV-1"));
         verifying.purpose = SessionPurpose::Verify;
         assert!(
             refusal_of(run(&verifying, "catervas_read_data_pipelines", json!({})))
@@ -1534,7 +1534,7 @@ mod tests {
         assert!(
             refusal_of(project.call(
                 "fin",
-                Some("FRK-2"),
+                Some("CTV-2"),
                 "catervas_read_data_pipelines",
                 json!({})
             ))
@@ -1543,7 +1543,7 @@ mod tests {
         assert!(
             refusal_of(project.call(
                 "dev-a",
-                Some("FRK-3"),
+                Some("CTV-3"),
                 "catervas_read_data_pipelines",
                 json!({})
             ))

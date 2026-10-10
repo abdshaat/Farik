@@ -1038,12 +1038,12 @@ mod tests {
             .with_timezone(&Utc)
     }
 
-    /// An order `number` that `proc` drafted on FRK-1 at `when`.
+    /// An order `number` that `proc` drafted on CTV-1 at `when`.
     fn drafted(harness: &Harness, number: u64, when: DateTime<Utc>) {
         harness.project.record_by(
             Some("proc"),
             when,
-            "FRK-1",
+            "CTV-1",
             "purchase_order.drafted",
             &json!({
                 "order": number, "seller": format!("Seller {number}"), "seller_contact": "",
@@ -1081,7 +1081,7 @@ mod tests {
         ] {
             harness
                 .project
-                .record_at(start + Duration::days(5), "FRK-1", kind, &body);
+                .record_at(start + Duration::days(5), "CTV-1", kind, &body);
         }
         let clock = Arc::new(MovableClock::new(start));
         let orchestrator =
@@ -1100,7 +1100,7 @@ mod tests {
         let ids = &events[0].envelope.ids;
         assert_eq!(
             ids.task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-1")
+            Some("CTV-1")
         );
         assert_eq!(
             (&ids.agent_id, &ids.session_id),
@@ -1547,7 +1547,7 @@ mod tests {
         let orchestrator = harness.orchestrator_on(harness.recorded(Vec::new()), clock);
 
         let scope = crate::orchestrator::TickScope {
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             ..crate::orchestrator::TickScope::default()
         };
         orchestrator

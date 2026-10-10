@@ -39,7 +39,7 @@ const LINES = [
 
 /** The row `waiting.list` gives while Ivo's order PO-12 waits for the owner, drafted this morning. */
 export const ORDER_ROW = {
-	task_id: "FRK-31",
+	task_id: "CTV-31",
 	kind: "purchase_order",
 	agent_id: "ivo",
 	title: "Find a supplier for 500 pie boxes",
@@ -123,7 +123,7 @@ const base = {
 	total: "1450.00",
 	currency: "USD",
 	period: "once",
-	task_id: "FRK-31",
+	task_id: "CTV-31",
 	agent_id: "ivo",
 	drafted_at: at(26, 8),
 	overdue: false,

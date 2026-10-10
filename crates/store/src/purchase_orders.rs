@@ -367,11 +367,11 @@ mod tests {
         })
     }
 
-    /// Ivo drafts order `order` on FRK-1, in his session, at 10:`minute`.
+    /// Ivo drafts order `order` on CTV-1, in his session, at 10:`minute`.
     fn draft(board: &Board, minute: u32, order: u64, seller: &str) {
         board.session(
             at(10, minute),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-1",
             "purchase_order.drafted",
@@ -381,7 +381,7 @@ mod tests {
 
     /// The owner's step: an event with the order's task and no agent and no session.
     fn owner(board: &Board, minute: u32, kind: &str, body: Value) {
-        board.put(at(10, minute), Some("FRK-1"), None, kind, body);
+        board.put(at(10, minute), Some("CTV-1"), None, kind, body);
     }
 
     fn only(board: &Board) -> super::PurchaseOrderRecord {
@@ -397,7 +397,7 @@ mod tests {
         let drafted = only(&board);
         assert_eq!(drafted.state, OrderState::Drafted);
         assert_eq!(drafted.order, 1);
-        assert_eq!(drafted.task_id.as_str(), "FRK-1");
+        assert_eq!(drafted.task_id.as_str(), "CTV-1");
         assert_eq!(drafted.agent_id, "ivo");
         assert_eq!(drafted.drafted_at, at(10, 0));
         assert_eq!(drafted.drafted.seller.as_str(), "Acme");
@@ -422,7 +422,7 @@ mod tests {
         );
         board.session(
             at(10, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-2",
             "purchase_order.updated",
@@ -466,7 +466,7 @@ mod tests {
         // The agent cannot approve its own order, whatever the envelope's other fields say.
         board.session(
             at(10, 1),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-1",
             "purchase_order.approved",
@@ -474,14 +474,14 @@ mod tests {
         );
         board.put(
             at(10, 2),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("ivo"),
             "purchase_order.approved",
             json!({ "order": 1, "note": "" }),
         );
         board.put_with(
             at(10, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             Some("session-1"),
             "purchase_order.approved",
@@ -499,7 +499,7 @@ mod tests {
         let by_agent = |minute, kind: &str, body: Value| {
             board.session(
                 at(10, minute),
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "ivo",
                 "session-1",
                 kind,
@@ -703,7 +703,7 @@ mod tests {
             } else {
                 board.session(
                     at(10, minute),
-                    Some("FRK-1"),
+                    Some("CTV-1"),
                     who,
                     "session-9",
                     "purchase_order.updated",
@@ -789,7 +789,7 @@ mod tests {
         // Another agent's, with no session: not the owner's correction, and not its agent's.
         board.put(
             at(10, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("kai"),
             "purchase_order.updated",
             problem.clone(),
@@ -797,7 +797,7 @@ mod tests {
         // A session with no agent: nothing the owner's command records.
         board.put_with(
             at(10, 4),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             Some("session-9"),
             "purchase_order.updated",
@@ -808,7 +808,7 @@ mod tests {
         // The order's own agent with no session is the agent's, never the owner's.
         board.put(
             at(10, 5),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("ivo"),
             "purchase_order.updated",
             json!({ "order": 1, "status": "shipped", "note": "" }),
@@ -940,7 +940,7 @@ mod tests {
         // A status that gives a day replaces it.
         board.session(
             at(10, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-2",
             "purchase_order.updated",
@@ -952,7 +952,7 @@ mod tests {
         // A status with no day leaves the 30 days.
         board.session(
             at(10, 4),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "ivo",
             "session-2",
             "purchase_order.updated",

@@ -271,7 +271,7 @@ describe("team page", () => {
 					agent_id: "iris",
 					state: "idle",
 					line: "Waiting for Mira to approve a plan",
-					task_id: "FRK-21",
+					task_id: "CTV-21",
 				},
 			],
 		});
@@ -322,7 +322,7 @@ describe("team page", () => {
 					agent_id: "kai",
 					state: "idle",
 					line: "Waiting on you: Kai set up an order from Acme\u202e Co: 59.98 USD",
-					task_id: "FRK-21",
+					task_id: "CTV-21",
 				},
 			],
 		});

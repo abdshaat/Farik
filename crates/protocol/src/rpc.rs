@@ -110,7 +110,7 @@ mod tests {
             request(
                 5,
                 "query",
-                &json!({ "name": "task.get", "params": { "task_id": "FRK-12" } }),
+                &json!({ "name": "task.get", "params": { "task_id": "CTV-12" } }),
             ),
             request(6, "query", &json!({ "name": "serve.status", "params": {} })),
         ];

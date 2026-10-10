@@ -775,9 +775,9 @@ mod tests {
 
     use crate::orchestrator::fixtures::{Harness, run_until_idle_within_ten_seconds};
     use crate::recorded::fixtures::{
-        accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, plan_assigns_frk_2,
-        plan_breaks_down_frk_1, plan_closes_epic_frk_1, refine_asks_frk_1,
-        refine_writes_epic_frk_1, refine_writes_task_frk_1, review_writes_note, triage_frk_1_large,
+        accept_ctv_1, implement_finishes_ctv_1, plan_assigns_ctv_1, plan_assigns_ctv_2,
+        plan_breaks_down_ctv_1, plan_closes_epic_ctv_1, refine_asks_ctv_1,
+        refine_writes_epic_ctv_1, refine_writes_task_ctv_1, review_writes_note, triage_ctv_1_large,
     };
     use crate::tools::fixtures::at;
 
@@ -850,14 +850,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_a_sleeping_agent_then_goes_on() {
         let harness = Harness::new("orch-wait", |_| {});
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let until = at() + chrono::Duration::hours(1);
         harness.asleep("dev-a", until);
         let adapter = harness.recorded(vec![
-            plan_assigns_frk_1(),
-            implement_finishes_frk_1(),
+            plan_assigns_ctv_1(),
+            implement_finishes_ctv_1(),
             review_writes_note(),
-            accept_frk_1(),
+            accept_ctv_1(),
         ]);
         let orchestrator = std::sync::Arc::new(harness.orchestrator_at(adapter.clone(), at()));
 
@@ -874,7 +874,7 @@ mod tests {
                 (SessionStartedBodyPurpose::Verify, "pm".to_string()),
             ]
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
     }
 
     /// Waits until `until` on `orchestrator`, failing the test rather than hanging when the wait
@@ -918,7 +918,7 @@ mod tests {
                 tokio::task::yield_now().await;
                 orchestrator
                     .handle(Command::RequestTriage {
-                        task_id: "FRK-1".parse().expect("a task id"),
+                        task_id: "CTV-1".parse().expect("a task id"),
                         size: RequestSize::Small,
                         reason: "Sized by the human.".to_string(),
                     })
@@ -964,12 +964,12 @@ mod tests {
         let harness = Harness::new("orch-one-task", |wire| {
             wire["policy"]["integration"] = serde_json::json!("auto_merge");
         });
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let adapter = harness.recorded(vec![
-            plan_assigns_frk_1(),
-            implement_finishes_frk_1(),
+            plan_assigns_ctv_1(),
+            implement_finishes_ctv_1(),
             review_writes_note(),
-            accept_frk_1(),
+            accept_ctv_1(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let base = git_output_in(&harness.project.repo.path, &["rev-parse", "main"]);
@@ -979,9 +979,9 @@ mod tests {
             .await
             .expect("the run ends idle");
 
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
         let git = &harness.project.deps.git;
-        let branch = harness.branch("FRK-1");
+        let branch = harness.branch("CTV-1");
         assert_eq!(git.commit_count(&base, &branch).expect("git counts"), 1);
         assert_eq!(
             git.changed_paths(&base, &branch).expect("git lists"),
@@ -1037,7 +1037,7 @@ mod tests {
         for cost in &costs {
             assert_eq!(
                 cost.envelope.ids.task_id.as_ref().map(|task| task.as_str()),
-                Some("FRK-1")
+                Some("CTV-1")
             );
         }
         assert_eq!(adapter.started().len(), 4);
@@ -1051,17 +1051,17 @@ mod tests {
             ),
             "{integrated:?}"
         );
-        assert!(!harness.worktree("FRK-1").exists());
+        assert!(!harness.worktree("CTV-1").exists());
         assert_eq!(
             git_output_in(&harness.project.repo.path, &["branch", "--list", &branch]).trim(),
             branch
         );
     }
 
-    /// The Product Manager's triage of FRK-1 as `small`, a task: `triage_frk_1_large` with its
+    /// The Product Manager's triage of CTV-1 as `small`, a task: `triage_ctv_1_large` with its
     /// size changed, since the size is the only thing a replayed triage decides.
-    fn triage_frk_1_small() -> crate::recorded::Transcript {
-        let large = triage_frk_1_large().lines().collect::<Vec<_>>().join("\n");
+    fn triage_ctv_1_small() -> crate::recorded::Transcript {
+        let large = triage_ctv_1_large().lines().collect::<Vec<_>>().join("\n");
         assert!(
             large.contains(r#""size":"large""#),
             "the triage names a size"
@@ -1077,12 +1077,12 @@ mod tests {
         let harness = Harness::new("orch-one-request-task", |_| {});
         harness.a_request("Add done.txt and its check");
         let adapter = harness.recorded(vec![
-            triage_frk_1_small(),
-            refine_writes_task_frk_1(),
-            plan_assigns_frk_1(),
-            implement_finishes_frk_1(),
+            triage_ctv_1_small(),
+            refine_writes_task_ctv_1(),
+            plan_assigns_ctv_1(),
+            implement_finishes_ctv_1(),
             review_writes_note(),
-            accept_frk_1(),
+            accept_ctv_1(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -1102,7 +1102,7 @@ mod tests {
                 (SessionStartedBodyPurpose::Verify, "pm".to_string()),
             ]
         );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Accepted);
         assert!(
             harness.events(&[EventKind::BudgetExhausted]).is_empty(),
             "no budget ran out"
@@ -1112,7 +1112,7 @@ mod tests {
             .project
             .deps
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract reads");
         assert_eq!(
             contract.budget.max_sessions.get(),
@@ -1135,7 +1135,7 @@ mod tests {
                     .map(|task| task.as_str().to_string())
                     .unwrap_or_default();
                 Some(match &event.body {
-                    EventBody::RequestTriaged(_) if task == "FRK-1" => {
+                    EventBody::RequestTriaged(_) if task == "CTV-1" => {
                         "request.triaged".to_string()
                     }
                     EventBody::QuestionAsked(_) => "question.asked".to_string(),
@@ -1146,15 +1146,15 @@ mod tests {
                         "escalation.raised approval".to_string()
                     }
                     EventBody::HumanAccepted(body) => format!("human.accepted {}", body.subject),
-                    EventBody::TaskTransitioned(body) if task == "FRK-1" => {
-                        format!("FRK-1 {} -> {}", body.from, body.to)
+                    EventBody::TaskTransitioned(body) if task == "CTV-1" => {
+                        format!("CTV-1 {} -> {}", body.from, body.to)
                     }
-                    EventBody::TaskCreated(_) if task == "FRK-2" => "FRK-2 created".to_string(),
+                    EventBody::TaskCreated(_) if task == "CTV-2" => "CTV-2 created".to_string(),
                     EventBody::TaskIntegrated(_) => format!("{task} integrated"),
                     EventBody::CriterionRecorded(body)
-                        if task == "FRK-1" && body.recorded_by == "governor" =>
+                        if task == "CTV-1" && body.recorded_by == "governor" =>
                     {
-                        format!("FRK-1 {} run by the governor", body.criterion_id)
+                        format!("CTV-1 {} run by the governor", body.criterion_id)
                     }
                     _ => return None,
                 })
@@ -1230,31 +1230,31 @@ mod tests {
         });
         harness.a_request("Add done.txt and its check");
         let adapter = harness.recorded(vec![
-            triage_frk_1_large(),
-            refine_asks_frk_1(),
-            refine_writes_epic_frk_1(),
-            plan_breaks_down_frk_1(),
-            plan_assigns_frk_2(),
-            implement_finishes_frk_1(),
+            triage_ctv_1_large(),
+            refine_asks_ctv_1(),
+            refine_writes_epic_ctv_1(),
+            plan_breaks_down_ctv_1(),
+            plan_assigns_ctv_2(),
+            implement_finishes_ctv_1(),
             review_writes_note(),
-            accept_frk_1(),
-            plan_closes_epic_frk_1(),
-            accept_frk_1(),
+            accept_ctv_1(),
+            plan_closes_epic_ctv_1(),
+            accept_ctv_1(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        let epic: TaskId = "FRK-1".parse().expect("a task id");
+        let epic: TaskId = "CTV-1".parse().expect("a task id");
 
         drive_one_request(&harness, &orchestrator, &epic).await;
 
-        let frk_1 = harness.row("FRK-1");
+        let ctv_1 = harness.row("CTV-1");
         assert_eq!(
-            (frk_1.kind, frk_1.status),
+            (ctv_1.kind, ctv_1.status),
             (TaskKind::Epic, TaskStatus::Accepted)
         );
-        let frk_2 = harness.row("FRK-2");
-        assert_eq!(frk_2.parent, Some(epic.clone()));
-        assert_eq!(frk_2.status, TaskStatus::Accepted);
-        assert!(!frk_2.awaiting_integration);
+        let ctv_2 = harness.row("CTV-2");
+        assert_eq!(ctv_2.parent, Some(epic.clone()));
+        assert_eq!(ctv_2.status, TaskStatus::Accepted);
+        assert!(!ctv_2.awaiting_integration);
         assert!(
             git_output_in(
                 &harness.project.repo.path,
@@ -1266,16 +1266,16 @@ mod tests {
         );
         let started = sessions_with_tasks(&harness);
         let expected: Vec<(SessionStartedBodyPurpose, String, String)> = [
-            (SessionStartedBodyPurpose::Triage, "pm", "FRK-1"),
-            (SessionStartedBodyPurpose::Refine, "pm", "FRK-1"),
-            (SessionStartedBodyPurpose::Refine, "pm", "FRK-1"),
-            (SessionStartedBodyPurpose::Plan, "pm", "FRK-1"),
-            (SessionStartedBodyPurpose::Plan, "pm", "FRK-2"),
-            (SessionStartedBodyPurpose::Implement, "dev-a", "FRK-2"),
-            (SessionStartedBodyPurpose::Verify, "dev-b", "FRK-2"),
-            (SessionStartedBodyPurpose::Verify, "pm", "FRK-2"),
-            (SessionStartedBodyPurpose::Plan, "pm", "FRK-1"),
-            (SessionStartedBodyPurpose::Verify, "pm", "FRK-1"),
+            (SessionStartedBodyPurpose::Triage, "pm", "CTV-1"),
+            (SessionStartedBodyPurpose::Refine, "pm", "CTV-1"),
+            (SessionStartedBodyPurpose::Refine, "pm", "CTV-1"),
+            (SessionStartedBodyPurpose::Plan, "pm", "CTV-1"),
+            (SessionStartedBodyPurpose::Plan, "pm", "CTV-2"),
+            (SessionStartedBodyPurpose::Implement, "dev-a", "CTV-2"),
+            (SessionStartedBodyPurpose::Verify, "dev-b", "CTV-2"),
+            (SessionStartedBodyPurpose::Verify, "pm", "CTV-2"),
+            (SessionStartedBodyPurpose::Plan, "pm", "CTV-1"),
+            (SessionStartedBodyPurpose::Verify, "pm", "CTV-1"),
         ]
         .into_iter()
         .map(|(purpose, agent, task)| (purpose, agent.to_string(), task.to_string()))
@@ -1285,21 +1285,21 @@ mod tests {
             milestones(&harness),
             [
                 "request.triaged",
-                "FRK-1 draft -> refining",
+                "CTV-1 draft -> refining",
                 "question.asked",
                 "question.answered",
-                "FRK-1 refining -> escalated",
+                "CTV-1 refining -> escalated",
                 "escalation.raised approval",
                 "human.accepted contract",
-                "FRK-1 escalated -> ready",
-                "FRK-1 ready -> assigned",
-                "FRK-1 assigned -> in_progress",
-                "FRK-2 created",
-                "FRK-2 integrated",
-                "FRK-1 in_progress -> verifying",
-                "FRK-1 C1 run by the governor",
+                "CTV-1 escalated -> ready",
+                "CTV-1 ready -> assigned",
+                "CTV-1 assigned -> in_progress",
+                "CTV-2 created",
+                "CTV-2 integrated",
+                "CTV-1 in_progress -> verifying",
+                "CTV-1 C1 run by the governor",
                 "human.accepted result",
-                "FRK-1 verifying -> accepted",
+                "CTV-1 verifying -> accepted",
             ]
         );
         assert!(
@@ -1318,13 +1318,13 @@ mod tests {
 
         // A session in a folder that is a link would work where the link points (5.6, 6.6).
         let harness = Harness::with_finance("orch-session-dir-link");
-        harness.finance_task("FRK-1", None);
+        harness.finance_task("CTV-1", None);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         let contract = orchestrator
             .deps
             .tools
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the contract");
         let folder = harness.finance_folder();
         let outside = harness

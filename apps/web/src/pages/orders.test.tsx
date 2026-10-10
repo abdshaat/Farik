@@ -379,7 +379,7 @@ describe("the orders on the Procurement Specialist's page", () => {
 			return frames[1];
 		});
 		expect(s.calls("command")).toHaveLength(2);
-		await s.reply(again as never, { task_id: "FRK-50" });
+		await s.reply(again as never, { task_id: "CTV-50" });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
@@ -520,7 +520,7 @@ describe("the orders on the Procurement Specialist's page", () => {
 		expect((filed as { params: object }).params).toEqual({
 			text: "Update the register for PO-11 from Northfield Mill: it came on 26 October, and I paid 190.00 EUR. It renews on 26 October 2027.",
 		});
-		await s.reply(filed as never, { task_id: "FRK-51" });
+		await s.reply(filed as never, { task_id: "CTV-51" });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 		await waitFor(() => expect(asked(s)).toBe(before + 1));
 	});
@@ -851,7 +851,7 @@ describe("the orders on the Procurement Specialist's page", () => {
 		expect((filed as { params: object }).params).toEqual({
 			text: "Follow up on PO-11 from Northfield Mill: where is it, and when will it come?",
 		});
-		await s.reply(filed as never, { task_id: "FRK-52" });
+		await s.reply(filed as never, { task_id: "CTV-52" });
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 		expect(s.calls("command")).toHaveLength(0);
 	});

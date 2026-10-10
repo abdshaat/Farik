@@ -661,7 +661,7 @@ mod tests {
         let expected = spend_query_of(&[campaign_name(CUSTOMER, 11)]);
 
         // A developer's session is running, and the tick that started it waits for it to end.
-        watching.ads.harness.in_progress("FRK-2", "dev-a", "dev-b");
+        watching.ads.harness.in_progress("CTV-2", "dev-a", "dev-b");
         let tick = {
             let orchestrator = Arc::clone(&watching.orchestrator);
             tokio::spawn(async move { orchestrator.tick().await })

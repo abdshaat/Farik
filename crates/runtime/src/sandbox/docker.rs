@@ -323,10 +323,10 @@ mod tests {
             stdout: Vec::new(),
             stderr: stderr.as_bytes().to_vec(),
         };
-        let missing = "Error response from daemon: No such container: catervas-p-frk-1\n";
+        let missing = "Error response from daemon: No such container: catervas-p-ctv-1\n";
         assert_eq!(removed(&answer(missing)), Ok(()));
         // A `--rm` container whose process just ended is being removed by Docker itself.
-        let going = "Error response from daemon: removal of container catervas-browser-p-frk-1 is \
+        let going = "Error response from daemon: removal of container catervas-browser-p-ctv-1 is \
                      already in progress\n";
         assert_eq!(removed(&answer(going)), Ok(()));
         let refused = "Error response from daemon: could not kill: permission denied\n";
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn refuses_a_worktree_the_mount_cannot_name() {
-        let task = TaskId::try_from("FRK-1").expect("an id");
+        let task = TaskId::try_from("CTV-1").expect("an id");
         for worktree in ["/tmp/a,b", "relative/worktree"] {
             let refused = DockerSandbox::create(
                 "p",
@@ -381,35 +381,35 @@ mod tests {
 
     #[test]
     fn tells_docker_saying_the_container_is_gone_from_a_command_saying_it() {
-        let missing = "Error response from daemon: No such container: catervas-p-frk-1";
+        let missing = "Error response from daemon: No such container: catervas-p-ctv-1";
         let stopped = "Error response from daemon: container 0123abcd is not running";
         assert!(is_container_gone(&with_stderr(missing)));
         assert!(is_container_gone(&with_stderr(&format!(
             "noise\n{stopped}\n"
         ))));
-        let own = "No such container: frk-1\nthe server is not running\n";
+        let own = "No such container: ctv-1\nthe server is not running\n";
         assert!(!is_container_gone(&with_stderr(own)));
         assert!(!is_container_gone(&with_stderr("")));
     }
 
     #[test]
     fn names_the_base_container_apart_from_the_task_s_own() {
-        let task = TaskId::try_from("FRK-12").expect("an id");
+        let task = TaskId::try_from("CTV-12").expect("an id");
         assert_eq!(
             base_container_name("My Project/1", &task),
-            "catervas-my-project-1-frk-12-base"
+            "catervas-my-project-1-ctv-12-base"
         );
         assert_ne!(base_container_name("p", &task), container_name("p", &task));
     }
 
     #[test]
     fn names_a_container_by_docker_rule_and_rounds_the_timeout_up() {
-        let task = TaskId::try_from("FRK-12").expect("an id");
+        let task = TaskId::try_from("CTV-12").expect("an id");
         assert_eq!(
             container_name("My Project/1", &task),
-            "catervas-my-project-1-frk-12"
+            "catervas-my-project-1-ctv-12"
         );
-        assert_eq!(container_name("a_b.c-d", &task), "catervas-a_b.c-d-frk-12");
+        assert_eq!(container_name("a_b.c-d", &task), "catervas-a_b.c-d-ctv-12");
         assert_eq!(whole_seconds(Duration::from_millis(200)), 1);
         assert_eq!(whole_seconds(Duration::ZERO), 1);
         assert_eq!(whole_seconds(Duration::from_millis(2001)), 3);

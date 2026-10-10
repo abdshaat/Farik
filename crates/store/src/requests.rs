@@ -296,7 +296,7 @@ fn file(
     // id is not the author's and a rule about it is not one the author can break, so the contract
     // is checked under a stand-in and given its real id once it passes.
     let stamp = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    object.insert("id".to_string(), json!("FRK-0"));
+    object.insert("id".to_string(), json!("CTV-0"));
     object.insert("status".to_string(), json!("draft"));
     object.insert("created_by".to_string(), json!(created_by));
     object.insert("created_at".to_string(), json!(stamp));
@@ -328,11 +328,11 @@ fn file(
 
     // Past every contract the repository already holds as well as the counter: the log is
     // machine-local and the contracts are committed (8.4), so on a fresh clone the counter alone
-    // would hand out FRK-1 again. `list_contracts` is in number order, so the last is the highest.
+    // would hand out CTV-1 again. `list_contracts` is in number order, so the last is the highest.
     let taken = files
         .list_contracts()?
         .last()
-        .and_then(|id| id.as_str().trim_start_matches("FRK-").parse::<u64>().ok())
+        .and_then(|id| id.as_str().trim_start_matches("CTV-").parse::<u64>().ok())
         .unwrap_or(0);
     contract.id = log.next_task_id_above(taken)?;
 
@@ -871,7 +871,7 @@ mod tests {
         let mut request =
             request_from_brief("Add done.txt", &brief, budget).expect("a request is built");
         assert!(texts(&request).iter().all(|text| text == PLACEHOLDER));
-        request["id"] = json!("FRK-1");
+        request["id"] = json!("CTV-1");
         request["status"] = json!("draft");
         validate_contract(&request).expect("the store would file it");
 
@@ -896,7 +896,7 @@ mod tests {
         let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
             .expect("the request is filed");
 
-        assert_eq!(request.id.as_str(), "FRK-1");
+        assert_eq!(request.id.as_str(), "CTV-1");
         assert_eq!(request.status, TaskStatus::Draft);
         assert_eq!(
             files.read_contract(&request.id).expect("it is on disk"),
@@ -909,7 +909,7 @@ mod tests {
     fn files_a_child_as_a_triaged_task_of_its_epic() {
         let (project, log) = a_project("requests-child");
         let files = project.files();
-        let epic = TaskId::try_from("FRK-1").expect("an id");
+        let epic = TaskId::try_from("CTV-1").expect("an id");
         let request = file_request(
             &files,
             &log,
@@ -923,7 +923,7 @@ mod tests {
         .expect("the child is filed");
 
         assert_eq!(request.kind, TaskKind::Task);
-        assert_eq!(request.parent.as_ref().map(|p| p.as_str()), Some("FRK-1"));
+        assert_eq!(request.parent.as_ref().map(|p| p.as_str()), Some("CTV-1"));
         assert_eq!(request.status, TaskStatus::Draft);
         let events = log.read(&EventQuery::default()).expect("the log reads");
         assert_eq!(
@@ -953,7 +953,7 @@ mod tests {
         let (project, log) = a_project("requests-id");
         let files = project.files();
         let mut wire = a_request();
-        wire["id"] = serde_json::json!("FRK-9");
+        wire["id"] = serde_json::json!("CTV-9");
         let refused = file_request(&files, &log, wire, "human", None, at(), &ids(), None)
             .expect_err("an id is Catervas's to give");
 
@@ -968,7 +968,7 @@ mod tests {
         );
     }
 
-    /// A project with one request the human filed, FRK-1, and the board over its log.
+    /// A project with one request the human filed, CTV-1, and the board over its log.
     fn a_filed_request(name: &str) -> (TempProject, Arc<EventLog>, Projections, TaskId) {
         let (project, log) = a_project(name);
         let request = file_request(
@@ -986,10 +986,10 @@ mod tests {
         (project, log, projections, request.id)
     }
 
-    /// Records FRK-1's move from `draft` to `to`, as the governor would.
+    /// Records CTV-1's move from `draft` to `to`, as the governor would.
     fn moved(log: &EventLog, projections: &Projections, to: &str) {
         let mut wire = an_event_wire(EventKind::TaskTransitioned);
-        wire["task_id"] = serde_json::json!("FRK-1");
+        wire["task_id"] = serde_json::json!("CTV-1");
         wire["body"]["from"] = serde_json::json!("draft");
         wire["body"]["to"] = serde_json::json!(to);
         let event = event_from_value(&wire).expect("the fixture is schema-valid");
@@ -1038,7 +1038,7 @@ mod tests {
         let row = projections
             .task(&id)
             .expect("the board reads")
-            .expect("FRK-1 is on it");
+            .expect("CTV-1 is on it");
         assert_eq!(row.kind, TaskKind::Epic);
         assert!(row.triaged);
     }
@@ -1071,7 +1071,7 @@ mod tests {
         );
         assert_eq!(kinds(&log).len(), before, "nothing is appended");
 
-        let unknown = TaskId::try_from("FRK-9").expect("an id");
+        let unknown = TaskId::try_from("CTV-9").expect("an id");
         let blank = triage_by_human(
             &files,
             &log,
@@ -1084,7 +1084,7 @@ mod tests {
         )
         .expect_err("a blank reason is no reason");
         let RequestError::Refused { reason } = blank else {
-            panic!("refused before FRK-9 is looked for: {blank:?}");
+            panic!("refused before CTV-9 is looked for: {blank:?}");
         };
         assert!(reason.contains("recorded with a reason"), "{reason}");
     }

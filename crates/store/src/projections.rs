@@ -460,10 +460,10 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                  left_for_the_backlog, skips_sprints \
                                  FROM task_projections";
 
-/// The board is ordered by the number in the task id, not by the id itself: `FRK-10` sorts before
-/// `FRK-9` as text, and a board that puts the tenth task before the ninth is a board nobody trusts.
+/// The board is ordered by the number in the task id, not by the id itself: `CTV-10` sorts before
+/// `CTV-9` as text, and a board that puts the tenth task before the ninth is a board nobody trusts.
 ///
-/// The id itself breaks a tie. The schema's pattern allows a leading zero, so `FRK-007` and `FRK-7`
+/// The id itself breaks a tie. The schema's pattern allows a leading zero, so `CTV-007` and `CTV-7`
 /// are two spellings of one number; this store never writes one, but a log written by another tool
 /// could, and two rows whose order is whatever SQLite happens to return is not an order.
 const BY_NUMBER: &str = "CAST(substr(task_id, ?1) AS INTEGER), task_id";
@@ -1199,12 +1199,12 @@ mod tests {
     #[test]
     fn shows_a_request_on_the_board_as_soon_as_it_is_filed() {
         let (log, projections) = a_board();
-        let filed = record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        let filed = record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         let board = projections.board().expect("the board reads");
         assert_eq!(
             board,
             vec![TaskProjection {
-                task_id: "FRK-1".parse().expect("a task id"),
+                task_id: "CTV-1".parse().expect("a task id"),
                 kind: TaskKind::Task,
                 parent: None,
                 title: "Add a login page".to_string(),
@@ -1234,27 +1234,27 @@ mod tests {
     #[test]
     fn takes_every_field_of_the_latest_contract_written() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-2"));
         let rewritten = record(
             &log,
             &projections,
             &written(
-                "FRK-2",
+                "CTV-2",
                 "Add a logout page",
                 "refining",
                 "high",
-                Some("FRK-1"),
+                Some("CTV-1"),
             ),
         );
         assert_eq!(
             projections
-                .task(&"FRK-2".parse().expect("a task id"))
+                .task(&"CTV-2".parse().expect("a task id"))
                 .expect("the read works")
                 .expect("on the board"),
             TaskProjection {
-                task_id: "FRK-2".parse().expect("a task id"),
+                task_id: "CTV-2".parse().expect("a task id"),
                 kind: TaskKind::Task,
-                parent: Some("FRK-1".parse().expect("a task id")),
+                parent: Some("CTV-1".parse().expect("a task id")),
                 title: "Add a logout page".to_string(),
                 status: TaskStatus::Refining,
                 risk: Risk::High,
@@ -1281,15 +1281,15 @@ mod tests {
     #[test]
     fn moves_a_task_on_the_board_when_it_transitions() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         // The fixture is `ready -> assigned` to dev-a, reviewed by dev-b, at iteration 0.
         let moved = record(
             &log,
             &projections,
-            &about(EventKind::TaskTransitioned, "FRK-1"),
+            &about(EventKind::TaskTransitioned, "CTV-1"),
         );
         let row = projections
-            .task(&"FRK-1".parse().expect("a task id"))
+            .task(&"CTV-1".parse().expect("a task id"))
             .expect("the read works")
             .expect("on the board");
         assert_eq!(row.status, TaskStatus::Assigned);
@@ -1302,12 +1302,12 @@ mod tests {
     #[test]
     fn leaves_the_board_alone_on_a_refusal() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         let before = projections.board().expect("the board reads");
         let refused = record(
             &log,
             &projections,
-            &about(EventKind::TransitionRefused, "FRK-1"),
+            &about(EventKind::TransitionRefused, "CTV-1"),
         );
         assert_eq!(projections.board().expect("the board reads"), before);
         assert_eq!(
@@ -1335,25 +1335,25 @@ mod tests {
 
     #[test]
     fn orders_the_board_by_the_number_in_the_id_rather_than_by_its_text() {
-        // `FRK-10` sorts before `FRK-9` as text, and a board that puts the tenth task before the
+        // `CTV-10` sorts before `CTV-9` as text, and a board that puts the tenth task before the
         // ninth is a board nobody trusts.
         let (log, projections) = a_board();
-        for id in ["FRK-2", "FRK-10", "FRK-1"] {
+        for id in ["CTV-2", "CTV-10", "CTV-1"] {
             record(&log, &projections, &about(EventKind::TaskCreated, id));
         }
         assert_eq!(
             ids_of(&projections.board().expect("the board reads")),
-            ["FRK-1", "FRK-2", "FRK-10"]
+            ["CTV-1", "CTV-2", "CTV-10"]
         );
     }
 
     #[test]
     fn says_nothing_about_a_contract_it_never_saw_an_event_for() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         assert_eq!(
             projections
-                .task(&"FRK-9".parse().expect("a task id"))
+                .task(&"CTV-9".parse().expect("a task id"))
                 .expect("the read works"),
             None
         );
@@ -1364,17 +1364,17 @@ mod tests {
         // Nothing this crate writes can produce such a row, so this is about the file having been
         // changed by something else, or written by a Catervas this one does not understand.
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         log.connection()
             .execute(
-                "UPDATE task_projections SET status = 'nearly done' WHERE task_id = 'FRK-1'",
+                "UPDATE task_projections SET status = 'nearly done' WHERE task_id = 'CTV-1'",
                 (),
             )
             .expect("a row is changed by hand");
         let refusal = projections.board().expect_err("a status nothing spells");
         assert!(
             matches!(&refusal, StoreError::InvalidEvent { detail }
-                if detail.contains("FRK-1") && detail.contains("nearly done")),
+                if detail.contains("CTV-1") && detail.contains("nearly done")),
             "{refusal:?}"
         );
     }
@@ -1384,14 +1384,14 @@ mod tests {
         // Triage decides whether a request is an epic or a task, and the board is where a user sees
         // that it has happened at all (`docs/SPEC.md` 5.16 item 1).
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         let triaged = record(
             &log,
             &projections,
-            &about(EventKind::RequestTriaged, "FRK-1"),
+            &about(EventKind::RequestTriaged, "CTV-1"),
         );
         let task = projections
-            .task(&"FRK-1".parse().expect("a task id"))
+            .task(&"CTV-1".parse().expect("a task id"))
             .expect("the read works")
             .expect("the contract is on the board");
         assert!(task.triaged);
@@ -1399,11 +1399,11 @@ mod tests {
         assert_eq!(task.updated_seq, triaged.envelope.seq);
 
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
-        let mut large = about(EventKind::RequestTriaged, "FRK-2");
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-2"));
+        let mut large = about(EventKind::RequestTriaged, "CTV-2");
         large.body = event_from_value(&{
             let mut wire = an_event_wire(EventKind::RequestTriaged);
-            wire["task_id"] = json!("FRK-2");
+            wire["task_id"] = json!("CTV-2");
             wire["body"]["size"] = json!("large");
             wire
         })
@@ -1412,7 +1412,7 @@ mod tests {
         record(&log, &projections, &large);
         assert_eq!(
             projections
-                .task(&"FRK-2".parse().expect("a task id"))
+                .task(&"CTV-2".parse().expect("a task id"))
                 .expect("the read works")
                 .expect("on the board")
                 .kind,
@@ -1424,8 +1424,8 @@ mod tests {
     #[test]
     fn says_who_holds_a_contract_the_human_locked_and_gave_back() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
-        let id: TaskId = "FRK-1".parse().expect("a task id");
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        let id: TaskId = "CTV-1".parse().expect("a task id");
         let held = |projections: &Projections| {
             projections
                 .task(&id)
@@ -1436,13 +1436,13 @@ mod tests {
         record(
             &log,
             &projections,
-            &about(EventKind::ContractLocked, "FRK-1"),
+            &about(EventKind::ContractLocked, "CTV-1"),
         );
         assert!(held(&projections), "locked");
         record(
             &log,
             &projections,
-            &about(EventKind::ContractUnlocked, "FRK-1"),
+            &about(EventKind::ContractUnlocked, "CTV-1"),
         );
         assert!(!held(&projections), "given back");
     }
@@ -1456,7 +1456,7 @@ mod tests {
         record(
             &log,
             &projections,
-            &about(EventKind::ContractLocked, "FRK-4"),
+            &about(EventKind::ContractLocked, "CTV-4"),
         );
         assert_eq!(projections.board().expect("the board reads"), Vec::new());
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -1483,14 +1483,14 @@ mod tests {
         // The projections are derived, so a process that appended and stopped before projecting has
         // left work behind rather than damage. Opening is where it is done.
         let log = a_log();
-        for id in ["FRK-1", "FRK-2"] {
+        for id in ["CTV-1", "CTV-2"] {
             log.append(&about(EventKind::TaskCreated, id))
                 .expect("appends");
         }
         let projections = open_projections(Arc::clone(&log)).expect("the projections open");
         assert_eq!(
             ids_of(&projections.board().expect("the board reads")),
-            ["FRK-1", "FRK-2"]
+            ["CTV-1", "CTV-2"]
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 2);
         // And opening again reads nothing twice.
@@ -1503,15 +1503,15 @@ mod tests {
     fn applies_one_event_once_however_often_it_is_handed_over() {
         // A caller that both subscribes and catches up on open hands the same append over twice.
         let (log, projections) = a_board();
-        let filed = record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        let filed = record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         let rewritten = record(
             &log,
             &projections,
-            &written("FRK-1", "Add a logout page", "refining", "low", None),
+            &written("CTV-1", "Add a logout page", "refining", "low", None),
         );
         projections.apply(&filed).expect("the first one again");
         let task = projections
-            .task(&"FRK-1".parse().expect("a task id"))
+            .task(&"CTV-1".parse().expect("a task id"))
             .expect("the read works")
             .expect("on the board");
         assert_eq!(
@@ -1529,24 +1529,24 @@ mod tests {
         // always comes first (5.16 item 1, and the `draft -> refining` gate of 5.2), so a summary
         // that reset the flag would un-triage every contract on the board.
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         record(
             &log,
             &projections,
-            &about(EventKind::RequestTriaged, "FRK-1"),
+            &about(EventKind::RequestTriaged, "CTV-1"),
         );
         record(
             &log,
             &projections,
-            &about(EventKind::ContractLocked, "FRK-1"),
+            &about(EventKind::ContractLocked, "CTV-1"),
         );
         record(
             &log,
             &projections,
-            &written("FRK-1", "Add a logout page", "refining", "low", None),
+            &written("CTV-1", "Add a logout page", "refining", "low", None),
         );
         let task = projections
-            .task(&"FRK-1".parse().expect("a task id"))
+            .task(&"CTV-1".parse().expect("a task id"))
             .expect("the read works")
             .expect("on the board");
         assert!(task.triaged, "the triage still stands");
@@ -1578,14 +1578,14 @@ mod tests {
         refuses(
             "INSERT INTO task_projections
                  (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
-             VALUES ('FRK-1', 'task', NULL, x'00', 'draft', 'low', 0, 0, 1)",
+             VALUES ('CTV-1', 'task', NULL, x'00', 'draft', 'low', 0, 0, 1)",
             "a blob where a title belongs",
             "cannot store BLOB value",
         );
         refuses(
             "INSERT INTO task_projections
                  (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
-             VALUES ('FRK-2', 'task', NULL, 'a title', 'draft', 'low', 2, 0, 1)",
+             VALUES ('CTV-2', 'task', NULL, 'a title', 'draft', 'low', 2, 0, 1)",
             "a flag that is neither 0 nor 1",
             "CHECK",
         );
@@ -1598,7 +1598,7 @@ mod tests {
         // the log for good, with nothing to notice — so the events in between are read from the
         // log, which is the one place they certainly are.
         let (log, projections) = a_board();
-        let events: Vec<CatervasEvent> = ["FRK-1", "FRK-2", "FRK-3"]
+        let events: Vec<CatervasEvent> = ["CTV-1", "CTV-2", "CTV-3"]
             .iter()
             .map(|id| {
                 log.append(&about(EventKind::TaskCreated, id))
@@ -1609,7 +1609,7 @@ mod tests {
         projections.apply(&events[2]).expect("projects the third");
         assert_eq!(
             ids_of(&projections.board().expect("the board reads")),
-            ["FRK-1", "FRK-2", "FRK-3"],
+            ["CTV-1", "CTV-2", "CTV-3"],
             "the second was read from the log rather than stepped over"
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 3);
@@ -1624,7 +1624,7 @@ mod tests {
         // What `docs/SPEC.md` section 10 asks of this step: opening a project whose board is up to
         // date costs nothing, rather than replaying every event to arrive at the board it has.
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         assert_eq!(
             projections.catch_up().expect("catching up reads the log"),
             0,
@@ -1637,11 +1637,11 @@ mod tests {
         // Nothing in the tables is a source of truth, so this is the repair for a row that drifted
         // for any reason at all.
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         log.connection()
             .execute(
                 "UPDATE task_projections SET title = 'something else', status = 'accepted'
-                 WHERE task_id = 'FRK-1'",
+                 WHERE task_id = 'CTV-1'",
                 (),
             )
             .expect("a row is changed by hand");
@@ -1649,13 +1649,13 @@ mod tests {
             .execute(
                 "INSERT INTO task_projections
                      (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
-                 VALUES ('FRK-7', 'task', NULL, 'never happened', 'draft', 'low', 0, 0, 1)",
+                 VALUES ('CTV-7', 'task', NULL, 'never happened', 'draft', 'low', 0, 0, 1)",
                 (),
             )
             .expect("and a row is invented");
         projections.rebuild().expect("the board is built again");
         let board = projections.board().expect("the board reads");
-        assert_eq!(ids_of(&board), ["FRK-1"], "the invented row is gone");
+        assert_eq!(ids_of(&board), ["CTV-1"], "the invented row is gone");
         assert_eq!(board[0].title, "Add a login page");
         assert_eq!(board[0].status, TaskStatus::Draft);
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -1686,27 +1686,27 @@ mod tests {
     #[test]
     fn awaits_integration_from_acceptance_until_integrated() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
-        record(&log, &projections, &moved("FRK-1", "ready", "verifying"));
-        assert!(!awaiting(&projections, "FRK-1"));
-        record(&log, &projections, &moved("FRK-1", "verifying", "accepted"));
-        assert!(awaiting(&projections, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        record(&log, &projections, &moved("CTV-1", "ready", "verifying"));
+        assert!(!awaiting(&projections, "CTV-1"));
+        record(&log, &projections, &moved("CTV-1", "verifying", "accepted"));
+        assert!(awaiting(&projections, "CTV-1"));
         let integrated = record(
             &log,
             &projections,
-            &about(EventKind::TaskIntegrated, "FRK-1"),
+            &about(EventKind::TaskIntegrated, "CTV-1"),
         );
-        assert!(!awaiting(&projections, "FRK-1"));
+        assert!(!awaiting(&projections, "CTV-1"));
         let row = projections
-            .task(&"FRK-1".parse().expect("a task id"))
+            .task(&"CTV-1".parse().expect("a task id"))
             .expect("the read works")
             .expect("on the board");
         assert_eq!(row.status, TaskStatus::Accepted);
         assert_eq!(row.updated_seq, integrated.envelope.seq);
 
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-2"));
         let mut large = an_event_wire(EventKind::RequestTriaged);
-        large["task_id"] = json!("FRK-2");
+        large["task_id"] = json!("CTV-2");
         large["body"]["size"] = json!("large");
         let large = event_from_value(&large).expect("the fixture is schema-valid");
         record(
@@ -1718,9 +1718,9 @@ mod tests {
                 body: large.body,
             },
         );
-        record(&log, &projections, &moved("FRK-2", "verifying", "accepted"));
+        record(&log, &projections, &moved("CTV-2", "verifying", "accepted"));
         assert!(
-            !awaiting(&projections, "FRK-2"),
+            !awaiting(&projections, "CTV-2"),
             "an epic has no branch of its own"
         );
     }
@@ -1730,10 +1730,10 @@ mod tests {
         // A task in a private folder has no branch (6.6): its acceptance says so in its effects,
         // and a task that depends on it counts it integrated from then on.
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
-        record(&log, &projections, &moved("FRK-1", "ready", "verifying"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        record(&log, &projections, &moved("CTV-1", "ready", "verifying"));
         let mut accepted = an_event_wire(EventKind::TaskTransitioned);
-        accepted["task_id"] = json!("FRK-1");
+        accepted["task_id"] = json!("CTV-1");
         accepted["body"]["from"] = json!("verifying");
         accepted["body"]["to"] = json!("accepted");
         accepted["body"]["effects"] = json!(["nothing_to_integrate"]);
@@ -1748,16 +1748,16 @@ mod tests {
             },
         );
         let row = projections
-            .task(&"FRK-1".parse().expect("a task id"))
+            .task(&"CTV-1".parse().expect("a task id"))
             .expect("the read works")
             .expect("on the board");
         assert_eq!(row.status, TaskStatus::Accepted);
         assert!(!row.awaiting_integration);
         // Acceptance with any other effect still awaits.
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
-        record(&log, &projections, &moved("FRK-2", "ready", "verifying"));
-        record(&log, &projections, &moved("FRK-2", "verifying", "accepted"));
-        assert!(awaiting(&projections, "FRK-2"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-2"));
+        record(&log, &projections, &moved("CTV-2", "ready", "verifying"));
+        record(&log, &projections, &moved("CTV-2", "verifying", "accepted"));
+        assert!(awaiting(&projections, "CTV-2"));
     }
 
     #[test]
@@ -1777,9 +1777,9 @@ mod tests {
                 .execute_batch(
                     "INSERT INTO task_projections
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
-                     VALUES ('FRK-1', 'task', NULL, 'a task', 'accepted', 'low', 1, 0, 1),
-                            ('FRK-2', 'epic', NULL, 'an epic', 'accepted', 'low', 1, 0, 2),
-                            ('FRK-3', 'task', NULL, 'a task', 'verifying', 'low', 1, 0, 3);",
+                     VALUES ('CTV-1', 'task', NULL, 'a task', 'accepted', 'low', 1, 0, 1),
+                            ('CTV-2', 'epic', NULL, 'an epic', 'accepted', 'low', 1, 0, 2),
+                            ('CTV-3', 'task', NULL, 'a task', 'verifying', 'low', 1, 0, 3);",
                 )
                 .expect("the older rows are written");
             // Version 5 alone: a full open goes on to 0007, which empties the projections for a
@@ -1794,9 +1794,9 @@ mod tests {
                     )
                     .expect("the row reads")
             };
-            assert!(awaiting("FRK-1"));
-            assert!(!awaiting("FRK-2"));
-            assert!(!awaiting("FRK-3"));
+            assert!(awaiting("CTV-1"));
+            assert!(!awaiting("CTV-2"));
+            assert!(!awaiting("CTV-3"));
         }
         let _ = std::fs::remove_dir_all(&directory);
     }
@@ -1824,24 +1824,24 @@ mod tests {
     #[test]
     fn waits_on_the_human_while_a_question_is_open() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
-        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        assert!(!row_of(&projections, "CTV-1").waiting_on_human);
         let first = record(
             &log,
             &projections,
-            &about(EventKind::QuestionAsked, "FRK-1"),
+            &about(EventKind::QuestionAsked, "CTV-1"),
         );
         let second = record(
             &log,
             &projections,
-            &about(EventKind::QuestionAsked, "FRK-1"),
+            &about(EventKind::QuestionAsked, "CTV-1"),
         );
-        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+        assert!(row_of(&projections, "CTV-1").waiting_on_human);
 
         let answer = |question: &CatervasEvent| {
             with_body(
                 EventKind::QuestionAnswered,
-                "FRK-1",
+                "CTV-1",
                 json!({
                     "question_id": question.envelope.seq,
                     "answer": "Yes.",
@@ -1851,30 +1851,30 @@ mod tests {
         };
         record(&log, &projections, &answer(&first));
         assert!(
-            row_of(&projections, "FRK-1").waiting_on_human,
+            row_of(&projections, "CTV-1").waiting_on_human,
             "one question is still open"
         );
         record(&log, &projections, &answer(&second));
-        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+        assert!(!row_of(&projections, "CTV-1").waiting_on_human);
     }
 
     #[test]
     fn waits_on_the_human_while_a_marketing_plan_is_proposed() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
-        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-2"));
+        assert!(!row_of(&projections, "CTV-1").waiting_on_human);
         record(
             &log,
             &projections,
-            &about(EventKind::MarketingPlanProposed, "FRK-1"),
+            &about(EventKind::MarketingPlanProposed, "CTV-1"),
         );
         assert!(
-            row_of(&projections, "FRK-1").waiting_on_human,
+            row_of(&projections, "CTV-1").waiting_on_human,
             "the proposing task waits on the owner"
         );
         assert!(
-            !row_of(&projections, "FRK-2").waiting_on_human,
+            !row_of(&projections, "CTV-2").waiting_on_human,
             "no other task does"
         );
     }
@@ -1882,22 +1882,22 @@ mod tests {
     #[test]
     fn stops_waiting_when_a_marketing_plan_is_approved_or_returned() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         for _ in 0..2 {
             record(
                 &log,
                 &projections,
-                &about(EventKind::MarketingPlanProposed, "FRK-1"),
+                &about(EventKind::MarketingPlanProposed, "CTV-1"),
             );
         }
-        let decide = |kind| about(kind, "FRK-1");
+        let decide = |kind| about(kind, "CTV-1");
         record(
             &log,
             &projections,
             &decide(EventKind::MarketingPlanApproved),
         );
         assert!(
-            row_of(&projections, "FRK-1").waiting_on_human,
+            row_of(&projections, "CTV-1").waiting_on_human,
             "one plan still waits"
         );
         record(
@@ -1905,7 +1905,7 @@ mod tests {
             &projections,
             &decide(EventKind::MarketingPlanReturned),
         );
-        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+        assert!(!row_of(&projections, "CTV-1").waiting_on_human);
         // A decision with nothing waiting never takes the count below nothing.
         record(
             &log,
@@ -1915,60 +1915,60 @@ mod tests {
         record(
             &log,
             &projections,
-            &about(EventKind::MarketingPlanProposed, "FRK-1"),
+            &about(EventKind::MarketingPlanProposed, "CTV-1"),
         );
-        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+        assert!(row_of(&projections, "CTV-1").waiting_on_human);
         // An end is about no task and moves nothing.
         record(
             &log,
             &projections,
             &a_new_event(EventKind::MarketingPlanEnded),
         );
-        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+        assert!(row_of(&projections, "CTV-1").waiting_on_human);
     }
 
     #[test]
     fn a_site_request_makes_its_task_wait() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-2"));
         let first = record(
             &log,
             &projections,
-            &about(EventKind::SiteRequested, "FRK-1"),
+            &about(EventKind::SiteRequested, "CTV-1"),
         );
         assert!(
-            row_of(&projections, "FRK-1").waiting_on_human,
+            row_of(&projections, "CTV-1").waiting_on_human,
             "the asking task waits on the owner"
         );
         assert!(
-            !row_of(&projections, "FRK-2").waiting_on_human,
+            !row_of(&projections, "CTV-2").waiting_on_human,
             "no other task does"
         );
         let second = record(
             &log,
             &projections,
-            &about(EventKind::SiteRequested, "FRK-1"),
+            &about(EventKind::SiteRequested, "CTV-1"),
         );
 
         // An approval that answers a request lowers the count, as a decline does.
         let approves = |request: &CatervasEvent| {
             with_body(
                 EventKind::SiteApproved,
-                "FRK-1",
+                "CTV-1",
                 json!({ "host": "shop.example", "request": request.envelope.seq }),
             )
         };
         let declines = |request: &CatervasEvent| {
             with_body(
                 EventKind::SiteDeclined,
-                "FRK-1",
+                "CTV-1",
                 json!({ "request": request.envelope.seq, "host": "shop.example", "note": "" }),
             )
         };
         record(&log, &projections, &approves(&first));
         assert!(
-            row_of(&projections, "FRK-1").waiting_on_human,
+            row_of(&projections, "CTV-1").waiting_on_human,
             "one request still waits"
         );
         // A site the owner added unasked answers no request and lowers nothing.
@@ -1977,29 +1977,29 @@ mod tests {
             &projections,
             &with_body(
                 EventKind::SiteApproved,
-                "FRK-1",
+                "CTV-1",
                 json!({ "host": "added.example" }),
             ),
         );
         record(&log, &projections, &a_new_event(EventKind::SiteRemoved));
-        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+        assert!(row_of(&projections, "CTV-1").waiting_on_human);
         record(&log, &projections, &declines(&second));
-        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+        assert!(!row_of(&projections, "CTV-1").waiting_on_human);
 
         // A decision with nothing waiting never takes the count below nothing.
         record(&log, &projections, &declines(&second));
         record(
             &log,
             &projections,
-            &about(EventKind::SiteRequested, "FRK-1"),
+            &about(EventKind::SiteRequested, "CTV-1"),
         );
-        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+        assert!(row_of(&projections, "CTV-1").waiting_on_human);
     }
 
     #[test]
     fn awaits_approval_from_the_escalation_until_the_next_move() {
         let (log, projections) = a_board();
-        for task in ["FRK-1", "FRK-2", "FRK-3"] {
+        for task in ["CTV-1", "CTV-2", "CTV-3"] {
             record(&log, &projections, &about(EventKind::TaskCreated, task));
         }
         let escalation = |task: &str, reason: &str| {
@@ -2009,16 +2009,16 @@ mod tests {
                 json!({ "reason": reason, "detail": "contract_requires_human" }),
             )
         };
-        record(&log, &projections, &escalation("FRK-1", "approval"));
-        record(&log, &projections, &escalation("FRK-2", "risk_gate"));
-        record(&log, &projections, &escalation("FRK-3", "iterations"));
-        assert!(row_of(&projections, "FRK-1").awaiting_approval);
-        assert!(row_of(&projections, "FRK-2").awaiting_approval);
-        assert!(!row_of(&projections, "FRK-3").awaiting_approval);
+        record(&log, &projections, &escalation("CTV-1", "approval"));
+        record(&log, &projections, &escalation("CTV-2", "risk_gate"));
+        record(&log, &projections, &escalation("CTV-3", "iterations"));
+        assert!(row_of(&projections, "CTV-1").awaiting_approval);
+        assert!(row_of(&projections, "CTV-2").awaiting_approval);
+        assert!(!row_of(&projections, "CTV-3").awaiting_approval);
 
-        record(&log, &projections, &moved("FRK-1", "escalated", "ready"));
-        assert!(!row_of(&projections, "FRK-1").awaiting_approval);
-        assert!(row_of(&projections, "FRK-2").awaiting_approval);
+        record(&log, &projections, &moved("CTV-1", "escalated", "ready"));
+        assert!(!row_of(&projections, "CTV-1").awaiting_approval);
+        assert!(row_of(&projections, "CTV-2").awaiting_approval);
     }
 
     #[test]
@@ -2038,26 +2038,26 @@ mod tests {
                 .execute_batch(
                     "INSERT INTO events (seq, recorded_at, team_id, project_id, task_id, kind, body)
                      VALUES
-                       (1, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-1', 'task.transitioned',
+                       (1, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'CTV-1', 'task.transitioned',
                         '{\"from\":\"refining\",\"to\":\"escalated\",\"actor\":\"governor\",\"requested_by\":\"governor\",\"gate\":\"contract_requires_human\",\"effects\":[\"raise_escalation\"],\"iteration\":0}'),
-                       (2, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-1', 'escalation.raised',
+                       (2, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'CTV-1', 'escalation.raised',
                         '{\"reason\":\"approval\",\"detail\":\"contract_requires_human\"}'),
-                       (3, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-2', 'question.asked',
+                       (3, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'CTV-2', 'question.asked',
                         '{\"question\":\"Should done.txt be empty?\",\"asked_by\":\"pm\"}'),
-                       (4, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-3', 'escalation.raised',
+                       (4, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'CTV-3', 'escalation.raised',
                         '{\"reason\":\"approval\",\"detail\":\"contract_requires_human\"}'),
-                       (5, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-3', 'task.transitioned',
+                       (5, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'CTV-3', 'task.transitioned',
                         '{\"from\":\"escalated\",\"to\":\"ready\",\"actor\":\"human\",\"requested_by\":\"human\",\"effects\":[],\"iteration\":0}'),
-                       (6, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-4', 'escalation.raised',
+                       (6, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'CTV-4', 'escalation.raised',
                         '{\"reason\":\"approval\",\"detail\":\"contract_requires_human\"}'),
-                       (7, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-4', 'escalation.raised',
+                       (7, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'CTV-4', 'escalation.raised',
                         '{\"reason\":\"iterations\",\"detail\":\"too many\"}');
                      INSERT INTO task_projections
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
-                     VALUES ('FRK-1', 'epic', NULL, 'an epic', 'escalated', 'low', 1, 0, 2),
-                            ('FRK-2', 'task', NULL, 'a task', 'refining', 'low', 1, 0, 3),
-                            ('FRK-3', 'epic', NULL, 'an approved epic', 'ready', 'low', 1, 0, 5),
-                            ('FRK-4', 'task', NULL, 'escalated again', 'escalated', 'low', 1, 0, 7);
+                     VALUES ('CTV-1', 'epic', NULL, 'an epic', 'escalated', 'low', 1, 0, 2),
+                            ('CTV-2', 'task', NULL, 'a task', 'refining', 'low', 1, 0, 3),
+                            ('CTV-3', 'epic', NULL, 'an approved epic', 'ready', 'low', 1, 0, 5),
+                            ('CTV-4', 'task', NULL, 'escalated again', 'escalated', 'low', 1, 0, 7);
                      INSERT INTO projection_cursor (id, seq) VALUES (1, 7);",
                 )
                 .expect("the older rows are written");
@@ -2074,11 +2074,11 @@ mod tests {
                     .expect("the row reads")
             };
             // (awaiting approval, waiting on the human)
-            assert_eq!(flags("FRK-1"), (true, false));
-            assert_eq!(flags("FRK-2"), (false, true));
+            assert_eq!(flags("CTV-1"), (true, false));
+            assert_eq!(flags("CTV-2"), (false, true));
             // A move after the approval's escalation ends it, and so does a later escalation.
-            assert!(!flags("FRK-3").0);
-            assert!(!flags("FRK-4").0);
+            assert!(!flags("CTV-3").0);
+            assert!(!flags("CTV-4").0);
         }
         let _ = std::fs::remove_dir_all(&directory);
     }
@@ -2136,23 +2136,23 @@ mod tests {
     #[test]
     fn sums_a_tasks_costs_on_the_board() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-2"));
         for usd in [0.25, 0.5] {
-            let spent = cost(Some("FRK-1"), "a", "s1", "2026-09-22", (usd, 1, 1));
+            let spent = cost(Some("CTV-1"), "a", "s1", "2026-09-22", (usd, 1, 1));
             record(&log, &projections, &spent);
         }
-        assert!((cost_on_board(&projections, "FRK-1") - 0.75).abs() < f64::EPSILON);
-        assert!(cost_on_board(&projections, "FRK-2").abs() < f64::EPSILON);
+        assert!((cost_on_board(&projections, "CTV-1") - 0.75).abs() < f64::EPSILON);
+        assert!(cost_on_board(&projections, "CTV-2").abs() < f64::EPSILON);
     }
 
     /// The three records `groups_costs_by_each_scope` describes.
     fn three_costs_for_one_task(log: &EventLog, projections: &Projections) {
-        record(log, projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(log, projections, &about(EventKind::TaskCreated, "CTV-1"));
         for spent in [
-            cost(Some("FRK-1"), "a", "s1", "2026-09-21", (1.0, 100, 10)),
-            cost(Some("FRK-1"), "a", "s2", "2026-09-22", (2.0, 200, 20)),
-            cost(Some("FRK-1"), "b", "s3", "2026-09-22", (4.0, 400, 40)),
+            cost(Some("CTV-1"), "a", "s1", "2026-09-21", (1.0, 100, 10)),
+            cost(Some("CTV-1"), "a", "s2", "2026-09-22", (2.0, 200, 20)),
+            cost(Some("CTV-1"), "b", "s3", "2026-09-22", (4.0, 400, 40)),
         ] {
             record(log, projections, &spent);
         }
@@ -2219,14 +2219,14 @@ mod tests {
     #[test]
     fn counts_a_tasks_distinct_sessions() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         for session in ["a", "a", "b"] {
-            let spent = cost(Some("FRK-1"), "x", session, "2026-09-22", (1.0, 1, 1));
+            let spent = cost(Some("CTV-1"), "x", session, "2026-09-22", (1.0, 1, 1));
             record(&log, &projections, &spent);
         }
         let tasks = projections.costs(CostScope::Task).expect("the costs read");
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].key, "FRK-1");
+        assert_eq!(tasks[0].key, "CTV-1");
         assert_eq!(tasks[0].sessions, 2);
     }
 
@@ -2251,7 +2251,7 @@ mod tests {
     #[test]
     fn orders_task_costs_by_the_number_in_the_id() {
         let (log, projections) = a_board();
-        for task_id in ["FRK-10", "FRK-9"] {
+        for task_id in ["CTV-10", "CTV-9"] {
             record(&log, &projections, &about(EventKind::TaskCreated, task_id));
             let spent = cost(Some(task_id), "a", "s1", "2026-09-22", (1.0, 1, 1));
             record(&log, &projections, &spent);
@@ -2262,7 +2262,7 @@ mod tests {
             .into_iter()
             .map(|row| row.key)
             .collect();
-        assert_eq!(keys, ["FRK-9", "FRK-10"]);
+        assert_eq!(keys, ["CTV-9", "CTV-10"]);
     }
 
     #[test]
@@ -2277,7 +2277,7 @@ mod tests {
         );
         assert_eq!(
             before,
-            vec![row(CostScope::Task, "FRK-1", (7.0, 700, 70, 3))]
+            vec![row(CostScope::Task, "CTV-1", (7.0, 700, 70, 3))]
         );
     }
 
@@ -2311,9 +2311,9 @@ mod tests {
         (row.verifications, row.rejections, row.interventions)
     }
 
-    /// FRK-1 verified twice and rejected once between, by the agents alone.
+    /// CTV-1 verified twice and rejected once between, by the agents alone.
     fn verified_twice(log: &EventLog, projections: &Projections) {
-        record(log, projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(log, projections, &about(EventKind::TaskCreated, "CTV-1"));
         for (from, to, actor) in [
             ("in_progress", "verifying", "assignee"),
             ("verifying", "rejected", "reviewer"),
@@ -2321,7 +2321,7 @@ mod tests {
             ("in_progress", "verifying", "assignee"),
             ("verifying", "accepted", "product_manager"),
         ] {
-            record(log, projections, &moved_by("FRK-1", from, to, actor));
+            record(log, projections, &moved_by("CTV-1", from, to, actor));
         }
     }
 
@@ -2329,15 +2329,15 @@ mod tests {
     fn counts_each_move_into_verifying_and_into_rejected() {
         let (log, projections) = a_board();
         verified_twice(&log, &projections);
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
-        assert_eq!(counts_of(&projections, "FRK-1"), (2, 1, 0));
-        assert_eq!(counts_of(&projections, "FRK-2"), (0, 0, 0));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-2"));
+        assert_eq!(counts_of(&projections, "CTV-1"), (2, 1, 0));
+        assert_eq!(counts_of(&projections, "CTV-2"), (0, 0, 0));
     }
 
     #[test]
     fn counts_every_escalation_but_the_two_the_process_asks_for() {
         let (log, projections) = a_board();
-        for task in ["FRK-1", "FRK-2"] {
+        for task in ["CTV-1", "CTV-2"] {
             record(&log, &projections, &about(EventKind::TaskCreated, task));
         }
         for reason in [
@@ -2352,70 +2352,70 @@ mod tests {
             "integration",
             "explicit_request",
         ] {
-            record(&log, &projections, &escalated_for("FRK-1", reason));
+            record(&log, &projections, &escalated_for("CTV-1", reason));
         }
         for reason in ["approval", "risk_gate"] {
-            record(&log, &projections, &escalated_for("FRK-2", reason));
+            record(&log, &projections, &escalated_for("CTV-2", reason));
         }
-        assert_eq!(row_of(&projections, "FRK-1").interventions, 8);
-        assert_eq!(row_of(&projections, "FRK-2").interventions, 0);
+        assert_eq!(row_of(&projections, "CTV-1").interventions, 8);
+        assert_eq!(row_of(&projections, "CTV-2").interventions, 0);
     }
 
     #[test]
     fn counts_the_humans_own_moves_and_not_their_answers() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         record(
             &log,
             &projections,
-            &moved_by("FRK-1", "in_progress", "blocked", "assignee"),
+            &moved_by("CTV-1", "in_progress", "blocked", "assignee"),
         );
         record(
             &log,
             &projections,
-            &moved_by("FRK-1", "blocked", "in_progress", "human"),
+            &moved_by("CTV-1", "blocked", "in_progress", "human"),
         );
         record(
             &log,
             &projections,
-            &moved_by("FRK-1", "in_progress", "escalated", "human"),
+            &moved_by("CTV-1", "in_progress", "escalated", "human"),
         );
         record(
             &log,
             &projections,
-            &escalated_for("FRK-1", "explicit_request"),
+            &escalated_for("CTV-1", "explicit_request"),
         );
         record(
             &log,
             &projections,
-            &moved_by("FRK-1", "escalated", "in_progress", "human"),
+            &moved_by("CTV-1", "escalated", "in_progress", "human"),
         );
         record(
             &log,
             &projections,
-            &moved_by("FRK-1", "in_progress", "escalated", "governor"),
+            &moved_by("CTV-1", "in_progress", "escalated", "governor"),
         );
         record(
             &log,
             &projections,
-            &moved_by("FRK-1", "escalated", "cancelled", "human"),
+            &moved_by("CTV-1", "escalated", "cancelled", "human"),
         );
         record(
             &log,
             &projections,
-            &about(EventKind::QuestionAsked, "FRK-1"),
+            &about(EventKind::QuestionAsked, "CTV-1"),
         );
         record(
             &log,
             &projections,
-            &about(EventKind::QuestionAnswered, "FRK-1"),
+            &about(EventKind::QuestionAnswered, "CTV-1"),
         );
         record(
             &log,
             &projections,
             &with_body(
                 EventKind::HumanAccepted,
-                "FRK-1",
+                "CTV-1",
                 json!({ "subject": "contract", "accepted_by": "human" }),
             ),
         );
@@ -2424,16 +2424,16 @@ mod tests {
             &projections,
             &with_body(
                 EventKind::RequestTriaged,
-                "FRK-1",
+                "CTV-1",
                 json!({ "size": "small", "reason": "One page.", "triaged_by": "human" }),
             ),
         );
         record(
             &log,
             &projections,
-            &about(EventKind::ContractLocked, "FRK-1"),
+            &about(EventKind::ContractLocked, "CTV-1"),
         );
-        assert_eq!(row_of(&projections, "FRK-1").interventions, 2);
+        assert_eq!(row_of(&projections, "CTV-1").interventions, 2);
     }
 
     #[test]
@@ -2441,7 +2441,7 @@ mod tests {
         let (log, projections) = a_board();
         verified_twice(&log, &projections);
         projections.rebuild().expect("the board is built again");
-        assert_eq!(counts_of(&projections, "FRK-1"), (2, 1, 0));
+        assert_eq!(counts_of(&projections, "CTV-1"), (2, 1, 0));
     }
 
     #[test]
@@ -2484,7 +2484,7 @@ mod tests {
                         "INSERT INTO events
                              (seq, recorded_at, team_id, project_id, task_id, agent_id,
                               session_id, kind, body)
-                         VALUES (?1, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'FRK-1', 'dev-a',
+                         VALUES (?1, '2026-09-17T10:00:00Z', 'catervas', 'catervas', 'CTV-1', 'dev-a',
                                  's1', ?2, ?3)",
                         (seq, kind.to_string(), body.to_string()),
                     )
@@ -2494,15 +2494,15 @@ mod tests {
                 .execute_batch(
                     "INSERT INTO task_projections
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
-                     VALUES ('FRK-1', 'task', NULL, 'Add a login page', 'verifying', 'low', 0, 0,
+                     VALUES ('CTV-1', 'task', NULL, 'Add a login page', 'verifying', 'low', 0, 0,
                              4);
                      INSERT INTO task_projections
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
-                     VALUES ('FRK-9', 'task', NULL, 'Not in the log', 'ready', 'low', 0, 0, 5);
+                     VALUES ('CTV-9', 'task', NULL, 'Not in the log', 'ready', 'low', 0, 0, 5);
                      INSERT INTO cost_records
                          (seq, task_id, agent_id, session_id, day, purpose, model_id,
                           input_tokens, output_tokens, cost_usd)
-                     VALUES (5, 'FRK-1', 'dev-a', 's1', '2026-09-17', 'implement',
+                     VALUES (5, 'CTV-1', 'dev-a', 's1', '2026-09-17', 'implement',
                              'claude-sonnet-4-5', 1000, 100, 0.5);
                      INSERT INTO projection_cursor (id, seq) VALUES (1, 5);",
                 )
@@ -2511,7 +2511,7 @@ mod tests {
         let log = Arc::new(open_event_log(&path, at(10)).expect("the log opens"));
         let projections = open_projections(log).expect("the projections open");
 
-        let row = row_of(&projections, "FRK-1");
+        let row = row_of(&projections, "CTV-1");
         assert_eq!(row.verifications, 2);
         assert_eq!(row.interventions, 1);
         assert!(
@@ -2521,7 +2521,7 @@ mod tests {
         );
         assert_eq!(
             projections
-                .task(&"FRK-9".parse().expect("a task id"))
+                .task(&"CTV-9".parse().expect("a task id"))
                 .expect("the board reads"),
             None,
             "a row the log never created is not kept"
@@ -2582,7 +2582,7 @@ mod tests {
     #[test]
     fn marks_what_a_sprint_leaves_for_the_backlog() {
         let (log, projections) = a_board();
-        for task_id in ["FRK-1", "FRK-2", "FRK-3"] {
+        for task_id in ["CTV-1", "CTV-2", "CTV-3"] {
             record(&log, &projections, &about(EventKind::TaskCreated, task_id));
         }
         // Without the field, an end marks nothing.
@@ -2590,64 +2590,64 @@ mod tests {
         record(
             &log,
             &projections,
-            &planned("S1", &["FRK-1", "FRK-2", "FRK-3"]),
+            &planned("S1", &["CTV-1", "CTV-2", "CTV-3"]),
         );
         record(
             &log,
             &projections,
-            &ended("S1", &["FRK-1", "FRK-2", "FRK-3"]),
+            &ended("S1", &["CTV-1", "CTV-2", "CTV-3"]),
         );
-        assert!(!marked(&projections, "FRK-1"));
+        assert!(!marked(&projections, "CTV-1"));
         // With `backlog: true`, each task in `left` and no other.
         record(&log, &projections, &started("S2", None));
         record(
             &log,
             &projections,
-            &planned("S2", &["FRK-1", "FRK-2", "FRK-3"]),
+            &planned("S2", &["CTV-1", "CTV-2", "CTV-3"]),
         );
-        let mut end = ended("S2", &["FRK-1", "FRK-2"]);
+        let mut end = ended("S2", &["CTV-1", "CTV-2"]);
         let catervas_protocol::event::EventBody::SprintEnded(body) = &mut end.body else {
             panic!("a sprint.ended");
         };
         body.backlog = Some(true);
         record(&log, &projections, &end);
         assert_eq!(
-            ["FRK-1", "FRK-2", "FRK-3"].map(|task_id| marked(&projections, task_id)),
+            ["CTV-1", "CTV-2", "CTV-3"].map(|task_id| marked(&projections, task_id)),
             [true, true, false]
         );
         // The plan that puts a task in a sprint clears its mark.
         record(&log, &projections, &started("S3", None));
-        record(&log, &projections, &planned("S3", &["FRK-1"]));
+        record(&log, &projections, &planned("S3", &["CTV-1"]));
         assert_eq!(
-            ["FRK-1", "FRK-2"].map(|task_id| marked(&projections, task_id)),
+            ["CTV-1", "CTV-2"].map(|task_id| marked(&projections, task_id)),
             [false, true]
         );
         // Switching the policy on, or saying nothing of it, clears none; switching it off, all.
         record(&log, &projections, &team_updated(Some(true)));
         record(&log, &projections, &team_updated(None));
-        assert!(marked(&projections, "FRK-2"));
+        assert!(marked(&projections, "CTV-2"));
         record(&log, &projections, &team_updated(Some(false)));
-        assert!(!marked(&projections, "FRK-2"));
+        assert!(!marked(&projections, "CTV-2"));
     }
 
     #[test]
     fn the_mark_is_kept_on_the_row() {
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
-        let mut raise = about(EventKind::TaskCreated, "FRK-2");
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        let mut raise = about(EventKind::TaskCreated, "CTV-2");
         let catervas_protocol::event::EventBody::TaskCreated(body) = &mut raise.body else {
             panic!("a task.created");
         };
         body.raises = Some("MP-1".to_string().try_into().expect("a plan id"));
         record(&log, &projections, &raise);
 
-        assert!(!row_of(&projections, "FRK-1").skips_sprints);
-        assert!(row_of(&projections, "FRK-2").skips_sprints);
+        assert!(!row_of(&projections, "CTV-1").skips_sprints);
+        assert!(row_of(&projections, "CTV-2").skips_sprints);
         // The mark stays through what the contract is written as later, and is on the board.
         record(
             &log,
             &projections,
-            &written("FRK-2", "Raise the budget", "refining", "low", None),
+            &written("CTV-2", "Raise the budget", "refining", "low", None),
         );
         let board = projections.board().expect("the board reads");
         assert_eq!(
@@ -2655,7 +2655,7 @@ mod tests {
                 .iter()
                 .map(|row| (row.task_id.to_string(), row.skips_sprints))
                 .collect::<Vec<_>>(),
-            [("FRK-1".to_string(), false), ("FRK-2".to_string(), true)]
+            [("CTV-1".to_string(), false), ("CTV-2".to_string(), true)]
         );
     }
 
@@ -2678,64 +2678,64 @@ mod tests {
     #[test]
     fn puts_a_task_in_a_sprint_and_takes_it_out() {
         let (log, projections) = a_board();
-        for task_id in ["FRK-1", "FRK-2"] {
+        for task_id in ["CTV-1", "CTV-2"] {
             record(&log, &projections, &about(EventKind::TaskCreated, task_id));
         }
         record(&log, &projections, &started("S1", None));
-        record(&log, &projections, &planned("S1", &["FRK-1", "FRK-2"]));
-        assert_eq!(sprint_of(&projections, "FRK-2").as_deref(), Some("S1"));
-        record(&log, &projections, &moved("FRK-1", "verifying", "accepted"));
-        record(&log, &projections, &ended("S1", &["FRK-2"]));
-        assert_eq!(sprint_of(&projections, "FRK-1").as_deref(), Some("S1"));
-        assert_eq!(sprint_of(&projections, "FRK-2"), None);
+        record(&log, &projections, &planned("S1", &["CTV-1", "CTV-2"]));
+        assert_eq!(sprint_of(&projections, "CTV-2").as_deref(), Some("S1"));
+        record(&log, &projections, &moved("CTV-1", "verifying", "accepted"));
+        record(&log, &projections, &ended("S1", &["CTV-2"]));
+        assert_eq!(sprint_of(&projections, "CTV-1").as_deref(), Some("S1"));
+        assert_eq!(sprint_of(&projections, "CTV-2"), None);
     }
 
     #[test]
     fn takes_every_unfinished_task_out_of_an_ended_sprint() {
         let (log, projections) = a_board();
-        for task_id in ["FRK-1", "FRK-2", "FRK-3"] {
+        for task_id in ["CTV-1", "CTV-2", "CTV-3"] {
             record(&log, &projections, &about(EventKind::TaskCreated, task_id));
         }
         record(&log, &projections, &started("S1", None));
         record(
             &log,
             &projections,
-            &planned("S1", &["FRK-1", "FRK-2", "FRK-3"]),
+            &planned("S1", &["CTV-1", "CTV-2", "CTV-3"]),
         );
-        record(&log, &projections, &moved("FRK-2", "verifying", "accepted"));
-        record(&log, &projections, &moved("FRK-3", "ready", "cancelled"));
-        // An end whose `left` misses FRK-1: its sprint file lost it, or it joined after the end
+        record(&log, &projections, &moved("CTV-2", "verifying", "accepted"));
+        record(&log, &projections, &moved("CTV-3", "ready", "cancelled"));
+        // An end whose `left` misses CTV-1: its sprint file lost it, or it joined after the end
         // read the board.
         record(&log, &projections, &ended("S1", &[]));
-        assert_eq!(sprint_of(&projections, "FRK-1"), None);
-        assert_eq!(sprint_of(&projections, "FRK-2").as_deref(), Some("S1"));
-        assert_eq!(sprint_of(&projections, "FRK-3").as_deref(), Some("S1"));
+        assert_eq!(sprint_of(&projections, "CTV-1"), None);
+        assert_eq!(sprint_of(&projections, "CTV-2").as_deref(), Some("S1"));
+        assert_eq!(sprint_of(&projections, "CTV-3").as_deref(), Some("S1"));
     }
 
     #[test]
     fn plans_nothing_into_a_sprint_that_is_not_open() {
         let (log, projections) = a_board();
-        for task_id in ["FRK-1", "FRK-2"] {
+        for task_id in ["CTV-1", "CTV-2"] {
             record(&log, &projections, &about(EventKind::TaskCreated, task_id));
         }
         record(&log, &projections, &started("S1", None));
         record(&log, &projections, &ended("S1", &[]));
         // A plan that raced the end and lost, and one into a sprint the log never started.
-        record(&log, &projections, &planned("S1", &["FRK-1"]));
-        record(&log, &projections, &planned("S9", &["FRK-2"]));
-        assert_eq!(sprint_of(&projections, "FRK-1"), None);
-        assert_eq!(sprint_of(&projections, "FRK-2"), None);
+        record(&log, &projections, &planned("S1", &["CTV-1"]));
+        record(&log, &projections, &planned("S9", &["CTV-2"]));
+        assert_eq!(sprint_of(&projections, "CTV-1"), None);
+        assert_eq!(sprint_of(&projections, "CTV-2"), None);
     }
 
-    /// FRK-1 spends a dollar in S1, leaves it when S1 ends, then spends two more; S2 opens.
+    /// CTV-1 spends a dollar in S1, leaves it when S1 ends, then spends two more; S2 opens.
     fn a_sprint_that_ended_with_a_task_left(log: &EventLog, projections: &Projections) {
-        record(log, projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(log, projections, &about(EventKind::TaskCreated, "CTV-1"));
         record(log, projections, &started("S1", Some(20.0)));
-        record(log, projections, &planned("S1", &["FRK-1"]));
-        let first = cost(Some("FRK-1"), "a", "s1", "2026-09-22", (1.0, 100, 10));
+        record(log, projections, &planned("S1", &["CTV-1"]));
+        let first = cost(Some("CTV-1"), "a", "s1", "2026-09-22", (1.0, 100, 10));
         record(log, projections, &first);
-        record(log, projections, &ended("S1", &["FRK-1"]));
-        let second = cost(Some("FRK-1"), "a", "s2", "2026-09-22", (2.0, 200, 20));
+        record(log, projections, &ended("S1", &["CTV-1"]));
+        let second = cost(Some("CTV-1"), "a", "s2", "2026-09-22", (2.0, 200, 20));
         record(log, projections, &second);
         record(log, projections, &started("S2", None));
     }
@@ -2779,7 +2779,7 @@ mod tests {
     fn rebuilds_the_sprints() {
         let (log, projections) = a_board();
         a_sprint_that_ended_with_a_task_left(&log, &projections);
-        record(&log, &projections, &planned("S2", &["FRK-1"]));
+        record(&log, &projections, &planned("S2", &["CTV-1"]));
         let before = sprint_view(&projections);
         assert_eq!(
             before.0.as_ref().map(|sprint| sprint.sprint_id.as_str()),
@@ -2787,7 +2787,7 @@ mod tests {
         );
         assert_eq!(
             before.1,
-            vec![("FRK-1".to_string(), Some("S2".to_string()))]
+            vec![("CTV-1".to_string(), Some("S2".to_string()))]
         );
         // A sprint the log never started, which only emptying the table takes away.
         log.connection()
@@ -2816,10 +2816,10 @@ mod tests {
             let mut connection = rusqlite::Connection::open(&path).expect("the database opens");
             migrations::apply_through(&mut connection, 7, at(9)).expect("version 7 applies");
             let events = [
-                (Some("FRK-1"), EventKind::TaskCreated),
+                (Some("CTV-1"), EventKind::TaskCreated),
                 (None, EventKind::SprintStarted),
                 (None, EventKind::SprintPlanned),
-                (Some("FRK-1"), EventKind::CostRecorded),
+                (Some("CTV-1"), EventKind::CostRecorded),
             ];
             for (seq, (task_id, kind)) in (1_i64..).zip(events) {
                 connection
@@ -2843,11 +2843,11 @@ mod tests {
                 .execute_batch(
                     "INSERT INTO task_projections
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
-                     VALUES ('FRK-1', 'task', NULL, 'Add a login page', 'draft', 'low', 0, 0, 1);
+                     VALUES ('CTV-1', 'task', NULL, 'Add a login page', 'draft', 'low', 0, 0, 1);
                      INSERT INTO cost_records
                          (seq, task_id, agent_id, session_id, day, purpose, model_id,
                           input_tokens, output_tokens, cost_usd)
-                     VALUES (4, 'FRK-1', 'dev-a', 's1', '2026-09-17', 'implement',
+                     VALUES (4, 'CTV-1', 'dev-a', 's1', '2026-09-17', 'implement',
                              'claude-sonnet-4-5', 1000, 100, 0.5);
                      INSERT INTO projection_cursor (id, seq) VALUES (1, 4);",
                 )
@@ -2858,7 +2858,7 @@ mod tests {
         let migrated = sprint_view(&projections);
         assert_eq!(
             migrated.1,
-            vec![("FRK-1".to_string(), Some("S1".to_string()))]
+            vec![("CTV-1".to_string(), Some("S1".to_string()))]
         );
         projections.rebuild().expect("the board is built again");
         assert_eq!(sprint_view(&projections), migrated);
@@ -2880,7 +2880,7 @@ mod tests {
             migrations::apply_through(&mut connection, 8, at(9)).expect("version 8 applies");
         }
         {
-            // A plan and an end whose `left` missed FRK-1, as version 8 projected them: FRK-1
+            // A plan and an end whose `left` missed CTV-1, as version 8 projected them: CTV-1
             // stuck in S1 after S1 ended. A move into `verifying` and a cost are also already
             // projected, in `task_projections` and `cost_records`, so a 0009 that failed to empty
             // either table (N2, N4) would replay them a second time. 0008 runs before these rows
@@ -2889,12 +2889,12 @@ mod tests {
             // 0010's column cannot be.
             let log = Arc::new(open_event_log(&path, at(9)).expect("the log opens"));
             for event in [
-                about(EventKind::TaskCreated, "FRK-1"),
+                about(EventKind::TaskCreated, "CTV-1"),
                 started("S1", None),
-                planned("S1", &["FRK-1"]),
+                planned("S1", &["CTV-1"]),
                 ended("S1", &[]),
-                moved("FRK-1", "draft", "verifying"),
-                cost(Some("FRK-1"), "dev-a", "s1", "2026-09-17", (0.5, 1000, 100)),
+                moved("CTV-1", "draft", "verifying"),
+                cost(Some("CTV-1"), "dev-a", "s1", "2026-09-17", (0.5, 1000, 100)),
             ] {
                 log.append(&event).expect("appends");
             }
@@ -2904,13 +2904,13 @@ mod tests {
                      INSERT INTO task_projections
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq,
                           sprint, verifications)
-                     VALUES ('FRK-1', 'task', NULL, 'Add a login page', 'verifying', 'low', 0, 0, 5,
+                     VALUES ('CTV-1', 'task', NULL, 'Add a login page', 'verifying', 'low', 0, 0, 5,
                              'S1', 1);
                      INSERT INTO sprints (sprint_id, budget_usd, open) VALUES ('S1', NULL, 0);
                      INSERT INTO cost_records
                          (seq, task_id, agent_id, session_id, day, purpose, model_id,
                           input_tokens, output_tokens, cost_usd)
-                     VALUES (6, 'FRK-1', 'dev-a', 's1', '2026-09-17', 'implement',
+                     VALUES (6, 'CTV-1', 'dev-a', 's1', '2026-09-17', 'implement',
                              'claude-sonnet-4-5', 1000, 100, 0.5);
                      INSERT INTO projection_cursor (id, seq) VALUES (1, 6)
                          ON CONFLICT (id) DO UPDATE SET seq = 6;",
@@ -2919,15 +2919,15 @@ mod tests {
         }
         let log = Arc::new(open_event_log(&path, at(10)).expect("the log opens"));
         let projections = open_projections(log).expect("the projections open");
-        assert_eq!(sprint_of(&projections, "FRK-1"), None);
+        assert_eq!(sprint_of(&projections, "CTV-1"), None);
         assert_eq!(
-            row_of(&projections, "FRK-1").verifications,
+            row_of(&projections, "CTV-1").verifications,
             1,
             "a stale row left in task_projections would double it"
         );
         assert_eq!(
             projections.costs(CostScope::Task).expect("the costs read"),
-            vec![row(CostScope::Task, "FRK-1", (0.5, 1000, 100, 1))],
+            vec![row(CostScope::Task, "CTV-1", (0.5, 1000, 100, 1))],
             "a stale row left in cost_records would collide with the replayed one"
         );
         let _ = std::fs::remove_dir_all(&directory);
@@ -2937,7 +2937,7 @@ mod tests {
     fn splits_a_tasks_cost_by_purpose() {
         use catervas_protocol::event::{CostRecordedBodyPurpose, EventBody};
         let (log, projections) = a_board();
-        for task_id in ["FRK-1", "FRK-2"] {
+        for task_id in ["CTV-1", "CTV-2"] {
             record(&log, &projections, &about(EventKind::TaskCreated, task_id));
         }
         let with = |purpose, task_id, usd| {
@@ -2948,15 +2948,15 @@ mod tests {
             spent
         };
         for spent in [
-            with(CostRecordedBodyPurpose::Implement, "FRK-1", 1.0),
-            with(CostRecordedBodyPurpose::Implement, "FRK-1", 2.0),
-            with(CostRecordedBodyPurpose::Verify, "FRK-1", 4.0),
-            with(CostRecordedBodyPurpose::Verify, "FRK-2", 8.0),
+            with(CostRecordedBodyPurpose::Implement, "CTV-1", 1.0),
+            with(CostRecordedBodyPurpose::Implement, "CTV-1", 2.0),
+            with(CostRecordedBodyPurpose::Verify, "CTV-1", 4.0),
+            with(CostRecordedBodyPurpose::Verify, "CTV-2", 8.0),
         ] {
             record(&log, &projections, &spent);
         }
         let split = projections
-            .costs_by_purpose(&"FRK-1".parse().expect("a task id"))
+            .costs_by_purpose(&"CTV-1".parse().expect("a task id"))
             .expect("the costs read");
         assert_eq!(
             split.into_iter().collect::<Vec<_>>(),
@@ -2968,13 +2968,13 @@ mod tests {
     fn costs_each_agent_by_day_and_sprint() {
         use super::CostWindow;
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         record(&log, &projections, &started("S1", None));
-        record(&log, &projections, &planned("S1", &["FRK-1"]));
+        record(&log, &projections, &planned("S1", &["CTV-1"]));
         for spent in [
-            cost(Some("FRK-1"), "a", "s1", "2026-09-21", (1.0, 1, 1)),
-            cost(Some("FRK-1"), "a", "s2", "2026-09-22", (2.0, 1, 1)),
-            cost(Some("FRK-1"), "b", "s3", "2026-09-22", (4.0, 1, 1)),
+            cost(Some("CTV-1"), "a", "s1", "2026-09-21", (1.0, 1, 1)),
+            cost(Some("CTV-1"), "a", "s2", "2026-09-22", (2.0, 1, 1)),
+            cost(Some("CTV-1"), "b", "s3", "2026-09-22", (4.0, 1, 1)),
             // No task, so no sprint; still the day's.
             cost(None, "b", "s4", "2026-09-22", (8.0, 1, 1)),
         ] {
@@ -3006,7 +3006,7 @@ mod tests {
             projections
                 .costs_for(CostScope::Task, CostWindow::Day(day))
                 .expect("the costs read"),
-            vec![row(CostScope::Task, "FRK-1", (6.0, 2, 2, 2))]
+            vec![row(CostScope::Task, "CTV-1", (6.0, 2, 2, 2))]
         );
         assert_eq!(
             agents(CostWindow::All),
@@ -3018,11 +3018,11 @@ mod tests {
     fn between_sums_the_days_inclusive() {
         use super::CostWindow;
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         for spent in [
-            cost(Some("FRK-1"), "a", "s1", "2026-10-01", (1.0, 1, 1)),
-            cost(Some("FRK-1"), "a", "s2", "2026-10-02", (2.0, 1, 1)),
-            cost(Some("FRK-1"), "a", "s3", "2026-10-04", (4.0, 1, 1)),
+            cost(Some("CTV-1"), "a", "s1", "2026-10-01", (1.0, 1, 1)),
+            cost(Some("CTV-1"), "a", "s2", "2026-10-02", (2.0, 1, 1)),
+            cost(Some("CTV-1"), "a", "s3", "2026-10-04", (4.0, 1, 1)),
         ] {
             record(&log, &projections, &spent);
         }
@@ -3043,7 +3043,7 @@ mod tests {
             projections
                 .costs_for(CostScope::Task, between())
                 .expect("the costs read"),
-            vec![row(CostScope::Task, "FRK-1", (6.0, 2, 2, 2))]
+            vec![row(CostScope::Task, "CTV-1", (6.0, 2, 2, 2))]
         );
     }
 
@@ -3052,7 +3052,7 @@ mod tests {
         use super::CostWindow;
         use catervas_protocol::event::{CostRecordedBodyPurpose, EventBody};
         let (log, projections) = a_board();
-        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
         let with = |purpose, task_id, session, day, usd| {
             let mut spent = cost(task_id, "a", session, day, (usd, 1, 1));
             if let EventBody::CostRecorded(body) = &mut spent.body {
@@ -3071,7 +3071,7 @@ mod tests {
             with(CostRecordedBodyPurpose::Chat, None, "s2", "2026-09-22", 0.5),
             with(
                 CostRecordedBodyPurpose::Implement,
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "s3",
                 "2026-09-22",
                 2.0,

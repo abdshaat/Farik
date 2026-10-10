@@ -541,11 +541,11 @@ mod tests {
     #[test]
     fn records_one_cost_priced_from_the_table() {
         let (log, projections) = a_board();
-        filed(&log, &projections, "FRK-1");
+        filed(&log, &projections, "CTV-1");
         let charged = record_session_cost(
             &log,
             &projections,
-            &source(ids(Some("FRK-1"), "s1")),
+            &source(ids(Some("CTV-1"), "s1")),
             &Usage {
                 cache_read_tokens: 2_000_000,
                 cache_write_tokens: 4_000_000,
@@ -571,9 +571,9 @@ mod tests {
         assert_eq!(body.usage.cache_write_tokens, 4_000_000);
         assert_eq!(body.purpose, CostRecordedBodyPurpose::Implement);
         assert!(!body.unpriced);
-        assert_eq!(recorded.envelope.ids, ids(Some("FRK-1"), "s1"));
+        assert_eq!(recorded.envelope.ids, ids(Some("CTV-1"), "s1"));
         let task = projections
-            .task(&"FRK-1".parse().expect("a task id"))
+            .task(&"CTV-1".parse().expect("a task id"))
             .expect("the read works")
             .expect("on the board");
         assert!(close(task.cost_usd, 4.0));
@@ -662,13 +662,13 @@ mod tests {
     fn records_a_model_no_table_prices_at_no_cost_and_says_so() {
         // An agent may run on any model (ADR 0015): its usage is recorded, at no cost, and marked.
         let (log, projections) = a_board();
-        filed(&log, &projections, "FRK-1");
+        filed(&log, &projections, "CTV-1");
         let charged = record_session_cost(
             &log,
             &projections,
             &CostSource {
                 model_id: "claude-unknown-9",
-                ..source(ids(Some("FRK-1"), "s1"))
+                ..source(ids(Some("CTV-1"), "s1"))
             },
             &usage(1000, 0),
             &prices(),
@@ -689,7 +689,7 @@ mod tests {
             .costs(CostScope::Task)
             .expect("the costs read")
             .into_iter()
-            .find(|row| row.key == "FRK-1")
+            .find(|row| row.key == "CTV-1")
             .expect("the task's cost");
         assert_eq!(task.sessions, 1);
         assert!(close(task.usd, 0.0));
@@ -800,14 +800,14 @@ mod tests {
     #[test]
     fn reads_budgets_from_the_team_the_contract_and_the_day() {
         let (log, projections) = a_board();
-        filed(&log, &projections, "FRK-1");
-        filed(&log, &projections, "FRK-2");
+        filed(&log, &projections, "CTV-1");
+        filed(&log, &projections, "CTV-2");
         let yesterday = FixedClock::new(at("2026-09-21T10:00:00Z"));
         // A million input tokens is a dollar at these prices.
         for (task, session, millions, when) in [
-            ("FRK-1", "a", 1, clock()),
-            ("FRK-1", "b", 3, clock()),
-            ("FRK-2", "c", 1, yesterday),
+            ("CTV-1", "a", 1, clock()),
+            ("CTV-1", "b", 3, clock()),
+            ("CTV-2", "c", 1, yesterday),
         ] {
             record_session_cost(
                 &log,
@@ -819,7 +819,7 @@ mod tests {
             )
             .expect("recorded");
         }
-        let contract = a_contract("FRK-1", 5.0, 3);
+        let contract = a_contract("CTV-1", 5.0, 3);
         let read = state(
             &projections,
             &a_team(None),
@@ -839,12 +839,12 @@ mod tests {
     #[test]
     fn counts_no_session_the_provider_refused_the_key_of() {
         let (log, projections) = a_board();
-        filed(&log, &projections, "FRK-1");
+        filed(&log, &projections, "CTV-1");
         for session in ["a", "b"] {
             record_session_cost(
                 &log,
                 &projections,
-                &source(ids(Some("FRK-1"), session)),
+                &source(ids(Some("CTV-1"), session)),
                 &usage(0, 0),
                 &prices(),
                 &clock(),
@@ -852,7 +852,7 @@ mod tests {
             .expect("recorded");
         }
         // Another task's refused session is not this task's to leave out.
-        for (task, session) in [("FRK-1", "b"), ("FRK-2", "c")] {
+        for (task, session) in [("CTV-1", "b"), ("CTV-2", "c")] {
             crate::sessions::record_session_ended(
                 &log,
                 session,
@@ -863,7 +863,7 @@ mod tests {
             )
             .expect("recorded");
         }
-        let contract = a_contract("FRK-1", 5.0, 3);
+        let contract = a_contract("CTV-1", 5.0, 3);
         let read = state(
             &projections,
             &a_team(None),
@@ -876,13 +876,13 @@ mod tests {
     #[test]
     fn fills_the_sprint_budget_from_the_open_sprint() {
         let (log, projections) = a_board();
-        filed(&log, &projections, "FRK-1");
+        filed(&log, &projections, "CTV-1");
         let team = a_team(None);
         let none = state(&projections, &team, Role::SoftwareDeveloper, None);
         assert!(none.sprint_max_usd.is_infinite() && none.sprint_max_usd > 0.0);
         assert!(close(none.sprint_spent_usd, 0.0));
 
-        // S1 open with ten dollars, holding FRK-1.
+        // S1 open with ten dollars, holding CTV-1.
         let mut started = an_event_wire(EventKind::SprintStarted);
         started["body"]["budget_usd"] = json!(10.0);
         let started = event_from_value(&started).expect("the fixture is schema-valid");
@@ -898,7 +898,7 @@ mod tests {
         record_session_cost(
             &log,
             &projections,
-            &source(ids(Some("FRK-1"), "a")),
+            &source(ids(Some("CTV-1"), "a")),
             &usage(4_000_000, 0),
             &prices(),
             &clock(),
@@ -981,7 +981,7 @@ mod tests {
         let (_log, projections) = a_board();
         let past_u32 = u64::from(u32::MAX) + 1;
         let team = a_team(Some(json!({ "max_tool_calls": past_u32 })));
-        let contract = a_contract("FRK-1", 5.0, past_u32);
+        let contract = a_contract("CTV-1", 5.0, past_u32);
         let read = state(
             &projections,
             &team,

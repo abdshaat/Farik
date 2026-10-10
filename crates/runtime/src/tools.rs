@@ -825,12 +825,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_tool_the_agent_has_no_tier_for() {
         let project = TestProject::new("tools-tier", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         let marker = project.repo.path.join("ran");
         let refused = project
             .call(
                 "pm",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "catervas_exec",
                 json!({ "command": format!("touch {}", marker.display()) }),
             )

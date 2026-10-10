@@ -83,7 +83,7 @@ fn keeps_every_event_and_its_place_across_a_reopen() {
         .expect("appends");
     assert_eq!(third.envelope.seq, 3);
     // And the ids the store hands out carry on too.
-    assert_eq!(reopened.next_task_id().expect("an id").to_string(), "FRK-1");
+    assert_eq!(reopened.next_task_id().expect("an id").to_string(), "CTV-1");
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn keeps_two_logs_on_one_file_from_sharing_a_place_or_an_id() {
         second.next_task_id().expect("an id").to_string(),
         first.next_task_id().expect("an id").to_string(),
     ];
-    assert_eq!(ids, ["FRK-1", "FRK-2", "FRK-3"]);
+    assert_eq!(ids, ["CTV-1", "CTV-2", "CTV-3"]);
     // Both connections see the whole log, whichever of them wrote each event.
     assert_eq!(second.read(&EventQuery::default()).expect("reads").len(), 4);
 }
@@ -209,7 +209,7 @@ fn hands_two_processes_on_one_file_a_different_id_every_time() {
     let mut numbers: Vec<u64> = taken
         .iter()
         .map(|id| {
-            id.strip_prefix("FRK-")
+            id.strip_prefix("CTV-")
                 .expect("every id carries the prefix")
                 .parse()
                 .expect("and a number")
@@ -299,7 +299,7 @@ fn projects_every_event_when_several_processes_append_and_project_at_once() {
                     for event in 0..EVENTS_PER_PROCESS {
                         let mut filed = an_event(EventKind::TaskCreated);
                         filed.ids.task_id = Some(
-                            format!("FRK-{}", process * EVENTS_PER_PROCESS + event + 1)
+                            format!("CTV-{}", process * EVENTS_PER_PROCESS + event + 1)
                                 .parse()
                                 .expect("a task id"),
                         );

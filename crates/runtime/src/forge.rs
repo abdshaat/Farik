@@ -247,7 +247,7 @@ mod tests {
     }
 
     fn open(forge: &Forge) -> Result<PullRequest, ForgeError> {
-        forge.open_pull_request("main", "catervas/FRK-1", "FRK-1: Add done", BODY)
+        forge.open_pull_request("main", "catervas/CTV-1", "CTV-1: Add done", BODY)
     }
 
     #[test]
@@ -276,7 +276,7 @@ mod tests {
                     "pr",
                     "list",
                     "--head",
-                    "catervas/FRK-1",
+                    "catervas/CTV-1",
                     "--base",
                     "main",
                     "--state",
@@ -292,9 +292,9 @@ mod tests {
                     "--base",
                     "main",
                     "--head",
-                    "catervas/FRK-1",
+                    "catervas/CTV-1",
                     "--title",
-                    "FRK-1: Add done",
+                    "CTV-1: Add done",
                     "--body-file",
                     "-",
                 ]),

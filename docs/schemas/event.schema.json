@@ -35,7 +35,7 @@
     },
     "task_id": {
       "type": "string",
-      "pattern": "^FRK-[0-9]{1,6}$",
+      "pattern": "^CTV-[0-9]{1,6}$",
       "description": "The contract the event is about, when it is about one."
     },
     "agent_id": {
@@ -265,7 +265,7 @@
       "required": ["kind", "title", "status", "risk"],
       "properties": {
         "kind": { "type": "string", "enum": ["epic", "task"] },
-        "parent": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "parent": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
         "title": { "type": "string" },
         "status": {
           "type": "string",
@@ -687,7 +687,7 @@
           "type": "array",
           "maxItems": 1000,
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+          "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
         },
         "planned_by": { "type": "string" }
       }
@@ -705,7 +705,7 @@
           "type": "array",
           "maxItems": 1000,
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+          "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
         },
         "backlog": { "type": "boolean" }
       }
@@ -1531,7 +1531,7 @@
         "pipeline": { "$ref": "#/$defs/dataPipelineNumber" },
         "by": { "$ref": "#/$defs/dataPipelineDecidedBy" },
         "reason": { "type": "string", "maxLength": 600 },
-        "request": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+        "request": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
       }
     },
     "dataPipelineDeclinedBody": {

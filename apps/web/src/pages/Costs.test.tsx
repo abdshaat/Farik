@@ -43,8 +43,8 @@ const ACTIVITY = {
 		{
 			agent_id: "theo",
 			state: "working",
-			line: "Building FRK-7",
-			task_id: "FRK-7",
+			line: "Building CTV-7",
+			task_id: "CTV-7",
 		},
 		{ agent_id: "mira", state: "idle", line: "Nothing to do yet" },
 	],
@@ -139,7 +139,7 @@ describe("costs page", () => {
 			within(row("Theo"))
 				.getAllByRole("cell")
 				.map((c) => c.textContent),
-		).toEqual(["$2.94", "$6.10", "Building FRK-7"]);
+		).toEqual(["$2.94", "$6.10", "Building CTV-7"]);
 		expect(
 			within(row("Mira"))
 				.getAllByRole("cell")

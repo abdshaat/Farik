@@ -15,14 +15,14 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 		// Each session waits before it plays, so the board redraws in every lane the task passes.
 		paceMs: 600,
 		transcripts: [
-			"triage_frk_1_small_by_pm",
-			"refine_writes_task_for_theo_frk_1",
-			"judge_frk_1_by_architect",
-			"planning_ceremony_frk_1",
-			"plan_assigns_frk_1_to_theo",
-			"implement_finishes_frk_1",
+			"triage_ctv_1_small_by_pm",
+			"refine_writes_task_for_theo_ctv_1",
+			"judge_ctv_1_by_architect",
+			"planning_ceremony_ctv_1",
+			"plan_assigns_ctv_1_to_theo",
+			"implement_finishes_ctv_1",
 			"review_writes_note",
-			"accept_frk_1",
+			"accept_ctv_1",
 			"review",
 			"retro",
 		],
@@ -59,9 +59,9 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 			.getByLabel("What should the team do next?")
 			.fill("Add a done.txt at the root, so a run can be checked for it");
 		await page.getByRole("button", { name: "Send to the team" }).click();
-		await expect(page).toHaveURL(/\/requests\/FRK-1$/);
+		await expect(page).toHaveURL(/\/requests\/CTV-1$/);
 
-		// 3. On the board, FRK-1 moves through the lanes by itself: every lane it is drawn in is
+		// 3. On the board, CTV-1 moves through the lanes by itself: every lane it is drawn in is
 		// recorded as the board redraws.
 		await page.getByRole("link", { name: "Board" }).first().click();
 		await page.evaluate((lanes) => {
@@ -73,7 +73,7 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 						`section[aria-labelledby="lane-${lane}-title"]`,
 					);
 					if (
-						column?.querySelector('a[href="/tasks/FRK-1"]') &&
+						column?.querySelector('a[href="/tasks/CTV-1"]') &&
 						seen.at(-1) !== lane
 					)
 						seen.push(lane);
@@ -101,10 +101,10 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 
 		// 4. The task's five tabs, each with what the run left.
 		await task.click();
-		await expect(page).toHaveURL(/\/tasks\/FRK-1$/);
+		await expect(page).toHaveURL(/\/tasks\/CTV-1$/);
 		await expect(
 			page.getByText(
-				"FRK-1 in sprint 1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+				"CTV-1 in sprint 1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
 			),
 		).toBeVisible();
 		const panel = page.getByRole("tabpanel");
@@ -123,7 +123,7 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 		await expect(panel.getByText("$5.00 for this task")).toBeVisible();
 		await page.getByRole("tab", { name: "Code changes" }).click();
 		await expect(
-			panel.getByText("1 file, +0 −0, on the branch feature/FRK-1."),
+			panel.getByText("1 file, +0 −0, on the branch feature/CTV-1."),
 		).toBeVisible();
 		await page.getByRole("tab", { name: "Notes" }).click();
 		await expect(

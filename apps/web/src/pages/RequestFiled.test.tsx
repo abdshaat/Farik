@@ -37,7 +37,7 @@ const event = (seq: number, kind: string, body: object, at: string) => ({
 	recorded_at: at,
 	team_id: "t",
 	project_id: "p",
-	task_id: "FRK-7",
+	task_id: "CTV-7",
 	kind,
 	body,
 });
@@ -54,14 +54,14 @@ const TRIAGED = event(
 	"2026-09-26T09:15:00Z",
 );
 
-/** The request page for FRK-7, with the team, the contract and its history answered. */
+/** The request page for CTV-7, with the team, the contract and its history answered. */
 async function opened(status: string, events: object[]) {
-	const { container, socket } = await renderApp("/requests/FRK-7");
+	const { container, socket } = await renderApp("/requests/CTV-7");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", { team: TEAM });
 	await answerQuery(s, "contract.get", {
-		contract: { id: "FRK-7", title: "Gift cards", intent: INTENT, status },
+		contract: { id: "CTV-7", title: "Gift cards", intent: INTENT, status },
 	});
 	await answerQuery(s, "task.history", { events });
 	return { container, s };
@@ -76,12 +76,12 @@ describe("request page", () => {
 		expect(
 			await screen.findByRole("heading", { name: en.requestTitle }),
 		).toBeTruthy();
-		expect(screen.getByText("FRK-7, sent at 09:14 UTC.")).toBeTruthy();
+		expect(screen.getByText("CTV-7, sent at 09:14 UTC.")).toBeTruthy();
 		expect(screen.getByText(INTENT)).toBeTruthy();
 		// Before triage, the Scrum Master is still sizing it.
 		expect(screen.getByText("Sol is sizing your request…")).toBeTruthy();
 		expect(asked(s, "task.history")[0]?.params.params).toEqual({
-			task_id: "FRK-7",
+			task_id: "CTV-7",
 		});
 
 		// The triage arrives; the page asks again and shows the size.
@@ -112,7 +112,7 @@ describe("request page", () => {
 			"Saturday 26 September",
 			"Sol, Scrum Master",
 			"Mira, Product Manager",
-			"FRK-7",
+			"CTV-7",
 			"Planning",
 		])
 			expect(within(about).getByText(text)).toBeTruthy();
@@ -132,13 +132,13 @@ describe("request page", () => {
 		expect(sent.params).toEqual({
 			command: {
 				command: "request_triage",
-				body: { task_id: "FRK-7", size: "small", reason: "Changed by you" },
+				body: { task_id: "CTV-7", size: "small", reason: "Changed by you" },
 			},
 		});
 		await s.reply(sent, {
 			error: {
 				kind: "refused",
-				detail: "triage_refused: FRK-1 is already refining",
+				detail: "triage_refused: CTV-1 is already refining",
 			},
 		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
@@ -151,7 +151,7 @@ describe("request page", () => {
 		await waitFor(() => expect(asked(s, "contract.get")).toHaveLength(2));
 		await answerQuery(s, "contract.get", {
 			contract: {
-				id: "FRK-7",
+				id: "CTV-7",
 				title: "Gift cards",
 				intent: INTENT,
 				status: "refining",

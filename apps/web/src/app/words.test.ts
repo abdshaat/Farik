@@ -31,13 +31,13 @@ describe("refusal sentences", () => {
 			"already_paused: the team is already paused": en.refuseAlreadyPaused,
 			"not_paused: the team is not paused": en.refuseNotPaused,
 			"already_answered: question 7 has its answer": en.refuseAlreadyAnswered,
-			"already_accepted: the human accepted FRK-1's result in this verification":
+			"already_accepted: the human accepted CTV-1's result in this verification":
 				en.refuseAlreadyAccepted,
-			"not_waiting_for_the_human: FRK-1 is accepted, and its result does not wait for the human":
+			"not_waiting_for_the_human: CTV-1 is accepted, and its result does not wait for the human":
 				en.refuseNotWaiting,
-			"not_awaiting_approval: FRK-1 is ready and no approval is asked of the human":
+			"not_awaiting_approval: CTV-1 is ready and no approval is asked of the human":
 				en.refuseNotWaiting,
-			"not_escalated: FRK-1 is ready, and only an escalation is resolved":
+			"not_escalated: CTV-1 is ready, and only an escalation is resolved":
 				en.refuseNotWaiting,
 			"review_first: the reviewer has not finished; send back once the review is in":
 				en.refuseReviewFirst,
@@ -45,21 +45,21 @@ describe("refusal sentences", () => {
 				en.refuseChecksNotRun,
 			"criterion_failed: C1 failed on the integration branch: escalate the epic":
 				en.refuseChecksFailed,
-			"use_human_accept: FRK-1 awaits the human's approval": en.refuseUsePlan,
-			"use_escalation_resolve: FRK-1 is escalated": en.refuseUseHelp,
+			"use_human_accept: CTV-1 awaits the human's approval": en.refuseUsePlan,
+			"use_escalation_resolve: CTV-1 is escalated": en.refuseUseHelp,
 			"extra_tries_only_for_tries: more tries resume the work":
 				en.refuseExtraTries,
-			"same_status: FRK-1 is already ready": en.refuseSameStatus,
+			"same_status: CTV-1 is already ready": en.refuseSameStatus,
 			"agent_retired: Theo has retired, and a past teammate's chat is read-only":
 				en.refuseAgentRetired,
 			"sprint_open: sprint S2 is open": en.refuseSprintOpen,
 			"no_sprint_open: no sprint is open": en.refuseNoSprintOpen,
-			"triage_refused: FRK-1 is already ready": en.refuseTriage,
-			"lock_refused: FRK-1 is accepted": en.refuseLock,
+			"triage_refused: CTV-1 is already ready": en.refuseTriage,
+			"lock_refused: CTV-1 is accepted": en.refuseLock,
 			// A code the page does not know, a failure with none, a not-found: one plain sentence.
 			"not_a_question: event 7 is a task.created, not a question.asked":
 				en.refuseCommand,
-			"task FRK-9": en.refuseCommand,
+			"task CTV-9": en.refuseCommand,
 			"an answer is blank, and the log is where somebody reads it back":
 				en.refuseCommand,
 		};

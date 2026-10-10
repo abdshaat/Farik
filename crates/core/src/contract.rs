@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn accepts_a_schema_valid_contract_and_applies_the_defaults() {
         let contract = validate_contract(&a_contract_wire()).expect("valid");
-        assert_eq!(contract.id.to_string(), "FRK-1");
+        assert_eq!(contract.id.to_string(), "CTV-1");
         assert_eq!(contract.scope.out_of_scope, vec!["password reset"]);
         assert_eq!(contract.budget.max_sessions.get(), 14);
         assert_eq!(contract.budget.max_iterations.get(), 3);
@@ -500,7 +500,7 @@ mod tests {
         assert!(contract.locked);
         assert_eq!(
             serde_json::to_value(&contract.parent).unwrap(),
-            json!("FRK-3")
+            json!("CTV-3")
         );
         assert_eq!(
             contract

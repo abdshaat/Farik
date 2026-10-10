@@ -81,13 +81,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_retro_outside_a_retro_ceremony() {
         let project = TestProject::new("retro-outside", &a_team_of_three(|_| {}));
-        project.filed("FRK-1", "in_progress", "task", None);
+        project.filed("CTV-1", "in_progress", "task", None);
         let before = project.event_count();
 
         let refused = project
             .call(
                 "dev-a",
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "catervas_append_retro",
                 json!({ "text": "Keep the tasks small." }),
             )

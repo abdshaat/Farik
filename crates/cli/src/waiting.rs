@@ -200,7 +200,7 @@ mod tests {
 
     fn a_plan_waiting() -> Listed {
         Listed {
-            task_id: "FRK-1".parse::<TaskId>().expect("a task id"),
+            task_id: "CTV-1".parse::<TaskId>().expect("a task id"),
             kind: WaitingKind::MarketingPlan,
             agent_id: Some("kai".to_string()),
             title: "Spring launch".to_string(),
@@ -291,12 +291,12 @@ mod tests {
         assert_eq!(
             waiting.lines(),
             [
-                "FRK-1 waits: Theo set up an order from Acme: 59.98 USD: catervas order approve 23, or catervas order reject 23"
+                "CTV-1 waits: Theo set up an order from Acme: 59.98 USD: catervas order approve 23, or catervas order reject 23"
             ]
         );
         let json = waiting.json();
         assert_eq!(json["order"], 23);
-        assert_eq!(json["task_id"], "FRK-1");
+        assert_eq!(json["task_id"], "CTV-1");
         assert_eq!(
             json["command"],
             "catervas order approve 23, or catervas order reject 23"
@@ -315,12 +315,12 @@ mod tests {
         assert_eq!(
             waiting.lines(),
             [
-                "FRK-1 waits: Kai proposes a marketing plan: Spring launch: catervas marketing plan approve MP-1, or catervas marketing plan return MP-1 --reason <text>"
+                "CTV-1 waits: Kai proposes a marketing plan: Spring launch: catervas marketing plan approve MP-1, or catervas marketing plan return MP-1 --reason <text>"
             ]
         );
         let json = waiting.json();
         assert_eq!(json["plan"], "MP-1");
-        assert_eq!(json["task_id"], "FRK-1");
+        assert_eq!(json["task_id"], "CTV-1");
         assert_eq!(
             json["command"],
             "catervas marketing plan approve MP-1, or catervas marketing plan return MP-1 --reason <text>"
@@ -339,12 +339,12 @@ mod tests {
         assert_eq!(
             waiting.lines(),
             [
-                "FRK-1 waits: Kai wants to post on Instagram: catervas marketing post send 42, or catervas marketing post decline 42"
+                "CTV-1 waits: Kai wants to post on Instagram: catervas marketing post send 42, or catervas marketing post decline 42"
             ]
         );
         let json = waiting.json();
         assert_eq!(json["post"], 42);
-        assert_eq!(json["task_id"], "FRK-1");
+        assert_eq!(json["task_id"], "CTV-1");
         assert_eq!(
             json["command"],
             "catervas marketing post send 42, or catervas marketing post decline 42"
@@ -359,12 +359,12 @@ mod tests {
         assert_eq!(
             waiting.lines(),
             [
-                "FRK-1 waits: Kai asks to read shop.example: catervas site approve 17, or catervas site decline 17"
+                "CTV-1 waits: Kai asks to read shop.example: catervas site approve 17, or catervas site decline 17"
             ]
         );
         let json = waiting.json();
         assert_eq!(json["request"], 17);
-        assert_eq!(json["task_id"], "FRK-1");
+        assert_eq!(json["task_id"], "CTV-1");
         assert!(json.get("plan").is_none(), "a request names no plan");
         assert!(describe(&a_post_waiting()).json().get("request").is_none());
     }

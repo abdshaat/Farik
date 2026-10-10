@@ -849,8 +849,8 @@ mod tests {
                 detail: "No such file or directory (os error 2)".to_string(),
             },
             GitError::CommandFailed {
-                command: "branch catervas/FRK-1 main".to_string(),
-                stderr: "fatal: a branch named 'catervas/FRK-1' already exists".to_string(),
+                command: "branch catervas/CTV-1 main".to_string(),
+                stderr: "fatal: a branch named 'catervas/CTV-1' already exists".to_string(),
             },
         ]
         .iter()
@@ -861,7 +861,7 @@ mod tests {
             [
                 "there is no git repository here",
                 "git could not be run: No such file or directory (os error 2)",
-                "git branch catervas/FRK-1 main refused: fatal: a branch named 'catervas/FRK-1' already \
+                "git branch catervas/CTV-1 main refused: fatal: a branch named 'catervas/CTV-1' already \
                  exists",
             ]
         );
@@ -910,15 +910,15 @@ mod tests {
         assert_eq!(nowhere.default_branch(), Err(GitError::NotARepository));
         assert_eq!(nowhere.current_branch(), Err(GitError::NotARepository));
         assert_eq!(
-            nowhere.create_branch("catervas/FRK-1", "main"),
+            nowhere.create_branch("catervas/CTV-1", "main"),
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.create_worktree(Path::new("worktrees/FRK-1"), "catervas/FRK-1", "main"),
+            nowhere.create_worktree(Path::new("worktrees/CTV-1"), "catervas/CTV-1", "main"),
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.remove_worktree(Path::new("worktrees/FRK-1")),
+            nowhere.remove_worktree(Path::new("worktrees/CTV-1")),
             Err(GitError::NotARepository)
         );
         assert_eq!(
@@ -926,19 +926,19 @@ mod tests {
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.commit_count("main", "catervas/FRK-1"),
+            nowhere.commit_count("main", "catervas/CTV-1"),
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.changed_paths("main", "catervas/FRK-1"),
+            nowhere.changed_paths("main", "catervas/CTV-1"),
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.diff("main", "catervas/FRK-1"),
+            nowhere.diff("main", "catervas/CTV-1"),
             Err(GitError::NotARepository)
         );
         assert_eq!(
-            nowhere.merge("main", "catervas/FRK-1", "a message"),
+            nowhere.merge("main", "catervas/CTV-1", "a message"),
             Err(GitError::NotARepository)
         );
     }

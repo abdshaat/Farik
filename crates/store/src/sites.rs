@@ -411,7 +411,7 @@ mod tests {
         let asked = board
             .session(
                 at(10, 1),
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "kai",
                 "session-1",
                 "site.requested",
@@ -429,7 +429,7 @@ mod tests {
         for (minute, kind) in [(2, "site.declined"), (3, "site.approved")] {
             board.session(
                 at(10, minute),
-                Some("FRK-1"),
+                Some("CTV-1"),
                 "kai",
                 "session-1",
                 kind,
@@ -440,14 +440,14 @@ mod tests {
 
         board.put(
             at(10, 4),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "site.declined",
             json!({ "host": "shop.example", "request": asked, "note": "No." }),
         );
         board.put(
             at(10, 5),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "site.approved",
             json!({ "host": "shop.example", "request": asked, "note": "Yes." }),
@@ -466,11 +466,11 @@ mod tests {
     #[test]
     fn only_the_owner_declines_a_site() {
         let board = Board::new("sites-declined-by-owner");
-        let task = "FRK-1".parse().expect("a task id");
+        let task = "CTV-1".parse().expect("a task id");
         let declined = |host: &str| json!({ "host": host, "request": 1, "note": "No." });
         board.session(
             at(10, 1),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "kai",
             "session-1",
             "site.declined",
@@ -478,7 +478,7 @@ mod tests {
         );
         board.put(
             at(10, 2),
-            Some("FRK-1"),
+            Some("CTV-1"),
             Some("kai"),
             "site.declined",
             declined("forged-too.example"),
@@ -491,21 +491,21 @@ mod tests {
 
         board.put(
             at(10, 3),
-            Some("FRK-1"),
+            Some("CTV-1"),
             None,
             "site.declined",
             declined("shop.example"),
         );
         board.put(
             at(10, 4),
-            Some("FRK-2"),
+            Some("CTV-2"),
             None,
             "site.declined",
             declined("another-task.example"),
         );
         board.session(
             at(10, 5),
-            Some("FRK-1"),
+            Some("CTV-1"),
             "kai",
             "session-1",
             "site.approved",

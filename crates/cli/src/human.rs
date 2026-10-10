@@ -14,7 +14,7 @@ use crate::project::Project;
 use crate::start::{send, try_lock};
 
 /// `catervas stop`: the run, or with `target` one session, in the process driving the project. A
-/// `FRK-<n>` names the task's last session started and not ended.
+/// `CTV-<n>` names the task's last session started and not ended.
 ///
 /// # Errors
 ///

@@ -1040,7 +1040,7 @@ mod tests {
             Some((true, Some("Start small".to_string()), at(10)))
         );
         assert_eq!(first.agent_id, "kai");
-        assert_eq!(first.task_id.as_str(), "FRK-1");
+        assert_eq!(first.task_id.as_str(), "CTV-1");
         assert_eq!(first.proposed_at, at(9));
         assert_eq!(first.ended_at, None);
         // Everything the proposal said, with its figures read.
@@ -1233,7 +1233,7 @@ mod tests {
         assert_eq!(second.end_note, None, "the second end's note is not kept");
     }
 
-    /// An agent's post event of `kind`: Kai's, in her session, on FRK-1, with `change` applied to
+    /// An agent's post event of `kind`: Kai's, in her session, on CTV-1, with `change` applied to
     /// its body. Answers the post's number.
     fn kai_wrote(
         log: &EventLog,
@@ -1371,7 +1371,7 @@ mod tests {
         );
         let first = &posts[0];
         assert_eq!(first.agent_id, "kai");
-        assert_eq!(first.task_id.as_str(), "FRK-1");
+        assert_eq!(first.task_id.as_str(), "CTV-1");
         assert_eq!(first.channel, PostChannel::Instagram);
         assert_eq!(first.buffer_channel, "chan-1");
         assert_eq!(first.text, "We open on Wednesday.");

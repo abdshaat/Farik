@@ -57,7 +57,7 @@ pub(crate) fn register(harness: &Harness, connector: SessionConnector) -> String
         session_id: SESSION.to_string(),
         web: catervas_core::governor::sites::WebAccess::Open,
         agent_id: "kai".to_string(),
-        task_id: Some("FRK-1".parse().expect("a task id")),
+        task_id: Some("CTV-1".parse().expect("a task id")),
         purpose: SessionPurpose::Implement,
         in_reply_to: None,
         thread: None,
@@ -226,14 +226,14 @@ impl Ads {
         self.harness.project.record_by(
             Some("kai"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "marketing_plan.proposed",
             &body,
         );
         self.harness.project.record_by(
             None,
             approved_at,
-            "FRK-1",
+            "CTV-1",
             "marketing_plan.approved",
             &json!({ "plan": plan, "note": "" }),
         );
@@ -279,7 +279,7 @@ impl Ads {
         self.harness.project.record_by(
             Some("kai"),
             crate::tools::fixtures::at(),
-            "FRK-1",
+            "CTV-1",
             "marketing_campaign.created",
             &json!({
                 "plan": plan, "key": key, "account": crate::google_ads::dashed(customer),

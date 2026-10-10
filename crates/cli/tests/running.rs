@@ -19,8 +19,8 @@ use catervas_protocol::clock::MovableClock;
 use catervas_protocol::event::{EventBody, EventKind, SessionEndedBodyReason};
 use catervas_runtime::RuntimeAdapter;
 use catervas_runtime::recorded::fixtures::{
-    UsageThenWaitAdapter, accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1,
-    planning_ceremony_frk_1, refine_writes_task_frk_1, reply_to_a_mention, review_writes_note,
+    UsageThenWaitAdapter, accept_ctv_1, implement_finishes_ctv_1, plan_assigns_ctv_1,
+    planning_ceremony_ctv_1, refine_writes_task_ctv_1, reply_to_a_mention, review_writes_note,
     standup,
 };
 use catervas_runtime::sleep::Sleeper;
@@ -358,11 +358,11 @@ fn runs_a_task_to_acceptance_and_says_what_waits() {
 
     let ran = run_with(&repository.path, &["run"], |io| {
         io.engine = recorded(vec![
-            refine_writes_task_frk_1(),
-            plan_assigns_frk_1(),
-            implement_finishes_frk_1(),
+            refine_writes_task_ctv_1(),
+            plan_assigns_ctv_1(),
+            implement_finishes_ctv_1(),
             review_writes_note(),
-            accept_frk_1(),
+            accept_ctv_1(),
         ]);
     });
 
@@ -578,10 +578,10 @@ fn prints_the_wait() {
             io.clock = clock.clone();
             io.sleeper = Some(Arc::new(MovingSleeper(Arc::clone(&clock))));
             io.engine = recorded(vec![
-                plan_assigns_frk_1(),
-                implement_finishes_frk_1(),
+                plan_assigns_ctv_1(),
+                implement_finishes_ctv_1(),
                 review_writes_note(),
-                accept_frk_1(),
+                accept_ctv_1(),
             ]);
         }));
     });
@@ -629,7 +629,7 @@ fn plans_without_starting_work() {
     walked(&repository, &task, &["refining", "ready"]);
 
     let ran = run_with(&repository.path, &["plan"], |io| {
-        io.engine = recorded(vec![plan_assigns_frk_1()]);
+        io.engine = recorded(vec![plan_assigns_ctv_1()]);
     });
 
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
@@ -653,14 +653,14 @@ fn prints_a_sprint_line_for_a_planning_session() {
     assert_eq!(started.code, 0, "{}", started.err);
 
     let ran = run_with(&repository.path, &["plan"], |io| {
-        io.engine = recorded(vec![planning_ceremony_frk_1(), plan_assigns_frk_1()]);
+        io.engine = recorded(vec![planning_ceremony_ctv_1(), plan_assigns_ctv_1()]);
     });
 
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
     assert!(
         ran.out
             .lines()
-            .any(|line| line.starts_with("S1: ") && line.contains("S1 holds FRK-1")),
+            .any(|line| line.starts_with("S1: ") && line.contains("S1 holds CTV-1")),
         "{}",
         ran.out
     );
@@ -996,7 +996,7 @@ fn gives_a_session_the_connectors_kept_where_this_computer_keeps_them() {
             .insert("XDG_CONFIG_HOME".to_string(), config.display().to_string());
         io.engine = Engine::Given(Arc::new(move |daemon| {
             let adapter = Arc::new(RecordedAdapter::with_tools(
-                vec![refine_writes_task_frk_1()],
+                vec![refine_writes_task_ctv_1()],
                 tool_runner(daemon),
             ));
             *kept.lock().expect("not poisoned") = Some(Arc::clone(&adapter));

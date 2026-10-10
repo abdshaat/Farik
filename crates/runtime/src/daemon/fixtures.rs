@@ -1,5 +1,5 @@
 //! A daemon on a project the tools can be called on: the team of `pm`, `dev-a`, and `dev-b`, a
-//! task FRK-1 of `dev-a`'s whose allowed paths are `src/**`, and `dev-a`'s session registered with
+//! task CTV-1 of `dev-a`'s whose allowed paths are `src/**`, and `dev-a`'s session registered with
 //! the task's worktree as its directory. The recorded hook inputs are read with `/workspace`
 //! replaced by that worktree.
 
@@ -19,7 +19,7 @@ use crate::session::SessionPurpose;
 use crate::tools::fixtures::{TestProject, a_team_of_three, at, tiers_of};
 use crate::tools::{ToolDeps, tool_descriptors};
 
-/// The session of `dev-a`, on FRK-1.
+/// The session of `dev-a`, on CTV-1.
 pub(crate) const DEV_SESSION: &str = "3f1c2a9e-8b7d-4e6f-9a01-2b3c4d5e6f70";
 
 /// The recorded `PreToolUse` input of a `Read`.
@@ -34,7 +34,7 @@ pub(crate) fn every_catervas_tool() -> Vec<&'static str> {
     tool_descriptors().iter().map(|tool| tool.name).collect()
 }
 
-/// A project, the worktree of its task FRK-1, and a daemon with `dev-a`'s session on it.
+/// A project, the worktree of its task CTV-1, and a daemon with `dev-a`'s session on it.
 pub(crate) struct TestDaemon {
     pub(crate) project: TestProject,
     pub(crate) worktree: PathBuf,
@@ -45,16 +45,16 @@ impl TestDaemon {
     /// The daemon, with `before` run on the repository before the worktree is made from it.
     pub(crate) fn new(name: &str, before: impl FnOnce(&TempRepo)) -> Self {
         let project = TestProject::new(name, &a_team_of_three(|_| {}));
-        project.filed_with("FRK-1", "in_progress", "task", None, |wire| {
+        project.filed_with("CTV-1", "in_progress", "task", None, |wire| {
             wire["allowed_paths"] = json!(["src/**"]);
             wire["assignee"] = json!("dev-a");
         });
         before(&project.repo);
-        let worktree = project.repo.path.join(".catervas/local/worktrees/FRK-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
         project
             .repo
             .adapter()
-            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
             .expect("the worktree is made");
         let state = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
         // The user's state folder, beside the repository and outside it, as `~/.config/catervas` is.
@@ -67,7 +67,7 @@ impl TestDaemon {
             worktree,
             state,
         };
-        daemon.register(DEV_SESSION, "dev-a", Some("FRK-1"), DEFAULT_SESSION_LIMITS);
+        daemon.register(DEV_SESSION, "dev-a", Some("CTV-1"), DEFAULT_SESSION_LIMITS);
         daemon
     }
 
@@ -81,7 +81,7 @@ impl TestDaemon {
             self.project.repo.path.display()
         )));
         self.state = state;
-        self.register(DEV_SESSION, "dev-a", Some("FRK-1"), DEFAULT_SESSION_LIMITS);
+        self.register(DEV_SESSION, "dev-a", Some("CTV-1"), DEFAULT_SESSION_LIMITS);
         self
     }
 
@@ -104,7 +104,7 @@ impl TestDaemon {
             self.project.repo.path.display()
         )));
         self.state = state;
-        self.register(DEV_SESSION, "dev-a", Some("FRK-1"), DEFAULT_SESSION_LIMITS);
+        self.register(DEV_SESSION, "dev-a", Some("CTV-1"), DEFAULT_SESSION_LIMITS);
         self
     }
 
@@ -218,7 +218,7 @@ impl TestDaemon {
             session_id: DEV_SESSION.to_string(),
             web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             cwd: self.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
@@ -240,7 +240,7 @@ impl TestDaemon {
 
     /// A daemon on the same project whose log is a file that has lost its table of events after
     /// it was opened, so that every read of it is refused, with `proc`'s session registered on it
-    /// as `session-proc`, about FRK-1.
+    /// as `session-proc`, about CTV-1.
     pub(crate) fn with_a_log_that_cannot_be_read(&self) -> DaemonState {
         let path = self.project.repo.path.join(".catervas/local/unreadable.db");
         let log = Arc::new(open_event_log(&path, at()).expect("the log is made"));
@@ -263,7 +263,7 @@ impl TestDaemon {
             session_id: "session-proc".to_string(),
             web: self.web_of("proc"),
             agent_id: "proc".to_string(),
-            task_id: Some("FRK-1".parse().expect("a task id")),
+            task_id: Some("CTV-1".parse().expect("a task id")),
             cwd: self.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,

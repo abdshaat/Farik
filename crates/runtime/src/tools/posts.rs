@@ -579,13 +579,13 @@ mod tests {
                         .push(an_agent_wire("kai", "marketing_specialist"));
                 }),
             );
-            project.filed_with("FRK-1", "assigned", "task", None, |wire| {
+            project.filed_with("CTV-1", "assigned", "task", None, |wire| {
                 wire["allowed_paths"] = json!(["docs/marketing/**"]);
                 wire["assignee_role"] = json!("marketing_specialist");
                 wire["reviewer_role"] = json!("product_manager");
             });
             project.moved(
-                "FRK-1",
+                "CTV-1",
                 "assigned",
                 "in_progress",
                 &json!({ "assignee": "kai", "reviewer": "pm" }),
@@ -604,9 +604,9 @@ mod tests {
                     }))
                     .collect::<Vec<_>>()
             );
-            project.record_by(Some("kai"), at(), "FRK-1", "marketing_plan.proposed", &plan);
+            project.record_by(Some("kai"), at(), "CTV-1", "marketing_plan.proposed", &plan);
             if plan_approved {
-                project.plan_approved("FRK-1", "MP-1", "");
+                project.plan_approved("CTV-1", "MP-1", "");
             }
             let daemon = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
             daemon.set_state_dir(PathBuf::from(format!(
@@ -633,9 +633,9 @@ mod tests {
             }
         }
 
-        /// Kai's implement session of FRK-1, with the daemon that keeps her connection.
+        /// Kai's implement session of CTV-1, with the daemon that keeps her connection.
         fn context(&self, agent: &str) -> ToolContext {
-            let mut context = self.project.context(agent, Some("FRK-1"));
+            let mut context = self.project.context(agent, Some("CTV-1"));
             context.daemon = Arc::downgrade(&self.daemon);
             context
         }
@@ -722,7 +722,7 @@ mod tests {
         assert_eq!(ids.session_id.as_deref(), Some("session-1"));
         assert_eq!(
             ids.task_id.as_ref().map(|task| task.to_string()),
-            Some("FRK-1".to_string())
+            Some("CTV-1".to_string())
         );
         assert_eq!(
             answer["post"], events[0].envelope.seq,
@@ -835,7 +835,7 @@ mod tests {
             .project
             .deps
             .projections
-            .task(&"FRK-1".parse().expect("an id"))
+            .task(&"CTV-1".parse().expect("an id"))
             .expect("the board reads")
             .expect("a row");
         assert!(

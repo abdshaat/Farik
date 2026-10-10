@@ -12,7 +12,7 @@ use crate::git::{Git, integration_branch};
 /// A diff and what it touches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskDiff {
-    /// The unified diff, or for an epic its tasks' under a `# FRK-n` line each.
+    /// The unified diff, or for an epic its tasks' under a `# CTV-n` line each.
     pub diff: String,
     /// Every file it touches, once each, in the order it first touches them.
     pub files: Vec<String>,
@@ -29,7 +29,7 @@ pub struct TaskDiff {
 /// integration branch before integration, and after it against the first parent of the merge
 /// commit it was integrated by, or, when its integration was not a merge commit, against the
 /// integration branch, which then holds it all. An epic has no branch: its `children`, each with
-/// its history, give their diffs, those integrated only, in id order, each under a `# FRK-n` line.
+/// its history, give their diffs, those integrated only, in id order, each under a `# CTV-n` line.
 ///
 /// # Errors
 ///
@@ -102,12 +102,12 @@ fn accepted_changes(history: &[CatervasEvent]) -> Option<Vec<String>> {
     })
 }
 
-/// The number of a task id, which orders `FRK-9` before `FRK-10`.
+/// The number of a task id, which orders `CTV-9` before `CTV-10`.
 fn id_number(contract: &TaskContract) -> u64 {
     contract
         .id
         .as_str()
-        .trim_start_matches("FRK-")
+        .trim_start_matches("CTV-")
         .parse()
         .unwrap_or_default()
 }
@@ -160,7 +160,7 @@ fn branch_diff(
 }
 
 /// `diff` with the files it touches and the lines it adds and removes, counted inside its hunks
-/// only, so that neither a file's `---`/`+++` header nor a `# FRK-n` line counts.
+/// only, so that neither a file's `---`/`+++` header nor a `# CTV-n` line counts.
 fn counted(diff: String) -> TaskDiff {
     let (mut files, mut added, mut removed) = (Vec::<String>::new(), 0, 0);
     let mut in_hunk = false;
@@ -173,7 +173,7 @@ fn counted(diff: String) -> TaskDiff {
             }
         } else if line.starts_with("@@") {
             in_hunk = true;
-        } else if line.starts_with("# FRK-") {
+        } else if line.starts_with("# CTV-") {
             in_hunk = false;
         } else if in_hunk && line.starts_with('+') {
             added += 1;
@@ -206,7 +206,7 @@ mod tests {
 
     const FOLDER: &str = ".catervas/local/finance";
 
-    /// A Finance Specialist's task FRK-1, in its folder.
+    /// A Finance Specialist's task CTV-1, in its folder.
     fn a_finance_task() -> TaskContract {
         let mut wire = a_contract_wire();
         wire["assignee_role"] = json!("finance_specialist");
@@ -225,7 +225,7 @@ mod tests {
         validate_team(&a_team_wire()).expect("a team")
     }
 
-    /// FRK-1's move into `accepted`, which integrates nothing, naming `changed` when it is given.
+    /// CTV-1's move into `accepted`, which integrates nothing, naming `changed` when it is given.
     fn its_acceptance(changed: Option<&[&str]>) -> CatervasEvent {
         let mut wire = an_event_wire(EventKind::TaskTransitioned);
         wire["body"] = json!({
@@ -256,17 +256,17 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn an_accepted_tasks_changes_stay_its_own() {
-        // FRK-1 was accepted with `books.xlsx` changed; FRK-2 then changed `forecast.xlsx` in the
-        // same folder, which FRK-1's page does not show as its own.
+        // CTV-1 was accepted with `books.xlsx` changed; CTV-2 then changed `forecast.xlsx` in the
+        // same folder, which CTV-1's page does not show as its own.
         let repo = TempRepo::new("diff-accepted-own");
         let folder = repo.path.join(FOLDER);
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
-        copy_baseline(&folder, &"FRK-1".parse().expect("a task id")).expect("the copy");
+        copy_baseline(&folder, &"CTV-1".parse().expect("a task id")).expect("the copy");
         std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
         let accepted = its_acceptance(Some(&["books.xlsx"]));
         std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
-        std::fs::write(folder.join("books.xlsx"), "FRK-2's books").expect("written");
+        std::fs::write(folder.join("books.xlsx"), "CTV-2's books").expect("written");
 
         assert_eq!(files_of(&repo, &[accepted]), ["books.xlsx"]);
     }
@@ -280,7 +280,7 @@ mod tests {
         let folder = repo.path.join(FOLDER);
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
-        copy_baseline(&folder, &"FRK-1".parse().expect("a task id")).expect("the copy");
+        copy_baseline(&folder, &"CTV-1".parse().expect("a task id")).expect("the copy");
         std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
         std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
 

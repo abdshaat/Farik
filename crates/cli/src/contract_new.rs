@@ -233,7 +233,7 @@ fn hand_over(
     if asked.lock {
         return Err(
             "--lock waits for the Product Manager's contract, which the process driving \
-                    this project writes: run catervas contract lock FRK-<n> once it has"
+                    this project writes: run catervas contract lock CTV-<n> once it has"
                 .to_string(),
         );
     }

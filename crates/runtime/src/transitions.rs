@@ -1826,10 +1826,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_status_and_people_from_the_board_not_the_file() {
         let project = Project::new("board-not-file", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "draft");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "draft");
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "refining",
             "ready",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b", "iteration": 1 }),
@@ -1837,7 +1837,7 @@ mod tests {
         );
         let context = project.context(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Assigned,
                 TransitionActor::ProductManager,
                 Some("maya"),
@@ -1854,33 +1854,33 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn counts_readiness_failures_since_the_task_last_entered_refining() {
         let project = Project::new("readiness-count", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "draft");
-        project.evaluated("FRK-1", false);
-        project.evaluated("FRK-1", false);
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "draft");
+        project.evaluated("CTV-1", false);
+        project.evaluated("CTV-1", false);
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "escalated",
             "refining",
             &json!({ "actor": "human", "requested_by": "human" }),
             at(10),
         );
-        project.evaluated("FRK-1", true);
-        project.evaluated("FRK-1", false);
+        project.evaluated("CTV-1", true);
+        project.evaluated("CTV-1", false);
         let context = project.context(
-            &a_request("FRK-1", TaskStatus::Ready, TransitionActor::Governor, None),
+            &a_request("CTV-1", TaskStatus::Ready, TransitionActor::Governor, None),
             &TransitionAsk::default(),
         );
         assert_eq!(context.readiness_failed_attempts, 1);
 
         // A failed Definition of Done is not a readiness failure.
         project.record(
-            "FRK-1",
+            "CTV-1",
             "contract.evaluated",
             &json!({ "gate": "definition_of_done", "passed": false, "failures": [] }),
             at(10),
         );
-        let request = a_request("FRK-1", TaskStatus::Ready, TransitionActor::Governor, None);
+        let request = a_request("CTV-1", TaskStatus::Ready, TransitionActor::Governor, None);
         assert_eq!(
             project
                 .context(&request, &TransitionAsk::default())
@@ -1890,12 +1890,12 @@ mod tests {
 
         // A re-triage starts refining over, as a move into refining does.
         project.record(
-            "FRK-1",
+            "CTV-1",
             "request.triaged",
             &json!({ "size": "large", "reason": "Two deliverables.", "triaged_by": "maya" }),
             at(11),
         );
-        project.evaluated("FRK-1", false);
+        project.evaluated("CTV-1", false);
         assert_eq!(
             project
                 .context(&request, &TransitionAsk::default())
@@ -1908,19 +1908,19 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_an_assignment_from_the_ask_and_the_team() {
         let project = Project::new("assignment", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "ready");
-        project.created("FRK-2", "ready");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "ready");
+        project.created("CTV-2", "ready");
         project.moved(
-            "FRK-2",
+            "CTV-2",
             "ready",
             "assigned",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
             at(10),
         );
-        project.created("FRK-3", "ready");
+        project.created("CTV-3", "ready");
         project.moved(
-            "FRK-3",
+            "CTV-3",
             "verifying",
             "accepted",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -1928,7 +1928,7 @@ mod tests {
         );
         let context = project.context(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Assigned,
                 TransitionActor::ProductManager,
                 Some("maya"),
@@ -1992,7 +1992,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_second_finance_task_waits() {
         let request = a_request(
-            "FRK-2",
+            "CTV-2",
             TaskStatus::Assigned,
             TransitionActor::ProductManager,
             Some("maya"),
@@ -2009,8 +2009,8 @@ mod tests {
             "escalated",
         ] {
             let project = Project::new(&format!("folder-busy-{held}"), a_finance_team(), at(12));
-            a_finance_task(&project, "FRK-1", Some(held));
-            a_finance_task(&project, "FRK-2", None);
+            a_finance_task(&project, "CTV-1", Some(held));
+            a_finance_task(&project, "CTV-2", None);
             let assignment = project
                 .context(&request, &second)
                 .assignment
@@ -2030,8 +2030,8 @@ mod tests {
         // Over, it holds nothing, and the second is assigned.
         for ended in ["accepted", "cancelled"] {
             let project = Project::new(&format!("folder-free-{ended}"), a_finance_team(), at(12));
-            a_finance_task(&project, "FRK-1", Some(ended));
-            a_finance_task(&project, "FRK-2", None);
+            a_finance_task(&project, "CTV-1", Some(ended));
+            a_finance_task(&project, "CTV-2", None);
             let assignment = project
                 .context(&request, &second)
                 .assignment
@@ -2045,28 +2045,28 @@ mod tests {
         // Another folder's, or none, is not held by it: a Developer's open task, and the task
         // asked about itself.
         let project = Project::new("folder-other", a_finance_team(), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "ready");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "ready");
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "ready",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
             at(10),
         );
-        a_finance_task(&project, "FRK-2", None);
+        a_finance_task(&project, "CTV-2", None);
         let assignment = project
             .context(&request, &second)
             .assignment
             .expect("an assignment");
         assert!(!assignment.private_folder_busy);
         let own = a_request(
-            "FRK-2",
+            "CTV-2",
             TaskStatus::Assigned,
             TransitionActor::ProductManager,
             Some("maya"),
         );
-        a_finance_task(&project, "FRK-3", Some("in_progress"));
+        a_finance_task(&project, "CTV-3", Some("in_progress"));
         assert!(
             project
                 .context(&own, &second)
@@ -2075,7 +2075,7 @@ mod tests {
                 .private_folder_busy
         );
         let mine = a_request(
-            "FRK-3",
+            "CTV-3",
             TaskStatus::Assigned,
             TransitionActor::ProductManager,
             Some("maya"),
@@ -2138,7 +2138,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn the_folders_do_not_wait_for_each_other() {
         let request = a_request(
-            "FRK-2",
+            "CTV-2",
             TaskStatus::Assigned,
             TransitionActor::ProductManager,
             Some("maya"),
@@ -2159,8 +2159,8 @@ mod tests {
                 a_procurement_team(),
                 at(12),
             );
-            a_finance_task(&project, "FRK-1", Some(held));
-            a_procurement_task(&project, "FRK-2", None);
+            a_finance_task(&project, "CTV-1", Some(held));
+            a_procurement_task(&project, "CTV-2", None);
             assert!(!busy(&project), "{held}");
             assert!(
                 matches!(project.ask(&request, &second), TransitionOutcome::Moved(_)),
@@ -2171,8 +2171,8 @@ mod tests {
                 a_procurement_team(),
                 at(12),
             );
-            a_procurement_task(&project, "FRK-1", Some(held));
-            a_finance_task(&project, "FRK-2", None);
+            a_procurement_task(&project, "CTV-1", Some(held));
+            a_finance_task(&project, "CTV-2", None);
             let to_finance = project
                 .context(&request, &assigning("fin-1", "maya"))
                 .assignment
@@ -2190,8 +2190,8 @@ mod tests {
             "escalated",
         ] {
             let project = Project::new(&format!("proc-busy-{held}"), a_procurement_team(), at(12));
-            a_procurement_task(&project, "FRK-1", Some(held));
-            a_procurement_task(&project, "FRK-2", None);
+            a_procurement_task(&project, "CTV-1", Some(held));
+            a_procurement_task(&project, "CTV-2", None);
             let assignment = project
                 .context(&request, &second)
                 .assignment
@@ -2212,8 +2212,8 @@ mod tests {
         // Over, the first holds nothing.
         for ended in ["accepted", "cancelled"] {
             let project = Project::new(&format!("proc-free-{ended}"), a_procurement_team(), at(12));
-            a_procurement_task(&project, "FRK-1", Some(ended));
-            a_procurement_task(&project, "FRK-2", None);
+            a_procurement_task(&project, "CTV-1", Some(ended));
+            a_procurement_task(&project, "CTV-2", None);
             assert!(!busy(&project), "{ended}");
         }
     }
@@ -2222,21 +2222,21 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_procurement_task_ends_at_accepted() {
         let project = Project::new("procurement-accepted", a_procurement_team(), at(12));
-        a_procurement_task(&project, "FRK-1", Some("in_progress"));
+        a_procurement_task(&project, "CTV-1", Some("in_progress"));
         let folder = project.repo.path.join(".catervas/local/procurement");
         std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
         std::fs::write(folder.join("vendors.xlsx"), "register").expect("written");
         std::fs::write(folder.join("evaluations/old.md"), "an old comparison").expect("written");
-        let task: catervas_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        let task: catervas_core::contract::TaskId = "CTV-1".parse().expect("a task id");
         // Assignment's copy holds the notes as well as the workbooks (a guard: it copies all).
         catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
-        assert!(folder.join(".history/FRK-1/vendors.xlsx").is_file());
-        assert!(folder.join(".history/FRK-1/evaluations/old.md").is_file());
+        assert!(folder.join(".history/CTV-1/vendors.xlsx").is_file());
+        assert!(folder.join(".history/CTV-1/evaluations/old.md").is_file());
         // The task writes its comparison and edits the register.
         std::fs::write(folder.join("evaluations/email-sending.md"), "# Email").expect("written");
         std::fs::write(folder.join("vendors.xlsx"), "register, edited").expect("written");
         project.record(
-            "FRK-1",
+            "CTV-1",
             "criterion.recorded",
             &json!({
                 "criterion_id": "C1",
@@ -2248,7 +2248,7 @@ mod tests {
             at(10),
         );
         let verifying = a_request(
-            "FRK-1",
+            "CTV-1",
             TaskStatus::Verifying,
             TransitionActor::Assignee,
             Some("proc-1"),
@@ -2280,14 +2280,14 @@ mod tests {
         );
 
         // A task that depends on it, and an agent to give it to, wait for it.
-        a_procurement_task(&project, "FRK-2", None);
-        project.file("FRK-2", |wire| {
+        a_procurement_task(&project, "CTV-2", None);
+        project.file("CTV-2", |wire| {
             as_a_procurement_task(wire);
-            wire["dependencies"] = json!(["FRK-1"]);
+            wire["dependencies"] = json!(["CTV-1"]);
         });
         let assigning_second = || {
             let request = a_request(
-                "FRK-2",
+                "CTV-2",
                 TaskStatus::Assigned,
                 TransitionActor::ProductManager,
                 Some("maya"),
@@ -2303,10 +2303,10 @@ mod tests {
         );
 
         // Accepted, it is finished: nothing is integrated, and its dependant may be assigned.
-        governor_result(&project, "FRK-1", "C1");
-        note(&project, "FRK-1", "completion", "proc-1");
-        note(&project, "FRK-1", "review", "maya");
-        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        governor_result(&project, "CTV-1", "C1");
+        note(&project, "CTV-1", "completion", "proc-1");
+        note(&project, "CTV-1", "review", "maya");
+        let outcome = project.ask(&accepting("CTV-1"), &TransitionAsk::default());
         let TransitionOutcome::Moved(decision) = outcome else {
             panic!("the comparison is in the folder: {outcome:?}");
         };
@@ -2322,16 +2322,16 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_task_holds_the_folder_by_its_role_not_by_its_agent() {
-        // FRK-1's agent is no longer on the team, so the team gives it no role; the task's copy of
+        // CTV-1's agent is no longer on the team, so the team gives it no role; the task's copy of
         // the folder and its work are still there, and it is the task's own role that holds them.
         let project = Project::new("folder-agent-left", a_finance_team(), at(12));
-        a_finance_task(&project, "FRK-1", None);
+        a_finance_task(&project, "CTV-1", None);
         let people = json!({ "assignee": "fin-gone", "reviewer": "maya" });
-        project.moved("FRK-1", "ready", "assigned", &people, at(10));
-        project.moved("FRK-1", "assigned", "in_progress", &people, at(10));
-        a_finance_task(&project, "FRK-2", None);
+        project.moved("CTV-1", "ready", "assigned", &people, at(10));
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(10));
+        a_finance_task(&project, "CTV-2", None);
         let request = a_request(
-            "FRK-2",
+            "CTV-2",
             TaskStatus::Assigned,
             TransitionActor::ProductManager,
             Some("maya"),
@@ -2348,8 +2348,8 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn a_task_waiting_in_the_backlog_still_holds_the_folder() {
-        // FRK-1 was in progress when its sprint ended and was left in the Backlog with its agent.
-        // It waits and fills no one's limit, but its copy of the folder is kept, so FRK-2, in the
+        // CTV-1 was in progress when its sprint ended and was left in the Backlog with its agent.
+        // It waits and fills no one's limit, but its copy of the folder is kept, so CTV-2, in the
         // next sprint, still waits for the folder.
         let project = Project::new(
             "folder-backlog",
@@ -2365,20 +2365,20 @@ mod tests {
             }),
             at(12),
         );
-        a_finance_task(&project, "FRK-1", Some("in_progress"));
-        a_finance_task(&project, "FRK-2", None);
-        project.open_sprint("S1", 100.0, &["FRK-1"]);
+        a_finance_task(&project, "CTV-1", Some("in_progress"));
+        a_finance_task(&project, "CTV-2", None);
+        project.open_sprint("S1", 100.0, &["CTV-1"]);
         project.append_wire(&json!({
             "seq": 1,
             "recorded_at": at(11).to_rfc3339(),
             "team_id": "catervas",
             "project_id": "catervas",
             "kind": "sprint.ended",
-            "body": { "sprint_id": "S1", "ended_by": "human", "left": ["FRK-1"], "backlog": true },
+            "body": { "sprint_id": "S1", "ended_by": "human", "left": ["CTV-1"], "backlog": true },
         }));
-        project.open_sprint("S2", 100.0, &["FRK-2"]);
+        project.open_sprint("S2", 100.0, &["CTV-2"]);
         let request = a_request(
-            "FRK-2",
+            "CTV-2",
             TaskStatus::Assigned,
             TransitionActor::ProductManager,
             Some("maya"),
@@ -2396,7 +2396,7 @@ mod tests {
                 .board()
                 .expect("the board")
                 .iter()
-                .any(|row| { row.task_id.as_str() == "FRK-1" && row.left_for_the_backlog })
+                .any(|row| { row.task_id.as_str() == "CTV-1" && row.left_for_the_backlog })
         );
         assert!(assignment.private_folder_busy);
     }
@@ -2409,18 +2409,18 @@ mod tests {
             a_team(|wire| wire["budgets"] = json!({})),
             at(12),
         );
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "ready");
-        project.spent("FRK-1", 1000.0);
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "ready");
+        project.spent("CTV-1", 1000.0);
         let readiness = project.context(
-            &a_request("FRK-1", TaskStatus::Ready, TransitionActor::Governor, None),
+            &a_request("CTV-1", TaskStatus::Ready, TransitionActor::Governor, None),
             &TransitionAsk::default(),
         );
         let left = readiness.readiness.remaining_sprint_budget_usd;
         assert!(left.is_infinite() && left > 0.0, "{left}");
         let context = project.context(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Assigned,
                 TransitionActor::ProductManager,
                 Some("maya"),
@@ -2438,9 +2438,9 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_the_policy_that_asks_the_human_for_every_contract() {
         let project = Project::new("policy", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "refining");
-        let request = a_request("FRK-1", TaskStatus::Ready, TransitionActor::Governor, None);
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "refining");
+        let request = a_request("CTV-1", TaskStatus::Ready, TransitionActor::Governor, None);
         let all = a_team(|wire| wire["policy"]["human_accepts_contracts"] = json!("all"));
         let context = project
             .transitions
@@ -2459,15 +2459,15 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_work_from_the_tasks_worktree() {
         let project = Project::new("worktree-work", a_team(|_| {}), at(12));
-        for task in ["FRK-1", "FRK-2"] {
+        for task in ["CTV-1", "CTV-2"] {
             project.file(task, |_| {});
             project.created(task, "in_progress");
         }
-        let worktree = project.repo.path.join(".catervas/local/worktrees/FRK-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
         project
             .repo
             .adapter()
-            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
             .expect("the worktree is made");
         std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
         std::fs::write(worktree.join("src/login/form.rs"), "fn form() {}\n").expect("written");
@@ -2476,7 +2476,7 @@ mod tests {
 
         let context = project.context(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Verifying,
                 TransitionActor::Assignee,
                 Some("dev-a"),
@@ -2493,7 +2493,7 @@ mod tests {
         std::fs::write(worktree.join("scratch.txt"), "not committed\n").expect("written");
         let dirty = project.context(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Verifying,
                 TransitionActor::Assignee,
                 Some("dev-a"),
@@ -2504,7 +2504,7 @@ mod tests {
 
         let context = project.context(
             &a_request(
-                "FRK-2",
+                "CTV-2",
                 TaskStatus::Verifying,
                 TransitionActor::Assignee,
                 Some("dev-a"),
@@ -2520,14 +2520,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_the_blocked_time_from_the_last_move_into_blocked() {
         let project = Project::new("blocked-time", a_team(|_| {}), at(15));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "in_progress");
-        project.moved("FRK-1", "in_progress", "blocked", &json!({}), at(10));
-        project.moved("FRK-1", "blocked", "in_progress", &json!({}), at(11));
-        let blocked = project.moved("FRK-1", "in_progress", "blocked", &json!({}), at(12));
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "in_progress");
+        project.moved("CTV-1", "in_progress", "blocked", &json!({}), at(10));
+        project.moved("CTV-1", "blocked", "in_progress", &json!({}), at(11));
+        let blocked = project.moved("CTV-1", "in_progress", "blocked", &json!({}), at(12));
         let context = project.context(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Escalated,
                 TransitionActor::Governor,
                 None,
@@ -2542,14 +2542,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_children_from_the_board() {
         let project = Project::new("children", a_team(|_| {}), at(12));
-        project.file("FRK-1", |wire| wire["kind"] = json!("epic"));
-        project.created_under("FRK-1", "in_progress", "epic", None);
-        project.created_under("FRK-2", "accepted", "task", Some("FRK-1"));
-        project.created_under("FRK-3", "ready", "task", Some("FRK-1"));
-        project.created("FRK-4", "ready");
+        project.file("CTV-1", |wire| wire["kind"] = json!("epic"));
+        project.created_under("CTV-1", "in_progress", "epic", None);
+        project.created_under("CTV-2", "accepted", "task", Some("CTV-1"));
+        project.created_under("CTV-3", "ready", "task", Some("CTV-1"));
+        project.created("CTV-4", "ready");
         let context = project.context(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Verifying,
                 TransitionActor::Assignee,
                 Some("maya"),
@@ -2564,8 +2564,8 @@ mod tests {
         assert_eq!(
             children,
             vec![
-                ("FRK-2".to_string(), TaskStatus::Accepted),
-                ("FRK-3".to_string(), TaskStatus::Ready),
+                ("CTV-2".to_string(), TaskStatus::Accepted),
+                ("CTV-3".to_string(), TaskStatus::Ready),
             ]
         );
     }
@@ -2574,25 +2574,25 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_the_epics_remaining_budget_and_the_sprints_remainder() {
         let project = Project::new("epic-budget", a_team(|_| {}), at(12));
-        project.file("FRK-1", |wire| {
+        project.file("CTV-1", |wire| {
             wire["kind"] = json!("epic");
             wire["budget"]["max_cost_usd"] = json!(12);
             wire["allowed_paths"] = json!(["src/**", "docs/**"]);
         });
-        project.created_under("FRK-1", "in_progress", "epic", None);
-        project.spent("FRK-1", 2.5);
+        project.created_under("CTV-1", "in_progress", "epic", None);
+        project.spent("CTV-1", 2.5);
         for (task, status, max) in [
-            ("FRK-2", "refining", 1),
-            ("FRK-3", "ready", 3),
-            ("FRK-4", "cancelled", 4),
+            ("CTV-2", "refining", 1),
+            ("CTV-3", "ready", 3),
+            ("CTV-4", "cancelled", 4),
         ] {
             project.file(task, |wire| {
-                wire["parent"] = json!("FRK-1");
+                wire["parent"] = json!("CTV-1");
                 wire["budget"]["max_cost_usd"] = json!(max);
             });
-            project.created_under(task, status, "task", Some("FRK-1"));
+            project.created_under(task, status, "task", Some("CTV-1"));
         }
-        let request = a_request("FRK-2", TaskStatus::Ready, TransitionActor::Governor, None);
+        let request = a_request("CTV-2", TaskStatus::Ready, TransitionActor::Governor, None);
         let context = project.context(&request, &TransitionAsk::default());
         let parent = context.readiness.parent.expect("the epic");
         // Twelve, less the epic's own 2.50, less the live sibling's 3; not the cancelled one's
@@ -2612,13 +2612,13 @@ mod tests {
         assert!(left.is_infinite() && left > 0.0, "{left}");
 
         // In S1, to what S1 has left: twenty, less the 2.50 spent in it.
-        project.open_sprint("S1", 20.0, &["FRK-1", "FRK-2"]);
-        project.spent("FRK-1", 2.5);
+        project.open_sprint("S1", 20.0, &["CTV-1", "CTV-2"]);
+        project.spent("CTV-1", 2.5);
         let context = project.context(&request, &TransitionAsk::default());
         assert!((context.readiness.remaining_sprint_budget_usd - 17.5).abs() < 1e-9);
 
         // A sprint spent past its budget leaves nothing, not less than nothing.
-        project.spent("FRK-1", 30.0);
+        project.spent("CTV-1", 30.0);
         let context = project.context(&request, &TransitionAsk::default());
         assert!(context.readiness.remaining_sprint_budget_usd.abs() < 1e-12);
         assert!(context.readiness.remaining_sprint_budget_usd >= 0.0);
@@ -2629,20 +2629,20 @@ mod tests {
     fn binds_the_summary_to_the_plans_a_human_approves() {
         // The fixture's team asks the human under `high_risk`.
         let project = Project::new("readiness-summary", a_team(|_| {}), at(12));
-        project.file("FRK-1", |wire| wire["risk"] = json!("high"));
-        project.created("FRK-1", "refining");
-        project.file("FRK-2", |wire| {
+        project.file("CTV-1", |wire| wire["risk"] = json!("high"));
+        project.created("CTV-1", "refining");
+        project.file("CTV-2", |wire| {
             wire["kind"] = json!("epic");
             wire["reviewer_role"] = json!("human");
         });
-        project.created_under("FRK-2", "refining", "epic", None);
-        project.file("FRK-3", |_| {});
-        project.created("FRK-3", "refining");
-        project.file("FRK-4", |wire| {
+        project.created_under("CTV-2", "refining", "epic", None);
+        project.file("CTV-3", |_| {});
+        project.created("CTV-3", "refining");
+        project.file("CTV-4", |wire| {
             wire["risk"] = json!("high");
             wire["summary"] = json!("A login page, so that people can sign in to the app.");
         });
-        project.created("FRK-4", "refining");
+        project.created("CTV-4", "refining");
         let misses_its_summary = |task: &str, team: &Team| {
             let context = project
                 .transitions
@@ -2663,33 +2663,33 @@ mod tests {
                 .any(|failure| failure.rule == ReadinessRule::SummaryPresent)
         };
 
-        assert!(misses_its_summary("FRK-1", &project.team));
-        assert!(misses_its_summary("FRK-2", &project.team));
-        assert!(!misses_its_summary("FRK-3", &project.team));
-        assert!(!misses_its_summary("FRK-4", &project.team));
+        assert!(misses_its_summary("CTV-1", &project.team));
+        assert!(misses_its_summary("CTV-2", &project.team));
+        assert!(!misses_its_summary("CTV-3", &project.team));
+        assert!(!misses_its_summary("CTV-4", &project.team));
         // Under `all` the human approves every plan, the low risk one too.
         let all = a_team(|wire| wire["policy"]["human_accepts_contracts"] = json!("all"));
-        assert!(misses_its_summary("FRK-3", &all));
+        assert!(misses_its_summary("CTV-3", &all));
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn checks_readiness_against_the_contracts_own_sprint() {
         let project = Project::new("readiness-sprint", a_team(|_| {}), at(12));
-        project.file("FRK-1", |wire| {
+        project.file("CTV-1", |wire| {
             wire["kind"] = json!("epic");
             wire["budget"]["max_cost_usd"] = json!(12);
         });
-        project.created_under("FRK-1", "in_progress", "epic", None);
-        project.file("FRK-2", |wire| {
-            wire["parent"] = json!("FRK-1");
+        project.created_under("CTV-1", "in_progress", "epic", None);
+        project.file("CTV-2", |wire| {
+            wire["parent"] = json!("CTV-1");
             wire["budget"]["max_cost_usd"] = json!(3);
         });
-        project.created_under("FRK-2", "refining", "task", Some("FRK-1"));
-        project.file("FRK-3", |wire| wire["budget"]["max_cost_usd"] = json!(3));
-        project.created("FRK-3", "refining");
-        project.open_sprint("S1", 10.0, &["FRK-1", "FRK-2"]);
-        project.spent("FRK-1", 8.0);
+        project.created_under("CTV-2", "refining", "task", Some("CTV-1"));
+        project.file("CTV-3", |wire| wire["budget"]["max_cost_usd"] = json!(3));
+        project.created("CTV-3", "refining");
+        project.open_sprint("S1", 10.0, &["CTV-1", "CTV-2"]);
+        project.spent("CTV-1", 8.0);
         let refuses_on_the_sprint = |task: &str, team: &Team| {
             let context = project
                 .transitions
@@ -2711,12 +2711,12 @@ mod tests {
         };
 
         // The breakdown's task is in S1, which has two dollars left.
-        assert!(refuses_on_the_sprint("FRK-2", &project.team));
+        assert!(refuses_on_the_sprint("CTV-2", &project.team));
         // A contract in no sprint is not held to the open one's budget.
-        assert!(!refuses_on_the_sprint("FRK-3", &project.team));
+        assert!(!refuses_on_the_sprint("CTV-3", &project.team));
         // Nor to what is left of the day, which `spent` enforces instead.
         let poor = a_team(|wire| wire["budgets"]["daily_usd"] = json!(9));
-        assert!(!refuses_on_the_sprint("FRK-3", &poor));
+        assert!(!refuses_on_the_sprint("CTV-3", &poor));
     }
 
     #[test]
@@ -2731,31 +2731,31 @@ mod tests {
             wire["policy"]["judgment"] = json!({ "required": "always" });
         });
         let project = Project::new("context-sources", team, at(12));
-        project.file("FRK-1", |wire| {
+        project.file("CTV-1", |wire| {
             wire["assignee_role"] = json!("scrum_master");
-            wire["dependencies"] = json!(["FRK-2", "FRK-9"]);
+            wire["dependencies"] = json!(["CTV-2", "CTV-9"]);
         });
-        project.created("FRK-1", "ready");
-        project.spent("FRK-1", 1.5);
-        project.created("FRK-2", "in_progress");
-        project.created("FRK-3", "ready");
+        project.created("CTV-1", "ready");
+        project.spent("CTV-1", 1.5);
+        project.created("CTV-2", "in_progress");
+        project.created("CTV-3", "ready");
         project.moved(
-            "FRK-3",
+            "CTV-3",
             "ready",
             "assigned",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
             at(10),
         );
-        project.created("FRK-4", "ready");
+        project.created("CTV-4", "ready");
         project.moved(
-            "FRK-4",
+            "CTV-4",
             "assigned",
             "cancelled",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
             at(10),
         );
         let request = a_request(
-            "FRK-1",
+            "CTV-1",
             TaskStatus::Assigned,
             TransitionActor::ScrumMaster,
             Some("sam"),
@@ -2765,7 +2765,7 @@ mod tests {
         assert!(!context.triaged);
         assert_eq!(
             context.readiness.dependency_statuses,
-            [("FRK-2".to_string(), TaskStatus::InProgress)]
+            [("CTV-2".to_string(), TaskStatus::InProgress)]
                 .into_iter()
                 .collect()
         );
@@ -2794,14 +2794,14 @@ mod tests {
         assert_eq!(
             assignment.dependencies,
             vec![DependencyState {
-                task_id: "FRK-2".to_string(),
+                task_id: "CTV-2".to_string(),
                 status: TaskStatus::InProgress,
                 integrated: false,
             }]
         );
 
         project.record(
-            "FRK-1",
+            "CTV-1",
             "request.triaged",
             &json!({ "size": "small", "reason": "One deliverable.", "triaged_by": "maya" }),
             at(11),
@@ -2835,12 +2835,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_a_dependency_as_integrated_once_merged() {
         let project = Project::new("dependency-integrated", a_team(|_| {}), at(12));
-        project.file("FRK-2", |wire| wire["dependencies"] = json!(["FRK-1"]));
-        project.created("FRK-1", "verifying");
-        project.created("FRK-2", "ready");
-        project.moved("FRK-1", "verifying", "accepted", &json!({}), at(10));
+        project.file("CTV-2", |wire| wire["dependencies"] = json!(["CTV-1"]));
+        project.created("CTV-1", "verifying");
+        project.created("CTV-2", "ready");
+        project.moved("CTV-1", "verifying", "accepted", &json!({}), at(10));
         let request = a_request(
-            "FRK-2",
+            "CTV-2",
             TaskStatus::Assigned,
             TransitionActor::ProductManager,
             Some("maya"),
@@ -2855,14 +2855,14 @@ mod tests {
         assert_eq!(
             dependencies(&project),
             vec![DependencyState {
-                task_id: "FRK-1".to_string(),
+                task_id: "CTV-1".to_string(),
                 status: TaskStatus::Accepted,
                 integrated: false,
             }]
         );
 
         project.record(
-            "FRK-1",
+            "CTV-1",
             "task.integrated",
             &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
             at(11),
@@ -2870,7 +2870,7 @@ mod tests {
         assert_eq!(
             dependencies(&project),
             vec![DependencyState {
-                task_id: "FRK-1".to_string(),
+                task_id: "CTV-1".to_string(),
                 status: TaskStatus::Accepted,
                 integrated: true,
             }]
@@ -2881,22 +2881,22 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_the_integration_branch_from_the_policy_and_only_for_a_worktree() {
         let project = Project::new("integration-branch", a_team(|_| {}), at(12));
-        for task in ["FRK-1", "FRK-2"] {
+        for task in ["CTV-1", "CTV-2"] {
             project.file(task, |_| {});
             project.created(task, "in_progress");
         }
-        let worktree = project.repo.path.join(".catervas/local/worktrees/FRK-1");
+        let worktree = project.repo.path.join(".catervas/local/worktrees/CTV-1");
         project
             .repo
             .adapter()
-            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
+            .create_worktree(&worktree, &project.branch("CTV-1"), "main")
             .expect("the worktree is made");
         std::fs::write(worktree.join("form.rs"), "fn form() {}\n").expect("written");
         git_in(&worktree, &["add", "-A"]);
         git_in(&worktree, &["commit", "-m", "the form"]);
         git_in(
             &project.repo.path,
-            &["branch", "develop", &project.branch("FRK-1")],
+            &["branch", "develop", &project.branch("CTV-1")],
         );
         // With no remote and a detached head, git can name no default branch.
         git_in(&project.repo.path, &["checkout", "--detach"]);
@@ -2912,18 +2912,18 @@ mod tests {
         let develop = a_team(|wire| wire["policy"]["integration_branch"] = json!("develop"));
         let context = project
             .transitions
-            .context(&verifying("FRK-1"), &TransitionAsk::default(), &develop)
+            .context(&verifying("CTV-1"), &TransitionAsk::default(), &develop)
             .expect("the policy's branch needs no default");
         assert_eq!(context.work.commits, 0);
         assert!(context.done.changed_paths.is_empty());
 
         // A task with no worktree asks git nothing, so the missing default is no error.
-        project.context(&verifying("FRK-2"), &TransitionAsk::default());
+        project.context(&verifying("CTV-2"), &TransitionAsk::default());
         assert!(
             project
                 .transitions
                 .context(
-                    &verifying("FRK-1"),
+                    &verifying("CTV-1"),
                     &TransitionAsk::default(),
                     &project.team
                 )
@@ -2967,11 +2967,11 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn moves_a_ready_task_to_assigned_and_records_it() {
         let project = Project::new("assign", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "ready");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "ready");
         let outcome = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Assigned,
                 TransitionActor::ProductManager,
                 Some("maya"),
@@ -2985,7 +2985,7 @@ mod tests {
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
-        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let moves = project.events("CTV-1", &[EventKind::TaskTransitioned]);
         assert_eq!(moves.len(), 1);
         assert_eq!(moves[0].envelope.ids.session_id.as_deref(), Some("s-7"));
         let body = moved_body(&moves[0]);
@@ -2995,14 +2995,14 @@ mod tests {
         assert_eq!(moves[0].envelope.ids.agent_id.as_deref(), Some("maya"));
         let file = project
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the file reads");
         assert_eq!(file.status, TaskStatus::Assigned);
         assert_eq!(file.assignee.as_deref(), Some("dev-a"));
         assert_eq!(file.updated_at, Some(at(12)));
         let row = project
             .projections
-            .task(&"FRK-1".parse().expect("a task id"))
+            .task(&"CTV-1".parse().expect("a task id"))
             .expect("the board reads")
             .expect("on the board");
         assert_eq!(row.status, TaskStatus::Assigned);
@@ -3020,11 +3020,11 @@ mod tests {
         project
             .transitions
             .set_previews(Arc::new(crate::preview::fixtures::UnaskedPreviews));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "ready");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "ready");
         let outcome = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Assigned,
                 TransitionActor::ProductManager,
                 Some("maya"),
@@ -3102,13 +3102,13 @@ mod tests {
             if let Some(previews) = previews {
                 project.transitions.set_previews(previews);
             }
-            project.file("FRK-1", |wire| {
+            project.file("CTV-1", |wire| {
                 wire["assignee_role"] = json!("ui_ux_designer");
             });
-            project.created("FRK-1", "ready");
+            project.created("CTV-1", "ready");
             let outcome = project.ask(
                 &a_request(
-                    "FRK-1",
+                    "CTV-1",
                     TaskStatus::Assigned,
                     TransitionActor::ProductManager,
                     Some("maya"),
@@ -3143,11 +3143,11 @@ mod tests {
                 .push(paused);
         });
         let project = Project::new("assign-unknown", team, at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "ready");
-        let before = project.file_value("FRK-1");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "ready");
+        let before = project.file_value("CTV-1");
         let request = a_request(
-            "FRK-1",
+            "CTV-1",
             TaskStatus::Assigned,
             TransitionActor::ProductManager,
             Some("maya"),
@@ -3169,16 +3169,16 @@ mod tests {
         }
         assert_eq!(
             project
-                .events("FRK-1", &[EventKind::TransitionRefused])
+                .events("CTV-1", &[EventKind::TransitionRefused])
                 .len(),
             3
         );
         assert!(
             project
-                .events("FRK-1", &[EventKind::TaskTransitioned])
+                .events("CTV-1", &[EventKind::TaskTransitioned])
                 .is_empty()
         );
-        assert_eq!(project.file_value("FRK-1"), before);
+        assert_eq!(project.file_value("CTV-1"), before);
     }
 
     #[test]
@@ -3187,7 +3187,7 @@ mod tests {
         let project = Project::new("assign-epic", a_team(|_| {}), at(12));
         // An epic on a team with no Scrum Master is the Product Manager's, reviewed by the human,
         // who has no agent id (5.16 item 4).
-        for task in ["FRK-1", "FRK-2"] {
+        for task in ["CTV-1", "CTV-2"] {
             project.file(task, |wire| wire["kind"] = json!("epic"));
             project.created_under(task, "ready", "epic", None);
         }
@@ -3203,12 +3203,12 @@ mod tests {
                 Some("maya"),
             )
         };
-        let outcome = project.ask(&assigning_epic("FRK-1"), &epic);
+        let outcome = project.ask(&assigning_epic("CTV-1"), &epic);
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
-        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let moves = project.events("CTV-1", &[EventKind::TaskTransitioned]);
         assert_eq!(moved_body(&moves[0]).reviewer, None);
 
         // With a Scrum Master active, the epic's reviewer is an agent, and the ask must name it.
@@ -3220,7 +3220,7 @@ mod tests {
         });
         let outcome = project
             .transitions
-            .request(&assigning_epic("FRK-2"), &epic, &with_sam)
+            .request(&assigning_epic("CTV-2"), &epic, &with_sam)
             .expect("the request is judged");
         assert_eq!(
             assignment_failures(&outcome),
@@ -3232,11 +3232,11 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn records_a_blank_reviewer_as_none() {
         let project = Project::new("assign-blank", a_team(|_| {}), at(12));
-        project.file("FRK-1", |wire| wire["kind"] = json!("epic"));
-        project.created_under("FRK-1", "ready", "epic", None);
+        project.file("CTV-1", |wire| wire["kind"] = json!("epic"));
+        project.created_under("CTV-1", "ready", "epic", None);
         let outcome = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Assigned,
                 TransitionActor::ProductManager,
                 Some("maya"),
@@ -3251,10 +3251,10 @@ mod tests {
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
-        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let moves = project.events("CTV-1", &[EventKind::TaskTransitioned]);
         assert_eq!(moved_body(&moves[0]).assignee.as_deref(), Some("maya"));
         assert_eq!(moved_body(&moves[0]).reviewer, None);
-        let id = "FRK-1".parse().expect("a task id");
+        let id = "CTV-1".parse().expect("a task id");
         let file = project.files.read_contract(&id).expect("the file reads");
         assert_eq!(file.assignee.as_deref(), Some("maya"));
         assert_eq!(file.reviewer, None);
@@ -3271,12 +3271,12 @@ mod tests {
     fn serialises_two_requests_that_race_for_one_place() {
         let team = a_team(|wire| wire["policy"]["wip_limit_per_agent"] = json!(1));
         let project = Project::new("race", team, at(12));
-        for task in ["FRK-1", "FRK-2"] {
+        for task in ["CTV-1", "CTV-2"] {
             project.file(task, |_| {});
             project.created(task, "ready");
         }
         let outcomes: Vec<TransitionOutcome> = std::thread::scope(|scope| {
-            let racers: Vec<_> = ["FRK-1", "FRK-2"]
+            let racers: Vec<_> = ["CTV-1", "CTV-2"]
                 .into_iter()
                 .map(|task| {
                     let project = &project;
@@ -3309,10 +3309,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn records_the_blocker_the_escalation_was_about() {
         let project = Project::new("blocker-escalation", a_team(|_| {}), at(9));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "assigned");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "assigned");
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
@@ -3327,7 +3327,7 @@ mod tests {
         };
         let outcome = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Blocked,
                 TransitionActor::Assignee,
                 Some("dev-a"),
@@ -3339,7 +3339,7 @@ mod tests {
             "{outcome:?}"
         );
         let escalating = a_request(
-            "FRK-1",
+            "CTV-1",
             TaskStatus::Escalated,
             TransitionActor::Governor,
             None,
@@ -3353,7 +3353,7 @@ mod tests {
         project.clock.set(at(9) + chrono::Duration::hours(25));
         let outcome = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Escalated,
                 TransitionActor::Governor,
                 None,
@@ -3365,7 +3365,7 @@ mod tests {
             "{outcome:?}"
         );
 
-        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let moves = project.events("CTV-1", &[EventKind::TaskTransitioned]);
         let into_blocked = moved_body(&moves[1]);
         assert_eq!(
             into_blocked
@@ -3374,7 +3374,7 @@ mod tests {
                 .map(|blocker| blocker.description.as_str()),
             Some("no key")
         );
-        let escalations = project.events("FRK-1", &[EventKind::EscalationRaised]);
+        let escalations = project.events("CTV-1", &[EventKind::EscalationRaised]);
         let EventBody::EscalationRaised(escalation) = &escalations[0].body else {
             panic!("an escalation.raised");
         };
@@ -3386,17 +3386,17 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn escalates_a_task_whose_criterion_catervas_could_not_run() {
         let project = Project::new("unrunnable-escalation", a_team(|_| {}), at(9));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "assigned");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "assigned");
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "assigned",
             "in_progress",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
             at(9),
         );
         let escalating = a_request(
-            "FRK-1",
+            "CTV-1",
             TaskStatus::Escalated,
             TransitionActor::Governor,
             None,
@@ -3418,7 +3418,7 @@ mod tests {
             "{outcome:?}"
         );
 
-        let escalations = project.events("FRK-1", &[EventKind::EscalationRaised]);
+        let escalations = project.events("CTV-1", &[EventKind::EscalationRaised]);
         let escalation = escalation_body(&escalations[0]);
         assert_eq!(
             escalation.reason,
@@ -3434,12 +3434,12 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_claimed_role_the_agent_does_not_hold() {
         let project = Project::new("claimed-role", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "ready");
-        let before = project.file_value("FRK-1");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "ready");
+        let before = project.file_value("CTV-1");
         let outcome = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Assigned,
                 TransitionActor::ProductManager,
                 Some("dev-a"),
@@ -3453,7 +3453,7 @@ mod tests {
             ),
             "{outcome:?}"
         );
-        let refusals = project.events("FRK-1", &[EventKind::TransitionRefused]);
+        let refusals = project.events("CTV-1", &[EventKind::TransitionRefused]);
         assert_eq!(refusals.len(), 1);
         let body = refused_body(&refusals[0]);
         assert_eq!(body.from, TaskStatusWire::Ready);
@@ -3462,7 +3462,7 @@ mod tests {
             body.details,
             vec!["not the named agent: asked dev-a".to_string()]
         );
-        assert_eq!(project.file_value("FRK-1"), before);
+        assert_eq!(project.file_value("CTV-1"), before);
 
         // A Product Manager who is paused holds the role no longer.
         let paused = a_team(|wire| {
@@ -3476,7 +3476,7 @@ mod tests {
             .transitions
             .request(
                 &a_request(
-                    "FRK-1",
+                    "CTV-1",
                     TaskStatus::Assigned,
                     TransitionActor::ProductManager,
                     Some("maya"),
@@ -3498,13 +3498,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn records_a_refusal_with_every_reason_its_gate_gave() {
         let project = Project::new("refusal-reasons", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "ready");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "ready");
         // The Product Manager is neither the contract's assignee role nor its reviewer role, and
         // would review its own work: one gate, several reasons.
         let outcome = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Assigned,
                 TransitionActor::ProductManager,
                 Some("maya"),
@@ -3513,7 +3513,7 @@ mod tests {
         );
         let reasons = assignment_failures(&outcome);
         assert!(reasons.len() >= 2, "{reasons:?}");
-        let refusals = project.events("FRK-1", &[EventKind::TransitionRefused]);
+        let refusals = project.events("CTV-1", &[EventKind::TransitionRefused]);
         let body = refused_body(&refusals[0]);
         assert_eq!(body.from, TaskStatusWire::Ready);
         assert_eq!(body.to, TaskStatusWire::Assigned);
@@ -3532,10 +3532,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn records_the_readiness_evaluation_before_the_move() {
         let project = Project::new("readiness-recorded", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "refining");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "refining");
         let outcome = project.ask(
-            &a_request("FRK-1", TaskStatus::Ready, TransitionActor::Governor, None),
+            &a_request("CTV-1", TaskStatus::Ready, TransitionActor::Governor, None),
             &TransitionAsk::default(),
         );
         assert!(
@@ -3543,7 +3543,7 @@ mod tests {
             "{outcome:?}"
         );
         let recorded = project.events(
-            "FRK-1",
+            "CTV-1",
             &[EventKind::ContractEvaluated, EventKind::TaskTransitioned],
         );
         assert_eq!(recorded.len(), 2);
@@ -3564,11 +3564,11 @@ mod tests {
             at(12),
         );
         // Fifty dollars is past the team's five-dollar task maximum, so the contract fails.
-        project.file("FRK-1", |wire| wire["budget"]["max_cost_usd"] = json!(50));
-        project.created("FRK-1", "refining");
-        project.evaluated("FRK-1", false);
-        project.evaluated("FRK-1", false);
-        let governor = |to| a_request("FRK-1", to, TransitionActor::Governor, None);
+        project.file("CTV-1", |wire| wire["budget"]["max_cost_usd"] = json!(50));
+        project.created("CTV-1", "refining");
+        project.evaluated("CTV-1", false);
+        project.evaluated("CTV-1", false);
+        let governor = |to| a_request("CTV-1", to, TransitionActor::Governor, None);
         let outcome = project.ask(&governor(TaskStatus::Ready), &TransitionAsk::default());
         assert!(
             matches!(outcome, TransitionOutcome::Refused(_)),
@@ -3580,7 +3580,7 @@ mod tests {
             "{outcome:?}"
         );
         let recorded = project.events(
-            "FRK-1",
+            "CTV-1",
             &[EventKind::TaskTransitioned, EventKind::EscalationRaised],
         );
         assert_eq!(recorded.len(), 2);
@@ -3595,7 +3595,7 @@ mod tests {
         assert_eq!(escalation.detail, "readiness_exhausted");
         let row = project
             .projections
-            .task(&"FRK-1".parse().expect("a task id"))
+            .task(&"CTV-1".parse().expect("a task id"))
             .expect("the board reads")
             .expect("on the board");
         assert_eq!(row.status, TaskStatus::Escalated);
@@ -3698,11 +3698,11 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn passes_a_contract_the_scrum_master_judged() {
         let project = Project::new("judged-passes", a_team_with_a_scrum_master(), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "refining");
-        written(&project, "FRK-1");
-        judged(&project, "FRK-1", true, true);
-        let outcome = readying(&project, "FRK-1");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "refining");
+        written(&project, "CTV-1");
+        judged(&project, "CTV-1", true, true);
+        let outcome = readying(&project, "CTV-1");
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
@@ -3713,16 +3713,16 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_contract_the_scrum_master_judged_too_large() {
         let project = Project::new("judged-too-large", a_team_with_a_scrum_master(), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "refining");
-        written(&project, "FRK-1");
-        judged(&project, "FRK-1", false, true);
-        let outcome = readying(&project, "FRK-1");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "refining");
+        written(&project, "CTV-1");
+        judged(&project, "CTV-1", false, true);
+        let outcome = readying(&project, "CTV-1");
         assert!(
             matches!(outcome, TransitionOutcome::Refused(_)),
             "{outcome:?}"
         );
-        let failures = readiness_failures(&project, "FRK-1");
+        let failures = readiness_failures(&project, "CTV-1");
         assert!(
             holds(&failures, "Does the task fit its budget?"),
             "{failures:?}"
@@ -3752,19 +3752,19 @@ mod tests {
                 }),
                 at(12),
             );
-            project.file("FRK-1", |_| {});
-            project.created("FRK-1", "refining");
-            written(&project, "FRK-1");
+            project.file("CTV-1", |_| {});
+            project.created("CTV-1", "refining");
+            written(&project, "CTV-1");
             let answered: Vec<(&str, bool)> = questions.into_iter().zip(answers).collect();
-            judged_with(&project, "FRK-1", &answered);
-            let outcome = readying(&project, "FRK-1");
+            judged_with(&project, "CTV-1", &answered);
+            let outcome = readying(&project, "CTV-1");
             assert_eq!(
                 matches!(outcome, TransitionOutcome::Moved(_)),
                 moves,
                 "{answers:?}: {outcome:?}"
             );
             if !moves {
-                let failures = readiness_failures(&project, "FRK-1");
+                let failures = readiness_failures(&project, "CTV-1");
                 assert!(
                     holds(
                         &failures,
@@ -3789,11 +3789,11 @@ mod tests {
                 a_team_with_a_scrum_master(),
                 at(12),
             );
-            project.file("FRK-1", |_| {});
-            project.created("FRK-1", "refining");
-            written(&project, "FRK-1");
+            project.file("CTV-1", |_| {});
+            project.created("CTV-1", "refining");
+            written(&project, "CTV-1");
             project.record(
-                "FRK-1",
+                "CTV-1",
                 "contract.judged",
                 &json!({
                     "judged_by": "sam",
@@ -3803,14 +3803,14 @@ mod tests {
                 }),
                 at(10),
             );
-            let outcome = readying(&project, "FRK-1");
+            let outcome = readying(&project, "CTV-1");
             assert_eq!(
                 matches!(outcome, TransitionOutcome::Moved(_)),
                 moves,
                 "{outcome:?}"
             );
             if !moves {
-                let failures = readiness_failures(&project, "FRK-1");
+                let failures = readiness_failures(&project, "CTV-1");
                 assert!(
                     holds(
                         &failures,
@@ -3822,16 +3822,16 @@ mod tests {
         }
         // A judgment with neither answers nor the old booleans passes nothing.
         let project = Project::new("judged-empty", a_team_with_a_scrum_master(), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "refining");
-        written(&project, "FRK-1");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "refining");
+        written(&project, "CTV-1");
         project.record(
-            "FRK-1",
+            "CTV-1",
             "contract.judged",
             &json!({ "judged_by": "sam", "reason": "Looks fine." }),
             at(10),
         );
-        let outcome = readying(&project, "FRK-1");
+        let outcome = readying(&project, "CTV-1");
         assert!(
             !matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
@@ -3842,13 +3842,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn passes_a_child_filed_whole_once_judged() {
         let project = Project::new("judged-child", a_team_with_a_scrum_master(), at(12));
-        project.file("FRK-1", |wire| wire["kind"] = json!("epic"));
-        project.created_under("FRK-1", "in_progress", "epic", None);
+        project.file("CTV-1", |wire| wire["kind"] = json!("epic"));
+        project.created_under("CTV-1", "in_progress", "epic", None);
         // Filed whole by the breakdown: created with its full contract, never written since.
-        project.file("FRK-2", |wire| wire["parent"] = json!("FRK-1"));
-        project.created_under("FRK-2", "refining", "task", Some("FRK-1"));
-        judged(&project, "FRK-2", true, true);
-        let outcome = readying(&project, "FRK-2");
+        project.file("CTV-2", |wire| wire["parent"] = json!("CTV-1"));
+        project.created_under("CTV-2", "refining", "task", Some("CTV-1"));
+        judged(&project, "CTV-2", true, true);
+        let outcome = readying(&project, "CTV-2");
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
@@ -3859,17 +3859,17 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_contract_judged_before_its_last_write() {
         let project = Project::new("judged-then-written", a_team_with_a_scrum_master(), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "refining");
-        written(&project, "FRK-1");
-        judged(&project, "FRK-1", true, true);
-        written(&project, "FRK-1");
-        let outcome = readying(&project, "FRK-1");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "refining");
+        written(&project, "CTV-1");
+        judged(&project, "CTV-1", true, true);
+        written(&project, "CTV-1");
+        let outcome = readying(&project, "CTV-1");
         assert!(
             matches!(outcome, TransitionOutcome::Refused(_)),
             "{outcome:?}"
         );
-        let failures = readiness_failures(&project, "FRK-1");
+        let failures = readiness_failures(&project, "CTV-1");
         assert!(
             holds(&failures, "judgment review is not recorded"),
             "{failures:?}"
@@ -3885,12 +3885,12 @@ mod tests {
                 a_team_with_a_scrum_master(),
                 at(12),
             );
-            project.file("FRK-1", |_| {});
-            project.created("FRK-1", "refining");
-            written(&project, "FRK-1");
-            judged(&project, "FRK-1", first, true);
-            judged(&project, "FRK-1", last, true);
-            let outcome = readying(&project, "FRK-1");
+            project.file("CTV-1", |_| {});
+            project.created("CTV-1", "refining");
+            written(&project, "CTV-1");
+            judged(&project, "CTV-1", first, true);
+            judged(&project, "CTV-1", last, true);
+            let outcome = readying(&project, "CTV-1");
             assert_eq!(
                 matches!(outcome, TransitionOutcome::Moved(_)),
                 moves,
@@ -3907,22 +3907,22 @@ mod tests {
             a_team_with_a_scrum_master(),
             at(12),
         );
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "refining");
-        written(&project, "FRK-1");
-        judged(&project, "FRK-1", true, true);
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "refining");
+        written(&project, "CTV-1");
+        judged(&project, "CTV-1", true, true);
         project.record(
-            "FRK-1",
+            "CTV-1",
             "request.triaged",
             &json!({ "size": "large", "reason": "Two deliverables.", "triaged_by": "sam" }),
             at(11),
         );
-        let outcome = readying(&project, "FRK-1");
+        let outcome = readying(&project, "CTV-1");
         assert!(
             matches!(outcome, TransitionOutcome::Refused(_)),
             "{outcome:?}"
         );
-        let failures = readiness_failures(&project, "FRK-1");
+        let failures = readiness_failures(&project, "CTV-1");
         assert!(
             holds(&failures, "judgment review is not recorded"),
             "{failures:?}"
@@ -3933,10 +3933,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn asks_no_judgment_without_a_scrum_master() {
         let project = Project::new("no-scrum-master", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "refining");
-        written(&project, "FRK-1");
-        let outcome = readying(&project, "FRK-1");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "refining");
+        written(&project, "CTV-1");
+        let outcome = readying(&project, "CTV-1");
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
@@ -3947,10 +3947,10 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn increments_the_iteration_when_a_rejected_task_returns() {
         let project = Project::new("iteration", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "verifying");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "verifying");
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "verifying",
             "rejected",
             &json!({ "assignee": "dev-a", "reviewer": "dev-b", "iteration": 1 }),
@@ -3958,7 +3958,7 @@ mod tests {
         );
         let outcome = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::InProgress,
                 TransitionActor::Governor,
                 None,
@@ -3969,7 +3969,7 @@ mod tests {
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
-        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let moves = project.events("CTV-1", &[EventKind::TaskTransitioned]);
         let body = moved_body(&moves[1]);
         assert_eq!(body.iteration, 2);
         assert_eq!(body.gate, GateWire::IterationBelowLimit);
@@ -3986,7 +3986,7 @@ mod tests {
         assert_eq!(moves[1].envelope.ids.agent_id, None);
         let file = project
             .files
-            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .read_contract(&"CTV-1".parse().expect("a task id"))
             .expect("the file reads");
         assert_eq!(file.iteration, 2);
         assert_eq!(file.assignee.as_deref(), Some("dev-a"));
@@ -3998,13 +3998,13 @@ mod tests {
     fn records_the_resolution_and_the_rejection_a_move_was_judged_on() {
         let project = Project::new("evidence", a_team(|_| {}), at(12));
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b", "iteration": 1 });
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "in_progress");
-        project.moved("FRK-1", "in_progress", "blocked", &people, at(10));
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "in_progress");
+        project.moved("CTV-1", "in_progress", "blocked", &people, at(10));
         // The human is no agent, whatever id the request carries.
         let outcome = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::InProgress,
                 TransitionActor::Human,
                 Some("maya"),
@@ -4018,16 +4018,16 @@ mod tests {
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
-        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let moves = project.events("CTV-1", &[EventKind::TaskTransitioned]);
         let body = moved_body(&moves[1]);
         assert_eq!(body.blocker_resolution.as_deref(), Some("the key arrived"));
         assert_eq!(body.gate, GateWire::BlockerResolved);
         assert_eq!(body.requested_by, "human");
         assert_eq!(moves[1].envelope.ids.agent_id, None);
 
-        project.file("FRK-2", |wire| wire["budget"]["max_iterations"] = json!(1));
-        project.created("FRK-2", "in_progress");
-        project.moved("FRK-2", "in_progress", "verifying", &people, at(10));
+        project.file("CTV-2", |wire| wire["budget"]["max_iterations"] = json!(1));
+        project.created("CTV-2", "in_progress");
+        project.moved("CTV-2", "in_progress", "verifying", &people, at(10));
         let rejection = TransitionAsk {
             rejection: Some(Rejection {
                 failed_criterion_ids: vec!["C1".to_string()],
@@ -4037,7 +4037,7 @@ mod tests {
         };
         let outcome = project.ask(
             &a_request(
-                "FRK-2",
+                "CTV-2",
                 TaskStatus::Rejected,
                 TransitionActor::Reviewer,
                 Some("dev-b"),
@@ -4050,7 +4050,7 @@ mod tests {
         );
         let outcome = project.ask(
             &a_request(
-                "FRK-2",
+                "CTV-2",
                 TaskStatus::Escalated,
                 TransitionActor::Governor,
                 None,
@@ -4061,14 +4061,14 @@ mod tests {
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
-        let moves = project.events("FRK-2", &[EventKind::TaskTransitioned]);
+        let moves = project.events("CTV-2", &[EventKind::TaskTransitioned]);
         let recorded = moved_body(&moves[1])
             .rejection
             .as_ref()
             .expect("a rejection");
         assert_eq!(recorded.failed_criterion_ids, vec!["C1".to_string()]);
         assert_eq!(recorded.reasons, "the form has no labels");
-        let escalations = project.events("FRK-2", &[EventKind::EscalationRaised]);
+        let escalations = project.events("CTV-2", &[EventKind::EscalationRaised]);
         let escalation = escalation_body(&escalations[0]);
         assert_eq!(escalation.reason, EscalationRaisedBodyReason::Iterations);
         assert_eq!(
@@ -4139,17 +4139,17 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_the_approval_of_the_contract_the_task_has_now() {
         let project = Project::new("approval-now", a_team(|_| {}), at(12));
-        an_epic(&project, "FRK-1", &a_contract_wire()["exit_criteria"]);
-        project.created_under("FRK-1", "draft", "epic", None);
-        project.moved("FRK-1", "draft", "refining", &json!({}), at(9));
-        project.moved("FRK-1", "refining", "escalated", &json!({}), at(9));
+        an_epic(&project, "CTV-1", &a_contract_wire()["exit_criteria"]);
+        project.created_under("CTV-1", "draft", "epic", None);
+        project.moved("CTV-1", "draft", "refining", &json!({}), at(9));
+        project.moved("CTV-1", "refining", "escalated", &json!({}), at(9));
         project.record(
-            "FRK-1",
+            "CTV-1",
             "escalation.raised",
             &json!({ "reason": "approval", "detail": "contract_requires_human" }),
             at(9),
         );
-        let approving = a_request("FRK-1", TaskStatus::Ready, TransitionActor::Human, None);
+        let approving = a_request("CTV-1", TaskStatus::Ready, TransitionActor::Human, None);
         assert!(
             !project
                 .context(&approving, &TransitionAsk::default())
@@ -4157,7 +4157,7 @@ mod tests {
                 .given
         );
 
-        accepted(&project, "FRK-1", "contract", None);
+        accepted(&project, "CTV-1", "contract", None);
         assert!(
             project
                 .context(&approving, &TransitionAsk::default())
@@ -4173,7 +4173,7 @@ mod tests {
         };
         let written = || {
             project.record(
-                "FRK-1",
+                "CTV-1",
                 "contract.written",
                 &json!({
                     "summary": { "kind": "epic", "title": "Add a login page", "status": "refining", "risk": "low" },
@@ -4186,12 +4186,12 @@ mod tests {
         // refining.
         written();
         assert!(!given(), "an approval is of the contract as it was written");
-        accepted(&project, "FRK-1", "contract", None);
+        accepted(&project, "CTV-1", "contract", None);
         assert!(given());
-        project.moved("FRK-1", "escalated", "refining", &json!({}), at(11));
+        project.moved("CTV-1", "escalated", "refining", &json!({}), at(11));
         assert!(!given(), "a return to refining ends the approval");
         // The human's acceptance of a result is not an approval of the contract.
-        accepted(&project, "FRK-1", "result", None);
+        accepted(&project, "CTV-1", "result", None);
         assert!(!given(), "only an acceptance of the contract approves it");
     }
 
@@ -4205,14 +4205,14 @@ mod tests {
             a_team(|wire| wire["rules"]["protected_paths"] = json!(["infra/**"])),
             at(12),
         );
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "assigned");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "assigned");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
-        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
-        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
+        project.moved("CTV-1", "in_progress", "verifying", &people, at(10));
 
         let protected = project
-            .context(&accepting("FRK-1"), &TransitionAsk::default())
+            .context(&accepting("CTV-1"), &TransitionAsk::default())
             .done
             .protected_paths;
         for glob in ["infra/**", "**/*.pem", ".env"] {
@@ -4227,17 +4227,17 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn accepts_a_high_risk_task_once_the_human_has() {
         let project = Project::new("high-risk-accept", a_team(|_| {}), at(12));
-        project.file("FRK-1", |wire| wire["risk"] = json!("high"));
-        project.created("FRK-1", "assigned");
+        project.file("CTV-1", |wire| wire["risk"] = json!("high"));
+        project.created("CTV-1", "assigned");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
-        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
-        governor_result(&project, "FRK-1", "C1");
-        note(&project, "FRK-1", "completion", "dev-a");
-        note(&project, "FRK-1", "review", "dev-b");
-        accepted(&project, "FRK-1", "result", None);
-        project.moved("FRK-1", "in_progress", "verifying", &people, at(11));
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
+        governor_result(&project, "CTV-1", "C1");
+        note(&project, "CTV-1", "completion", "dev-a");
+        note(&project, "CTV-1", "review", "dev-b");
+        accepted(&project, "CTV-1", "result", None);
+        project.moved("CTV-1", "in_progress", "verifying", &people, at(11));
 
-        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let outcome = project.ask(&accepting("CTV-1"), &TransitionAsk::default());
         let TransitionOutcome::Refused(refusal) = outcome else {
             panic!("an acceptance from before this verification: {outcome:?}");
         };
@@ -4248,8 +4248,8 @@ mod tests {
             "{refusal:?}"
         );
 
-        accepted(&project, "FRK-1", "result", None);
-        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        accepted(&project, "CTV-1", "result", None);
+        let outcome = project.ask(&accepting("CTV-1"), &TransitionAsk::default());
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
@@ -4260,31 +4260,31 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn an_accepted_finance_task_unblocks_its_dependants() {
         let project = Project::new("folder-accepted", a_finance_team(), at(12));
-        a_finance_task(&project, "FRK-1", Some("in_progress"));
+        a_finance_task(&project, "CTV-1", Some("in_progress"));
         // The books are in the folder, and the task has no branch, no commit and no worktree.
         let folder = project.repo.path.join(".catervas/local/finance");
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
-        governor_result(&project, "FRK-1", "C1");
-        note(&project, "FRK-1", "completion", "fin-1");
-        note(&project, "FRK-1", "review", "maya");
+        governor_result(&project, "CTV-1", "C1");
+        note(&project, "CTV-1", "completion", "fin-1");
+        note(&project, "CTV-1", "review", "maya");
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "in_progress",
             "verifying",
             &json!({ "assignee": "fin-1", "reviewer": "maya" }),
             at(11),
         );
         // A task that depends on it, and an agent to give it to.
-        a_finance_task(&project, "FRK-2", None);
-        project.file("FRK-2", |wire| {
+        a_finance_task(&project, "CTV-2", None);
+        project.file("CTV-2", |wire| {
             wire["assignee_role"] = json!("finance_specialist");
             wire["reviewer_role"] = json!("product_manager");
-            wire["dependencies"] = json!(["FRK-1"]);
+            wire["dependencies"] = json!(["CTV-1"]);
         });
         let assigning_second = || {
             let request = a_request(
-                "FRK-2",
+                "CTV-2",
                 TaskStatus::Assigned,
                 TransitionActor::ProductManager,
                 Some("maya"),
@@ -4294,7 +4294,7 @@ mod tests {
         let before = assigning_second().assignment.expect("an assignment");
         assert!(!before.dependencies[0].integrated);
 
-        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let outcome = project.ask(&accepting("CTV-1"), &TransitionAsk::default());
 
         let TransitionOutcome::Moved(decision) = outcome else {
             panic!("the books are in the folder: {outcome:?}");
@@ -4303,14 +4303,14 @@ mod tests {
             decision.effects,
             [catervas_core::governor::transition::TransitionEffect::NothingToIntegrate]
         );
-        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let moves = project.events("CTV-1", &[EventKind::TaskTransitioned]);
         assert_eq!(
             moved_body(moves.last().expect("a move")).effects,
             [TaskTransitionedBodyEffectsItem::NothingToIntegrate]
         );
         let row = project
             .projections
-            .task(&"FRK-1".parse().expect("a task id"))
+            .task(&"CTV-1".parse().expect("a task id"))
             .expect("the board reads")
             .expect("a row");
         assert_eq!(row.status, TaskStatus::Accepted);
@@ -4322,7 +4322,7 @@ mod tests {
         assert!(matches!(
             project.ask(
                 &a_request(
-                    "FRK-2",
+                    "CTV-2",
                     TaskStatus::Assigned,
                     TransitionActor::ProductManager,
                     Some("maya"),
@@ -4337,20 +4337,20 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn the_acceptance_carries_the_changed_files() {
         let project = Project::new("folder-accepted-changed", a_finance_team(), at(12));
-        a_finance_task(&project, "FRK-1", Some("in_progress"));
+        a_finance_task(&project, "CTV-1", Some("in_progress"));
         let folder = project.repo.path.join(".catervas/local/finance");
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
         std::fs::write(folder.join("old.xlsx"), "an old one").expect("written");
-        let task: catervas_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        let task: catervas_core::contract::TaskId = "CTV-1".parse().expect("a task id");
         catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
         // The task edited the books and left the old workbook alone.
         std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
-        governor_result(&project, "FRK-1", "C1");
-        note(&project, "FRK-1", "completion", "fin-1");
-        note(&project, "FRK-1", "review", "maya");
+        governor_result(&project, "CTV-1", "C1");
+        note(&project, "CTV-1", "completion", "fin-1");
+        note(&project, "CTV-1", "review", "maya");
         project.record(
-            "FRK-1",
+            "CTV-1",
             "criterion.recorded",
             &json!({
                 "criterion_id": "C1",
@@ -4365,7 +4365,7 @@ mod tests {
         // `record_move` writes it: the files are named, and the move carries none of them.
         let verifying = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Verifying,
                 TransitionActor::Assignee,
                 Some("fin-1"),
@@ -4380,13 +4380,13 @@ mod tests {
             "{verifying:?}"
         );
 
-        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let outcome = project.ask(&accepting("CTV-1"), &TransitionAsk::default());
 
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
-        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let moves = project.events("CTV-1", &[EventKind::TaskTransitioned]);
         let (accepted, earlier) = moves.split_last().expect("the moves");
         assert_eq!(
             moved_body(accepted).changed,
@@ -4404,20 +4404,20 @@ mod tests {
         }
         // A task with a worktree changes no folder, and its acceptance says nothing of one.
         let project = Project::new("worktree-accepted-changed", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "assigned");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "assigned");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
-        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
-        governor_result(&project, "FRK-1", "C1");
-        note(&project, "FRK-1", "completion", "dev-a");
-        note(&project, "FRK-1", "review", "dev-b");
-        project.moved("FRK-1", "in_progress", "verifying", &people, at(11));
-        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
+        governor_result(&project, "CTV-1", "C1");
+        note(&project, "CTV-1", "completion", "dev-a");
+        note(&project, "CTV-1", "review", "dev-b");
+        project.moved("CTV-1", "in_progress", "verifying", &people, at(11));
+        let outcome = project.ask(&accepting("CTV-1"), &TransitionAsk::default());
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
-        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let moves = project.events("CTV-1", &[EventKind::TaskTransitioned]);
         assert_eq!(moved_body(moves.last().expect("a move")).changed, None);
     }
 
@@ -4427,30 +4427,30 @@ mod tests {
         // The folder's changes are the Definition of Done's diff (5.4): a task allowed the books
         // alone is refused acceptance for a forecast it added, and accepted for the books.
         let project = Project::new("folder-allowed", a_finance_team(), at(12));
-        a_finance_task(&project, "FRK-1", Some("in_progress"));
-        project.file("FRK-1", |wire| {
+        a_finance_task(&project, "CTV-1", Some("in_progress"));
+        project.file("CTV-1", |wire| {
             as_a_finance_task(wire);
             wire["allowed_paths"] = json!([".catervas/local/finance/books.xlsx"]);
         });
         let folder = project.repo.path.join(".catervas/local/finance");
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
-        let task: catervas_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        let task: catervas_core::contract::TaskId = "CTV-1".parse().expect("a task id");
         catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
         std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
         std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
-        governor_result(&project, "FRK-1", "C1");
-        note(&project, "FRK-1", "completion", "fin-1");
-        note(&project, "FRK-1", "review", "maya");
+        governor_result(&project, "CTV-1", "C1");
+        note(&project, "CTV-1", "completion", "fin-1");
+        note(&project, "CTV-1", "review", "maya");
         project.moved(
-            "FRK-1",
+            "CTV-1",
             "in_progress",
             "verifying",
             &json!({ "assignee": "fin-1", "reviewer": "maya" }),
             at(11),
         );
 
-        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let outcome = project.ask(&accepting("CTV-1"), &TransitionAsk::default());
 
         let TransitionOutcome::Refused(refusal) = outcome else {
             panic!("a forecast outside the allowed paths: {outcome:?}");
@@ -4465,7 +4465,7 @@ mod tests {
         );
         // Without the forecast, the books alone are within what it may change.
         std::fs::remove_file(folder.join("forecast.xlsx")).expect("removed");
-        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let outcome = project.ask(&accepting("CTV-1"), &TransitionAsk::default());
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
@@ -4491,16 +4491,16 @@ mod tests {
         project
             .transitions
             .set_previews(Arc::new(crate::preview::fixtures::FakePreviews::ready()));
-        project.file("FRK-1", |wire| wire["ui_change"] = json!(true));
-        project.created("FRK-1", "assigned");
+        project.file("CTV-1", |wire| wire["ui_change"] = json!(true));
+        project.created("CTV-1", "assigned");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
-        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
-        governor_result(&project, "FRK-1", "C1");
-        note(&project, "FRK-1", "completion", "dev-a");
-        note(&project, "FRK-1", "review", "dev-b");
-        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
+        governor_result(&project, "CTV-1", "C1");
+        note(&project, "CTV-1", "completion", "dev-a");
+        note(&project, "CTV-1", "review", "dev-b");
+        project.moved("CTV-1", "in_progress", "verifying", &people, at(10));
 
-        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let outcome = project.ask(&accepting("CTV-1"), &TransitionAsk::default());
         let TransitionOutcome::Refused(refusal) = outcome else {
             panic!("a UI change whose design review waits: {outcome:?}");
         };
@@ -4512,12 +4512,12 @@ mod tests {
         );
 
         project.record(
-            "FRK-1",
+            "CTV-1",
             "design_review.recorded",
             &json!({ "pass": true, "reasons": "Reads well.", "checks": [] }),
             at(11),
         );
-        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let outcome = project.ask(&accepting("CTV-1"), &TransitionAsk::default());
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
@@ -4534,25 +4534,25 @@ mod tests {
                 .push(an_agent_wire("iris", "ui_ux_designer"));
         });
         let project = Project::new("design-reviewer", team, at(12));
-        project.file("FRK-1", |wire| wire["ui_change"] = json!(true));
-        project.created("FRK-1", "assigned");
+        project.file("CTV-1", |wire| wire["ui_change"] = json!(true));
+        project.created("CTV-1", "assigned");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
-        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
-        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
+        project.moved("CTV-1", "in_progress", "verifying", &people, at(10));
         let reviewed = |pass: bool| {
             project.append_wire(&json!({
                 "seq": 1,
                 "recorded_at": at(11).to_rfc3339(),
                 "team_id": "catervas",
                 "project_id": "catervas",
-                "task_id": "FRK-1",
+                "task_id": "CTV-1",
                 "agent_id": "iris",
                 "session_id": "s-1",
                 "kind": "design_review.recorded",
                 "body": { "pass": pass, "reasons": "Looked.", "checks": [] },
             }));
             project
-                .context(&accepting("FRK-1"), &TransitionAsk::default())
+                .context(&accepting("CTV-1"), &TransitionAsk::default())
                 .design_reviewer
         };
         assert_eq!(reviewed(true), None, "a pass rejects nothing");
@@ -4563,20 +4563,20 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn answers_every_human_criterion_with_one_acceptance() {
         let project = Project::new("human-criteria", a_team(|_| {}), at(12));
-        project.file("FRK-1", |wire| {
+        project.file("CTV-1", |wire| {
             wire["exit_criteria"] = json!([
                 { "id": "C1", "text": "It builds.", "verification": { "method": "command", "command": "true", "expect": {} } },
                 { "id": "C2", "text": "The founder signed in.", "verification": { "method": "human", "question": "Did you sign in?" } },
                 { "id": "C3", "text": "The founder signed out.", "verification": { "method": "human", "question": "Did you sign out?" } }
             ]);
         });
-        project.created("FRK-1", "assigned");
+        project.created("CTV-1", "assigned");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
-        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
-        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
-        let acceptance = accepted(&project, "FRK-1", "result", None);
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
+        project.moved("CTV-1", "in_progress", "verifying", &people, at(10));
+        let acceptance = accepted(&project, "CTV-1", "result", None);
 
-        let context = project.context(&accepting("FRK-1"), &TransitionAsk::default());
+        let context = project.context(&accepting("CTV-1"), &TransitionAsk::default());
         let evidence = format!("human.accepted at seq {}", acceptance.envelope.seq);
         let human: Vec<_> = context
             .done
@@ -4610,20 +4610,20 @@ mod tests {
         let criteria = json!([
             { "id": "C2", "text": "done.txt says it.", "verification": { "method": "review", "rubric": ["Does done.txt say what the request asked?"] } }
         ]);
-        project.file("FRK-1", |wire| {
+        project.file("CTV-1", |wire| {
             wire["kind"] = json!("epic");
             wire["assignee_role"] = json!("scrum_master");
             wire["reviewer_role"] = json!("product_manager");
             wire["exit_criteria"] = criteria.clone();
         });
-        project.created_under("FRK-1", "assigned", "epic", None);
+        project.created_under("CTV-1", "assigned", "epic", None);
         let people = json!({ "assignee": "sam", "reviewer": "maya" });
-        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
-        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
-        note(&project, "FRK-1", "review", "maya");
-        accepted(&project, "FRK-1", "result", Some("Both look right."));
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
+        project.moved("CTV-1", "in_progress", "verifying", &people, at(10));
+        note(&project, "CTV-1", "review", "maya");
+        accepted(&project, "CTV-1", "result", Some("Both look right."));
 
-        let context = project.context(&accepting("FRK-1"), &TransitionAsk::default());
+        let context = project.context(&accepting("CTV-1"), &TransitionAsk::default());
 
         assert_eq!(
             context.done.review_note.as_deref(),
@@ -4650,17 +4650,17 @@ mod tests {
             { "id": "C2", "text": "done.txt says it.", "verification": { "method": "review", "rubric": ["Does done.txt say what the request asked?"] } },
             { "id": "C3", "text": "The founder read it.", "verification": { "method": "human", "question": "Is it right?" } }
         ]);
-        an_epic(&project, "FRK-1", &criteria);
-        project.created_under("FRK-1", "assigned", "epic", None);
+        an_epic(&project, "CTV-1", &criteria);
+        project.created_under("CTV-1", "assigned", "epic", None);
         let people = json!({ "assignee": "maya" });
-        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
-        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
-        governor_result(&project, "FRK-1", "C1");
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
+        project.moved("CTV-1", "in_progress", "verifying", &people, at(10));
+        governor_result(&project, "CTV-1", "C1");
         // A review note an agent wrote does not stand in for the human's words.
-        note(&project, "FRK-1", "review", "maya");
-        accepted(&project, "FRK-1", "result", Some("Both look right."));
+        note(&project, "CTV-1", "review", "maya");
+        accepted(&project, "CTV-1", "result", Some("Both look right."));
 
-        let context = project.context(&accepting("FRK-1"), &TransitionAsk::default());
+        let context = project.context(&accepting("CTV-1"), &TransitionAsk::default());
         let of = |id: &str, run_by: RunBy| {
             context
                 .done
@@ -4685,17 +4685,17 @@ mod tests {
         );
         assert!(context.done.human_accepted);
 
-        project.file("FRK-2", |wire| {
-            wire["id"] = json!("FRK-2");
+        project.file("CTV-2", |wire| {
+            wire["id"] = json!("CTV-2");
             wire["exit_criteria"] = criteria.clone();
         });
-        project.created("FRK-2", "assigned");
+        project.created("CTV-2", "assigned");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
-        project.moved("FRK-2", "assigned", "in_progress", &people, at(9));
-        project.moved("FRK-2", "in_progress", "verifying", &people, at(10));
-        note(&project, "FRK-2", "review", "dev-b");
-        accepted(&project, "FRK-2", "result", Some("Both look right."));
-        let context = project.context(&accepting("FRK-2"), &TransitionAsk::default());
+        project.moved("CTV-2", "assigned", "in_progress", &people, at(9));
+        project.moved("CTV-2", "in_progress", "verifying", &people, at(10));
+        note(&project, "CTV-2", "review", "dev-b");
+        accepted(&project, "CTV-2", "result", Some("Both look right."));
+        let context = project.context(&accepting("CTV-2"), &TransitionAsk::default());
         assert_eq!(
             context.done.review_note.as_deref(),
             Some("The review note."),
@@ -4735,13 +4735,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn records_the_humans_reason_on_their_move() {
         let project = Project::new("human-reason", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "assigned");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "assigned");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
-        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
 
         let outcome = project.ask(
-            &a_request("FRK-1", TaskStatus::Escalated, TransitionActor::Human, None),
+            &a_request("CTV-1", TaskStatus::Escalated, TransitionActor::Human, None),
             &TransitionAsk {
                 reason: Some("stopped by the human".to_string()),
                 ..TransitionAsk::default()
@@ -4751,14 +4751,14 @@ mod tests {
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
-        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let moves = project.events("CTV-1", &[EventKind::TaskTransitioned]);
         assert_eq!(
             moved_body(moves.last().expect("the human's move"))
                 .reason
                 .as_deref(),
             Some("stopped by the human")
         );
-        let escalations = project.events("FRK-1", &[EventKind::EscalationRaised]);
+        let escalations = project.events("CTV-1", &[EventKind::EscalationRaised]);
         let escalation = escalation_body(&escalations[0]);
         assert_eq!(
             escalation.reason,
@@ -4797,16 +4797,16 @@ mod tests {
         }
     }
 
-    /// The human moves `FRK-1` from `escalated` to `in_progress`, saying `reason`.
+    /// The human moves `CTV-1` from `escalated` to `in_progress`, saying `reason`.
     fn resumed_by_the_human(name: &str, reason: &str) -> Project {
         let project = Project::new(name, a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "in_progress");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "in_progress");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
-        project.moved("FRK-1", "in_progress", "escalated", &people, at(10));
+        project.moved("CTV-1", "in_progress", "escalated", &people, at(10));
         let outcome = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::InProgress,
                 TransitionActor::Human,
                 None,
@@ -4827,25 +4827,25 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn posts_a_line_for_the_governors_move() {
         let project = Project::new("system-governor", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "refining");
-        written(&project, "FRK-1");
-        let outcome = readying(&project, "FRK-1");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "refining");
+        written(&project, "CTV-1");
+        let outcome = readying(&project, "CTV-1");
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
 
-        let (line, moved) = system_line(&project, "FRK-1");
+        let (line, moved) = system_line(&project, "CTV-1");
         assert!(line.envelope.seq > moved);
         let body = posted_body(&line);
         assert_eq!(body.author, "catervas");
         assert_eq!(body.kind, MessageKind::System);
-        assert_eq!(body.text, "FRK-1 refining → ready (by the governor)");
+        assert_eq!(body.text, "CTV-1 refining → ready (by the governor)");
         assert_eq!(line.envelope.ids.agent_id, None);
         assert_eq!(
             line.envelope.ids.task_id,
-            Some("FRK-1".parse().expect("a task id"))
+            Some("CTV-1".parse().expect("a task id"))
         );
     }
 
@@ -4854,10 +4854,10 @@ mod tests {
     fn posts_the_humans_reason() {
         let project = resumed_by_the_human("system-human", "go on");
 
-        let (line, _) = system_line(&project, "FRK-1");
+        let (line, _) = system_line(&project, "CTV-1");
         assert_eq!(
             posted_body(&line).text,
-            "FRK-1 escalated → in_progress (by the human): go on"
+            "CTV-1 escalated → in_progress (by the human): go on"
         );
     }
 
@@ -4865,17 +4865,17 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn posts_no_line_for_a_bookkeeping_move() {
         let project = Project::new("system-bookkeeping", a_team(|_| {}), at(12));
-        project.file("FRK-1", |_| {});
-        project.created("FRK-1", "draft");
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "draft");
         project.record(
-            "FRK-1",
+            "CTV-1",
             "request.triaged",
             &json!({ "size": "small", "reason": "One file.", "triaged_by": "maya" }),
             at(11),
         );
         let outcome = project.ask(
             &a_request(
-                "FRK-1",
+                "CTV-1",
                 TaskStatus::Refining,
                 TransitionActor::ProductManager,
                 Some("maya"),
@@ -4889,7 +4889,7 @@ mod tests {
 
         assert!(
             project
-                .events("FRK-1", &[EventKind::MessagePosted])
+                .events("CTV-1", &[EventKind::MessagePosted])
                 .is_empty()
         );
     }
@@ -4899,7 +4899,7 @@ mod tests {
     fn cuts_a_long_line() {
         let project = resumed_by_the_human("system-long", &"a".repeat(3_000));
 
-        let (line, _) = system_line(&project, "FRK-1");
+        let (line, _) = system_line(&project, "CTV-1");
         let text = &posted_body(&line).text;
         assert_eq!(text.chars().count(), 2_000);
         assert!(text.ends_with('…'), "{text}");
@@ -4914,7 +4914,7 @@ mod tests {
     fn mentions_nobody_in_a_system_line() {
         let project = resumed_by_the_human("system-mentions", "go on @dev-a");
 
-        let (line, _) = system_line(&project, "FRK-1");
+        let (line, _) = system_line(&project, "CTV-1");
         assert!(posted_body(&line).mentions.is_empty());
     }
 }

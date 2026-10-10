@@ -655,12 +655,12 @@ mod tests {
     fn answers_the_sprints() {
         let harness = Harness::new("board-sprints", |_| {});
         let deps = &harness.project.deps;
-        harness.accepted("FRK-1");
-        harness.ready("FRK-2");
-        harness.file("FRK-4", "cancelled", |_| {});
+        harness.accepted("CTV-1");
+        harness.ready("CTV-2");
+        harness.file("CTV-4", "cancelled", |_| {});
         harness
             .project
-            .open_sprint("S1", Some(20.0), &["FRK-1", "FRK-2", "FRK-4"]);
+            .open_sprint("S1", Some(20.0), &["CTV-1", "CTV-2", "CTV-4"]);
         let planning = posted(&harness, "pm", "c1", "planning");
         posted(&harness, "pm", "c1", "planning");
         // A reply in the planning thread is talk, not the meeting.
@@ -676,7 +676,7 @@ mod tests {
         let tuesday = posted(&harness, "pm", "c6", "standup");
         spent(
             &harness,
-            (Some("FRK-1"), "dev-a", "s1"),
+            (Some("CTV-1"), "dev-a", "s1"),
             "implement",
             1.5,
             &at().to_rfc3339(),
@@ -686,11 +686,11 @@ mod tests {
         let review = posted(&harness, "pm", "c2", "review");
         let retro = posted(&harness, "pm", "c3", "retro");
         // S2 is planned by Catervas alone: a breakdown joining its epic's sprint.
-        harness.ready("FRK-3");
+        harness.ready("CTV-3");
         harness.project.open_sprint("S2", None, &[]);
         plan_sprint(
             deps,
-            &["FRK-3".parse().expect("an id")],
+            &["CTV-3".parse().expect("an id")],
             &PlannedBy::Governor,
         )
         .expect("the governor plans");
@@ -735,9 +735,9 @@ mod tests {
                 .map(|task| (task["task_id"].clone(), task["status"].clone()))
                 .collect::<Vec<_>>(),
             vec![
-                (json!("FRK-1"), json!("accepted")),
-                (json!("FRK-2"), json!("ready")),
-                (json!("FRK-4"), json!("cancelled")),
+                (json!("CTV-1"), json!("accepted")),
+                (json!("CTV-2"), json!("ready")),
+                (json!("CTV-4"), json!("cancelled")),
             ],
             "{one}"
         );
@@ -779,8 +779,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn says_which_session_an_agent_is_in() {
         let harness = Harness::new("board-activity", |_| {});
-        harness.ready("FRK-1");
-        harness.started_session("FRK-1", "dev-a", "s-7", "implement");
+        harness.ready("CTV-1");
+        harness.started_session("CTV-1", "dev-a", "s-7", "implement");
         let of = |agent: &str| {
             let all = query(
                 &harness.daemon,
@@ -813,7 +813,7 @@ mod tests {
                 "recorded_at": at().to_rfc3339(),
                 "team_id": "catervas",
                 "project_id": "catervas",
-                "task_id": "FRK-1",
+                "task_id": "CTV-1",
                 "agent_id": "dev-a",
                 "session_id": "s-7",
                 "kind": "session.ended",
@@ -854,10 +854,10 @@ mod tests {
             2.0,
             "2026-09-21T12:00:00Z",
         );
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         spent(
             &harness,
-            (Some("FRK-1"), "dev-a", "s1"),
+            (Some("CTV-1"), "dev-a", "s1"),
             "plan",
             4.0,
             &today,
@@ -880,8 +880,8 @@ mod tests {
             }));
         });
         let deps = &harness.project.deps;
-        harness.accepted("FRK-1");
-        harness.project.open_sprint("S1", Some(20.0), &["FRK-1"]);
+        harness.accepted("CTV-1");
+        harness.project.open_sprint("S1", Some(20.0), &["CTV-1"]);
         let today = at().to_rfc3339();
         for (agent, session, purpose, usd) in [
             ("dev-a", "s1", "implement", 1.0),
@@ -890,7 +890,7 @@ mod tests {
         ] {
             spent(
                 &harness,
-                (Some("FRK-1"), agent, session),
+                (Some("CTV-1"), agent, session),
                 purpose,
                 usd,
                 &today,
@@ -908,10 +908,10 @@ mod tests {
         let task = query(
             &harness.daemon,
             "task.costs",
-            &json!({ "task_id": "FRK-1" }),
+            &json!({ "task_id": "CTV-1" }),
             "taskCostsResult",
         );
-        let limit = harness.project.file("FRK-1")["budget"]["max_cost_usd"].clone();
+        let limit = harness.project.file("CTV-1")["budget"]["max_cost_usd"].clone();
         assert_eq!(
             task,
             json!({
@@ -925,10 +925,10 @@ mod tests {
         );
 
         // Today's plan of a task in no sprint: today's and dev-a's, not the sprint's.
-        harness.ready("FRK-2");
+        harness.ready("CTV-2");
         spent(
             &harness,
-            (Some("FRK-2"), "dev-a", "s5"),
+            (Some("CTV-2"), "dev-a", "s5"),
             "plan",
             0.5,
             &today,
@@ -936,14 +936,14 @@ mod tests {
         // An earlier day's check of the sprint's task: the sprint's and dev-b's, not today's.
         spent(
             &harness,
-            (Some("FRK-1"), "dev-b", "s6"),
+            (Some("CTV-1"), "dev-b", "s6"),
             "verify",
             16.0,
             "2026-09-21T12:00:00Z",
         );
         spent(
             &harness,
-            (Some("FRK-1"), "dev-c", "s7"),
+            (Some("CTV-1"), "dev-c", "s7"),
             "verify",
             0.25,
             "2026-09-21T12:00:00Z",
@@ -1080,7 +1080,7 @@ mod tests {
         let zero = said(&harness, "human", "human", "Zero.", &json!({}));
         let first = said(&harness, "human", "human", "One.", &json!({}));
         // Events that are not messages are not the channel's.
-        harness.ready("FRK-1");
+        harness.ready("CTV-1");
         let second = said(&harness, "human", "human", "Two.", &json!({}));
         let third = said(&harness, "catervas", "system", "Three.", &json!({}));
 
@@ -1113,10 +1113,10 @@ mod tests {
             &harness,
             "dev-a",
             "reply",
-            "On FRK-1 now.",
+            "On CTV-1 now.",
             &json!({
                 "agent_id": "dev-a",
-                "task_id": "FRK-1",
+                "task_id": "CTV-1",
                 "body": { "mentions": ["pm"], "thread": "standup", "in_reply_to": asked },
             }),
         );
@@ -1138,8 +1138,8 @@ mod tests {
                 },
                 {
                     "seq": reply, "at": at_now, "author": "dev-a", "kind": "reply",
-                    "text": "On FRK-1 now.", "mentions": ["pm"], "thread": "standup",
-                    "in_reply_to": asked, "task_id": "FRK-1",
+                    "text": "On CTV-1 now.", "mentions": ["pm"], "thread": "standup",
+                    "in_reply_to": asked, "task_id": "CTV-1",
                 },
             ])
         );
@@ -1387,7 +1387,7 @@ mod tests {
             sent_as,
             [
                 (asked, Value::Null),
-                (sent, json!("FRK-1")),
+                (sent, json!("CTV-1")),
                 (unsent, Value::Null)
             ]
         );
@@ -1408,7 +1408,7 @@ mod tests {
         let answered = chatted(&harness, "dev-a", "dev-a", "Two.", Some(asked));
         let past = chatted(&harness, "old", "human", "Still there?", None);
         let hi = said(&harness, "human", "human", "Hi team.", &json!({}));
-        said(&harness, "catervas", "system", "FRK-1 moved.", &json!({}));
+        said(&harness, "catervas", "system", "CTV-1 moved.", &json!({}));
 
         let listed = query(&harness.daemon, "chats.list", &json!({}), "chatsListResult");
 

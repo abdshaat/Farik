@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn creates_a_host_sandbox_rooted_at_the_worktree() {
         let root = fresh_root("factory");
-        let task_id = TaskId::try_from("FRK-1").expect("an id");
+        let task_id = TaskId::try_from("CTV-1").expect("an id");
         let sandbox = HostSandboxFactory
             .create("p", &task_id, &root, false)
             .expect("a host sandbox is always available");
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn creates_a_base_sandbox_rooted_at_the_worktree_it_is_given() {
         let root = fresh_root("base");
-        let task_id = TaskId::try_from("FRK-1").expect("an id");
+        let task_id = TaskId::try_from("CTV-1").expect("an id");
         let sandbox = HostSandboxFactory
             .create_base("p", &task_id, &root)
             .expect("a host sandbox is always available");
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn discards_a_host_sandbox_without_touching_the_workspace() {
         let root = fresh_root("discard");
-        let task_id = TaskId::try_from("FRK-1").expect("an id");
+        let task_id = TaskId::try_from("CTV-1").expect("an id");
         let sandbox = HostSandboxFactory
             .create("p", &task_id, &root, false)
             .expect("a host sandbox is always available");

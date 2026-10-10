@@ -846,7 +846,7 @@ mod tests {
 
     fn ask(to: TaskStatus, actor: A, agent_id: Option<&str>) -> TransitionRequest {
         TransitionRequest {
-            task_id: "FRK-1".parse().expect("a task id"),
+            task_id: "CTV-1".parse().expect("a task id"),
             to,
             actor,
             agent_id: agent_id.map(str::to_string),
@@ -888,11 +888,11 @@ mod tests {
         // which of the two the runtime meant.
         let context = a_context();
         let mut elsewhere = ask(TaskStatus::Verifying, A::Assignee, Some("dev-1"));
-        elsewhere.task_id = "FRK-999".parse().expect("a task id");
+        elsewhere.task_id = "CTV-999".parse().expect("a task id");
         assert_eq!(
             decide(&elsewhere, &context),
             Err(TransitionRefusal::WrongTask {
-                asked: "FRK-999".parse().expect("a task id"),
+                asked: "CTV-999".parse().expect("a task id"),
                 contract: context.contract.id.clone()
             })
         );
@@ -1488,12 +1488,12 @@ mod tests {
         // An epic is verified on its tasks instead, and nothing asks its assignee for a run.
         context.contract.kind = Kind::Epic;
         context.children = vec![ChildState {
-            task_id: "FRK-2".to_string(),
+            task_id: "CTV-2".to_string(),
             status: TaskStatus::Accepted,
         }];
         assert_eq!(effects(&request, &context), []);
         context.children = vec![ChildState {
-            task_id: "FRK-2".to_string(),
+            task_id: "CTV-2".to_string(),
             status: TaskStatus::InProgress,
         }];
         let (gate, details) = one_gate(&request, &context);
