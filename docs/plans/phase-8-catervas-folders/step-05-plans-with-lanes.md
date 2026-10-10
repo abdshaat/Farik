@@ -110,7 +110,7 @@ Messages, exact: `lane <n> is beyond the team's builders: it has <b> active, Sof
 - `plain_readiness_covers_every_rule` (`plain.rs`) holds with 26. RED: `listed` does not compile.
 - `reads_the_lanes_of_an_epics_other_tasks` (`transitions.rs`) — epic CTV-1 in progress, CTV-2 lane 1 `[src/**]`, CTV-3 no lane, CTV-4 lane 2 cancelled; the context for CTV-5's `refining -> ready` has `parent.lanes` exactly one `LanedTask` for CTV-2, lane 1, `[src/**]`, and with CTV-5 lane 2 `[src/x.rs]` its readiness fails `LanesOverlap`. RED: no field.
 
-- [ ] `feat(core): keep an epic's lanes apart at readiness`
+- [x] `feat(core): keep an epic's lanes apart at readiness`
 
 ### Task 4: Each lane goes to one builder
 

@@ -60,6 +60,12 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::BudgetWithinParent => {
             "The plan costs more than is left of the larger piece of work's budget."
         }
+        ReadinessRule::LaneBeyondBuilders => {
+            "The plan splits the work into more parallel parts than your team has builders."
+        }
+        ReadinessRule::LanesOverlap => {
+            "Two parts of this work that run side by side could change the same files."
+        }
         ReadinessRule::JudgmentRecorded => "The plan has not been checked yet.",
         ReadinessRule::JudgmentAnswers => "The check found the plan not ready.",
     }
@@ -70,7 +76,7 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 24] = [
+    const EVERY_RULE: [ReadinessRule; 26] = [
         IntentPresent,
         SummaryPresent,
         CriteriaPresent,
@@ -93,6 +99,8 @@ mod tests {
         ParentInProgress,
         PathsWithinParent,
         BudgetWithinParent,
+        LaneBeyondBuilders,
+        LanesOverlap,
         JudgmentRecorded,
         JudgmentAnswers,
     ];
@@ -122,6 +130,8 @@ mod tests {
             | ParentInProgress
             | PathsWithinParent
             | BudgetWithinParent
+            | LaneBeyondBuilders
+            | LanesOverlap
             | JudgmentRecorded
             | JudgmentAnswers => {}
         }

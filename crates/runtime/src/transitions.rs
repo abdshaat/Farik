@@ -25,7 +25,7 @@ use catervas_core::governor::gates::{
     FolderWork, Rejection, WorkState, waits_for_a_sprint,
 };
 use catervas_core::governor::readiness::{
-    JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext,
+    JudgmentAnswer, JudgmentReview, LanedTask, ParentState, ReadinessContext,
 };
 use catervas_core::governor::team_rules::is_ui_change;
 use catervas_core::governor::transition::{
@@ -836,21 +836,31 @@ impl Transitions {
         let row = row_of(board, parent)?;
         let epic = self.files.read_contract(parent)?;
         let mut remaining = epic.budget.max_cost_usd - row.cost_usd;
+        let mut lanes = Vec::new();
         for sibling in board.iter().filter(|other| {
             other.parent.as_ref() == Some(parent)
                 && other.task_id != *child
                 && other.status != TaskStatus::Cancelled
         }) {
-            remaining -= self
-                .files
-                .read_contract(&sibling.task_id)?
-                .budget
-                .max_cost_usd;
+            let sibling = self.files.read_contract(&sibling.task_id)?;
+            remaining -= sibling.budget.max_cost_usd;
+            if let Some(lane) = sibling.lane {
+                lanes.push(LanedTask {
+                    task_id: sibling.id.to_string(),
+                    lane: lane.get(),
+                    allowed_paths: sibling
+                        .allowed_paths
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect(),
+                });
+            }
         }
         Ok(Some(ParentState {
             status: row.status,
             allowed_paths: epic.allowed_paths.iter().map(ToString::to_string).collect(),
             remaining_budget_usd: remaining,
+            lanes,
         }))
     }
 }
@@ -1555,7 +1565,7 @@ mod tests {
     use catervas_core::contract::{Role, TaskStatus, validate_contract};
     use catervas_core::governor::done::{DoneRule, evaluate_done};
     use catervas_core::governor::gates::{Blocker, DependencyState, Rejection};
-    use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
+    use catervas_core::governor::readiness::{LanedTask, ReadinessRule, evaluate_readiness};
     use catervas_core::governor::transition::TransitionRefusal;
     use catervas_core::governor::transition::TransitionRequest;
     use catervas_core::governor::transition_table::GateId;
@@ -2724,6 +2734,51 @@ mod tests {
         let context = project.context(&request, &TransitionAsk::default());
         assert!(context.readiness.remaining_sprint_budget_usd.abs() < 1e-12);
         assert!(context.readiness.remaining_sprint_budget_usd >= 0.0);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_the_lanes_of_an_epics_other_tasks() {
+        let project = Project::new("epic-lanes", a_team(|_| {}), at(12));
+        project.file("CTV-1", |wire| wire["kind"] = json!("epic"));
+        project.created_under("CTV-1", "in_progress", "epic", None);
+        for (task, status, lane, path) in [
+            ("CTV-2", "ready", Some(1), "src/**"),
+            ("CTV-3", "ready", None, "src/**"),
+            ("CTV-4", "cancelled", Some(2), "src/**"),
+            ("CTV-5", "refining", Some(2), "src/x.rs"),
+        ] {
+            project.file(task, |wire| {
+                wire["parent"] = json!("CTV-1");
+                wire["allowed_paths"] = json!([path]);
+                if let Some(lane) = lane {
+                    wire["lane"] = json!(lane);
+                }
+            });
+            project.created_under(task, status, "task", Some("CTV-1"));
+        }
+        let request = a_request("CTV-5", TaskStatus::Ready, TransitionActor::Governor, None);
+        let context = project.context(&request, &TransitionAsk::default());
+        let parent = context.readiness.parent.clone().expect("the epic");
+        assert_eq!(
+            parent.lanes,
+            vec![LanedTask {
+                task_id: "CTV-2".to_string(),
+                lane: 1,
+                allowed_paths: vec!["src/**".to_string()],
+            }]
+        );
+        let contract = project
+            .files
+            .read_contract(&"CTV-5".parse().expect("a task id"))
+            .expect("the file reads");
+        assert!(
+            evaluate_readiness(&contract, &context.readiness)
+                .err()
+                .unwrap_or_default()
+                .iter()
+                .any(|failure| failure.rule == ReadinessRule::LanesOverlap)
+        );
     }
 
     #[test]

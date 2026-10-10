@@ -5,13 +5,14 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::paths::{
-    GlobError, PathRefusal, check_allowed_paths, reaches_the_catervas_directory, reaches_the_folder,
+    GlobError, PathRefusal, check_allowed_paths, could_overlap, reaches_the_catervas_directory,
+    reaches_the_folder,
 };
 use super::team_rules::TeamRules;
 use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
 };
-use crate::folders::ROLE_FOLDERS;
+use crate::folders::{ROLE_FOLDERS, plan_path};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::team::{
     changes_code, plain_role, private_file_fault, private_folder, task_private_folder,
@@ -76,6 +77,11 @@ pub enum ReadinessRule {
     PathsWithinParent,
     /// A task's budget fits in its parent's remaining budget.
     BudgetWithinParent,
+    /// A task's lane is no more than the team's active builders: Software Developers and UI/UX
+    /// Designers, one lane each.
+    LaneBeyondBuilders,
+    /// A task's allowed paths could not meet those of a task in another lane of its epic.
+    LanesOverlap,
     /// The judge's review is recorded when the team's policy checks plans.
     JudgmentRecorded,
     /// The judge answered yes to every question it was asked.
@@ -104,6 +110,17 @@ pub struct JudgmentReview {
     pub reason: String,
 }
 
+/// Another task of an epic that has a lane: what `LanesOverlap` reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanedTask {
+    /// The task's id.
+    pub task_id: String,
+    /// The task's lane.
+    pub lane: u64,
+    /// The task's allowed paths.
+    pub allowed_paths: Vec<String>,
+}
+
 /// What the readiness check needs to know about a task's epic (`docs/SPEC.md` section 5.16).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParentState {
@@ -113,6 +130,8 @@ pub struct ParentState {
     pub allowed_paths: Vec<String>,
     /// What is left of the epic's budget for its tasks, in dollars.
     pub remaining_budget_usd: f64,
+    /// Every other task of the epic that is not cancelled and has a lane.
+    pub lanes: Vec<LanedTask>,
 }
 
 /// Everything the readiness check needs from the world, passed in by the runtime.
@@ -148,7 +167,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 22] = [
+const CHECKS: [Check; 24] = [
     intent_present,
     summary_present,
     criteria_present,
@@ -171,6 +190,8 @@ const CHECKS: [Check; 22] = [
     parent_in_progress,
     paths_within_parent,
     budget_within_parent,
+    lane_beyond_builders,
+    lanes_overlap,
 ];
 
 /// The judge's review, asked of a contract only once every other rule passes, so that a
@@ -894,7 +915,17 @@ fn paths_within_parent(
     let Some(parent) = &context.parent else {
         return None;
     };
-    let outside = paths_outside(&contract.allowed_paths, &parent.allowed_paths);
+    // The plan lies inside its epic: the task that writes it, or is built from it, may name it.
+    let plan = contract
+        .plan
+        .as_ref()
+        .zip(contract.parent.as_ref())
+        .filter(|(plan, parent)| plan.as_str() == plan_path(parent.as_str()))
+        .map(|(plan, _)| plan.as_str());
+    let outside: Vec<&str> = paths_outside(&contract.allowed_paths, &parent.allowed_paths)
+        .into_iter()
+        .filter(|path| Some(*path) != plan)
+        .collect();
     if outside.is_empty() {
         return None;
     }
@@ -926,6 +957,64 @@ fn budget_within_parent(
         ));
     }
     None
+}
+
+fn lane_beyond_builders(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    let lane = contract.lane?.get();
+    contract.parent.as_ref()?;
+    let builders: u32 = context
+        .active_agents_by_role
+        .iter()
+        .filter(|(role, _)| changes_code(**role))
+        .map(|(_, count)| *count)
+        .sum();
+    if lane <= u64::from(builders) {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::LaneBeyondBuilders,
+        format!(
+            "lane {lane} is beyond the team's builders: it has {builders} active, Software Developers and UI/UX Designers, one lane each"
+        ),
+    ))
+}
+
+fn lanes_overlap(contract: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
+    let lane = contract.lane?.get();
+    contract.parent.as_ref()?;
+    let parent = context.parent.as_ref()?;
+    let clauses: Vec<String> = parent
+        .lanes
+        .iter()
+        .filter(|other| other.lane != lane)
+        .filter_map(|other| {
+            contract.allowed_paths.iter().find_map(|ours| {
+                other
+                    .allowed_paths
+                    .iter()
+                    .find(|theirs| could_overlap(ours, theirs))
+                    .map(|theirs| {
+                        format!(
+                            "{} in lane {} ({ours} and {theirs})",
+                            other.task_id, other.lane
+                        )
+                    })
+            })
+        })
+        .collect();
+    if clauses.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::LanesOverlap,
+        format!(
+            "lane {lane} could meet {}; tasks in different lanes are built side by side, so their allowed paths must part before their first wildcard: narrow the paths, or put the tasks in one lane",
+            clauses.join(", ")
+        ),
+    ))
 }
 
 fn judgment_recorded(_: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
@@ -968,8 +1057,8 @@ mod tests {
 
     use super::fixtures::{a_contract, a_ready_context};
     use super::{
-        JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext, ReadinessRule as R,
-        TeamRules, evaluate_readiness,
+        JudgmentAnswer, JudgmentReview, LanedTask, ParentState, ReadinessContext,
+        ReadinessRule as R, TeamRules, evaluate_readiness,
     };
     use crate::contract::fixtures::a_contract_wire;
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire, validate_contract};
@@ -1020,6 +1109,7 @@ mod tests {
             status: TaskStatus::InProgress,
             allowed_paths: vec!["src/**".to_string()],
             remaining_budget_usd: 50.0,
+            lanes: vec![],
         }
     }
 
@@ -1775,6 +1865,7 @@ mod tests {
             status: TaskStatus::InProgress,
             allowed_paths: vec!["**".to_string()],
             remaining_budget_usd: 50.0,
+            lanes: vec![],
         });
         assert_eq!(
             failed_rules(&under_an_epic, &context),
@@ -2001,6 +2092,101 @@ mod tests {
             ..an_in_progress_parent()
         });
         assert_eq!(failed_rules(&contract, &context), [R::PathsWithinParent]);
+    }
+
+    fn in_lane(lane: u64) -> TaskContract {
+        let mut contract = a_contract();
+        contract.lane = std::num::NonZeroU64::new(lane);
+        contract
+    }
+
+    #[test]
+    fn refuses_a_lane_beyond_the_builders() {
+        let (_, context) = a_task_under(an_in_progress_parent());
+        let parent = || Some("CTV-3".parse().expect("a task id"));
+        let mut contract = in_lane(2);
+        contract.parent = parent();
+        assert_eq!(failed_rules(&contract, &context), [R::LaneBeyondBuilders]);
+        assert_eq!(
+            message_of(&contract, &context, R::LaneBeyondBuilders),
+            "lane 2 is beyond the team's builders: it has 1 active, Software Developers and UI/UX Designers, one lane each"
+        );
+        let mut with_a_designer = context.clone();
+        with_a_designer
+            .active_agents_by_role
+            .insert(Role::UiUxDesigner, 1);
+        assert_eq!(evaluate_readiness(&contract, &with_a_designer), Ok(()));
+        let mut first = in_lane(1);
+        first.parent = parent();
+        assert_eq!(evaluate_readiness(&first, &context), Ok(()));
+        let mut without_a_developer = context.clone();
+        without_a_developer
+            .active_agents_by_role
+            .remove(&Role::SoftwareDeveloper);
+        assert_eq!(
+            failed_rules(&first, &without_a_developer),
+            [R::LaneBeyondBuilders]
+        );
+        // A lane is read only on a task with a parent.
+        assert_eq!(evaluate_readiness(&in_lane(2), &a_ready_context()), Ok(()));
+        let mut epic = in_lane(3);
+        epic.kind = Kind::Epic;
+        assert_eq!(evaluate_readiness(&epic, &a_ready_context()), Ok(()));
+    }
+
+    #[test]
+    fn refuses_lanes_whose_paths_could_meet() {
+        let a_lane = |task_id: &str, lane: u64, path: &str| LanedTask {
+            task_id: task_id.to_string(),
+            lane,
+            allowed_paths: vec![path.to_string()],
+        };
+        let (mut contract, mut context) = a_task_under(ParentState {
+            lanes: vec![
+                a_lane("CTV-7", 1, "src/**"),
+                a_lane("CTV-8", 2, "src/a/b.rs"),
+                a_lane("CTV-9", 3, "apps/**"),
+            ],
+            ..an_in_progress_parent()
+        });
+        context
+            .active_agents_by_role
+            .insert(Role::SoftwareDeveloper, 3);
+        contract.lane = std::num::NonZeroU64::new(2);
+        contract.allowed_paths = vec!["src/a/**".to_string(), "src/c.rs".to_string()];
+        assert_eq!(failed_rules(&contract, &context), [R::LanesOverlap]);
+        assert_eq!(
+            message_of(&contract, &context, R::LanesOverlap),
+            "lane 2 could meet CTV-7 in lane 1 (src/a/** and src/**); tasks in different lanes are built side by side, so their allowed paths must part before their first wildcard: narrow the paths, or put the tasks in one lane"
+        );
+        context.parent.as_mut().expect("a parent").lanes.remove(0);
+        assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+        contract.lane = None;
+        context.parent.as_mut().expect("a parent").lanes = vec![a_lane("CTV-7", 1, "src/**")];
+        assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+    }
+
+    #[test]
+    fn keeps_an_epics_plan_inside_it() {
+        let (mut contract, context) = a_task_under(an_in_progress_parent());
+        let fails_the_parent_paths = |contract: &TaskContract| {
+            evaluate_readiness(contract, &context)
+                .err()
+                .unwrap_or_default()
+                .iter()
+                .any(|failure| failure.rule == R::PathsWithinParent)
+        };
+        let plan = "docs/catervas/architecture/plans/CTV-3.md";
+        contract.plan = Some(plan.parse().expect("a plan path"));
+        contract.allowed_paths = vec![plan.to_string()];
+        assert!(!fails_the_parent_paths(&contract));
+        let other = "docs/catervas/architecture/plans/CTV-4.md";
+        contract.plan = Some(other.parse().expect("a plan path"));
+        contract.allowed_paths = vec![other.to_string()];
+        assert!(fails_the_parent_paths(&contract));
+        contract.plan = None;
+        contract.allowed_paths = vec![plan.to_string()];
+        assert!(fails_the_parent_paths(&contract));
     }
 
     #[test]
