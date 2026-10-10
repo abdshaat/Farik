@@ -160,6 +160,37 @@ pub fn reaches_the_folder(glob: &str, folder: &str) -> bool {
     })
 }
 
+/// Whether every path a glob could match lies within `read`, a read path `<literal segments>/**`
+/// (`docs/SPEC.md` section 5.6). Fails closed: `read` with a wildcard, brace, `.` or `..` segment
+/// before its `/**` is within nothing. A glob stays within when it holds no `\`, no alternative of
+/// its brace expansion holds a `{` or `}` (a nested or unclosed group), each alternative passes
+/// `normalise`, and starts with the folder's segments, each equal exactly, letter case included.
+#[must_use]
+pub fn stays_within(glob: &str, read: &str) -> bool {
+    let Some(folder) = read.strip_suffix("/**") else {
+        return false;
+    };
+    let folder: Vec<&str> = folder.split('/').collect();
+    let is_literal = |segment: &&str| {
+        !segment.is_empty()
+            && *segment != "."
+            && *segment != ".."
+            && !segment.contains(['*', '?', '[', '{', '}', '\\'])
+    };
+    if !folder.iter().all(is_literal) || glob.contains('\\') {
+        return false;
+    }
+    expand_braces(glob).iter().all(|alternative| {
+        !alternative.contains(['{', '}'])
+            && normalise(alternative).is_some_and(|path| {
+                let mut segments = path.split('/');
+                folder
+                    .iter()
+                    .all(|directory| segments.next() == Some(directory))
+            })
+    })
+}
+
 fn compiles(segment: &str) -> bool {
     GlobBuilder::new(segment).build().is_ok()
 }
@@ -233,7 +264,7 @@ fn refuse<'a>(violations: impl Iterator<Item = &'a String>) -> Result<(), PathRe
 mod tests {
     use super::{
         GlobError, PathRefusal, PathViolation, check_allowed_paths, check_protected_paths,
-        reaches_the_folder,
+        reaches_the_folder, stays_within,
     };
 
     fn strings(items: &[&str]) -> Vec<String> {
@@ -302,6 +333,52 @@ mod tests {
             "docs/catervas/productx/**",
             "docs/catervas/product"
         ));
+    }
+
+    #[test]
+    fn a_glob_stays_within_a_read_path_as_the_rule_says() {
+        let read = "docs/catervas/product/**";
+        for glob in [
+            "docs/catervas/product",
+            "docs/catervas/product/spec.md",
+            "docs/catervas/product/spec.agent.md",
+            "./docs/catervas/product/x.md",
+            "docs//catervas/product/x",
+            "docs/catervas/product/**/*.md",
+            "docs/catervas/product/{spec,roadmap}.md",
+            "docs/catervas/product/[x].md",
+        ] {
+            assert!(stays_within(glob, read), "{glob}");
+        }
+        for glob in [
+            "docs/catervas",
+            "docs/catervas/*",
+            "docs/catervas/*/spec.md",
+            "docs/*/product/x",
+            "docs/catervas/product*/x",
+            "docs/catervas/productx/x",
+            "Docs/catervas/product/x",
+            "docs/catervas/{product,architecture}/x",
+            "docs/catervas/product/../architecture/x",
+            "docs/catervas/product/{a,..}/x",
+            "docs/catervas/product/{a,{..,b}}/x",
+            "docs/catervas/product/{x",
+            "docs\\catervas\\product\\x",
+            "/docs/catervas/product/x",
+            "**/spec.md",
+            "**",
+            "src/main.rs",
+            "",
+        ] {
+            assert!(!stays_within(glob, read), "{glob}");
+        }
+        for read in [
+            "docs/catervas/*/**",
+            "docs/catervas/product",
+            "docs/../x/**",
+        ] {
+            assert!(!stays_within("docs/catervas/product/x", read), "{read}");
+        }
     }
 
     #[test]

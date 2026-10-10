@@ -80,7 +80,7 @@ Produces: `stays_within`. Consumes: `normalise`, `expand_braces`.
 
 - `a_glob_stays_within_a_read_path_as_the_rule_says` — for `docs/catervas/product/**`, each of `docs/catervas/product`, `docs/catervas/product/spec.md`, `docs/catervas/product/spec.agent.md`, `./docs/catervas/product/x.md`, `docs//catervas/product/x`, `docs/catervas/product/**/*.md`, `docs/catervas/product/{spec,roadmap}.md` and `docs/catervas/product/[x].md` stays within; none of `docs/catervas`, `docs/catervas/*`, `docs/catervas/*/spec.md`, `docs/*/product/x`, `docs/catervas/product*/x`, `docs/catervas/productx/x`, `Docs/catervas/product/x`, `docs/catervas/{product,architecture}/x`, `docs/catervas/product/../architecture/x`, `docs/catervas/product/{a,..}/x`, `docs/catervas/product/{a,{..,b}}/x`, `docs/catervas/product/{x`, `docs\catervas\product\x`, `/docs/catervas/product/x`, `**/spec.md`, `**`, `src/main.rs` and the empty glob does. Against `docs/catervas/*/**`, `docs/catervas/product` and `docs/../x/**`, not even `docs/catervas/product/x` stays within. RED: no function.
 
-- [ ] `feat(core): say when a glob stays within a folder`
+- [x] `feat(core): say when a glob stays within a folder`
 
 ### Task 2: Who reads what
 
