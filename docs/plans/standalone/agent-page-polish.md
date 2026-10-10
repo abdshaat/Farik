@@ -59,7 +59,7 @@ Tests:
 
 - `it('shows Playwright's logo inside its label')` — the element `#connector-playwright-label` contains an `img` whose `getAttribute("src")` equals `serviceLogo("playwright")`, and the `switch` named "Playwright" is still found by that exact name. Replaces the logo assertion of `'shows Playwright with its logo, a short line and the rest behind info'`, whose other assertions stay.
 
-- [ ] `fix(web): put Playwright's logo beside its name`
+- [x] `fix(web): put Playwright's logo beside its name`
 
 ### Task 3: skill descriptions behind ⓘ
 

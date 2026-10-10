@@ -2688,10 +2688,12 @@ describe("logos and info buttons on the Connectors section", () => {
 	it("shows Playwright with its logo, a short line and the rest behind info", async () => {
 		await opened();
 		const sw = screen.getByRole("switch", { name: en.connectorPlaywright });
-		const playwright = sw.closest("div")?.parentElement as HTMLElement;
-		expect(playwright.querySelector("img")?.getAttribute("src")).toBe(
-			serviceLogo("playwright"),
-		);
+		const playwright = sw.closest("div") as HTMLElement;
+		expect(
+			playwright
+				.querySelector("#connector-playwright-label img")
+				?.getAttribute("src"),
+		).toBe(serviceLogo("playwright"));
 		expect(
 			within(playwright).getByText(en.connectorPlaywrightShort),
 		).toBeTruthy();

@@ -504,22 +504,20 @@ function Editor({
 						{t("connectorsLead", { name })}
 					</InfoTip>
 				</div>
-				<div className={styles.titled}>
-					<ServiceLogo name="playwright" />
-					<Switch
-						id="connector-playwright"
-						label={t("connectorPlaywright")}
-						description={t("connectorPlaywrightShort")}
-						info={
-							<>
-								<span>{t("connectorPlaywrightNote", { name })}</span>
-								<span>{t("connectorsNote")}</span>
-							</>
-						}
-						checked={browsing}
-						onChange={(on) => setDraft(withPlaywright(agent, on))}
-					/>
-				</div>
+				<Switch
+					id="connector-playwright"
+					icon={<ServiceLogo name="playwright" />}
+					label={t("connectorPlaywright")}
+					description={t("connectorPlaywrightShort")}
+					info={
+						<>
+							<span>{t("connectorPlaywrightNote", { name })}</span>
+							<span>{t("connectorsNote")}</span>
+						</>
+					}
+					checked={browsing}
+					onChange={(on) => setDraft(withPlaywright(agent, on))}
+				/>
 				{!browsing && agent.role === "ui_ux_designer" && (
 					<p>
 						<strong>{t("connectorOff", { name })}</strong>
