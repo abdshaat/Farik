@@ -89,7 +89,7 @@ Files: the schema (two properties after `ui_change`; the top description's "writ
 - `the_product_manager_writes_a_plan_and_a_lane` (`gates.rs`) — `check_contract_write` allows the Product Manager's change of `plan` and `lane` on a refining task and refuses it on a ready one as frozen. RED: unknown fields.
 - `names_an_epics_plan` (`folders.rs`) — `plan_path("CTV-3")` is `docs/catervas/architecture/plans/CTV-3.md`. RED: no function.
 
-- [ ] `feat(core): add a contract's plan and lane`
+- [x] `feat(core): add a contract's plan and lane`
 
 ### Task 2: Two globs that could meet
 

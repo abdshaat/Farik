@@ -931,7 +931,7 @@ pub const FIELDS_FIXED_AT_CREATION: [&str; 2] = ["kind", "parent"];
 /// assignee writing the tasks under it, and by the human. Written out rather than left as
 /// whatever is not in the other sets, so that a field added to the schema is refused until
 /// somebody says who writes it.
-pub const FIELDS_OF_THE_CONTENT: [&str; 16] = [
+pub const FIELDS_OF_THE_CONTENT: [&str; 18] = [
     "title",
     "intent",
     "summary",
@@ -948,6 +948,8 @@ pub const FIELDS_OF_THE_CONTENT: [&str; 16] = [
     "budget",
     "allowed_paths",
     "ui_change",
+    "plan",
+    "lane",
 ];
 
 /// The fields the note tools write, which stay open whatever the contract's status: its notes,
@@ -2486,6 +2488,37 @@ mod tests {
                 "{status}"
             );
         }
+    }
+
+    #[test]
+    fn the_product_manager_writes_a_plan_and_a_lane() {
+        let product_manager = ContractWriteActor {
+            kind: TransitionActor::ProductManager,
+            agent_id: Some("pm-1".to_string()),
+        };
+        let fields = ["plan".to_string(), "lane".to_string()];
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Refining,
+                false,
+                &product_manager,
+                &fields
+            ),
+            Ok(ContractWriteOutcome::Allowed)
+        );
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Ready,
+                false,
+                &product_manager,
+                &fields
+            ),
+            Err(ContractWriteRefusal::ContractFrozen {
+                fields: fields.to_vec()
+            })
+        );
     }
 
     #[test]

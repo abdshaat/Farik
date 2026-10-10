@@ -27,6 +27,12 @@ pub fn role_folder(role: Role) -> Option<&'static str> {
         .find_map(|(owner, folder)| (*owner == role).then_some(*folder))
 }
 
+/// The Architect's implementation plan for an epic.
+#[must_use]
+pub fn plan_path(epic: &str) -> String {
+    format!("docs/catervas/architecture/plans/{epic}.md")
+}
+
 /// Whether a path is a human document: the product's `spec.md` and `roadmap.md`, or a marketing
 /// plan `plans/MP-<n>.md`, `n` decimal digits not starting with `0`. Each has an agent twin.
 #[must_use]
@@ -591,7 +597,7 @@ mod tests {
     use super::{
         FolderDocPathRefusal, OWNER_ACCEPTED, ROLE_FOLDERS, ReadAccess, agent_twin,
         check_folder_doc_path, folder_doc_author, folder_doc_message, folders_line, human_of_twin,
-        is_human_document, pair_changed_alone, read_access, role_folder,
+        is_human_document, pair_changed_alone, plan_path, read_access, role_folder,
     };
     use super::{LineChange, ShownLine, changed_lines, may_change_an_owner_document};
     use super::{
@@ -599,6 +605,14 @@ mod tests {
         plain_name, stale_line, twin_is_stale,
     };
     use crate::team::Role;
+
+    #[test]
+    fn names_an_epics_plan() {
+        assert_eq!(
+            plan_path("CTV-3"),
+            "docs/catervas/architecture/plans/CTV-3.md"
+        );
+    }
 
     const READ: &str = "Read any of them, and where a document has an .agent.md twin beside it, read the twin, which is written for agents.";
 
