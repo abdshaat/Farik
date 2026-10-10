@@ -117,7 +117,7 @@ Files: modified `PreviewFields.tsx`, `SetupTeam.tsx`, `en.ts`, `team.test.tsx`.
 - `asks_how_to_open_the_app_when_the_designer_is_on` (existing, kept) — with no proposed preview the fields show as today, the port labelled "Port (optional)".
 - `leaves_the_port_out_when_it_is_empty` — Continue with start `npm start` and an empty port sends `team.validate` a `preview` with no `port` key.
 
-- [ ] `feat(web): say how the app starts instead of asking for a port`
+- [x] `feat(web): say how the app starts instead of asking for a port`
 
 ### Task 5: "What they may do" starts answered and says less
 

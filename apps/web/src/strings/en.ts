@@ -1129,15 +1129,17 @@ export const en = {
 	previewSetupTitle: "{designer} needs to know how to open your app",
 	previewSetupLead:
 		"{designer} opens your app in a browser to check its screens.\nTell Catervas the commands that start it.\nNot sure? Leave these empty and add them in Settings later. {designer} waits until you do.",
+	previewFound: "{designer} opens your app with “{start}”.",
+	previewChange: "Change how it starts",
 	previewPrepare: "Get it ready (optional)",
 	previewPrepareHint:
 		"A command that installs what your app needs and builds it, such as “npm install”.\nYou can leave it empty.\nIt may use the internet, for up to 15 minutes.",
 	previewStart: "Start it",
 	previewStartHint:
 		"The command that starts your app, such as “npm start”.\nThe internet is off while your app runs.",
-	previewPort: "Port",
+	previewPort: "Port (optional)",
 	previewPortHint:
-		"The number your app answers on, like a door number.\nYour app often shows it when it starts: in “localhost:3000” it is 3000.\nIt must be a number from 1024 to 65535.",
+		"Leave it empty: Catervas finds it when your app starts.\nSet it only if your app answers on more than one.\nIt must be a number from 1024 to 65535.",
 	previewPath: "First page",
 	previewPathHint:
 		"The page {designer} opens first.\nLeave it as “/” for your app’s home page.",
@@ -1145,7 +1147,7 @@ export const en = {
 		"Catervas runs these commands inside Docker’s sandbox, a safe box kept apart from the rest of your computer.\nNot sure what to type? Ask whoever set up your app, or look in its README file.",
 	refusePreviewPort: "Use a number from 1024 to 65535.",
 	refusePreview:
-		"Catervas cannot use these. Starting your app needs a command and a port, each command is at most 500 characters, and the first page starts with /.",
+		"Catervas cannot use these. Starting your app needs a command, each command is at most 500 characters, and the first page starts with /.",
 	teamNeedsSandbox: "Needs Docker’s sandbox",
 	teamNeedsSandboxNote:
 		"{designer} opens your app in a browser, and only inside Docker’s sandbox, a safe box that keeps it away from the rest of your computer. Catervas did not find Docker here.",

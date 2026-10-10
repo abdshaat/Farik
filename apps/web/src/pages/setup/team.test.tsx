@@ -784,6 +784,62 @@ describe("team setup", () => {
 		);
 	});
 
+	it("says_how_the_app_starts_when_the_scan_found_it", async () => {
+		const { socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", {
+			...proposed((team) => {
+				team.agents = SIX;
+				team.preview = { start: "pnpm run dev", path: "/" };
+			}),
+			unavailable: [],
+		});
+		const card = await screen.findByRole("region", {
+			name: en.previewTitle,
+		});
+		expect(
+			within(card).getByText(
+				t("previewFound", { designer: "Iris", start: "pnpm run dev" }),
+			),
+		).toBeTruthy();
+		expect(
+			within(card).queryByRole("textbox", { name: en.previewStart }),
+		).toBeNull();
+		fireEvent.click(
+			within(card).getByRole("button", { name: en.previewChange }),
+		);
+		const start = within(card).getByRole("textbox", {
+			name: en.previewStart,
+		}) as HTMLInputElement;
+		expect(start.value).toBe("pnpm run dev");
+		expect(within(card).getAllByRole("textbox")).toHaveLength(4);
+	});
+
+	it("leaves_the_port_out_when_it_is_empty", async () => {
+		const { socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", {
+			...proposed((team) => {
+				team.agents = SIX;
+			}),
+			unavailable: [],
+		});
+		const card = await screen.findByRole("region", {
+			name: "Iris needs to know how to open your app",
+		});
+		fireEvent.change(
+			within(card).getByRole("textbox", { name: en.previewStart }),
+			{ target: { value: "npm start" } },
+		);
+		fireEvent.click(
+			screen.getByRole("button", { name: "Continue with these six" }),
+		);
+		const validate = await asked(s, "team.validate");
+		const team = (validate.params.params as { team: { preview: unknown } })
+			.team;
+		expect(team.preview).toEqual({ start: "npm start", path: "/" });
+	});
+
 	it("asks_how_to_open_the_app_when_the_designer_is_on", async () => {
 		const { container, socket } = await renderApp("/setup/team");
 		const s = socket as FakeSocket;
