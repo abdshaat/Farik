@@ -2833,14 +2833,14 @@ mod tests {
     /// lane 1 too, `ready`.
     fn lane_1_built_by_dev_a(harness: &Harness) {
         harness.file_under("CTV-2", "ready", Some("CTV-1"), |wire| {
-            wire["lane"] = json!(1)
+            wire["lane"] = json!(1);
         });
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
         for pair in ["ready", "assigned", "in_progress", "verifying", "accepted"].windows(2) {
             harness.project.moved("CTV-2", pair[0], pair[1], &people);
         }
         harness.file_under("CTV-3", "ready", Some("CTV-1"), |wire| {
-            wire["lane"] = json!(1)
+            wire["lane"] = json!(1);
         });
     }
 
