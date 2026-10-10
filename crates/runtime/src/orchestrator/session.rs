@@ -8,7 +8,7 @@ use std::sync::Arc;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
 use catervas_core::contract::{Role, TaskContract, TaskStatus};
-use catervas_core::folders::read_access;
+use catervas_core::folders::{read_access, role_folder};
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
 use catervas_core::governor::sites::{WebAccess, web_access};
@@ -847,6 +847,8 @@ const DRAFT_SELLER_MESSAGE_TOOL: &str = "catervas_draft_seller_message";
 /// the implement session of a task and in its chat.
 const READ_SELLER_MESSAGES_TOOL: &str = "catervas_read_seller_messages";
 const READ_SELLER_REPLIES_TOOL: &str = "catervas_read_seller_replies";
+/// The tool that writes a document of the caller's folder at a sprint planning, review or retro.
+const WRITE_FOLDER_DOC_TOOL: &str = "catervas_write_folder_doc";
 
 /// The Catervas tools `ask`'s session is offered, before its tiers are applied.
 fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> Vec<CatervasTool> {
@@ -914,6 +916,16 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
                 web_access(Role::from(ask.agent.role)) == WebAccess::ApprovedSites
                     && (in_its_task
                         || (tool.name == READ_SITES_TOOL && ask.purpose == SessionPurpose::Chat))
+            }
+            // A folder document is written at a planning, a review or a retro (not the standup)
+            // by a role that owns a folder.
+            WRITE_FOLDER_DOC_TOOL => {
+                ask.purpose == SessionPurpose::Ceremony
+                    && matches!(
+                        ask.thread,
+                        Some(Thread::Planning | Thread::Review | Thread::Retro)
+                    )
+                    && role_folder(Role::from(ask.agent.role)).is_some()
             }
             READ_SHEET_TOOL => {
                 private_folder(Role::from(ask.agent.role)).is_some()
@@ -1347,8 +1359,10 @@ mod tests {
     use catervas_protocol::event::{EventBody, EventKind, MessageKind, Thread};
 
     use super::{
-        SessionAsk, SessionEnd, TRIAGE_TOOL, offered_connector, run_session, session_spec, sleep,
+        SessionAsk, SessionEnd, TRIAGE_TOOL, offered_connector, offered_tools, run_session,
+        session_spec, sleep,
     };
+    use crate::orchestrator::rules::{CEREMONY_TOOLS, PLANNING_TOOLS, RETRO_TOOLS};
     use crate::prompt::{CEREMONY_INSTRUCTIONS, CLOSING_INSTRUCTIONS};
     use crate::recorded::fixtures::reply_to_a_mention;
     use crate::session::EndReason;
@@ -1387,6 +1401,69 @@ mod tests {
             .iter()
             .find(|agent| agent.id.as_str() == id)
             .expect("the agent is on the team")
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_the_folder_tool_at_planning_review_and_retro() {
+        let harness = Harness::new("session-folder-tool", |wire| {
+            wire["agents"].as_array_mut().expect("agents").push(
+                catervas_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+            );
+            crate::tools::fixtures::with_the_finance_specialist(wire);
+        });
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let offers = |who: &str,
+                      purpose: SessionPurpose,
+                      thread: Option<Thread>,
+                      tools: Option<&'static [&'static str]>| {
+            let ask = SessionAsk {
+                agent: agent(&team, who),
+                contract: None,
+                purpose,
+                cwd: harness.project.deps.files.root().to_path_buf(),
+                executor: None,
+                read_only: true,
+                only_tool: None,
+                tools,
+                in_reply_to: None,
+                thread,
+                initial_prompt: String::new(),
+                pipeline: None,
+            };
+            offered_tools(deps, &team, &ask)
+                .iter()
+                .any(|tool| tool.name == "catervas_write_folder_doc")
+        };
+        let ceremony = SessionPurpose::Ceremony;
+        for (thread, list) in [
+            (Thread::Planning, PLANNING_TOOLS),
+            (Thread::Review, CEREMONY_TOOLS),
+            (Thread::Retro, RETRO_TOOLS),
+        ] {
+            assert!(
+                offers("sm", ceremony, Some(thread), Some(list)),
+                "{thread:?}"
+            );
+        }
+        // The standup is given the review's list and still does not write documents.
+        assert!(!offers(
+            "sm",
+            ceremony,
+            Some(Thread::Standup),
+            Some(CEREMONY_TOOLS)
+        ));
+        assert!(!offers("sm", SessionPurpose::Chat, None, None));
+        assert!(!offers("sm", SessionPurpose::Implement, None, None));
+        // A role without a folder is offered it nowhere.
+        assert!(!offers(
+            "fin",
+            ceremony,
+            Some(Thread::Retro),
+            Some(RETRO_TOOLS)
+        ));
     }
 
     #[test]

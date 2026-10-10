@@ -454,7 +454,7 @@ async fn review_and_retro(
 }
 
 /// The Catervas tools the retro is offered: the standup's and the review's, and the retro's append.
-const RETRO_TOOLS: &[&str] = &[
+pub(super) const RETRO_TOOLS: &[&str] = &[
     "catervas_read_task",
     "catervas_read_board",
     "catervas_read_rules",
@@ -463,6 +463,7 @@ const RETRO_TOOLS: &[&str] = &[
     "catervas_append_retro",
     "catervas_write_memory",
     "catervas_read_decisions",
+    "catervas_write_folder_doc",
 ];
 
 /// Whether the sprint rules run in `scope`: they are about no one task, so only in a tick scoped
@@ -581,7 +582,7 @@ async fn sprint_planning(
 
 /// The Catervas tools the planning ceremony is offered: the reading tools, the channel, the plan, the
 /// notebook, and the decisions to read.
-const PLANNING_TOOLS: &[&str] = &[
+pub(super) const PLANNING_TOOLS: &[&str] = &[
     "catervas_read_task",
     "catervas_read_board",
     "catervas_read_rules",
@@ -590,6 +591,7 @@ const PLANNING_TOOLS: &[&str] = &[
     "catervas_plan_sprint",
     "catervas_write_memory",
     "catervas_read_decisions",
+    "catervas_write_folder_doc",
 ];
 
 /// The open sprint's standup (5.9), under `All` alone in a tick scoped to no task: once a UTC day,
@@ -676,7 +678,7 @@ async fn standup(
 
 /// The Catervas tools the standup and the review are offered: the reading tools, the channel, the
 /// notebook, and the decisions to read.
-const CEREMONY_TOOLS: &[&str] = &[
+pub(super) const CEREMONY_TOOLS: &[&str] = &[
     "catervas_read_task",
     "catervas_read_board",
     "catervas_read_rules",
@@ -684,6 +686,7 @@ const CEREMONY_TOOLS: &[&str] = &[
     "catervas_post_message",
     "catervas_write_memory",
     "catervas_read_decisions",
+    "catervas_write_folder_doc",
 ];
 
 /// Whether the day's dollars stop a session about no task from starting; `day_spent` is set when
@@ -5187,7 +5190,7 @@ mod tests {
         // chat's reply in a chat alone, the books' tools to the Finance Specialist and, to read
         // a workbook, a verify session about a finance task, an evaluation and the sites to the
         // Procurement Specialist in an implement session, and a post to the Marketing Specialist
-        // in one.
+        // in one; a folder document is written in a ceremony alone.
         let expected: Vec<String> = tool_descriptors()
             .iter()
             .filter(|tool| tiers.contains(&tool.tier))
@@ -5214,6 +5217,7 @@ mod tests {
                     "catervas_read_seller_messages",
                     "catervas_read_seller_replies",
                     "catervas_schedule_post",
+                    "catervas_write_folder_doc",
                 ]
                 .contains(&tool.name)
             })
@@ -5509,6 +5513,7 @@ mod tests {
                 "catervas_plan_sprint",
                 "catervas_write_memory",
                 "catervas_read_decisions",
+                "catervas_write_folder_doc",
             ])
         );
         // The candidates, the escalation the digest lists, the last retro, and the channel.
@@ -7309,7 +7314,10 @@ mod tests {
             "the note's first line alone: {}",
             spec.initial_prompt
         );
-        assert_eq!(tools_of(spec), BTreeSet::from(READ_AND_POST));
+        // The review writes a folder document of the Scrum Master's own; the standup does not.
+        let mut review_tools = BTreeSet::from(READ_AND_POST);
+        review_tools.insert("catervas_write_folder_doc");
+        assert_eq!(tools_of(spec), review_tools);
 
         let next = orchestrator.tick().await.expect("the tick runs");
 
@@ -7321,6 +7329,7 @@ mod tests {
         assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
         let mut retro_tools = BTreeSet::from(READ_AND_POST);
         retro_tools.insert("catervas_append_retro");
+        retro_tools.insert("catervas_write_folder_doc");
         assert_eq!(tools_of(&adapter.started()[1]), retro_tools);
         let after = orchestrator.tick().await.expect("the tick runs");
         assert!(!matches!(after, TickReport::Sprint { .. }), "{after:?}");

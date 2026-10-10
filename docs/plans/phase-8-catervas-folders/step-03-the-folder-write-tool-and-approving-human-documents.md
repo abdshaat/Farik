@@ -155,7 +155,7 @@ Consumes: Tasks 1 to 3.
 - `offers_the_folder_tool_at_planning_review_and_retro` (`orchestrator/session.rs`) — `offered_tools` for the Scrum Master's ceremony asks with thread `planning`, `review` and `retro`, given the three lists, holds the tool; with thread `standup` and `CEREMONY_TOOLS`, and for a `chat` or `implement` ask, it does not; for a Finance Specialist's `retro` ask it does not. RED.
 - `holds_the_standup_before_work` (`rules.rs:5748`) holds unchanged: the standup is offered `READ_AND_POST` alone.
 
-- [ ] `feat(runtime): write a folder document at a sprint ceremony`
+- [x] `feat(runtime): write a folder document at a sprint ceremony`
 
 ### Task 5: A folder change is integrated as a task's branch is
 

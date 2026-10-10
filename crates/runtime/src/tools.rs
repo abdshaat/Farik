@@ -36,6 +36,7 @@ mod evaluation;
 mod exec;
 #[cfg(test)]
 pub(crate) mod fixtures;
+pub(crate) mod folders;
 mod git;
 mod marketing;
 pub(crate) mod media;
@@ -257,6 +258,11 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             "catervas_ask_human",
             Read,
             "Ask the human a question; end your turn after asking.",
+        ),
+        tool::<folders::WriteFolderDocInput>(
+            "catervas_write_folder_doc",
+            Read,
+            "At a sprint planning, review or retro: write a document of your own folder under docs/catervas/. A document for agents is committed on a branch of its own and added to the project as the team's integration policy says. The product's spec.md and roadmap.md are proposed to the owner at the sprint review, with agent_text (their .agent.md version) and summary (what changed and why, for the owner), and wait for the owner's approval.",
         ),
         tool::<channel::PostMessageInput>(
             "catervas_post_message",
@@ -509,6 +515,7 @@ pub async fn call_tool(
         "catervas_record_criterion_result" => work::record_criterion(&call, parse(input)?),
         "catervas_write_note" => work::write_note(&call, parse(input)?),
         "catervas_ask_human" => work::ask_human(&call, parse(input)?),
+        "catervas_write_folder_doc" => folders::write_folder_doc(&call, &parse(input)?),
         "catervas_post_message" => channel::post_message(&call, parse(input)?),
         "catervas_append_retro" => retro::append_retro(&call, &parse(input)?),
         "catervas_write_memory" => memory::write_memory(&call, &parse(input)?),
@@ -801,6 +808,7 @@ mod tests {
             "catervas_record_criterion_result",
             "catervas_write_note",
             "catervas_ask_human",
+            "catervas_write_folder_doc",
             "catervas_post_message",
             "catervas_append_retro",
             "catervas_write_memory",
@@ -850,7 +858,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..40] {
+        for tool in &tools[..41] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

@@ -587,7 +587,26 @@ pub(crate) fn waits_for_the_lock<Answer: Send>(
     project: &TestProject,
     step: impl FnOnce() -> Answer + Send,
 ) -> Answer {
-    let held = crate::locked(lock);
+    waits_while(crate::locked(lock), project, step)
+}
+
+/// `waits_for_the_lock`, the lock being the integration lock file under `root` (5.14), which the
+/// step takes as an integration, a folder document's write and the owner's decision on one do.
+pub(crate) fn waits_for_the_lock_file<Answer: Send>(
+    root: &Path,
+    project: &TestProject,
+    step: impl FnOnce() -> Answer + Send,
+) -> Answer {
+    let held = crate::transitions::integration_lock(root).expect("the lock file is taken");
+    waits_while(held, project, step)
+}
+
+/// Runs `step` on a thread of its own while this one keeps `held`, then lets it go.
+fn waits_while<Held, Answer: Send>(
+    held: Held,
+    project: &TestProject,
+    step: impl FnOnce() -> Answer + Send,
+) -> Answer {
     let before = project.event_count();
     std::thread::scope(|scope| {
         let running = scope.spawn(step);
@@ -597,6 +616,13 @@ pub(crate) fn waits_for_the_lock<Answer: Send>(
             project.event_count(),
             before,
             "the step records nothing while it waits"
+        );
+        assert_eq!(
+            project
+                .repo
+                .git_output(&["branch", "--list", "docs/folder-*"]),
+            "",
+            "the step makes no branch while it waits"
         );
         drop(held);
         running.join().expect("the step ends")

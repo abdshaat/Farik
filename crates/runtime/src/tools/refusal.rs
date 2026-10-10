@@ -136,6 +136,8 @@ pub(crate) enum Refusal {
     Pipeline { code: &'static str, detail: String },
     /// A refusal of one of the tools for the messages to sellers under the code it names (6.10).
     Seller { code: &'static str, detail: String },
+    /// A refusal of `catervas_write_folder_doc` under the code it names (5.17).
+    FolderDoc { code: &'static str, detail: String },
 }
 
 impl Refusal {
@@ -244,7 +246,8 @@ impl Refusal {
             | Self::Sites { code, detail }
             | Self::PurchaseOrder { code, detail }
             | Self::Pipeline { code, detail }
-            | Self::Seller { code, detail } => (*code, detail.clone()),
+            | Self::Seller { code, detail }
+            | Self::FolderDoc { code, detail } => (*code, detail.clone()),
             // Each fault on a line of its own, the first one's code leading the reason.
             Self::MarketingPlanFaults { faults } => {
                 return faults
