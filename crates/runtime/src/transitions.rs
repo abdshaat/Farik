@@ -1233,7 +1233,7 @@ fn assignment(
     let assignee_role = role_in(team, assignee_id);
     let (reviewer_id, reviewer_role) = match ask.reviewer_id.as_deref() {
         Some(reviewer) => (reviewer.to_string(), role_in(team, reviewer)),
-        // The human reviews an epic the Product Manager broke down (5.16 item 4), and has no agent
+        // The human reviews an epic the Product Manager holds (5.16 item 4), and has no agent
         // id.
         None => (String::new(), Role::Human),
     };

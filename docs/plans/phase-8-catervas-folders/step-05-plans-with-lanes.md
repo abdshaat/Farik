@@ -137,7 +137,7 @@ Files: `requests.rs` (`Child`, `EpicStep`, `epic_step`; `in_progress_epic` runs 
 - `files_a_child_of_an_epic_its_assignee_breaks_down` (`contracts.rs:1093`) gains: `pm` files a child of the Scrum Master's epic. RED: refused.
 - `apps/web/e2e/sprints.spec.ts` holds: its team is `pm-architect-developer`, so the breakdown session is `pm`'s and its first message is now `plan_task_message`, and the recorded transcript files a Developer's task anyway, which is no plan task and carries no lane.
 
-- [ ] `feat(runtime): plan an approved epic with the Architect before its tasks`
+- [x] `feat(runtime): plan an approved epic with the Architect before its tasks`
 
 ### Task 6: The roles are told the order
 

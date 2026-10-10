@@ -1125,6 +1125,36 @@ mod tests {
             "gate_failed",
         );
         assert_eq!(project.event_count(), before);
+
+        // The Product Manager writes the tasks of an epic the Scrum Master holds.
+        let project = a_project_with_scrum_master("tools-child-pm");
+        project.filed("CTV-1", "in_progress", "epic", None);
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "sm" }),
+        );
+        let filed = project
+            .call(
+                "pm",
+                None,
+                "catervas_create_task",
+                json!({ "contract": a_request(), "parent": "CTV-1" }),
+            )
+            .expect("the Product Manager files a task of the Scrum Master's epic");
+        assert_eq!(filed["task_id"], "CTV-2");
+        let before = project.event_count();
+        refused_with(
+            project.call(
+                "dev-a",
+                None,
+                "catervas_create_task",
+                json!({ "contract": a_request(), "parent": "CTV-1" }),
+            ),
+            "gate_failed",
+        );
+        assert_eq!(project.event_count(), before);
     }
 
     /// `filed` in `status`, of `kind`, with a budget of `usd` dollars.

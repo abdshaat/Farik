@@ -290,7 +290,7 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
                 .to_string(),
         );
     }
-    // An epic the Product Manager broke down is reviewed by the human (5.16 item 4), and the human
+    // An epic the Product Manager holds is reviewed by the human (5.16 item 4), and the human
     // is not an agent: there is no id to name, and nothing for the reviewer to be the assignee of.
     if expected_reviewer != Role::Human {
         if input.reviewer_id.trim().is_empty() {
@@ -640,7 +640,8 @@ pub struct ParentEpic {
 }
 
 /// Whether a task may be created under this epic (`docs/SPEC.md` section 5.16 item 3): only its
-/// epic's assignee or the human, and only while the epic is in progress. The Definition of Ready
+/// epic's assignee, the Product Manager, who writes the tasks of every approved epic, or the
+/// human, and only while the epic is in progress. The Definition of Ready
 /// checks the task's paths and budget against the epic's; this checks who and when.
 ///
 /// # Errors
@@ -652,9 +653,13 @@ pub fn check_child_creation(parent: &ParentEpic, actor: &ContractWriteActor) -> 
     let is_the_assignee = !named.is_empty()
         && actor.kind != TransitionActor::Governor
         && actor.agent_id.as_deref().map(str::trim) == Some(named);
-    if actor.kind != TransitionActor::Human && !is_the_assignee {
+    if !matches!(
+        actor.kind,
+        TransitionActor::Human | TransitionActor::ProductManager
+    ) && !is_the_assignee
+    {
         reasons.push(format!(
-            "a task under an epic is written by the epic's assignee, {}, or by the human",
+            "a task under an epic is written by the epic's assignee, {}, by the Product Manager, or by the human",
             if named.is_empty() {
                 "which the runtime did not name"
             } else {
@@ -1342,7 +1347,7 @@ mod tests {
 
     #[test]
     fn asks_for_no_reviewer_agent_when_the_human_reviews_the_epic() {
-        // An epic broken down by the Product Manager is reviewed by the human (5.16 item 4), and
+        // An epic the Product Manager holds is reviewed by the human (5.16 item 4), and
         // the human is not an agent: there is no id for the runtime to pass and nothing for the
         // reviewer to be the assignee of.
         let mut epic = a_contract();
@@ -2348,7 +2353,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_a_task_under_an_epic_only_as_its_assignee_or_the_human() {
+    fn writes_a_task_under_an_epic_as_its_assignee_the_product_manager_or_the_human() {
         let parent = ParentEpic {
             status: TaskStatus::InProgress,
             assignee_id: "sm-1".to_string(),
@@ -2358,6 +2363,11 @@ mod tests {
             agent_id: Some("sm-1".to_string()),
         };
         assert_eq!(check_child_creation(&parent, &assignee), Ok(()));
+        let product_manager = ContractWriteActor {
+            kind: TransitionActor::ProductManager,
+            agent_id: Some("pm-1".to_string()),
+        };
+        assert_eq!(check_child_creation(&parent, &product_manager), Ok(()));
         let human = ContractWriteActor {
             kind: TransitionActor::Human,
             agent_id: None,
@@ -2371,7 +2381,9 @@ mod tests {
         };
         assert_eq!(
             reasons(check_child_creation(&parent, &governor)),
-            ["a task under an epic is written by the epic's assignee, sm-1, or by the human"]
+            [
+                "a task under an epic is written by the epic's assignee, sm-1, by the Product Manager, or by the human"
+            ]
         );
         let other = ContractWriteActor {
             kind: TransitionActor::Assignee,
@@ -2379,7 +2391,9 @@ mod tests {
         };
         assert_eq!(
             reasons(check_child_creation(&parent, &other)),
-            ["a task under an epic is written by the epic's assignee, sm-1, or by the human"]
+            [
+                "a task under an epic is written by the epic's assignee, sm-1, by the Product Manager, or by the human"
+            ]
         );
         let unnamed = ParentEpic {
             status: TaskStatus::InProgress,
@@ -2392,7 +2406,7 @@ mod tests {
         assert_eq!(
             reasons(check_child_creation(&unnamed, &nobody)),
             [
-                "a task under an epic is written by the epic's assignee, which the runtime did not name, or by the human"
+                "a task under an epic is written by the epic's assignee, which the runtime did not name, by the Product Manager, or by the human"
             ]
         );
         let not_started = ParentEpic {
@@ -2407,7 +2421,7 @@ mod tests {
         assert_eq!(
             reasons(check_child_creation(&not_started, &other)),
             [
-                "a task under an epic is written by the epic's assignee, sm-1, or by the human",
+                "a task under an epic is written by the epic's assignee, sm-1, by the Product Manager, or by the human",
                 "the epic is ready and its tasks are written while it is in progress"
             ]
         );
