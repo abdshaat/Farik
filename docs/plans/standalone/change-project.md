@@ -127,7 +127,7 @@ impl Git { pub fn task_branch_numbers(&self) -> Result<Vec<u64>, GitError>; } //
 - `files_a_request_past_the_highest_old_task_branch` — a repository with no contracts and a branch `feature/FRK-7`: the first filed request is `FRK-8`; with contract `FRK-10` and branch `feature/FRK-7`, `FRK-11`.
 - `files_a_request_when_git_cannot_list_branches` — a project folder that is not a git repository files `FRK-1`.
 
-- [ ] `feat(store): number new tasks past old task branches`
+- [x] `feat(store): number new tasks past old task branches`
 
 ### Task 3: the wire
 

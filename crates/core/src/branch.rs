@@ -22,9 +22,29 @@ pub fn task_branch(contract: &TaskContract) -> String {
     }
 }
 
+/// The task number a branch name holds, when it is one of the three shapes `task_branch` makes
+/// (`feature/FRK-<n>`, `fix/FRK-<n>`, `docs/FRK-<n>`), with or without a remote's name before it
+/// (`origin/fix/FRK-7`). Any other name answers `None`.
+#[must_use]
+pub fn task_number_of_branch(name: &str) -> Option<u64> {
+    let parts: Vec<&str> = name.split('/').collect();
+    let [kind, id] = match parts.as_slice() {
+        [_, kind, id] | [kind, id] => [*kind, *id],
+        _ => return None,
+    };
+    if !matches!(kind, "feature" | "fix" | "docs") {
+        return None;
+    }
+    let digits = id.strip_prefix("FRK-")?;
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::task_branch;
+    use super::{task_branch, task_number_of_branch};
     use crate::contract::Role;
     use crate::generated::task_contract::FarikTaskContractChange as Change;
     use crate::governor::readiness::fixtures::a_contract;
@@ -69,6 +89,45 @@ mod tests {
         ] {
             let contract = a_task(role, Some(Change::Fix));
             assert_eq!(task_branch(&contract), "docs/FRK-7", "{role}");
+        }
+    }
+
+    #[test]
+    fn task_number_of_branch_reads_the_three_shapes() {
+        for (name, number) in [
+            ("feature/FRK-7", 7),
+            ("fix/FRK-12", 12),
+            ("docs/FRK-3", 3),
+            ("origin/feature/FRK-9", 9),
+        ] {
+            assert_eq!(task_number_of_branch(name), Some(number), "{name}");
+        }
+        for name in [
+            "main",
+            "feature/login",
+            "feature/FRK-",
+            "feature/FRK-x",
+            "wip/FRK-4",
+            "feature/FRK-1/more",
+        ] {
+            assert_eq!(task_number_of_branch(name), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn task_number_of_branch_inverts_task_branch() {
+        for (role, change) in [
+            (Role::Architect, None),
+            (Role::SoftwareDeveloper, Some(Change::Fix)),
+            (Role::SoftwareDeveloper, Some(Change::Feature)),
+        ] {
+            let mut contract = a_task(role, change);
+            contract.id = "FRK-41".parse().expect("a task id");
+            assert_eq!(
+                task_number_of_branch(&task_branch(&contract)),
+                Some(41),
+                "{role}"
+            );
         }
     }
 }

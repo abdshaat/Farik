@@ -421,6 +421,27 @@ impl Git {
         Ok(paths_of(&listed))
     }
 
+    /// The number of every branch, local or remote-tracking, named like a task's branch
+    /// (`feature/FRK-<n>`, `fix/FRK-<n>`, `docs/FRK-<n>`), in git's order. A new task is numbered
+    /// past them, so that its branch does not meet one a project's earlier life left behind.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, `NotInstalled`, or `CommandFailed` when git refuses.
+    pub fn task_branch_numbers(&self) -> Result<Vec<u64>, GitError> {
+        self.require_repository()?;
+        let listed = self.at_root(&[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads",
+            "refs/remotes",
+        ])?;
+        Ok(listed
+            .lines()
+            .filter_map(farik_core::branch::task_number_of_branch)
+            .collect())
+    }
+
     /// Every path the repository tracks, in git's own order.
     ///
     /// Through git rather than by walking the directory, so that `.gitignore` decides what is not
@@ -893,6 +914,21 @@ mod tests {
         }
         repository.git(&["config", "core.sshCommand", "ssh -i ~/.ssh/farik"]);
         assert!(!wants_batch_ssh(&repository.path, nothing_set));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn task_branch_numbers_lists_local_and_remote_task_branches() {
+        let repository = TempRepo::new("task-branch-numbers");
+        let git = repository.adapter();
+        assert_eq!(git.task_branch_numbers(), Ok(vec![]));
+        for branch in ["feature/FRK-4", "docs/FRK-9", "topic"] {
+            repository.git(&["branch", branch]);
+        }
+        repository.git(&["update-ref", "refs/remotes/origin/fix/FRK-11", "HEAD"]);
+        let mut numbers = git.task_branch_numbers().expect("the refs are listed");
+        numbers.sort_unstable();
+        assert_eq!(numbers, [4, 9, 11]);
     }
 
     #[test]
