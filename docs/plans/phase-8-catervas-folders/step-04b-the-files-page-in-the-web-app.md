@@ -1,6 +1,6 @@
 # Phase 8, step 04b: The Files page in the web app
 
-Status: ready
+Status: done (executed and landing-reviewed 2026-10-10; lands after fixes 13f2cd26 … 96b8256d; spec 0.91; a document's title shows once, its first heading when it has one)
 Branch: `phase/8-catervas-folders` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 4.5 (new); no F-number covers the folders' page
 Depends on: step 04 of this phase (planned, not yet executed: `files.tree` with `integration`, `files.read` with `waiting`, `rederiving` and `editable`, `files.save` and their wire and refusal codes, `"files.save"` in `MethodName`), which rests on step 03's folder changes; step 03b (planned, not yet executed: the Today card `DocumentChanges`, which defers its "Open in Files" to this step); phase 7 and the Catervas rename (merged on main, 2c28b555); task ids `CTV-<n>` (merged on main, #33). Nothing of steps 02, 05, 06 or 07.
