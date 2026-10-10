@@ -3,7 +3,7 @@
 Status: draft. Its readiness review runs once step 06c has landed.
 Branch: `phase/12-ecosystem` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` 6.7, 6.9, 8.2, 8.6; F9
-Depends on: step 06c (`Production.image`, `image_for`); step 06 (`call_tool`, `ADAPTERS`, `Connection`); step 05 (the approved `ConnectorFileKey` board); phase 7 step 01 (the launcher, `LaunchSpec`, `POST /connector/launch`, `farik connect`); phase 7 steps 05 and 05b (the kit format, `spec_sha256`, `ConnectorAdd`, `KitConnect`); phase 6 (merged in #19)
+Depends on: step 06c (`Production.image`, `image_for`); step 06 (`call_tool`, `ADAPTERS`, `Connection`); step 05 (the approved `ConnectorFileKey` board); phase 7 step 01 (the launcher, `LaunchSpec`, `POST /connector/launch`, `catervas connect`); phase 7 steps 05 and 05b (the kit format, `spec_sha256`, `ConnectorAdd`, `KitConnect`); phase 6 (merged in #19)
 Readiness confirmed by: not yet run
 Moved 2026-10-09 by ADR 0049 (project plan revision 41; the founder: "DevOps later, rest after Cloud"): phase 7 step 12d until then (its file was `step-12d-kubernetes.md` in phase 7's folder). The DevOps Engineer is built in the Ecosystem phase, phase 12, after its own steps 01 to 04: phase 7's steps 11 to 11f are steps 05 to 05f here, and 12 to 12e are 06 to 06e. The text below names them by their new numbers, and phase 7's other steps as phase 7's; the dated lines above, and the founder's words, keep the numbers of their day. Phase 7 step 10h, ask or auto, is phase 10 step 01; step 13, the kit check, is phase 10 step 02 and has no DevOps task, so this phase checks the DevOps Engineer's kit itself; the phases after phase 9 moved up by one.
 
@@ -11,24 +11,24 @@ Signatures, not bodies; test names and what each asserts, not test code; around 
 
 ## Goal
 
-A team whose service runs on any Kubernetes cluster connects it to the DevOps Engineer by pasting, or choosing, a sign-in file for a service account limited to one namespace. The agent reads the namespace's deployments, pods, their logs and events through a pinned community server, the official choice being none; Farik moves the deployment to the image of the integrated commit, restarts its rollout, and moves it back to the last healthy image through the same server. A kit's connector may now name a key that is a whole file: Farik keeps it in the key store like any key, writes it into the server's own folder when the server starts, and gives the server its path. Out of scope: AWS's EKS, which signs in through AWS (06e).
+A team whose service runs on any Kubernetes cluster connects it to the DevOps Engineer by pasting, or choosing, a sign-in file for a service account limited to one namespace. The agent reads the namespace's deployments, pods, their logs and events through a pinned community server, the official choice being none; Catervas moves the deployment to the image of the integrated commit, restarts its rollout, and moves it back to the last healthy image through the same server. A kit's connector may now name a key that is a whole file: Catervas keeps it in the key store like any key, writes it into the server's own folder when the server starts, and gives the server its path. Out of scope: AWS's EKS, which signs in through AWS (06e).
 
 ## Decisions
 
-- **The server** (ADR 0020's second choice), checked 2026-10-05: Kubernetes publishes no MCP server of its own. The maintained community one is `containers/kubernetes-mcp-server` (github.com/containers/kubernetes-mcp-server; npm `kubernetes-mcp-server`, 0.0.67, published 2026-09-18), Go, run by `npx`, reading the standard `KUBECONFIG` variable. Rejected: `mcp-server-kubernetes` (4.1.9), which runs `kubectl` and needs it installed; a server of Farik's own (the community one already reads and patches what Farik needs). Entry: `transport: stdio`, `command: npx`, `args: ["kubernetes-mcp-server@0.0.67"]`, `credential_keys: [KUBECONFIG]`, `file_keys: [KUBECONFIG]`. Its own `read_only` setting stays off, since Farik patches through it; the agent is held by the tags, and the cluster by the account's role.
-- **A key kept as a file** (ADR 0046, Task 1). A kit connector's new field `file_keys` names credential keys whose value is a file's text. For each, at every listing (`list_tools`), call (`call_tool`) and launch (`POST /connector/launch` and `farik connector run`), the value is written to `<the server's folder>/<key in lower case>`, 0600, in the 0700 folder made fresh for that start (ADR 0030), and the variable is set to that file's path, not the text. A file key's value is at most 64 KiB of UTF-8 with no NUL (`file_key_too_large`, `file_key_not_text`), checked where keys are read (the web form, `farik connect`) before anything is kept. `file_keys` must be a subset of `credential_keys` (`file_key_unknown`), is `stdio` only (`file_key_not_stdio`), and is in `spec_sha256` when present, so every hash kept before stands (ADR 0036's rule for new fields). A store that refuses so large a value (Windows' credential manager keeps at most 2,560 bytes) fails the connect with the store's own sentence; the user then uses a file without an embedded certificate bundle, as the setup copy says. Rejected: a path to the file as the key (the file would sit outside the key store, readable by anything the user runs); the server's own `--kubeconfig` flag (one path, in `args`, for every user).
-- **The screens** (the approved `ConnectorFileKey`): `ConnectorAdd`'s key form shows a file key as "Choose the file" and a box to paste it into, never a one-line field, which would drop its line breaks. `farik connect` takes `--key-file <KEY>=<path>`, which reads the file, for a file key, and refuses `--key-file` for any other.
-- **What each tag is**, from the README (read 2026-10-05). `network`: `namespaces_list`, `events_list`, `pods_list_in_namespace`, `pods_get`, `pods_log`, `pods_top`, `resources_list`, `resources_get` (8). `denied`: `pods_exec` and `pods_run` (a shell or a pod in production, which spec 6.9 forbids), `pods_delete`, `resources_create_or_update` (Farik's), `resources_delete`, `resources_scale` (scaling is the human's), `pods_list` (every namespace), `nodes_log`, `nodes_stats_summary`, `nodes_top`, `projects_list`, `configuration_contexts_list`, `targets_list`, `configuration_view` (it shows the sign-in file) (14). Any other tool of the live listing (`helm_*` and the other toolsets when on) is `denied` unlabelled.
+- **The server** (ADR 0020's second choice), checked 2026-10-05: Kubernetes publishes no MCP server of its own. The maintained community one is `containers/kubernetes-mcp-server` (github.com/containers/kubernetes-mcp-server; npm `kubernetes-mcp-server`, 0.0.67, published 2026-09-18), Go, run by `npx`, reading the standard `KUBECONFIG` variable. Rejected: `mcp-server-kubernetes` (4.1.9), which runs `kubectl` and needs it installed; a server of Catervas's own (the community one already reads and patches what Catervas needs). Entry: `transport: stdio`, `command: npx`, `args: ["kubernetes-mcp-server@0.0.67"]`, `credential_keys: [KUBECONFIG]`, `file_keys: [KUBECONFIG]`. Its own `read_only` setting stays off, since Catervas patches through it; the agent is held by the tags, and the cluster by the account's role.
+- **A key kept as a file** (ADR 0046, Task 1). A kit connector's new field `file_keys` names credential keys whose value is a file's text. For each, at every listing (`list_tools`), call (`call_tool`) and launch (`POST /connector/launch` and `catervas connector run`), the value is written to `<the server's folder>/<key in lower case>`, 0600, in the 0700 folder made fresh for that start (ADR 0030), and the variable is set to that file's path, not the text. A file key's value is at most 64 KiB of UTF-8 with no NUL (`file_key_too_large`, `file_key_not_text`), checked where keys are read (the web form, `catervas connect`) before anything is kept. `file_keys` must be a subset of `credential_keys` (`file_key_unknown`), is `stdio` only (`file_key_not_stdio`), and is in `spec_sha256` when present, so every hash kept before stands (ADR 0036's rule for new fields). A store that refuses so large a value (Windows' credential manager keeps at most 2,560 bytes) fails the connect with the store's own sentence; the user then uses a file without an embedded certificate bundle, as the setup copy says. Rejected: a path to the file as the key (the file would sit outside the key store, readable by anything the user runs); the server's own `--kubeconfig` flag (one path, in `args`, for every user).
+- **The screens** (the approved `ConnectorFileKey`): `ConnectorAdd`'s key form shows a file key as "Choose the file" and a box to paste it into, never a one-line field, which would drop its line breaks. `catervas connect` takes `--key-file <KEY>=<path>`, which reads the file, for a file key, and refuses `--key-file` for any other.
+- **What each tag is**, from the README (read 2026-10-05). `network`: `namespaces_list`, `events_list`, `pods_list_in_namespace`, `pods_get`, `pods_log`, `pods_top`, `resources_list`, `resources_get` (8). `denied`: `pods_exec` and `pods_run` (a shell or a pod in production, which spec 6.9 forbids), `pods_delete`, `resources_create_or_update` (Catervas's), `resources_delete`, `resources_scale` (scaling is the human's), `pods_list` (every namespace), `nodes_log`, `nodes_stats_summary`, `nodes_top`, `projects_list`, `configuration_contexts_list`, `targets_list`, `configuration_view` (it shows the sign-in file) (14). Any other tool of the live listing (`helm_*` and the other toolsets when on) is `denied` unlabelled.
 - **The adapter** (`platforms/kubernetes.rs`), through `call_tool`. `production.service` is `<namespace>/<deployment>`, or `<namespace>/<deployment>/<container>` when the pod has more than one container; `production.image` is required. Shared with step 06e's EKS in `platforms/k8s_deployment.rs`, pure functions over the deployment object:
   - `live`: `resources_get { apiVersion: "apps/v1", kind: "Deployment", namespace, name }`; `Live` when `status.observedGeneration` equals `metadata.generation` and `updatedReplicas`, `availableReplicas` and `replicas` are equal; `Failed` when its `Progressing` condition is `False` with `ProgressDeadlineExceeded`; else `Building`; its `id` the container's image and its `version` the commit whose `image_for` it is, else the image;
-  - `deployments`: the live one alone, since Farik's own records hold the history;
+  - `deployments`: the live one alone, since Catervas's own records hold the history;
   - `deploy(commit)`: the object read, its container's image set to `image_for(commit)`, sent with `resources_create_or_update` keeping `metadata.resourceVersion`, so a change made since the read is refused rather than overwritten;
   - `restart`: the same with `spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"]` set to now, as `kubectl rollout restart` does;
-  - `roll_back(to)`: the image set to `to.id`, the last image Farik recorded healthy, which is the design's "undo to the healthy revision" by image rather than by revision number (revision numbers change with every restart);
+  - `roll_back(to)`: the image set to `to.id`, the last image Catervas recorded healthy, which is the design's "undo to the healthy revision" by image rather than by revision number (revision numbers change with every restart);
   - `error_rate`: `None`.
   The live run confirms `resources_create_or_update`'s input shape against 0.0.67; a field it refuses stops the run and the planner decides.
 - **The narrow credential**, as ADR 0027 asks: a service account in the one namespace, with a role allowing `get`, `list` and `watch` on pods, `pods/log`, events, replica sets and deployments, and `patch` and `update` on the one deployment by name; the setup copy says so in plain words for whoever runs the cluster.
-- **The copy.** Title "Kubernetes"; about "Kubernetes runs your app's containers on a cluster of machines."; why "So the DevOps Engineer can read your deployment, its pods, logs and events, and Farik can move it to the image of your planned work, restart it, or move it back when a planned deploy or an incident calls for it. The agent itself only reads."; setup "This needs Node.js on your computer. Ask whoever runs your cluster for a sign-in file (a kubeconfig) for a service account limited to one namespace: allowed to get, list and watch pods, their logs, events, replica sets and deployments, and to patch and update this one deployment. Choose or paste the file here. In Farik's Settings, the service name is namespace/deployment, and the image name is like registry.example.com/app:{commit}." `key_page: https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/`, since a kit that takes keys says where they come from (`key_page_missing`).
+- **The copy.** Title "Kubernetes"; about "Kubernetes runs your app's containers on a cluster of machines."; why "So the DevOps Engineer can read your deployment, its pods, logs and events, and Catervas can move it to the image of your planned work, restart it, or move it back when a planned deploy or an incident calls for it. The agent itself only reads."; setup "This needs Node.js on your computer. Ask whoever runs your cluster for a sign-in file (a kubeconfig) for a service account limited to one namespace: allowed to get, list and watch pods, their logs, events, replica sets and deployments, and to patch and update this one deployment. Choose or paste the file here. In Catervas's Settings, the service name is namespace/deployment, and the image name is like registry.example.com/app:{commit}." `key_page: https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/`, since a kit that takes keys says where they come from (`key_page_missing`).
 
 ## File map
 
@@ -51,8 +51,8 @@ Consumes: `CustomServer`, `spec_sha256`, `custom_server` (core); `parse_kit`, `K
 Produces:
 
 ```rust
-pub file_keys: Vec<String>                         // CustomServer, farik_core::team; in spec_sha256 when not empty
-pub struct KeyFile { pub variable: String, pub file: PathBuf, pub text: Secret }        // farik_runtime::connectors
+pub file_keys: Vec<String>                         // CustomServer, catervas_core::team; in spec_sha256 when not empty
+pub struct KeyFile { pub variable: String, pub file: PathBuf, pub text: Secret }        // catervas_runtime::connectors
 pub fn key_files(server: &CustomServer, keys: &BTreeMap<String, Secret>, folder: &Path) -> Result<Vec<KeyFile>, ConnectorError>;
 pub fn write_key_files(files: &[KeyFile]) -> std::io::Result<()>;                      // 0600, in the 0700 folder
 pub struct DeploymentObject(serde_json::Value);                                        // platforms::k8s_deployment
@@ -82,14 +82,14 @@ Files: `docs/decisions/0046-fixed-settings-and-file-keys-in-a-kit-server.md` (th
 ### Task 3: Writing the file
 
 - `listing_writes_the_file_and_gives_its_path`: a `sh` fixture server prints `$KUBECONFIG` and its file's text and mode; the variable is a path inside the server's folder, the file holds the key byte for byte, mode 0600. RED.
-- `the_launcher_writes_it_too`: `POST /connector/launch` answers `files` beside `env`; `farik connector run` writes them before it execs, and refuses an answer whose file is outside `cwd`. RED.
+- `the_launcher_writes_it_too`: `POST /connector/launch` answers `files` beside `env`; `catervas connector run` writes them before it execs, and refuses an answer whose file is outside `cwd`. RED.
 - `refuses_a_file_key_too_large_or_not_text`. RED.
 
 - [ ] `feat(runtime): hand a server its key as a file in its own folder`
 
 ### Task 4: Giving a file
 
-- `connect_reads_a_key_file` (`farik connect --key-file KUBECONFIG=<path>`) and `refuses_key_file_for_a_plain_key`. RED each.
+- `connect_reads_a_key_file` (`catervas connect --key-file KUBECONFIG=<path>`) and `refuses_key_file_for_a_plain_key`. RED each.
 - `the_key_form_takes_a_file_key_whole` (`ConnectorAdd`, as the board): "Choose the file" and the box, its line breaks kept in what is sent. RED.
 
 - [ ] `feat(web): give a connector a key that is a whole file`
@@ -114,7 +114,7 @@ Files: `docs/decisions/0046-fixed-settings-and-file-keys-in-a-kit-server.md` (th
 ### Task 7: Connected by name
 
 - `connects_each_devops_service_by_name` gains `kubernetes`. Guard.
-- `live_kit_pins.rs`'s header names Kubernetes and `FARIK_KIT_KUBERNETES_KUBECONFIG` (the file's text); the run writes it as the launcher does.
+- `live_kit_pins.rs`'s header names Kubernetes and `CATERVAS_KIT_KUBERNETES_KUBECONFIG` (the file's text); the run writes it as the launcher does.
 
 - [ ] `test(runtime): connect the DevOps Engineer's Kubernetes by name`
 
@@ -129,7 +129,7 @@ Files: `docs/decisions/0046-fixed-settings-and-file-keys-in-a-kit-server.md` (th
 ```
 cargo xtask check --integration
 # expected: xtask check: ok (with pnpm check)
-FARIK_LIVE_TESTS=1 cargo test -p farik-runtime --test live_kit_pins
+CATERVAS_LIVE_TESTS=1 cargo test -p catervas-runtime --test live_kit_pins
 # expected: ok, Kubernetes listed with no drift
 ```
 
