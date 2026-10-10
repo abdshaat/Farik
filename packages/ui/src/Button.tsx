@@ -8,6 +8,7 @@ export function Button({
 	disabled = false,
 	busy = false,
 	onClick,
+	"aria-describedby": describedBy,
 	children,
 }: {
 	kind?: "primary" | "secondary" | "quiet";
@@ -15,6 +16,7 @@ export function Button({
 	disabled?: boolean;
 	busy?: boolean;
 	onClick?: () => void;
+	"aria-describedby"?: string;
 	children: ReactNode;
 }) {
 	return (
@@ -24,6 +26,7 @@ export function Button({
 			data-kind={kind}
 			disabled={disabled || busy}
 			aria-busy={busy || undefined}
+			aria-describedby={describedBy}
 			onClick={onClick}
 		>
 			{children}

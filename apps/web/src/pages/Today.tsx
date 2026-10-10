@@ -524,6 +524,7 @@ function WaitingRow({
 				<div className={styles.decide}>
 					<Button
 						busy={busy}
+						aria-describedby={titleId}
 						onClick={() =>
 							send({
 								command: "folder_change_integrate",

@@ -296,9 +296,16 @@ describe("today", () => {
 			),
 		).toBeTruthy();
 		expect(within(folder as HTMLElement).queryByRole("link")).toBeNull();
-		fireEvent.click(
-			within(folder as HTMLElement).getByRole("button", { name: "Add" }),
+		const add = within(folder as HTMLElement).getByRole("button", {
+			name: "Add",
+		});
+		// The button is described by the row's title, as a task's link is.
+		const describedBy = add.getAttribute("aria-describedby");
+		expect(describedBy).toBeTruthy();
+		expect(document.getElementById(describedBy as string)?.textContent).toBe(
+			"Add Roadmap and Product description from the sprint 4 review to your project",
 		);
+		fireEvent.click(add);
 		const sent = await sentCommand(s);
 		expect(sent.params).toEqual({
 			command: { command: "folder_change_integrate", body: { change: 1 } },
