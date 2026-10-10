@@ -71,6 +71,9 @@ pub struct DoneEvidence {
     pub protected_paths: Vec<String>,
     /// Whether the change needs the Designer's pass, and has it.
     pub design_review: DesignReviewNeed,
+    /// The twins that are behind the document for people beside them (5.17), which the runtime
+    /// fills only when a changed path is a human document's twin. Such a twin may change alone.
+    pub stale_twins: Vec<String>,
 }
 
 /// One rule of the Definition of Done. Failures are reported in this order.
@@ -381,7 +384,7 @@ fn no_catervas_path_changed(
 /// 5.17): the two are one document, written twice. The diff is judged whole, whatever the
 /// allowed paths say.
 fn pair_changed_alone(_: &TaskContract, evidence: &DoneEvidence) -> Option<DoneFailure> {
-    let alone = pairs_changed_alone(&evidence.changed_paths);
+    let alone = pairs_changed_alone(&evidence.changed_paths, &evidence.stale_twins);
     if alone.is_empty() {
         return None;
     }
@@ -489,6 +492,7 @@ mod tests {
             human_accepted: false,
             protected_paths: DEFAULT_PROTECTED_PATHS.map(str::to_string).to_vec(),
             design_review: DesignReviewNeed::NotNeeded,
+            stale_twins: Vec::new(),
         }
     }
 
@@ -1057,6 +1061,19 @@ mod tests {
         );
         let whole = changed(&[spec, spec_twin, "docs/catervas/architecture/overview.md"]);
         assert_eq!(evaluate_done(&contract, &whole), Ok(()));
+    }
+
+    #[test]
+    fn passes_a_diff_that_only_brings_a_stale_twin_up_to_date() {
+        let mut contract = a_contract();
+        contract.allowed_paths = vec!["docs/catervas/**".to_string()];
+        let twin = "docs/catervas/product/roadmap.agent.md";
+        let mut evidence = an_evidence();
+        evidence.human_accepted = true;
+        evidence.changed_paths = vec![twin.to_string()];
+        assert_eq!(failed_rules(&contract, &evidence), [R::PairChangedAlone]);
+        evidence.stale_twins = vec![twin.to_string()];
+        assert_eq!(evaluate_done(&contract, &evidence), Ok(()));
     }
 
     #[test]

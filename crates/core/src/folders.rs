@@ -63,14 +63,19 @@ pub fn human_of_twin(path: &str) -> Option<String> {
 }
 
 /// Each path, normalised, that is one file of a human document's pair while the other is not in
-/// the list, in first-seen order, each once.
+/// the list, in first-seen order, each once. A twin in `stale_twins` may change alone: it is
+/// being brought up to date with a document the owner already changed.
 #[must_use]
-pub fn pair_changed_alone(changed_paths: &[String]) -> Vec<String> {
+pub fn pair_changed_alone(changed_paths: &[String], stale_twins: &[String]) -> Vec<String> {
     let changed: Vec<String> = changed_paths.iter().filter_map(|p| normalise(p)).collect();
+    let stale: Vec<String> = stale_twins.iter().filter_map(|p| normalise(p)).collect();
     let mut alone: Vec<String> = Vec::new();
     for path in &changed {
         let partner = agent_twin(path).or_else(|| human_of_twin(path));
-        if partner.is_some_and(|partner| !changed.contains(&partner)) && !alone.contains(path) {
+        if partner.is_some_and(|partner| !changed.contains(&partner))
+            && !stale.contains(path)
+            && !alone.contains(path)
+        {
             alone.push(path.clone());
         }
     }
@@ -699,26 +704,27 @@ mod tests {
             paths.iter().map(|path| (*path).to_string()).collect()
         };
         assert_eq!(
-            pair_changed_alone(&list(&[&spec, "src/x.rs"])),
+            pair_changed_alone(&list(&[&spec, "src/x.rs"]), &[]),
             list(&[&spec])
         );
         assert_eq!(
-            pair_changed_alone(&list(&[&spec_twin])),
+            pair_changed_alone(&list(&[&spec_twin]), &[]),
             list(&[&spec_twin])
         );
-        assert!(pair_changed_alone(&list(&[&spec, &spec_twin])).is_empty());
+        assert!(pair_changed_alone(&list(&[&spec, &spec_twin]), &[]).is_empty());
         assert!(
-            pair_changed_alone(&list(&["./docs/catervas/product/spec.md", &spec_twin])).is_empty()
+            pair_changed_alone(&list(&["./docs/catervas/product/spec.md", &spec_twin]), &[])
+                .is_empty()
         );
         assert_eq!(
-            pair_changed_alone(&list(&[&roadmap, &spec_twin, &spec, &roadmap])),
+            pair_changed_alone(&list(&[&roadmap, &spec_twin, &spec, &roadmap]), &[]),
             list(&[&roadmap])
         );
         let plan = "docs/catervas/marketing/plans/MP-2.md";
-        assert_eq!(pair_changed_alone(&list(&[plan])), list(&[plan]));
-        assert!(pair_changed_alone(&list(&[&product("notes.md")])).is_empty());
+        assert_eq!(pair_changed_alone(&list(&[plan]), &[]), list(&[plan]));
+        assert!(pair_changed_alone(&list(&[&product("notes.md")]), &[]).is_empty());
         assert_eq!(
-            pair_changed_alone(&list(&[&spec, &roadmap_twin])),
+            pair_changed_alone(&list(&[&spec, &roadmap_twin]), &[]),
             list(&[&spec, &roadmap_twin])
         );
     }
@@ -879,6 +885,25 @@ mod tests {
         assert_eq!(
             stale_line(&["docs/catervas/product/roadmap.agent.md".to_string()]),
             Some("- stale twins: docs/catervas/product/roadmap.agent.md. Each is behind the document for people beside it, which the owner changed: read that document as well until the twin is brought up to date.".to_string())
+        );
+    }
+
+    #[test]
+    fn lets_a_stale_twin_change_alone() {
+        let list = |paths: &[&str]| -> Vec<String> {
+            paths.iter().map(|path| (*path).to_string()).collect()
+        };
+        let roadmap = product("roadmap.md");
+        let roadmap_twin = product("roadmap.agent.md");
+        let spec_twin = product("spec.agent.md");
+        assert!(pair_changed_alone(&list(&[&roadmap_twin]), &list(&[&roadmap_twin])).is_empty());
+        assert_eq!(
+            pair_changed_alone(&list(&[&roadmap_twin]), &list(&[&spec_twin])),
+            list(&[&roadmap_twin])
+        );
+        assert_eq!(
+            pair_changed_alone(&list(&[&roadmap]), &list(&[&roadmap_twin])),
+            list(&[&roadmap])
         );
     }
 

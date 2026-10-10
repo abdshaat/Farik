@@ -827,6 +827,7 @@ mod tests {
                 human_accepted: false,
                 protected_paths: Vec::new(),
                 design_review: DesignReviewNeed::NotNeeded,
+                stale_twins: Vec::new(),
             },
             rejection: Some(Rejection {
                 failed_criterion_ids: vec!["C1".to_string()],

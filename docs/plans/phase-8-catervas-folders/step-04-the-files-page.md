@@ -120,7 +120,7 @@ Files: `folders.rs` (`pair_changed_alone`'s second argument; step 01's `finds_a_
 - `lets_a_stale_twin_change_alone` (`folders.rs`) — `[roadmap.agent.md]` with stale `[roadmap.agent.md]` gives nothing; with stale `[spec.agent.md]` gives `[roadmap.agent.md]`; `[roadmap.md]` with stale `[roadmap.agent.md]` still gives `[roadmap.md]`. RED: one argument.
 - `passes_a_diff_that_only_brings_a_stale_twin_up_to_date` (`done.rs`) — allowed `docs/catervas/**`, changed `[…/product/roadmap.agent.md]`: with `stale_twins` naming it, no `PairChangedAlone`; without, `PairChangedAlone` with step 01's message. RED.
 
-- [ ] `feat(core): let a diff that changes only a stale twin pass`
+- [x] `feat(core): let a diff that changes only a stale twin pass`
 
 ### Task 3: Git reads the folders
 

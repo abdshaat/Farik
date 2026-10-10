@@ -578,6 +578,7 @@ impl Transitions {
                     ReviewState::Passed => DesignReviewNeed::Passed,
                     _ => DesignReviewNeed::Missing,
                 },
+                stale_twins: Vec::new(),
             },
         );
         let hours = team.policy.blocked_limit_hours.get();
