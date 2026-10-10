@@ -935,6 +935,9 @@ fn serve_status(state: &DaemonState) -> Result<Value, Failure> {
         "port": web.port,
         "take_on_error": *locked(&web.take_on_error),
         "setup_pending": setup_pending,
+        // Real values arrive with project.leave and the copied keys (Task 5); the wire needs them now.
+        "leaving": null,
+        "keys_copied": null,
     }))
 }
 
@@ -2469,6 +2472,8 @@ mod tests {
                 "port": handle.info.port,
                 "take_on_error": null,
                 "setup_pending": false,
+                "leaving": null,
+                "keys_copied": null,
             })
         );
         let pause = json!({ "command": { "command": "team_pause", "body": {} } });

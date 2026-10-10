@@ -489,6 +489,8 @@ fn serve_status_has_no_credential_under_a_given_engine() {
             "port": port,
             "take_on_error": null,
             "setup_pending": false,
+            "leaving": null,
+            "keys_copied": null,
         }),
         "{status}"
     );

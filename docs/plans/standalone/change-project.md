@@ -136,7 +136,7 @@ Files: modified `docs/schemas/rpc.schema.json`; tested in `crates/protocol/src/r
 - `reads_the_change_project_requests` — `project.leave {}`, `keys_copied.dismiss {}`, `project.open { path, no_sandbox, replace: true }` and `project.open` without `replace` each pass `rpc_request_from_value`.
 - `refuses_bad_change_project_requests` — `project.leave { "x": 1 }`, `keys_copied.dismiss { "x": 1 }` and `project.open` with `replace: "yes"` are each refused.
 
-- [ ] `feat(protocol): add leaving a project and the copied keys to the wire`
+- [x] `feat(protocol): add leaving a project and the copied keys to the wire`
 
 ### Task 4: copying connector keys
 
