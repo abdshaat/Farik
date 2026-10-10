@@ -86,7 +86,7 @@ Files: the libraries; `Markdown.tsx`, `Markdown.module.css` (the figure's font, 
 - `keeps a diagram mermaid refuses as its source` — `render` rejecting leaves "This diagram could not be drawn." and the source in a `pre`, and no `img`. RED.
 - `has no accessibility violations` — `expectNoAxeViolations` on a rendered document with a heading, a list and a drawn diagram.
 
-- [ ] `feat(web): render Markdown with its Mermaid diagrams`
+- [x] `feat(web): render Markdown with its Mermaid diagrams`
 
 ### Task 2: Browse and read
 

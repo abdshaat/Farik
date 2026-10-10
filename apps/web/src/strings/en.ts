@@ -2470,4 +2470,6 @@ export const en = {
 		"One of these files is a link, which Catervas does not write through.",
 	refuseFolderDocWaiting:
 		"An earlier change to one of these files is not in your project yet. Approve once it is.",
+	diagram: "Diagram",
+	diagramFailed: "This diagram could not be drawn.",
 };
