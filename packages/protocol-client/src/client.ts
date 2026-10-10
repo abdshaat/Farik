@@ -30,6 +30,8 @@ export type CommandReply =
 export type MethodName =
 	| "project.open"
 	| "project.create"
+	| "project.leave"
+	| "keys_copied.dismiss"
 	| "account.connect"
 	| "sandbox.build"
 	| "browser.pull"

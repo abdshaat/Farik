@@ -92,6 +92,10 @@ each place's twice, and one line of text. */
 	margin: 0;
 }
 
+.project {
+	overflow-wrap: anywhere;
+}
+
 .conn {
 	display: flex;
 	gap: var(--farik-space-2);

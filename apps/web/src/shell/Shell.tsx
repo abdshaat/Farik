@@ -1,5 +1,13 @@
+import { Button } from "@farik/ui";
 import { useSyncExternalStore } from "react";
-import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router";
+import {
+	Link,
+	Navigate,
+	NavLink,
+	Outlet,
+	useLocation,
+	useNavigate,
+} from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { landing } from "../app/landing.ts";
 import { type ServeStatus, useQuery } from "../app/store.ts";
@@ -32,7 +40,8 @@ export function useWide(): boolean {
 
 export function Shell() {
 	const wide = useWide();
-	const { status } = useConnection();
+	const { status, client } = useConnection();
+	const navigate = useNavigate();
 	const { data } = useQuery<ServeStatus>("serve.status", {});
 	const path = useLocation().pathname;
 	// Nothing shows, and nothing is asked of the project, until Farik says where it stands.
@@ -51,6 +60,16 @@ export function Shell() {
 			))}
 		</ul>
 	);
+	const dismissKeys = async (thenTeam: boolean) => {
+		try {
+			await client?.call("keys_copied.dismiss", {});
+			if (thenTeam) navigate("/team");
+		} catch {
+			// The connection closed: the page shows that it is lost.
+		}
+	};
+	const copied = data.keysCopied;
+	const name = data.projectRoot?.split(/[\\/]/).at(-1);
 	const pause = data && <PauseControl paused={data.paused} short={!wide} />;
 	return (
 		<div className={wide ? styles.wide : styles.narrow}>
@@ -59,6 +78,14 @@ export function Shell() {
 					<p className={styles.logo}>{t("brand")}</p>
 					<nav aria-label={t("navRail")}>{places}</nav>
 					<div className={styles.foot}>
+						{name && (
+							<p
+								className={styles.project}
+								title={data.projectRoot ?? undefined}
+							>
+								{name}
+							</p>
+						)}
 						<p className={styles.conn}>
 							<span
 								className={`${styles.dot}${status === "open" ? ` ${styles.live}` : ""}`}
@@ -82,6 +109,18 @@ export function Shell() {
 						<strong>{t("pausedLead")}</strong> {t("pausedNothingNew")}
 						{wide && ` ${t("pausedStillYours")}`}
 					</p>
+				)}
+				{copied && (
+					<div role="status" className={styles.banner}>
+						<p>
+							{t(copied.count === 1 ? "keysCopiedOne" : "keysCopied", {
+								from: copied.from.split(/[\\/]/).at(-1) ?? copied.from,
+								count: copied.count,
+							})}
+						</p>
+						<Button onClick={() => dismissKeys(false)}>{t("keysKeep")}</Button>{" "}
+						<Button onClick={() => dismissKeys(true)}>{t("keysChoose")}</Button>
+					</div>
 				)}
 				<Outlet />
 				{!wide && path.startsWith("/team") && (

@@ -34,6 +34,12 @@ export const en = {
 	resume: "Resume",
 	pausedLead: "The team is paused.",
 	pausedNothingNew: "Nothing new starts until you resume.",
+	keysCopied:
+		"Your agents’ connections were copied from {from} ({count} services). Use different keys for this project?",
+	keysCopiedOne:
+		"Your agents’ connections were copied from {from} (1 service). Use different keys for this project?",
+	keysKeep: "Keep them",
+	keysChoose: "Choose different keys",
 	pausedStillYours: "You can still answer, approve and accept.",
 	eventsCaption: "The last 100 events, newest first",
 	eventSeq: "Seq",

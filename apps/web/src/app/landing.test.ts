@@ -17,6 +17,17 @@ const status = (fields: object) => ({
 describe("landing", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
+	it("sends_a_project_being_left_to_the_project_page", () => {
+		expect(
+			landing(
+				status({ projectRoot: null, takeOnError: null, leaving: "/h/old" }),
+			),
+		).toBe("/setup/project");
+		expect(
+			landing(status({ projectRoot: null, takeOnError: null, leaving: null })),
+		).toBe("/setup/computer");
+	});
+
 	it("lands_where_the_status_says", async () => {
 		expect(landing(status({ projectRoot: null }))).toBe("/setup/computer");
 		expect(

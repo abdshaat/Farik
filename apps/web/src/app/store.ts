@@ -15,6 +15,10 @@ export type ServeStatus = {
 	takeOnError: string | null;
 	/** Whether the project was just set up and waits for the team's setup. */
 	setupPending?: boolean;
+	/** The folder being left for another project, or null. */
+	leaving?: string | null;
+	/** Agents' connections copied from another project and not yet kept or replaced. */
+	keysCopied?: { from: string; count: number } | null;
 };
 
 /** The last 500 events, oldest first, from the provider's one subscription. */

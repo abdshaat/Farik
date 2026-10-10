@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { media } from "../test/media.ts";
 import { answerStatus, eventArrives, renderApp } from "../test/render-app.tsx";
+import { refusedBy } from "../test/schema.ts";
 import styles from "./Shell.module.css";
 
 const WIDE = "(min-width: 1024px)";
@@ -158,6 +159,81 @@ describe("shell", () => {
 		);
 		expect(css).toMatch(
 			/@media \(prefers-reduced-motion: reduce\) \{ \.live \{ animation: none; \} \}/,
+		);
+	});
+
+	it("names_the_project_folder_above_connected", async () => {
+		media.set(WIDE, true);
+		const { socket } = await renderApp("/team");
+		if (!socket) throw new Error("no socket");
+		await answerStatus(socket, false, 1, { project_root: "/h/work/old-repo" });
+		const name = await screen.findByText("old-repo");
+		expect(name.getAttribute("title")).toBe("/h/work/old-repo");
+		const connected = screen.getByText(en.connected);
+		expect(
+			name.compareDocumentPosition(connected) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+
+	it("offers_other_keys_until_one_is_chosen", async () => {
+		media.set(WIDE, true);
+		const { socket } = await renderApp("/board");
+		if (!socket) throw new Error("no socket");
+		await answerStatus(socket, false, 1, {
+			keys_copied: { from: "/h/old-repo", count: 2 },
+		});
+		const notice = await screen.findByRole("status");
+		expect(notice.textContent).toContain("old-repo");
+		expect(notice.textContent).toContain("2 services");
+		fireEvent.click(screen.getByRole("button", { name: en.keysKeep }));
+		const sent = await waitFor(() => {
+			const f = socket.calls("keys_copied.dismiss").at(-1);
+			if (!f) throw new Error("not sent");
+			return f;
+		});
+		expect(sent.params).toEqual({});
+		expect(refusedBy("keysCopiedDismissRequest", sent.params)).toEqual([]);
+		await socket.reply(sent, {});
+		await eventArrives(socket, 1);
+		await answerStatus(socket, false, 2, { keys_copied: null });
+		await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+	});
+
+	it("says_one_service_in_the_singular", async () => {
+		media.set(WIDE, true);
+		const { socket } = await renderApp("/board");
+		if (!socket) throw new Error("no socket");
+		await answerStatus(socket, false, 1, {
+			keys_copied: { from: "/h/old-repo", count: 1 },
+		});
+		expect((await screen.findByRole("status")).textContent).toContain(
+			"(1 service)",
+		);
+	});
+
+	it("choosing_different_keys_goes_to_the_team_page", async () => {
+		media.set(WIDE, true);
+		const { socket } = await renderApp("/board");
+		if (!socket) throw new Error("no socket");
+		await answerStatus(socket, false, 1, {
+			keys_copied: { from: "/h/old-repo", count: 2 },
+		});
+		fireEvent.click(await screen.findByRole("button", { name: en.keysChoose }));
+		const sent = await waitFor(() => {
+			const f = socket.calls("keys_copied.dismiss").at(-1);
+			if (!f) throw new Error("not sent");
+			return f;
+		});
+		expect(sent.params).toEqual({});
+		await socket.reply(sent, {});
+		const rail = screen.getByRole("navigation", { name: en.navRail });
+		await waitFor(() =>
+			expect(
+				within(rail)
+					.getByRole("link", { name: en.team })
+					.getAttribute("aria-current"),
+			).toBe("page"),
 		);
 	});
 });

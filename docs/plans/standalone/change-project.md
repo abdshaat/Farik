@@ -202,7 +202,7 @@ Files: modified `packages/protocol-client/src/client.ts`, `apps/web/src/app/stor
 - `offers_other_keys_until_one_is_chosen` — `keysCopied { from: "/h/old-repo", count: 2 }`: a status names "old-repo" and "2 services"; Keep them sends `keys_copied.dismiss` with `{}` (held by `test/schema.ts` to `keysCopiedDismissRequest`); once `serve.status` answers `keysCopied: null` the notice is gone.
 - `choosing_different_keys_goes_to_the_team_page` — Choose different keys sends `keys_copied.dismiss` and the location is `/team`.
 
-- [ ] `feat(web): name the project on the rail and offer other keys after a move`
+- [x] `feat(web): name the project on the rail and offer other keys after a move`
 
 ### Task 9: Change project and the moving wizard
 
