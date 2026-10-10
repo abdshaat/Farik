@@ -1,4 +1,5 @@
-import { useAdvanced } from "../../app/advanced.ts";
+import { useState } from "react";
+import { ShowAdvanced } from "../../components/ShowAdvanced.tsx";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
 import {
@@ -13,7 +14,7 @@ import {
 /** How work runs: how finished work is added, planning in sprints, the plan check, and the UI patterns. */
 export function Work() {
 	const { ready, part, key } = useRuleParts();
-	const [advanced] = useAdvanced();
+	const [advanced, setAdvanced] = useState(false);
 	return (
 		<div className={styles.page}>
 			<RulesTitle name={t("sectionWork")} />
@@ -22,7 +23,22 @@ export function Work() {
 					<Finish key={key("finish")} {...part("finish")} />
 					<Planning key={key("planning")} {...part("planning")} />
 					<Plans key={key("plans")} {...part("plans")} />
-					{advanced && <UiPaths key={key("paths")} {...part("paths")} />}
+					<ShowAdvanced
+						open={advanced}
+						onToggle={() => setAdvanced(!advanced)}
+						controls="work-advanced"
+					/>
+					{advanced && (
+						<ul
+							id="work-advanced"
+							className={styles.tiers}
+							aria-label={t("advanced")}
+						>
+							<li>
+								<UiPaths key={key("paths")} {...part("paths")} />
+							</li>
+						</ul>
+					)}
 				</>
 			)}
 		</div>

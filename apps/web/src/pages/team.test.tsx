@@ -747,8 +747,10 @@ describe("team page", () => {
 		await settings(WITH_IRIS, "/settings/work");
 		expect(screen.queryByRole("region", { name: en.uiPathsTitle })).toBeNull();
 		cleanup();
-		localStorage.setItem("catervas.advanced", "true");
 		const { container, s } = await settings(WITH_IRIS, "/settings/work");
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.advancedSwitch }),
+		);
 		const paths = screen.getByRole("region", { name: en.uiPathsTitle });
 		const list = within(paths).getByRole("list");
 		// The team says none, so the seven defaults stand.
@@ -1833,12 +1835,6 @@ describe("info buttons on Settings", () => {
 
 	it("keeps Settings to short lines, the rest behind info buttons", async () => {
 		const general = await settings(TEAM, "/settings/general");
-		for (const line of en.advancedMore.split("\n")) onlyInTips(line);
-		const advanced = screen.getByRole("switch", { name: en.advancedSwitch });
-		expect(
-			document.getElementById(advanced.getAttribute("aria-describedby") ?? "")
-				?.textContent,
-		).toBe(en.advancedBody);
 		await expectNoAxeViolations(general.container);
 		cleanup();
 

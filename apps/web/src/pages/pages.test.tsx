@@ -24,7 +24,7 @@ describe("pages", () => {
 		localStorage.clear();
 	});
 
-	it("settings_changes_the_theme_and_advanced", async () => {
+	it("settings_changes_the_theme", async () => {
 		const { container, socket } = await renderApp("/settings/general");
 		if (!socket) throw new Error("no socket");
 		// The shell asks first, and the page asks nothing.
@@ -34,12 +34,9 @@ describe("pages", () => {
 		fireEvent.click(await screen.findByRole("radio", { name: /^Dark/ }));
 		expect(document.documentElement.dataset.theme).toBe("dark");
 
-		const advanced = screen.getByRole("switch", { name: en.advancedSwitch });
-		fireEvent.click(advanced);
-		expect(localStorage.getItem("catervas.advanced")).toBe("true");
-		expect(advanced.getAttribute("aria-checked")).toBe("true");
-		fireEvent.click(advanced);
-		expect(localStorage.getItem("catervas.advanced")).toBe("false");
+		expect(
+			screen.queryByRole("switch", { name: en.advancedSwitch }),
+		).toBeNull();
 	});
 
 	it("settings_shows_the_computer_and_disconnects", async () => {

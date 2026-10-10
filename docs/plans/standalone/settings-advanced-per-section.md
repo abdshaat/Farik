@@ -67,7 +67,7 @@ Tests:
 - `settings.test.tsx`, `keeps_advanced_settings_to_their_own_section` — `localStorage` holding `catervas.advanced=true`: `/settings/work` still opens closed; General, Allowed actions, Spending, Your app, Saved teams, This computer and AI account have no button named "Show advanced settings" and no `switch` named `advancedSwitch`.
 - The existing tests that turned Advanced on for Work (`edits_the_ui_paths_in_advanced`, `team.test.tsx:745`; the end of `splits_the_rules_across_three_sections`, `settings.test.tsx:269`) press the button instead of setting `catervas.advanced`; the General tests, renamed `settings_changes_the_theme` (`pages.test.tsx:27`) and `holds_the_theme_and_the_language_in_general` (`settings.test.tsx:182`), assert no `switch` named `advancedSwitch`; the "short lines" test (`team.test.tsx:1834`) drops `advancedMore` and the switch's `advancedBody` description.
 
-- [ ] `feat(web): open advanced settings under their own section`
+- [x] `feat(web): open advanced settings under their own section`
 
 ### Task 2: the agent page's advanced settings under its button
 

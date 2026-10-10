@@ -179,15 +179,13 @@ describe("settings directory", () => {
 		expect(link.getAttribute("aria-current")).toBe("page");
 	});
 
-	it("holds_the_theme_the_language_and_advanced_in_general", async () => {
+	it("holds_the_theme_and_the_language_in_general", async () => {
 		await open("/settings/general", null);
 		expect(await screen.findByRole("radio", { name: /^Dark/ })).toBeTruthy();
 		expect(screen.getByText(en.english)).toBeTruthy();
-		const advanced = screen.getByRole("switch", { name: en.advancedSwitch });
-		expect(advanced).toBeTruthy();
-		for (const line of en.advancedMore.split("\n")) onlyInTips(line);
-		fireEvent.click(advanced);
-		expect(localStorage.getItem("catervas.advanced")).toBe("true");
+		expect(
+			screen.queryByRole("switch", { name: en.advancedSwitch }),
+		).toBeNull();
 	});
 
 	it("splits_the_rules_across_three_sections", async () => {
@@ -266,11 +264,101 @@ describe("settings directory", () => {
 			cleanup();
 		}
 
-		localStorage.setItem("catervas.advanced", "true");
 		const { s } = await open("/settings/work", rules);
 		await answerQuery(s, "settings.defaults", defaults);
+		await main().findByRole("heading", { level: 3, name: en.planTitle });
+		fireEvent.click(main().getByRole("button", { name: en.advancedSwitch }));
 		expect(
 			await main().findByRole("region", { name: en.uiPathsTitle }),
 		).toBeTruthy();
+	});
+
+	it("opens_work's_advanced_settings_under_its_button", async () => {
+		const defaults = {
+			budgets: {},
+			rules: {},
+			policy: {},
+			ui_paths: ["**/*.tsx"],
+		};
+		const rules = {
+			team: {
+				name: "Corner Bakery",
+				agents: [],
+				budgets: {},
+				policy: {},
+				rules: {},
+			},
+			agents: [],
+			judges: [],
+			max_agents: 7,
+		};
+		const { container, s } = await open("/settings/work", rules);
+		await answerQuery(s, "settings.defaults", defaults);
+		const button = await main().findByRole("button", {
+			name: en.advancedSwitch,
+		});
+		expect(main().queryByRole("region", { name: en.uiPathsTitle })).toBeNull();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(button);
+		const list = await main().findByRole("list", { name: en.advanced });
+		expect(
+			within(list).getByRole("region", { name: en.uiPathsTitle }),
+		).toBeTruthy();
+		expect(main().getByRole("button", { name: en.advancedHide })).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(main().getByRole("button", { name: en.advancedHide }));
+		expect(main().queryByRole("list", { name: en.advanced })).toBeNull();
+		expect(main().queryByRole("region", { name: en.uiPathsTitle })).toBeNull();
+	});
+
+	it("keeps_advanced_settings_to_their_own_section", async () => {
+		localStorage.setItem("catervas.advanced", "true");
+		const rules = {
+			team: {
+				name: "Corner Bakery",
+				agents: [],
+				budgets: {},
+				policy: {},
+				rules: {},
+			},
+			agents: [],
+			judges: [],
+			max_agents: 7,
+		};
+		const { s } = await open("/settings/work", rules);
+		await answerQuery(s, "settings.defaults", {
+			budgets: {},
+			rules: {},
+			policy: {},
+			ui_paths: ["**/*.tsx"],
+		});
+		await main().findByRole("button", { name: en.advancedSwitch });
+		expect(main().queryByRole("region", { name: en.uiPathsTitle })).toBeNull();
+		cleanup();
+
+		for (const path of [
+			"general",
+			"allowed-actions",
+			"spending",
+			"your-app",
+			"saved-teams",
+			"computer",
+			"account",
+		]) {
+			await open(
+				`/settings/${path}`,
+				path === "your-app" ? WITH_DESIGNER : null,
+			);
+			await screen.findByRole("heading", { level: 2 });
+			expect(
+				main().queryByRole("button", { name: en.advancedSwitch }),
+			).toBeNull();
+			expect(
+				main().queryByRole("switch", { name: en.advancedSwitch }),
+			).toBeNull();
+			cleanup();
+		}
 	});
 });

@@ -14,7 +14,7 @@ export const en = {
 	sectionSavedTeams: "Saved teams",
 	sectionComputer: "This computer",
 	sectionAccount: "AI account",
-	sectionGeneralSummary: "Theme, language, advanced",
+	sectionGeneralSummary: "Theme and language",
 	sectionAllowedActionsSummary: "What agents may do",
 	sectionSpendingSummary: "The daily limit",
 	sectionWorkSummary: "Sprints and plan checks",
@@ -74,9 +74,6 @@ export const en = {
 	themeSystemNote: "Follows your computer’s setting.",
 	advanced: "Advanced settings",
 	advancedSwitch: "Show advanced settings",
-	advancedBody: "Shows the detailed settings on each screen.",
-	advancedMore:
-		"Catervas’s defaults are safe. You never need to change them.\nTurning this on shows what each agent may do, the team’s rules, the checks, the models, and how a plan is judged ready.\nCatervas refuses any change that would stop your team working, and says what to change instead.",
 	thisComputer: "Catervas on this computer",
 	connectedLead: "Connected.",
 	connectedBody:

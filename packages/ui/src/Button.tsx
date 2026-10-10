@@ -8,6 +8,8 @@ export function Button({
 	disabled = false,
 	busy = false,
 	onClick,
+	expanded,
+	controls,
 	children,
 }: {
 	kind?: "primary" | "secondary" | "quiet";
@@ -15,6 +17,10 @@ export function Button({
 	disabled?: boolean;
 	busy?: boolean;
 	onClick?: () => void;
+	/** Whether what the button opens is open: `aria-expanded`. */
+	expanded?: boolean;
+	/** The id of what the button opens: `aria-controls`. */
+	controls?: string;
 	children: ReactNode;
 }) {
 	return (
@@ -24,6 +30,8 @@ export function Button({
 			data-kind={kind}
 			disabled={disabled || busy}
 			aria-busy={busy || undefined}
+			aria-expanded={expanded}
+			aria-controls={controls}
 			onClick={onClick}
 		>
 			{children}
