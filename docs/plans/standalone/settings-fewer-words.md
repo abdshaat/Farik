@@ -80,7 +80,7 @@ Tests:
 - `it('puts its info behind a button beside the label')` — with `info="Detail."`: a button "More about this" is present, the label's element does not contain it, the element `#${id}-info` has `role="tooltip"` and text "Detail.", the textbox's accessible name is exactly the label, and its `aria-describedby` contains `${id}-info`; no axe violations.
 - `it('has no info button without info')` — no button is rendered.
 
-- [ ] `feat(ui): let a text field carry an info button`
+- [x] `feat(ui): let a text field carry an info button`
 
 ### Task 2: Bullets
 
