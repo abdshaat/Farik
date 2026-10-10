@@ -1560,7 +1560,7 @@ export const en = {
 	finishPushNo: "Everything stays on this computer.",
 	finishCarriedBefore:
 		"You answered these when you saved the team, so Catervas does not ask again. Change them any time in ",
-	finishCarriedAfter: ", under Your team’s rules.",
+	finishCarriedAfter: ".",
 	templateSaveOpen: "Save as a template",
 	templateUseOpen: "Use a saved team",
 	saveTitle: "Save this team as a template",

@@ -1445,6 +1445,11 @@ describe("team templates", () => {
 		expect(line.textContent).toBe(
 			`${en.savedAsBefore}My usual team${en.savedAsAfter}${en.settings}.`,
 		);
+		expect(
+			within(line)
+				.getByRole("link", { name: en.settings })
+				.getAttribute("href"),
+		).toBe("/settings/saved-teams");
 		expect(screen.queryByRole("dialog")).toBeNull();
 		await expectNoAxeViolations(container);
 	});
@@ -1466,6 +1471,11 @@ describe("team templates", () => {
 			name: /^Pair/,
 		})) as HTMLInputElement;
 		expect(pair.checked).toBe(true);
+		expect(
+			within(dialog)
+				.getByRole("link", { name: en.settings })
+				.getAttribute("href"),
+		).toBe("/settings/saved-teams");
 		await expectNoAxeViolations(container);
 		fireEvent.click(within(dialog).getByRole("button", { name: en.useShow }));
 		const asked = await query(s, "template.preview");

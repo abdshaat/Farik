@@ -126,7 +126,7 @@ Tests:
 - The Team page's saved notice and the Use-a-saved-team dialog link to `/settings/saved-teams` (`team.test.tsx`: the test asserting `savedAsAfter` at line 1434, and the test that opens the Use-a-saved-team dialog, which gains the assertion, `useSettingsBefore` being untested today).
 - Setup's finish screen (`setup/team.test.tsx`, new assertion): the sentence reads `finishCarriedBefore` + "Settings" + "." and links to `/settings`.
 
-- [ ] `fix(web): send each link into Settings to its section`
+- [x] `fix(web): send each link into Settings to its section`
 
 ### Task 4: the spec and the design say so
 

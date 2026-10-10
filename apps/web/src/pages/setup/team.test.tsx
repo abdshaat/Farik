@@ -1604,6 +1604,15 @@ describe("team setup's three starts", () => {
 			`${en.finishYes} ${en.finishCommandsYes}`,
 		);
 		expect(carried.textContent).toContain(`${en.finishNo} ${en.finishPushNo}`);
+		// Settings is one place to change them, not a heading to look for in it.
+		expect(carried.textContent).toContain(
+			`${en.finishCarriedBefore}${en.settings}.`,
+		);
+		expect(
+			within(carried)
+				.getByRole("link", { name: en.settings })
+				.getAttribute("href"),
+		).toBe("/settings");
 		await expectNoAxeViolations(container);
 
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
