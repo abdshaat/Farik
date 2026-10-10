@@ -167,7 +167,7 @@ Files: modified `SetupAdvanced.tsx`, `SetupFinish.tsx`, `App.tsx`, `en.ts`, `tea
 - `the_old_advanced_address_goes_to_finish` — `/setup/advanced` lands on `/setup/finish`.
 - The existing `chooses_how_work_is_finished`, `edits_the_checks_and_the_plan_check`, `says_a_refused_check_or_note_in_plain_words`, `puts_each_setting_back_to_its_default` and `starts_a_team_that_plans_in_sprints` reach advanced settings by the button; their queries for the advanced settings' controls are scoped `within(document.getElementById("finish-advanced"))`, and assert as before.
 
-- [ ] `feat(web): open setup's advanced settings in place`
+- [x] `feat(web): open setup's advanced settings in place`
 
 ### Task 10: the spec
 

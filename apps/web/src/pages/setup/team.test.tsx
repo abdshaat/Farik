@@ -1297,6 +1297,37 @@ describe("team setup", () => {
 		expect(screen.queryByText(en.spendExample)).toBeNull();
 	});
 
+	it("opens_advanced_settings_in_place_on_finish", async () => {
+		const { socket } = await renderApp("/setup/finish");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerStatus(s, false, 1, { setup_pending: true });
+		await screen.findByRole("heading", { name: en.finishTitle });
+		expect(
+			screen.queryByRole("switch", { name: en.advancedSwitch }),
+		).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
+		expect(
+			screen
+				.getByRole("button", { name: en.advancedHide })
+				.getAttribute("aria-expanded"),
+		).toBe("true");
+		expect(screen.getByRole("heading", { name: en.finishTitle })).toBeTruthy();
+		expect(await screen.findByText(en.rulesTitle)).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: en.advancedHide }));
+		expect(screen.queryByText(en.rulesTitle)).toBeNull();
+	});
+
+	it("the_old_advanced_address_goes_to_finish", async () => {
+		const { socket } = await renderApp("/setup/advanced");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerStatus(s, false, 1, { setup_pending: true });
+		expect(
+			await screen.findByRole("heading", { name: en.finishTitle }),
+		).toBeTruthy();
+	});
+
 	it("chooses_how_work_is_finished", async () => {
 		const { container, socket } = await renderApp("/setup/finish");
 		const s = socket as FakeSocket;
@@ -1316,7 +1347,7 @@ describe("team setup", () => {
 		);
 
 		// Advanced and back keeps the choice.
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		fireEvent.click(
 			await screen.findByRole("button", { name: en.advancedHide }),
 		);
@@ -1332,7 +1363,7 @@ describe("team setup", () => {
 	});
 
 	it("edits_the_checks_and_the_plan_check", async () => {
-		const { container, socket } = await renderApp("/setup/advanced");
+		const { container, socket } = await renderApp("/setup/finish");
 		const s = socket as FakeSocket;
 		await answerQuery(
 			s,
@@ -1342,6 +1373,9 @@ describe("team setup", () => {
 			}),
 		);
 		await answerStatus(s, false, 1, { setup_pending: true });
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.advancedSwitch }),
+		);
 		// Who checks plans is the daemon's answer, not the page's own reckoning.
 		const mira = {
 			agent_id: "mira",
@@ -1427,10 +1461,11 @@ describe("team setup", () => {
 		).toBeTruthy();
 		expect(who.getAttribute("aria-describedby")).toBeTruthy();
 		expect(screen.queryByText(refusal)).toBeNull();
+		// Start stays enabled: the daemon refuses an invalid team and Start says why.
 		expect(
 			(screen.getByRole("button", { name: en.startTeam }) as HTMLButtonElement)
 				.disabled,
-		).toBe(true);
+		).toBe(false);
 
 		fireEvent.click(screen.getByRole("radio", { name: /^Catervas chooses/ }));
 		await answerQuery(s, "team.validate", { errors: [], effects: [] });
@@ -1456,10 +1491,13 @@ describe("team setup", () => {
 
 	it("says_a_refused_check_or_note_in_plain_words", async () => {
 		const RAW = "/criteria/1/name does not match ^[a-z0-9-]+$";
-		const { socket } = await renderApp("/setup/advanced");
+		const { socket } = await renderApp("/setup/finish");
 		const s = socket as FakeSocket;
 		await answerQuery(s, "team.propose", proposed());
 		await answerStatus(s, false, 1, { setup_pending: true });
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.advancedSwitch }),
+		);
 		fireEvent.change(await screen.findByLabelText(en.checkNew), {
 			target: { value: "The page loads in under two seconds." },
 		});
@@ -1575,10 +1613,12 @@ describe("team setup", () => {
 			).checked,
 		).toBe(true);
 
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		await screen.findByRole("button", { name: en.advancedHide });
 		await answerDefaults(4);
-		const backs = screen.getAllByRole("button", { name: en.putBack });
+		const backs = within(
+			document.getElementById("finish-advanced") as HTMLElement,
+		).getAllByRole("button", { name: en.putBack });
 		expect(backs).toHaveLength(2);
 		for (const one of backs) fireEvent.click(one);
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
@@ -1606,7 +1646,7 @@ describe("team setup", () => {
 		await expectNoAxeViolations(first.container);
 
 		// Behind advanced settings, the same switch as in Settings, on.
-		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
 		const toggle = await screen.findByRole("switch", {
 			name: en.planInSprints,
 		});
@@ -1622,10 +1662,13 @@ describe("team setup", () => {
 		expect(on.team.policy.plan_in_sprints).toBe(true);
 		cleanup();
 
-		const second = await renderApp("/setup/advanced");
+		const second = await renderApp("/setup/finish");
 		const s2 = second.socket as FakeSocket;
 		await answerQuery(s2, "team.propose", proposed());
 		await answerStatus(s2, false, 1, { setup_pending: true });
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.advancedSwitch }),
+		);
 		fireEvent.click(
 			await screen.findByRole("switch", { name: en.planInSprints }),
 		);

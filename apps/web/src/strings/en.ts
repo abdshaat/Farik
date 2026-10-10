@@ -319,8 +319,6 @@ export const en = {
 		"Rules for the whole team, the checks every piece of work must pass, and how plans are judged are already set to safe choices.",
 	startTeam: "Start the team",
 	advancedHide: "Hide advanced settings",
-	advancedLead:
-		"These are already set to safe choices. Change them only if you want to. You can come back to them any time in Settings.",
 	rulesTitle: "Team rules",
 	rulesLead: "Rules every agent follows, and that no agent can change.",
 	editAsText: "Edit as text",
