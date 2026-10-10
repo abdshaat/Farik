@@ -909,8 +909,10 @@ function KitRow({
 			<span className={styles.titled}>
 				<ServiceLogo name={service.name} />
 				<strong>{service.title}</strong>
-				<span className={styles.muted}>{service.about}</span>
-				<InfoTip id={`kit-${service.name}-info`}>{service.why}</InfoTip>
+				<span className={styles.muted}>
+					{service.about}{" "}
+					<InfoTip id={`kit-${service.name}-info`}>{service.why}</InfoTip>
+				</span>
 			</span>
 			{service.atLaunch && !held && (
 				<p>

@@ -2676,6 +2676,17 @@ describe("logos and info buttons on the Connectors section", () => {
 		onlyInTips(notion, KIT_NOTION.why);
 	});
 
+	it("keeps a kit service's info button with its short line", async () => {
+		await openedWithKit([KIT_NOTION], [], []);
+		const notion = kitRow("Notion");
+		const line = within(notion).getByText(KIT_NOTION.about).closest("span");
+		expect(
+			within(line as HTMLElement).getByRole("button", {
+				name: "More about this",
+			}),
+		).toBeTruthy();
+	});
+
 	it("shows the plug for a connector you added", async () => {
 		await opened();
 		const airtable = row("airtable");

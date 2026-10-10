@@ -81,7 +81,7 @@ Tests:
 
 - `it('keeps a kit service's info button with its short line')` — in the Notion kit row, the element holding `about`'s text also contains the "More about this" button (`closest` span of the text contains the button).
 
-- [ ] `fix(web): keep a kit row's info button beside its line on a phone`
+- [x] `fix(web): keep a kit row's info button beside its line on a phone`
 
 ## Verification
 
