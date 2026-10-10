@@ -694,6 +694,21 @@ mod tests {
         }
     }
 
+    /// A task that names the product spec or roadmap waits for the owner to accept it, so the
+    /// Product Manager is told to name them only when the task changes them.
+    #[test]
+    fn the_product_manager_is_told_which_tasks_wait_for_the_owner() {
+        let flat = PM_SKILL.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat.contains(
+                "Name `docs/catervas/product/spec.md` or `roadmap.md` in a task's allowed paths, \
+                 or a pattern that reaches them, only when the task changes them: such a task \
+                 waits for the owner to accept it."
+            ),
+            "{flat}"
+        );
+    }
+
     /// ADR 0019: its numbers are management accounting, and the role says so wherever it is
     /// told what it is: the prompt and its skill.
     #[test]

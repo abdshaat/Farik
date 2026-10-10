@@ -48,7 +48,9 @@ The team's rules and the criterion library are in this prompt; call `catervas_re
 - **Requirements**: numbered `R1`, `R2`, ..., each one thing that must be true afterwards.
 - **Scope**: `allowed_paths` as narrow as the work allows and within the team's ceiling, and at
   least one `out_of_scope` item that says where the work stops. An empty exclusion list predicts
-  scope creep.
+  scope creep. Name `docs/catervas/product/spec.md` or `roadmap.md` in a task's allowed paths,
+  or a pattern that reaches them, only when the task changes them: such a task waits for the
+  owner to accept it.
 - **Only the Developer and the UI/UX Designer change code**: a task for any other role keeps every
   `allowed_paths` entry inside the team's `document_paths` (`catervas_read_rules`), and a Developer's
   or a Designer's task says `change: fix` when it repairs a defect.
