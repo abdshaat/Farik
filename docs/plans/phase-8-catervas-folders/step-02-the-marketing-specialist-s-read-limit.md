@@ -91,7 +91,7 @@ Produces: `ReadAccess`, `read_access`, `allows`, `named`. Consumes: `stays_withi
 - `a_held_reader_reads_its_folders_alone` — the Marketing Specialist's access allows `docs/catervas/product/spec.agent.md` and `docs/catervas/marketing/plans/MP-1.md`, and not `docs/catervas/architecture/overview.md`, `README.md` or `docs/catervas/*.md`; `Open` allows all five; `named` is `docs/catervas/product/ and docs/catervas/marketing/`. RED: no type.
 - `tells_the_marketing_specialist_what_it_reads` — for the Marketing Specialist with active `[ProductManager, Architect, MarketingSpecialist]` the line is exactly `- folders: docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/marketing/ (Marketing Specialist). Yours is docs/catervas/marketing/: write no other folder named here. Read only docs/catervas/product/ and docs/catervas/marketing/: Catervas refuses a read anywhere else, and a search that names no path. Where a document there has an .agent.md twin beside it, read the twin, which is written for agents.` RED: it says "Read any of them". Step 01's tests of the other roles' lines hold unchanged.
 
-- [ ] `feat(core): hold the Marketing Specialist's reading to two folders`
+- [x] `feat(core): hold the Marketing Specialist's reading to two folders`
 
 ### Task 3: The hook holds a session to its read paths
 
