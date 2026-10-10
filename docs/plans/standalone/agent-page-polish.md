@@ -48,7 +48,7 @@ Tests:
 
 - `it('shows an icon inside its label, before the words')` — with `icon={<img alt="" src="x.svg" />}`, the element with id `${id}-label` contains the `img` as its first element child and the label text after it; the switch's accessible name is exactly `label`.
 
-- [ ] `feat(ui): let a switch carry an icon in its label`
+- [x] `feat(ui): let a switch carry an icon in its label`
 
 ### Task 2: Playwright's logo beside its name
 
