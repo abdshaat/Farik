@@ -236,6 +236,16 @@ describe("settings directory", () => {
 			expect(
 				await screen.findByRole("heading", { level: 2, name }),
 			).toBeTruthy();
+			// The section's name is the page's one h2; each part beneath it is an h3.
+			expect(
+				main()
+					.getAllByRole("heading", { level: 2 })
+					.map((h) => h.textContent),
+			).toEqual([name]);
+			for (const part of held)
+				expect(
+					main().getByRole("heading", { level: 3, name: part }),
+				).toBeTruthy();
 			for (const part of parts) {
 				const region = main().queryByRole("region", { name: part });
 				// The patterns come with Advanced, not with the page.

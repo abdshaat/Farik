@@ -280,6 +280,7 @@ export function Plans(part: Part) {
 			judges={checked?.judges}
 			errors={errors}
 			putBack={defaults && (() => setMine(defaults.policy.judgment ?? {}))}
+			heading="h3"
 		>
 			{foot}
 		</PlanCheck>
