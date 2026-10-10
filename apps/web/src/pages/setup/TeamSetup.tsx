@@ -3,7 +3,7 @@ import { type CSSProperties, useState } from "react";
 import { Outlet, useNavigate, useOutletContext } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { saidAll } from "../../app/refusals.ts";
-import { useQuery } from "../../app/store.ts";
+import { type ServeStatus, useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
 import type { Template } from "../SavedTeams.tsx";
 import {
@@ -270,12 +270,43 @@ function teamDraftOf(
 	};
 }
 
+const DRAFT = "catervas.setupDraft";
+
+// The team's answers, kept for this tab while the project is the same, so going back to the scan
+// and forward again does not lose them. Storage can refuse (a private window): nothing is kept.
+export function keepDraft(root: string, draft: Draft): void {
+	try {
+		sessionStorage.setItem(DRAFT, JSON.stringify({ root, draft }));
+	} catch {}
+}
+
+export function keptDraft(root: string): Draft | undefined {
+	try {
+		const kept = JSON.parse(sessionStorage.getItem(DRAFT) ?? "null") as {
+			root: string;
+			draft: Draft;
+		} | null;
+		return kept?.root === root ? kept.draft : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+export function forgetDraft(): void {
+	try {
+		sessionStorage.removeItem(DRAFT);
+	} catch {}
+}
+
 /** The layout of the team screens: the suggested team, fetched once, held for every screen. */
 export function TeamSetup() {
 	const { data, again } = useQuery<Proposed>("team.propose", {});
+	const { data: serve } = useQuery<ServeStatus>("serve.status", {});
 	const [mine, setMine] = useState<Draft>();
 	const unavailable = data ? unavailableRoles(data) : [];
-	const draft: Draft | undefined = mine ?? (data && draftOf(data, "suggested"));
+	const root = serve?.projectRoot ?? "";
+	const draft: Draft | undefined =
+		mine ?? (data && serve && (keptDraft(root) ?? draftOf(data, "suggested")));
 	if (!draft || !data) return null;
 	return (
 		<Outlet
@@ -283,7 +314,10 @@ export function TeamSetup() {
 				{
 					draft,
 					proposed: data,
-					change: setMine,
+					change: (next: Draft) => {
+						setMine(next);
+						keepDraft(root, next);
+					},
 					unavailable,
 					checkAgain: again,
 				} satisfies Setup
@@ -312,6 +346,7 @@ export function useStart() {
 				team: teamOf(draft),
 				criteria: draft.criteria,
 			});
+			forgetDraft();
 			navigate("/", { replace: true });
 		} catch (e) {
 			setRefused(saidAll(e));

@@ -445,6 +445,52 @@ describe("setup", () => {
 		).toBeTruthy();
 	});
 
+	it("goes_back_to_an_earlier_step_from_the_list", async () => {
+		const { socket } = await renderApp("/setup/scan");
+		await answerStatus(socket as FakeSocket, false, 1, {
+			setup_pending: true,
+		});
+		const steps = screen.getByRole("navigation", { name: en.setupSteps });
+		fireEvent.click(
+			within(steps).getByRole("button", { name: en.wizardAccount }),
+		);
+		expect(
+			await screen.findByRole("heading", { name: en.accountTitle }),
+		).toBeTruthy();
+	});
+
+	it("scan_goes_back_to_the_project", async () => {
+		const { socket } = await renderApp("/setup/scan");
+		await answerStatus(socket as FakeSocket, false, 1, {
+			setup_pending: true,
+		});
+		fireEvent.click(await screen.findByRole("button", { name: en.back }));
+		expect(
+			await screen.findByRole("heading", { name: en.projectTitle }),
+		).toBeTruthy();
+	});
+
+	it("keeps_the_project_already_taken_on", async () => {
+		const first = await renderApp("/setup/project");
+		await answerStatus(first.socket as FakeSocket, false, 1, {
+			project_root: "/home/u/shop",
+			setup_pending: true,
+		});
+		fireEvent.click(await screen.findByRole("button", { name: "Keep shop" }));
+		expect(
+			await screen.findByRole("heading", { name: en.scanTitle }),
+		).toBeTruthy();
+		cleanup();
+
+		const second = await renderApp("/setup/project");
+		await answerStatus(second.socket as FakeSocket, false, 1, {
+			project_root: null,
+			credential: null,
+		});
+		await screen.findByRole("heading", { name: en.projectTitle });
+		expect(screen.queryByRole("button", { name: /^Keep / })).toBeNull();
+	});
+
 	it("sends_the_user_to_setup_without_a_project", async () => {
 		const first = await renderApp("/");
 		await answerStatus(first.socket as FakeSocket, false, 1, NO_PROJECT);

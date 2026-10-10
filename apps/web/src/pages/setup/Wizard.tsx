@@ -2,6 +2,7 @@ import mark from "@catervas/brand/assets/logo-mark-1254.png";
 import wordmark from "@catervas/brand/assets/wordmark-1024.png";
 import { Stepper } from "@catervas/ui";
 import type { ReactNode } from "react";
+import { useNavigate } from "react-router";
 import { t } from "../../strings/t.ts";
 import styles from "./setup.module.css";
 
@@ -16,6 +17,17 @@ const STEPS = [
 	t("wizardSpending"),
 	t("wizardFinishing"),
 ];
+/** Each step's address, in `STEPS`' order. */
+const PATHS = [
+	"/setup/computer",
+	"/setup/account",
+	"/setup/project",
+	"/setup/scan",
+	"/setup/team",
+	"/setup/permissions",
+	"/setup/spending",
+	"/setup/finish",
+];
 const LOOP = [t("loopPlan"), t("loopBuild"), t("loopIterate"), t("loopShip")];
 const NO_SANDBOX = "catervas.noSandbox";
 
@@ -28,7 +40,11 @@ export function Wizard(props: {
 	/** A saved team's permission answers carried over: "What they may do" is not a step. */
 	carried?: boolean;
 }) {
+	const navigate = useNavigate();
 	const steps = props.carried ? STEPS.filter((s) => s !== MAY) : STEPS;
+	const paths = props.carried
+		? PATHS.filter((_, i) => STEPS[i] !== MAY)
+		: PATHS;
 	const current = props.carried && props.step > 5 ? props.step - 1 : props.step;
 	return (
 		<div className={styles.wizard}>
@@ -49,7 +65,11 @@ export function Wizard(props: {
 			</aside>
 			<main className={styles.main}>
 				<nav aria-label={t("setupSteps")}>
-					<Stepper steps={steps} current={current} />
+					<Stepper
+						steps={steps}
+						current={current}
+						onPick={(i) => navigate(paths[i] ?? "/")}
+					/>
 				</nav>
 				<h1 className={styles.title}>{props.title}</h1>
 				<p className={styles.lead}>{props.lead}</p>

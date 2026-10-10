@@ -96,9 +96,15 @@ export function SetupSpending() {
 			<p className={styles.note}>{t("firstDay")}</p>
 			<div className={styles.foot}>
 				<Button
-					onClick={() =>
-						navigate(draft.from ? "/setup/team" : "/setup/permissions")
-					}
+					onClick={() => {
+						// What was typed comes back with the screen.
+						if (!wrong)
+							change({
+								...draft,
+								team: { ...draft.team, budgets: budgets(draft.team.budgets) },
+							});
+						navigate(draft.from ? "/setup/team" : "/setup/permissions");
+					}}
 				>
 					{t("back")}
 				</Button>

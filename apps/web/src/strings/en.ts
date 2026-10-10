@@ -195,6 +195,7 @@ export const en = {
 		"The team stops working on {name}. Its work there is kept, and it is all there if you come back.",
 	changeProjectYes: "Change project",
 	movingFrom: "Moving your team from {name}",
+	projectKeep: "Keep {name}",
 	stayOn: "Stay on {name}",
 	replaceTeam:
 		"{target} already has a Catervas team. It will be replaced by yours, starting fresh; your code is not touched.",

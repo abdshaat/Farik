@@ -126,18 +126,21 @@ export function SetupScan() {
 				</div>
 			)}
 			<div className={styles.foot}>
-				{wrong ? (
-					<span />
-				) : (
-					<Button
-						onClick={() => {
-							setWrong(true);
-							setSaved(false);
-						}}
-					>
-						{t("scanWrong")}
+				<span className={styles.buttons}>
+					<Button onClick={() => navigate("/setup/project")}>
+						{t("back")}
 					</Button>
-				)}
+					{!wrong && (
+						<Button
+							onClick={() => {
+								setWrong(true);
+								setSaved(false);
+							}}
+						>
+							{t("scanWrong")}
+						</Button>
+					)}
+				</span>
 				<Button kind="primary" onClick={() => navigate("/setup/team")}>
 					{t("scanRight")}
 				</Button>

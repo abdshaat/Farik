@@ -149,7 +149,7 @@ Files: modified `Wizard.tsx`, `SetupScan.tsx`, `SetupProject.tsx`, `TeamSetup.ts
 - `spending_back_keeps_the_typed_limit` — choose a daily limit of 25, Back, then Continue on permissions: the field holds 25.
 - `forgets_the_draft_once_the_team_starts` — after a successful start, `sessionStorage` has no `catervas.setupDraft`.
 
-- [ ] `feat(web): go back to any earlier setup step`
+- [x] `feat(web): go back to any earlier setup step`
 
 ### Task 8: the daily limit shows an example
 
