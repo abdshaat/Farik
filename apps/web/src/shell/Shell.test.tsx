@@ -195,7 +195,6 @@ describe("shell", () => {
 		expect(sent.params).toEqual({});
 		expect(refusedBy("keysCopiedDismissRequest", sent.params)).toEqual([]);
 		await socket.reply(sent, {});
-		await eventArrives(socket, 1);
 		await answerStatus(socket, false, 2, { keys_copied: null });
 		await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
 	});
@@ -227,6 +226,8 @@ describe("shell", () => {
 		});
 		expect(sent.params).toEqual({});
 		await socket.reply(sent, {});
+		await answerStatus(socket, false, 2, { keys_copied: null });
+		await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
 		const rail = screen.getByRole("navigation", { name: en.navRail });
 		await waitFor(() =>
 			expect(

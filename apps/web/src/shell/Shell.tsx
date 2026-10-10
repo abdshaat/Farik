@@ -42,7 +42,7 @@ export function Shell() {
 	const wide = useWide();
 	const { status, client } = useConnection();
 	const navigate = useNavigate();
-	const { data } = useQuery<ServeStatus>("serve.status", {});
+	const { data, again } = useQuery<ServeStatus>("serve.status", {});
 	const path = useLocation().pathname;
 	// Nothing shows, and nothing is asked of the project, until Farik says where it stands.
 	if (!data) return null;
@@ -63,9 +63,11 @@ export function Shell() {
 	const dismissKeys = async (thenTeam: boolean) => {
 		try {
 			await client?.call("keys_copied.dismiss", {});
+			// The dismissal records no event, so nothing else asks the status again.
+			again();
 			if (thenTeam) navigate("/team");
 		} catch {
-			// The connection closed: the page shows that it is lost.
+			// Closed connection or a refusal: the notice stays, so the user can choose again.
 		}
 	};
 	const copied = data.keysCopied;
