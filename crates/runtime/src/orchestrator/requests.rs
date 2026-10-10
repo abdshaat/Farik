@@ -2821,6 +2821,69 @@ mod tests {
         );
     }
 
+    /// CTV-2 under `pm`'s epic CTV-1 in lane 1, accepted, `dev-a`'s and reviewed by `dev-b`; CTV-3,
+    /// lane 1 too, `ready`.
+    fn lane_1_built_by_dev_a(harness: &Harness) {
+        harness.file_under("CTV-2", "ready", Some("CTV-1"), |wire| {
+            wire["lane"] = json!(1)
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        for pair in ["ready", "assigned", "in_progress", "verifying", "accepted"].windows(2) {
+            harness.project.moved("CTV-2", pair[0], pair[1], &people);
+        }
+        harness.file_under("CTV-3", "ready", Some("CTV-1"), |wire| {
+            wire["lane"] = json!(1)
+        });
+    }
+
+    /// What the plan session for CTV-3 is told of the agents with room for it.
+    async fn those_with_room(harness: &Harness) -> String {
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick runs");
+        let started = adapter.started();
+        let spec = started
+            .iter()
+            .find(|spec| spec.task_id == Some(task("CTV-3")))
+            .expect("a plan session for CTV-3");
+        assert_eq!(spec.purpose, SessionPurpose::Plan);
+        spec.initial_prompt.clone()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn offers_a_lanes_task_to_its_builder_alone() {
+        let harness = Harness::new("lane-builder-offer", |_| {});
+        an_epic_in_progress(&harness, |_| {});
+        lane_1_built_by_dev_a(&harness);
+
+        let message = those_with_room(&harness).await;
+
+        assert!(
+            message.contains("with room for it: dev-a. The agents of its reviewer role"),
+            "{message}"
+        );
+        assert!(
+            message.contains("lane 1 of CTV-1, which dev-a builds"),
+            "{message}"
+        );
+
+        // With dev-a paused the lane has no builder: the other developer is offered it.
+        let harness = Harness::new("lane-builder-paused", |wire| {
+            wire["agents"][1]["status"] = json!("paused");
+        });
+        an_epic_in_progress(&harness, |_| {});
+        lane_1_built_by_dev_a(&harness);
+
+        let message = those_with_room(&harness).await;
+
+        assert!(
+            message.contains("with room for it: dev-b. The agents of its reviewer role"),
+            "{message}"
+        );
+        assert!(message.contains("first of lane 1"), "{message}");
+    }
+
     /// `with_a_scrum_master`, and an Architect, `ada`.
     fn with_a_scrum_master_and_an_architect(wire: &mut Value) {
         with_a_scrum_master(wire);

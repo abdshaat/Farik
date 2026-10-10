@@ -2935,6 +2935,44 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn holds_an_epics_lane_to_its_builder_at_the_gate() {
+        let project = Project::new("lane-gate", a_team(|_| {}), at(12));
+        project.file("CTV-1", |wire| wire["kind"] = json!("epic"));
+        project.created_under("CTV-1", "in_progress", "epic", None);
+        for (task, status) in [("CTV-2", "assigned"), ("CTV-3", "ready")] {
+            project.file(task, |wire| {
+                wire["parent"] = json!("CTV-1");
+                wire["lane"] = json!(1);
+            });
+            project.created_under(task, "ready", "task", Some("CTV-1"));
+            if status != "ready" {
+                let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+                project.moved(task, "ready", status, &people, at(10));
+            }
+        }
+        let request = a_request(
+            "CTV-3",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+
+        let failures = assignment_failures(&project.ask(&request, &assigning("dev-b", "dev-a")));
+        assert!(
+            failures.iter().any(|failure| failure
+                .starts_with("lane_taken: lane 1 of CTV-1 is dev-a's, who builds its tasks")),
+            "{failures:?}"
+        );
+
+        let outcome = project.ask(&request, &assigning("dev-a", "dev-b"));
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn binds_the_summary_to_the_plans_a_human_approves() {
         // The fixture's team asks the human under `high_risk`.
         let project = Project::new("readiness-summary", a_team(|_| {}), at(12));
