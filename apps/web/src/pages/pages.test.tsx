@@ -94,6 +94,34 @@ describe("pages", () => {
 		expect(screen.getByTestId("status").textContent).toBe("reopening");
 	});
 
+	it("settings_shows_a_refused_change_and_clears_it_on_the_next_try", async () => {
+		const { socket } = await renderApp(
+			"/settings",
+			{ "GET /session": 204 },
+			<Status />,
+		);
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerStatus(s, false, 2);
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.changeProject }),
+		);
+		fireEvent.click(screen.getByRole("button", { name: en.changeProjectYes }));
+		const first = await waitFor(() => {
+			const f = s.calls("project.leave").at(-1);
+			if (!f) throw new Error("no project.leave was sent");
+			return f;
+		});
+		await s.fail(first, -32005, "a task is still running");
+		expect(await screen.findByRole("alert")).toBeTruthy();
+		expect(screen.getByTestId("status").textContent).not.toBe("reopening");
+
+		// A new attempt starts without the old error.
+		fireEvent.click(screen.getByRole("button", { name: en.changeProjectYes }));
+		await waitFor(() => expect(s.calls("project.leave")).toHaveLength(2));
+		expect(screen.queryByRole("alert")).toBeNull();
+	});
+
 	it("shows_the_connect_page_states", async () => {
 		const first = await renderApp("/events", { "GET /session": 401 });
 		expect(

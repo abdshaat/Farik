@@ -60,6 +60,7 @@ export function Settings({
 	const [said, setSaid] = useState<string>();
 	const change = async () => {
 		if (!client) return;
+		setSaid(undefined);
 		setMoving(true);
 		try {
 			await client.call("project.leave", {});
