@@ -2,7 +2,7 @@
 //! `fix/<id>` for a Software Developer's or a UI/UX Designer's task, by its contract's `change`, and
 //! `docs/<id>` for every other role's task, because only those two change code.
 
-use crate::contract::TaskContract;
+use crate::contract::{TaskContract, TaskId};
 use crate::generated::task_contract::FarikTaskContractChange as Change;
 use crate::team::changes_code;
 
@@ -24,7 +24,9 @@ pub fn task_branch(contract: &TaskContract) -> String {
 
 /// The task number a branch name holds, when it is one of the three shapes `task_branch` makes
 /// (`feature/FRK-<n>`, `fix/FRK-<n>`, `docs/FRK-<n>`), with or without a remote's name before it
-/// (`origin/fix/FRK-7`). Any other name answers `None`.
+/// (`origin/fix/FRK-7`). Any single leading segment is read as a remote's name, so `x/feature/FRK-7`
+/// counts too, which at worst skips numbers. A number past what a task id can hold, and any other
+/// name, answers `None`.
 #[must_use]
 pub fn task_number_of_branch(name: &str) -> Option<u64> {
     let parts: Vec<&str> = name.split('/').collect();
@@ -35,11 +37,9 @@ pub fn task_number_of_branch(name: &str) -> Option<u64> {
     if !matches!(kind, "feature" | "fix" | "docs") {
         return None;
     }
-    let digits = id.strip_prefix("FRK-")?;
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    digits.parse().ok()
+    // Only a number a contract can hold: an id past the limit would be a floor no task id follows.
+    let task_id: TaskId = id.parse().ok()?;
+    task_id.as_str().strip_prefix("FRK-")?.parse().ok()
 }
 
 #[cfg(test)]
@@ -109,6 +109,7 @@ mod tests {
             "feature/FRK-x",
             "wip/FRK-4",
             "feature/FRK-1/more",
+            "feature/FRK-1234567",
         ] {
             assert_eq!(task_number_of_branch(name), None, "{name}");
         }

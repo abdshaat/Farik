@@ -945,6 +945,17 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_a_request_when_git_cannot_list_branches() {
+        // The folder is not a repository, so its branches cannot be listed: it counts as having none.
+        let (project, log) = a_project("requests-no-repository");
+        let files = project.files();
+        let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
+            .expect("the request is filed");
+        assert_eq!(request.id.as_str(), "FRK-1");
+    }
+
+    #[test]
     fn files_a_request_with_the_next_id_the_log_hands_out() {
         let (project, log) = a_project("requests-next");
         let files = project.files();
