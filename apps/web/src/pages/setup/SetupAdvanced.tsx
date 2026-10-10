@@ -5,6 +5,7 @@ import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
+import { Bullets } from "../../components/Bullets.tsx";
 import { t } from "../../strings/t.ts";
 import type { Judges } from "../Team.tsx";
 import { slug } from "./SetupProject.tsx";
@@ -66,7 +67,7 @@ export function SprintsSwitch({
 		<Switch
 			id="plan-in-sprints"
 			label={t("planInSprints")}
-			description={t("planInSprintsNote")}
+			info={<Bullets text={t("planInSprintsNote")} />}
 			checked={on}
 			onChange={onChange}
 		/>

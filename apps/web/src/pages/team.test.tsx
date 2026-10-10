@@ -1020,8 +1020,7 @@ describe("team page", () => {
 			name: en.planInSprints,
 		});
 		expect(toggle.getAttribute("aria-checked")).toBe("true");
-		expect(toggle.getAttribute("aria-describedby")).toBeTruthy();
-		expect(within(planning).getByText(en.planInSprintsNote)).toBeTruthy();
+		for (const line of en.planInSprintsNote.split("\n")) onlyInTips(line);
 		await expectNoAxeViolations(container);
 
 		fireEvent.click(toggle);

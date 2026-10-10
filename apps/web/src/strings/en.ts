@@ -868,7 +868,7 @@ export const en = {
 	rulesPlanning: "Planning work",
 	planInSprints: "Plan work in sprints",
 	planInSprintsNote:
-		"The team gets work ready at any time: it asks its questions, writes the plans and has them checked, and breaks big requests into tasks. Nobody starts building until you start a sprint. Work that becomes ready during a sprint waits in the Backlog for the next one.",
+		"The team gets work ready at any time: it asks its questions, writes the plans and has them checked, and breaks big requests into tasks.\nNobody starts building until you start a sprint.\nWork that gets ready during a sprint waits in the Backlog for the next one.",
 	finishSprints: "Your team works in sprints",
 	finishSprintsNote:
 		"The team gets your requests ready straight away, and starts building when you start a sprint from the Board. Until then, ready work waits in the Backlog.",

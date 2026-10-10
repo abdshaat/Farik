@@ -118,6 +118,17 @@ Tests:
 
 - [x] `fix(web): move Settings' notes behind info buttons, as bullets`
 
+### Task 5: the planning note behind ⓘ
+
+Files: modified `en.ts` (`planInSprintsNote`, now three lines), `SetupAdvanced.tsx` (`SprintsSwitch`), `team.test.tsx`, `docs/SPEC.md`
+Consumes: Task 2 (`Bullets`); Task 3's `onlyInTips`
+
+Tests:
+
+- `switches_planning_in_sprints` (`team.test.tsx`): each line of `planInSprintsNote` is only in tooltips; the switch is still named "Plan work in sprints".
+
+- [x] `fix(web): hide the planning note behind an info button`
+
 ## Verification
 
 ```
