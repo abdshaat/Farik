@@ -9,15 +9,15 @@
 	right: 0;
 	max-width: 50%;
 	overflow-wrap: anywhere;
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 	font:
-		var(--farik-type-small-weight) var(--farik-type-small-size) /
-		var(--farik-type-small-line-height) var(--farik-type-code-family);
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-code-family);
 }
 
 .group {
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 	min-width: 0;
 	margin: 0;
 	padding: 0;
@@ -35,11 +35,11 @@
 
 .criterion {
 	display: grid;
-	gap: var(--farik-space-2);
-	padding: var(--farik-space-3);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-rule);
-	border-radius: var(--farik-radius-control);
+	gap: var(--catervas-space-2);
+	padding: var(--catervas-space-3);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
 }
 
 .banner {
@@ -47,12 +47,12 @@
 	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
-	gap: var(--farik-space-3);
-	padding: var(--farik-space-3) var(--farik-space-4);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-rule);
-	border-left: 3px solid var(--farik-color-status-waiting);
-	border-radius: var(--farik-radius-control);
+	gap: var(--catervas-space-3);
+	padding: var(--catervas-space-3) var(--catervas-space-4);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-left: 3px solid var(--catervas-color-status-waiting);
+	border-radius: var(--catervas-radius-control);
 }
 
 .banner p {
@@ -61,11 +61,11 @@
 
 .verdict {
 	display: grid;
-	gap: var(--farik-space-2);
-	padding: var(--farik-space-4);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-rule);
-	border-radius: var(--farik-radius-raised);
+	gap: var(--catervas-space-2);
+	padding: var(--catervas-space-4);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-raised);
 }
 
 .verdict h2,
@@ -77,5 +77,5 @@
 /* A part's field and, below it, the button that removes it. */
 .part {
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }

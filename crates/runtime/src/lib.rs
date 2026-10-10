@@ -1,4 +1,4 @@
-//! Farik's agent runtime: a session is started, read, talked to, and stopped through one trait
+//! Catervas's agent runtime: a session is started, read, talked to, and stopped through one trait
 //! (`docs/SPEC.md` section 8.2), whatever program or recording is behind it.
 
 /// A kit connector's allowances: the period, the count and what a connect may set.
@@ -25,18 +25,18 @@ pub mod cost;
 pub mod credential;
 /// Contract exit criteria, run and judged.
 pub mod criteria;
-/// The local service: the hooks around every tool call, and Farik's tools over MCP.
+/// The local service: the hooks around every tool call, and Catervas's tools over MCP.
 #[cfg(unix)]
 pub mod daemon;
-/// Farik's own server over eBay's Browse API (ADR 0038, ADR 0043).
+/// Catervas's own server over eBay's Browse API (ADR 0038, ADR 0043).
 pub mod ebay;
 /// Commands run on an agent's behalf, and what came of them.
 pub mod exec;
 /// The forge pull requests live on, driven through the `gh` program.
 pub mod forge;
-/// Farik's own server over the central banks' exchange rates (ADR 0038).
+/// Catervas's own server over the central banks' exchange rates (ADR 0038).
 pub mod fx;
-/// Farik's own Google Ads connector: the client for Google's API and what each tool sends (ADR
+/// Catervas's own Google Ads connector: the client for Google's API and what each tool sends (ADR
 /// 0038, ADR 0042).
 #[cfg(unix)]
 pub mod google_ads;
@@ -58,10 +58,10 @@ pub mod marketing;
 #[cfg(all(test, unix))]
 #[path = "../tests/support/oauth_fixture.rs"]
 mod oauth_fixture;
-/// Farik running its team: the board read, the next thing on it done, one session at a time.
+/// Catervas running its team: the board read, the next thing on it done, one session at a time.
 #[cfg(unix)]
 pub mod orchestrator;
-/// Farik's own server over the open vulnerability database (ADR 0038).
+/// Catervas's own server over the open vulnerability database (ADR 0038).
 pub mod osv;
 /// Whether the human has paused the team.
 pub mod pause;
@@ -75,11 +75,11 @@ pub mod preview;
 pub mod procurement;
 /// A session's system prompt, assembled in one fixed order.
 pub mod prompt;
-/// Farik's own server over the United States' product and vehicle safety agencies (ADR 0038).
+/// Catervas's own server over the United States' product and vehicle safety agencies (ADR 0038).
 pub mod recalls;
 /// Sessions replayed from recorded transcripts.
 pub mod recorded;
-/// The apps Farik has registered with a service, and which servers' addresses each serves.
+/// The apps Catervas has registered with a service, and which servers' addresses each serves.
 pub mod registered_apps;
 /// Where a task's commands run: a container per task, or the host in no-sandbox mode.
 pub mod sandbox;
@@ -99,10 +99,10 @@ pub mod sleep;
 pub mod sprints;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
-/// Saved team templates, kept privately in Farik's state folder.
+/// Saved team templates, kept privately in Catervas's state folder.
 #[cfg(unix)]
 pub mod templates;
-/// Farik's own tools, each checked against the agent's tier and the rule that owns it.
+/// Catervas's own tools, each checked against the agent's tier and the rule that owns it.
 pub mod tools;
 /// Transition requests, judged by the governor on the store's facts and recorded either way.
 pub mod transitions;
@@ -159,5 +159,5 @@ pub use stream::StreamParser;
 #[cfg(unix)]
 pub use templates::{TemplateError, TemplateListing, Templates};
 pub use tools::{
-    FarikTool, KitSource, ToolContext, ToolDeps, ToolError, call_tool, tool_descriptors,
+    CatervasTool, KitSource, ToolContext, ToolDeps, ToolError, call_tool, tool_descriptors,
 };

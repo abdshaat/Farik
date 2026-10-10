@@ -1,15 +1,15 @@
 //! The governor's refusals in the words a person reads.
 //!
-//! `farik-core` answers with values rather than sentences, so that one rule has one answer and every
+//! `catervas-core` answers with values rather than sentences, so that one rule has one answer and every
 //! caller says it its own way (`docs/standards/code.md`). This is the command line's way of saying
 //! them; the daemon and the app will have their own, and every one of them points at the rule in
 //! `docs/SPEC.md` that decided it.
 
-use farik_protocol::event::EventError;
+use catervas_protocol::event::EventError;
 
 /// Why the governor would not let this write happen (`docs/SPEC.md` sections 5.2, 5.11 and 5.16):
 /// the store's sentence, which every caller of `hold_contract` reads.
-pub use farik_store::requests::contract_write;
+pub use catervas_store::requests::contract_write;
 
 /// Why an event could not be built. Either is this program disagreeing with itself rather than
 /// anything the person did, so each says which field was missing.
@@ -20,10 +20,10 @@ pub fn event(error: &EventError) -> String {
         // sentence names it rather than guessing which of the three it was.
         EventError::BlankId { field } => format!(
             "this event needed a {field} and it is blank, and a blank id names nobody: that is a bug \
-             in Farik rather than anything you did"
+             in Catervas rather than anything you did"
         ),
         EventError::NoContractNamed { kind } => format!(
-            "a {kind} event is about one contract and this one names none, which is a bug in Farik \
+            "a {kind} event is about one contract and this one names none, which is a bug in Catervas \
              rather than anything you did"
         ),
     }
@@ -31,9 +31,9 @@ pub fn event(error: &EventError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::TaskStatus;
-    use farik_core::governor::gates::ContractWriteRefusal;
-    use farik_protocol::event::{EventError, EventKind};
+    use catervas_core::contract::TaskStatus;
+    use catervas_core::governor::gates::ContractWriteRefusal;
+    use catervas_protocol::event::{EventError, EventKind};
 
     use super::{contract_write, event};
 
@@ -75,7 +75,7 @@ mod tests {
             ],
             [
                 "the contract is held by the human, and a contract's content is the holder's alone \
-                 (5.11): farik contract unlock gives it back to the team",
+                 (5.11): catervas contract unlock gives it back to the team",
                 "the contract is frozen: once a task leaves refining only its status, assignee, \
                  reviewer, iteration, sprint and notes change (5.11), and this would change title \
                  and risk",
@@ -84,7 +84,7 @@ mod tests {
                 "status is the governor's, written when it applies a transition (5.2): ask for the \
                  transition instead",
                 "locked is the human's alone (5.11)",
-                "id and created_at are the store's: Farik assigns the identifier and the stamps",
+                "id and created_at are the store's: Catervas assigns the identifier and the stamps",
                 "kind is fixed when a contract is created (5.16): the triage decides the kind, and \
                  a task's epic is the epic that broke it down",
                 "a contract's content is the Product Manager's and the human's, and an epic's tasks \
@@ -108,9 +108,9 @@ mod tests {
             ],
             [
                 "this event needed a team_id and it is blank, and a blank id names nobody: that is \
-                 a bug in Farik rather than anything you did",
+                 a bug in Catervas rather than anything you did",
                 "a contract.locked event is about one contract and this one names none, which is a \
-                 bug in Farik rather than anything you did",
+                 bug in Catervas rather than anything you did",
             ]
         );
     }

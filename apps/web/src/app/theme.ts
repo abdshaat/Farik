@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 export type ThemeChoice = "light" | "dark" | "system";
 
-const KEY = "farik.theme";
+const KEY = "catervas.theme";
 const DARK = "(prefers-color-scheme: dark)";
 
 // Storage can refuse (a private window, blocked site data): the theme then lives only in memory.

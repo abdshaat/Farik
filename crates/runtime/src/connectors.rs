@@ -6,14 +6,14 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use farik_core::team::{CustomServer, CustomTransport};
+use catervas_core::team::{CustomServer, CustomTransport};
 
 use crate::claude::Secret;
 use crate::credential::{CredentialError, map_keyring_error, read_keychain};
 use crate::sign_in::OAuthGrant;
 
 /// The keychain entry's service.
-pub const SERVICE: &str = "farik";
+pub const SERVICE: &str = "catervas";
 /// The refusal when there is neither a keychain nor a state folder to keep the keys in.
 pub const NO_SECRET_STORE: &str = "no_secret_store";
 
@@ -127,7 +127,7 @@ fn keep_id(file: &std::path::Path, id: &str) -> std::io::Result<String> {
     }
 }
 
-/// `id` when it is 32 lowercase hex digits, the only ids Farik makes: an account name, and a
+/// `id` when it is 32 lowercase hex digits, the only ids Catervas makes: an account name, and a
 /// folder's, are made of it.
 fn checked_id(id: String) -> std::io::Result<String> {
     if id.len() == 32
@@ -156,7 +156,7 @@ fn hex(bytes: &[u8]) -> String {
 /// What `connect` kept: the hash of the definition it connected, and the keys.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ConnectorEntry {
-    /// `farik_core::team::spec_sha256` of the server as it was connected.
+    /// `catervas_core::team::spec_sha256` of the server as it was connected.
     pub spec_sha256: String,
     /// Each key's name and value.
     pub keys: BTreeMap<String, Secret>,
@@ -199,7 +199,7 @@ impl ConnectorEntry {
     fn from_json(value: &serde_json::Value) -> Result<ConnectorEntry, CredentialError> {
         let unreadable = || {
             CredentialError::Failed(
-                "the stored connector keys are not ones farik can read".to_string(),
+                "the stored connector keys are not ones catervas can read".to_string(),
             )
         };
         let spec_sha256 = value["spec_sha256"].as_str().ok_or_else(unreadable)?;
@@ -275,7 +275,7 @@ pub trait ConnectorSecrets: Send + Sync {
 /// Opens the keychain entry of a service and account.
 type OpenEntry = Arc<dyn Fn(&str, &str) -> keyring::Result<keyring::Entry> + Send + Sync>;
 
-/// The OS keychain: service `farik`, account [`SecretAt::account`].
+/// The OS keychain: service `catervas`, account [`SecretAt::account`].
 pub struct KeychainConnectorSecrets {
     open: OpenEntry,
 }
@@ -331,7 +331,7 @@ impl FileConnectorSecrets {
             Ok(text) => match serde_json::from_str(&text) {
                 Ok(serde_json::Value::Object(entries)) => Ok(entries),
                 _ => Err(CredentialError::Failed(format!(
-                    "{} is not a file farik can read",
+                    "{} is not a file catervas can read",
                     self.path.display()
                 ))),
             },
@@ -360,7 +360,7 @@ impl FileConnectorSecrets {
     }
 
     /// Reads the entries, lets `change` change them, and writes them back when it says so, all
-    /// under an exclusive lock on `connectors.json.lock`: `farik connect` and the daemon may both
+    /// under an exclusive lock on `connectors.json.lock`: `catervas connect` and the daemon may both
     /// rewrite the file, and neither may lose the other's entry.
     fn rewrite(
         &self,
@@ -471,7 +471,7 @@ impl ConnectorSecrets for ConnectorSecretStores {
         match (self.keychain.save(at, entry), &self.file) {
             (Err(CredentialError::NoKeychain), Some(file)) => file.save(at, entry),
             (Err(CredentialError::NoKeychain), None) => Err(CredentialError::Failed(format!(
-                "{NO_SECRET_STORE}: this computer has no keychain and no Farik state folder to keep the keys in"
+                "{NO_SECRET_STORE}: this computer has no keychain and no Catervas state folder to keep the keys in"
             ))),
             (kept, _) => kept,
         }
@@ -517,8 +517,8 @@ pub enum ConnectorError {
     KeyMissing(String),
     /// Anything else, said in a sentence.
     Failed(String),
-    /// A tool Farik called itself ([`call_tool`]) answered that it failed: a result marked as an
-    /// error, or a JSON-RPC error. The service's own words, cut at 500 characters, which Farik
+    /// A tool Catervas called itself ([`call_tool`]) answered that it failed: a result marked as an
+    /// error, or a JSON-RPC error. The service's own words, cut at 500 characters, which Catervas
     /// passes on only as untrusted text.
     ToolError {
         /// What the service said.
@@ -560,7 +560,7 @@ impl fmt::Debug for LaunchSpec {
     }
 }
 
-/// The variables a server's environment keeps from Farik's, beside its keys (ADR 0030): never
+/// The variables a server's environment keeps from Catervas's, beside its keys (ADR 0030): never
 /// the model credential.
 pub const KEPT_ENV: [&str; 4] = ["PATH", "HOME", "LANG", "TMPDIR"];
 
@@ -586,8 +586,8 @@ pub fn working_folder(
     // is home itself, would put the folder back in the repository.
     if state.canonicalize()?.starts_with(root.canonicalize()?) {
         return Err(std::io::Error::other(format!(
-            "{STATE_INSIDE_PROJECT}: Farik's settings folder, {}, is inside this project, so a connector would run among \
-             the project's files. Keep the project and Farik's settings apart: unset \
+            "{STATE_INSIDE_PROJECT}: Catervas's settings folder, {}, is inside this project, so a connector would run among \
+             the project's files. Keep the project and Catervas's settings apart: unset \
              XDG_CONFIG_HOME, or move the project into a folder of its own.",
             state.display()
         )));
@@ -693,7 +693,7 @@ pub fn confirmed_entry(
 ) -> Result<Option<ConnectorEntry>, CredentialError> {
     Ok(secrets
         .load(at)?
-        .filter(|entry| entry.spec_sha256 == farik_core::team::spec_sha256(server)))
+        .filter(|entry| entry.spec_sha256 == catervas_core::team::spec_sha256(server)))
 }
 
 /// Each key `server` names, with its value from `keys`.
@@ -764,36 +764,36 @@ fn usable_tool_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-/// The program that starts a stdio server: `farik` itself for Farik's own connector (the exact
-/// pair [`farik_roles::is_farik_connector`] holds for), whatever `farik` the `PATH` might find,
+/// The program that starts a stdio server: `catervas` itself for Catervas's own connector (the exact
+/// pair [`catervas_roles::is_catervas_connector`] holds for), whatever `catervas` the `PATH` might find,
 /// and `command` as given for everything else (ADR 0038).
 #[must_use]
-pub fn program(command: &str, args: &[String], farik: &std::path::Path) -> PathBuf {
-    if farik_roles::is_farik_connector(command, args) {
-        farik.to_path_buf()
+pub fn program(command: &str, args: &[String], catervas: &std::path::Path) -> PathBuf {
+    if catervas_roles::is_catervas_connector(command, args) {
+        catervas.to_path_buf()
     } else {
         PathBuf::from(command)
     }
 }
 
-/// What a caller of [`list_tools`] says when Farik cannot find its own program.
-pub const NO_OWN_PROGRAM: &str = "farik could not find its own program";
+/// What a caller of [`list_tools`] says when Catervas cannot find its own program.
+pub const NO_OWN_PROGRAM: &str = "catervas could not find its own program";
 
-/// The program Farik's own connector runs: `own`, Farik's own executable as the process found it
+/// The program Catervas's own connector runs: `own`, Catervas's own executable as the process found it
 /// at its start (`None` when it could not), for the exact pair
-/// [`farik_roles::is_farik_connector`] holds for. Any other command gets an empty path it never
-/// uses, so a failure to find this program stops only a Farik connector and no `PATH` lookup ever
+/// [`catervas_roles::is_catervas_connector`] holds for. Any other command gets an empty path it never
+/// uses, so a failure to find this program stops only a Catervas connector and no `PATH` lookup ever
 /// stands in for it (ADR 0038).
 ///
 /// # Errors
 ///
-/// [`NO_OWN_PROGRAM`], when the command is Farik's own connector and `own` is `None`.
+/// [`NO_OWN_PROGRAM`], when the command is Catervas's own connector and `own` is `None`.
 pub fn own_program_for(
     command: &str,
     args: &[String],
     own: Option<&std::path::Path>,
 ) -> Result<PathBuf, &'static str> {
-    if farik_roles::is_farik_connector(command, args) {
+    if catervas_roles::is_catervas_connector(command, args) {
         own.map(std::path::Path::to_path_buf).ok_or(NO_OWN_PROGRAM)
     } else {
         Ok(PathBuf::new())
@@ -816,8 +816,8 @@ pub fn own_program(
 }
 
 /// The tools `server` lists when started, or reached, with `keys`, and `bearer` as its `Authorization`. A stdio server runs in `folder`
-/// with only [`KEPT_ENV`] and its keys; the whole listing gives up after thirty seconds. `farik` is
-/// the program Farik's own connector runs ([`program`]); no other server uses it.
+/// with only [`KEPT_ENV`] and its keys; the whole listing gives up after thirty seconds. `catervas` is
+/// the program Catervas's own connector runs ([`program`]); no other server uses it.
 ///
 /// # Errors
 ///
@@ -828,13 +828,13 @@ pub async fn list_tools(
     keys: &BTreeMap<String, Secret>,
     bearer: Option<&Secret>,
     folder: &std::path::Path,
-    farik: &std::path::Path,
+    catervas: &std::path::Path,
 ) -> Result<Vec<ListedTool>, ConnectorError> {
     // What failed, without the server's own words: an MCP error may quote what it was sent, keys
     // among it, and this reaches the person and the RPC reply (carry M12).
     let plain = |what: &str| ConnectorError::Failed(format!("{} {what}", server.name));
     let listing = async {
-        let client = connect(server, keys, bearer, folder, farik).await?;
+        let client = connect(server, keys, bearer, folder, catervas).await?;
         let tools = client
             .list_all_tools()
             .await
@@ -860,14 +860,14 @@ pub async fn list_tools(
 /// The most characters of a service's own words a [`ConnectorError::ToolError`] keeps.
 const TOOL_ERROR_CHARACTERS: usize = 500;
 
-/// Calls `tool` of `server` with `arguments`, as Farik itself, not as an agent: started or reached
+/// Calls `tool` of `server` with `arguments`, as Catervas itself, not as an agent: started or reached
 /// as [`list_tools`] does it (a stdio server in `folder` with only [`KEPT_ENV`] and its keys, an
 /// http one with its headers filled from `keys` and `bearer` as its `Authorization`), one MCP
-/// session for the call, opened, called and cancelled, all within thirty seconds. `farik` is the
-/// program Farik's own connector runs ([`program`]).
+/// session for the call, opened, called and cancelled, all within thirty seconds. `catervas` is the
+/// program Catervas's own connector runs ([`program`]).
 ///
 /// The answer is the result's structured content when it has some, else its first text block read
-/// as JSON, else `{ "text": <that text> }`. The arguments are Farik's own and hold no key.
+/// as JSON, else `{ "text": <that text> }`. The arguments are Catervas's own and hold no key.
 ///
 /// # Errors
 ///
@@ -878,12 +878,12 @@ pub async fn call_tool(
     keys: &BTreeMap<String, Secret>,
     bearer: Option<&Secret>,
     folder: &std::path::Path,
-    farik: &std::path::Path,
+    catervas: &std::path::Path,
     tool: &str,
     arguments: serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, ConnectorError> {
     let call = async {
-        let client = connect(server, keys, bearer, folder, farik).await?;
+        let client = connect(server, keys, bearer, folder, catervas).await?;
         let answered = client
             .call_tool(
                 rmcp::model::CallToolRequestParams::new(tool.to_string()).with_arguments(arguments),
@@ -962,7 +962,7 @@ async fn connect(
     keys: &BTreeMap<String, Secret>,
     bearer: Option<&Secret>,
     folder: &std::path::Path,
-    farik: &std::path::Path,
+    catervas: &std::path::Path,
 ) -> Result<rmcp::service::RunningService<rmcp::RoleClient, ()>, ConnectorError> {
     use rmcp::ServiceExt as _;
 
@@ -972,7 +972,7 @@ async fn connect(
     let plain = |what: &str| ConnectorError::Failed(format!("{} {what}", server.name));
     match &server.transport {
         CustomTransport::Stdio { command, args, .. } => {
-            let mut process = tokio::process::Command::new(program(command, args, farik));
+            let mut process = tokio::process::Command::new(program(command, args, catervas));
             // rmcp kills the server when the transport is dropped, as on the timeout of its
             // callers; this is the same promise again, should rmcp stop keeping it.
             process
@@ -1016,16 +1016,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn runs_farik_by_its_own_path() {
-        let own = std::path::Path::new("/opt/farik/bin/farik-under-test");
+    fn runs_catervas_by_its_own_path() {
+        let own = std::path::Path::new("/opt/catervas/bin/catervas-under-test");
         let args =
             |list: &[&str]| -> Vec<String> { list.iter().map(|a| (*a).to_string()).collect() };
-        assert_eq!(program("farik", &args(&["connector", "osv"]), own), own);
+        assert_eq!(program("catervas", &args(&["connector", "osv"]), own), own);
         assert_eq!(
-            program("farik", &args(&["serve"]), own),
-            PathBuf::from("farik")
+            program("catervas", &args(&["serve"]), own),
+            PathBuf::from("catervas")
         );
-        for other in ["farikx", "farik-osv", "FARIK", "farik.exe"] {
+        for other in ["catervasx", "catervas-osv", "CATERVAS", "catervas.exe"] {
             assert_eq!(
                 program(other, &args(&["connector", "osv"]), own),
                 PathBuf::from(other)
@@ -1036,26 +1036,26 @@ mod tests {
             PathBuf::from("npx")
         );
         assert_eq!(
-            program("/usr/local/bin/farik", &args(&["connector", "osv"]), own),
-            PathBuf::from("/usr/local/bin/farik")
+            program("/usr/local/bin/catervas", &args(&["connector", "osv"]), own),
+            PathBuf::from("/usr/local/bin/catervas")
         );
     }
 
     #[test]
-    fn finds_its_own_program_for_farik_s_connector_only() {
-        let farik = CustomServer {
+    fn finds_its_own_program_for_catervas_s_connector_only() {
+        let catervas = CustomServer {
             transport: CustomTransport::Stdio {
-                command: "farik".to_string(),
+                command: "catervas".to_string(),
                 args: vec!["connector".to_string(), "osv".to_string()],
                 oauth: None,
             },
             ..stdio(&[])
         };
         assert_eq!(
-            own_program(&farik, Some(std::path::Path::new("/opt/farik"))),
-            Ok(PathBuf::from("/opt/farik"))
+            own_program(&catervas, Some(std::path::Path::new("/opt/catervas"))),
+            Ok(PathBuf::from("/opt/catervas"))
         );
-        assert_eq!(own_program(&farik, None), Err(NO_OWN_PROGRAM));
+        assert_eq!(own_program(&catervas, None), Err(NO_OWN_PROGRAM));
         assert_eq!(own_program(&stdio(&[]), None), Ok(PathBuf::new()));
     }
 
@@ -1099,7 +1099,7 @@ mod tests {
 
     fn scratch(test: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("farik-connectors-{}-{test}", std::process::id()));
+            std::env::temp_dir().join(format!("catervas-connectors-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
@@ -1117,7 +1117,7 @@ mod tests {
         assert_eq!(keychain.load(&theo), Ok(Some(entry("abc"))));
 
         let kept = store
-            .build("farik", "connector:p:theo:github", None)
+            .build("catervas", "connector:p:theo:github", None)
             .expect("the entry")
             .get_password()
             .expect("the entry holds the keys");
@@ -1155,7 +1155,7 @@ mod tests {
         }
         let at_work = SecretAt::of(&state, &work, "theo", "github").expect("an address");
         assert!(
-            !work.join(".farik").exists(),
+            !work.join(".catervas").exists(),
             "nothing is kept in the project"
         );
         let file = id_file(&state);
@@ -1186,7 +1186,7 @@ mod tests {
 
     #[test]
     fn a_copied_project_gets_its_own_id() {
-        // `cp -r app app2` copied `.farik/local/project_id`: the copy is another project, and
+        // `cp -r app app2` copied `.catervas/local/project_id`: the copy is another project, and
         // must not find the first one's keys (re-review N3).
         let dir = scratch("copied");
         let state = dir.join("state");
@@ -1255,7 +1255,7 @@ mod tests {
         // pulled commit chose what `python -m github_mcp` ran, with the agent's keys.
         let dir = scratch("planted");
         let root = dir.join("app");
-        let planted = root.join(".farik/local/connectors/dev-a/github");
+        let planted = root.join(".catervas/local/connectors/dev-a/github");
         std::fs::create_dir_all(&planted).expect("the folder is made");
         std::fs::write(planted.join("github_mcp.py"), "print('PLANTED')").expect("planted");
         std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755))
@@ -1300,13 +1300,13 @@ mod tests {
         std::fs::create_dir_all(&root).expect("the root is made");
         let link = dir.join("link");
         std::os::unix::fs::symlink(&root, &link).expect("the link is made");
-        for state in [root.join(".cfg/farik"), link.join(".cfg/farik")] {
+        for state in [root.join(".cfg/catervas"), link.join(".cfg/catervas")] {
             let at = SecretAt::of(&state, &root, "dev-a", "github").expect("an address");
             let refused = working_folder(&state, &link, &at).expect_err("refused");
             assert!(
                 refused
                     .to_string()
-                    .starts_with("state_inside_project: Farik's settings folder"),
+                    .starts_with("state_inside_project: Catervas's settings folder"),
                 "{refused}"
             );
             assert!(!state.join("connectors").exists(), "nothing is made");
@@ -1433,7 +1433,7 @@ mod tests {
     #[test]
     fn connectors_json_is_owner_only() {
         let dir = scratch("modes");
-        let folder = dir.join("farik");
+        let folder = dir.join("catervas");
         let file = folder.join("connectors.json");
         let store = FileConnectorSecrets::new(file.clone());
         store
@@ -1470,13 +1470,13 @@ mod tests {
 
     /// Set in the children `two_processes_saving_at_once_lose_no_entry` runs itself as: the
     /// file both write, and the agent whose entries this one saves.
-    const WRITER_FILE: &str = "FARIK_TEST_CONNECTORS_FILE";
-    const WRITER_AGENT: &str = "FARIK_TEST_CONNECTORS_AGENT";
+    const WRITER_FILE: &str = "CATERVAS_TEST_CONNECTORS_FILE";
+    const WRITER_AGENT: &str = "CATERVAS_TEST_CONNECTORS_AGENT";
     const SAVES: usize = 40;
 
     #[test]
     fn two_processes_saving_at_once_lose_no_entry() {
-        // `farik connect` and the daemon may both rewrite `connectors.json`: two processes, each
+        // `catervas connect` and the daemon may both rewrite `connectors.json`: two processes, each
         // with its own handle on the file.
         if let (Some(file), Some(agent)) = (
             std::env::var_os(WRITER_FILE),
@@ -1658,7 +1658,7 @@ mod tests {
             transport: CustomTransport::Http {
                 url: "https://mcp.example/mcp".to_string(),
                 headers: BTreeMap::from([("X-Workspace".to_string(), "a".to_string())]),
-                oauth: Some(farik_core::team::OAuthSettings {
+                oauth: Some(catervas_core::team::OAuthSettings {
                     client_id: None,
                     callback_port: None,
                     scopes: Vec::new(),

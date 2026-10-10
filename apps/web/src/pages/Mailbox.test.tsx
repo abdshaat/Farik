@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -60,7 +60,7 @@ describe("the procurement mailbox on the Procurement Specialist's page", () => {
 		).toBeTruthy();
 		expect(
 			mailbox.getByText(
-				"Farik checks it for replies every 15 minutes. Last checked at 08:00.",
+				"Catervas checks it for replies every 15 minutes. Last checked at 08:00.",
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
@@ -70,7 +70,7 @@ describe("the procurement mailbox on the Procurement Specialist's page", () => {
 		await opened("ivo", { ...MAILBOX, checked_at: at(25, 8) });
 		expect(
 			within(await section()).getByText(
-				"Farik checks it for replies every 15 minutes. Last checked yesterday at 08:00.",
+				"Catervas checks it for replies every 15 minutes. Last checked yesterday at 08:00.",
 			),
 		).toBeTruthy();
 	});
@@ -80,7 +80,7 @@ describe("the procurement mailbox on the Procurement Specialist's page", () => {
 		await opened("ivo", unchecked);
 		const mailbox = within(await section());
 		expect(
-			mailbox.getByText("Farik checks it for replies every 15 minutes."),
+			mailbox.getByText("Catervas checks it for replies every 15 minutes."),
 		).toBeTruthy();
 		expect(mailbox.queryByText(/Last checked/)).toBeNull();
 	});
@@ -92,10 +92,10 @@ describe("the procurement mailbox on the Procurement Specialist's page", () => {
 			restarted_at: at(24, 9),
 		});
 		const mailbox = within(await section());
-		// Farik's sentence, the time of the try, and what it holds that hides is written out.
+		// Catervas's sentence, the time of the try, and what it holds that hides is written out.
 		expect(
 			mailbox.getByText(
-				"Farik could not read it at 08:00: Your provider\\u{202e} did not accept the sign-in",
+				"Catervas could not read it at 08:00: Your provider\\u{202e} did not accept the sign-in",
 			),
 		).toBeTruthy();
 		showsWhatItHides(await section());
@@ -130,7 +130,7 @@ describe("the procurement mailbox on the Procurement Specialist's page", () => {
 		expect(dialog.hasAttribute("data-fills-phone")).toBe(true);
 		expect(
 			within(dialog).getByText(
-				"Farik forgets its app password and stops reading it. Messages and replies already kept stay in Ivo’s folder.",
+				"Catervas forgets its app password and stops reading it. Messages and replies already kept stay in Ivo’s folder.",
 			),
 		).toBeTruthy();
 		expect(s.calls("procurement_mailbox.disconnect")).toHaveLength(0);

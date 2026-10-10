@@ -1,4 +1,4 @@
-import { Avatar, type AvatarKey, Button, Dialog } from "@farik/ui";
+import { Avatar, type AvatarKey, Button, Dialog } from "@catervas/ui";
 import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -347,7 +347,7 @@ export function GoingOut({
 											{t(post.state === "failed" ? "postFailed" : "postMissed")}
 										</span>
 									</PostBody>
-									{/* Buffer's words, or Farik's: text, never markup. */}
+									{/* Buffer's words, or Catervas's: text, never markup. */}
 									<p className={styles.why}>
 										{post.state === "failed"
 											? post.reason
@@ -370,7 +370,7 @@ export function GoingOut({
 	);
 }
 
-/** Why a post goes out, and when Farik hands it to Buffer. */
+/** Why a post goes out, and when Catervas hands it to Buffer. */
 function Why({ post, now }: { post: GoingOutPost; now: Date }) {
 	const handsOver = new Date(post.handsOverAt);
 	const ending =

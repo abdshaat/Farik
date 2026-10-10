@@ -1,4 +1,4 @@
-import { AVATAR_URLS, type AvatarKey, Button, Choice } from "@farik/ui";
+import { AVATAR_URLS, type AvatarKey, Button, Choice } from "@catervas/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://farik.dev/schemas/event.schema.json",
-  "title": "Farik Event",
-  "description": "One record in Farik's append-only log (docs/SPEC.md section 8.5). The envelope says where the event belongs and when it was recorded; kind says what happened and body carries that kind's payload. The pairing of kind and body is checked by the reader, farik_protocol::event::event_from_value, and not here: a schema that pairs them with if and then cannot be turned into Rust types by the generator.",
+  "$id": "https://catervas.dev/schemas/event.schema.json",
+  "title": "Catervas Event",
+  "description": "One record in Catervas's append-only log (docs/SPEC.md section 8.5). The envelope says where the event belongs and when it was recorded; kind says what happened and body carries that kind's payload. The pairing of kind and body is checked by the reader, catervas_protocol::event::event_from_value, and not here: a schema that pairs them with if and then cannot be turned into Rust types by the generator.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -259,7 +259,7 @@
     },
     "contractSummary": {
       "title": "Contract Summary",
-      "description": "The fields of a contract the board shows, repeated on every event that writes one so that the projections can be rebuilt from the log alone (docs/SPEC.md section 8.4). The vocabularies match task-contract.schema.json, which is the source of truth for them; a test in farik-protocol fails when the two drift.",
+      "description": "The fields of a contract the board shows, repeated on every event that writes one so that the projections can be rebuilt from the log alone (docs/SPEC.md section 8.4). The vocabularies match task-contract.schema.json, which is the source of truth for them; a test in catervas-protocol fails when the two drift.",
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "title", "status", "risk"],
@@ -592,7 +592,7 @@
     },
     "taskIntegratedBody": {
       "title": "Task Integrated Body",
-      "description": "An accepted task's branch reached the integration branch (docs/SPEC.md section 5.14): sha is the integration branch's commit that holds it, into is that branch, and integrated_by is governor for Farik's own merge and human for the human's integrate or a pull request the human merged on the forge.",
+      "description": "An accepted task's branch reached the integration branch (docs/SPEC.md section 5.14): sha is the integration branch's commit that holds it, into is that branch, and integrated_by is governor for Catervas's own merge and human for the human's integrate or a pull request the human merged on the forge.",
       "type": "object",
       "additionalProperties": false,
       "required": ["sha", "into", "integrated_by"],
@@ -604,7 +604,7 @@
     },
     "pullRequestOpenedBody": {
       "title": "Pull Request Opened Body",
-      "description": "Farik pushed an accepted task's branch and opened a pull request for it under the pull_request policy (docs/SPEC.md section 5.14): its url, its number on the forge, and the branch it merges.",
+      "description": "Catervas pushed an accepted task's branch and opened a pull request for it under the pull_request policy (docs/SPEC.md section 5.14): its url, its number on the forge, and the branch it merges.",
       "type": "object",
       "additionalProperties": false,
       "required": ["url", "number", "branch"],
@@ -723,7 +723,7 @@
     },
     "messagePostedBody": {
       "title": "Message Posted Body",
-      "description": "A message in the team's channel, which is where the channel is kept (docs/SPEC.md 5.9). author is an agent id, human, or farik, and is who said it; the envelope names the agent for an agent's message and none for human or farik, and the task when the message is about one. text is one line, not blank, and at most 2,000 characters: Farik turns each line break into a space and refuses the rest when the message is posted, so that reading the log never fails on an old message. mentions are the agents Farik found named as @<id> in text, never what the author said they were. thread names a ceremony's thread, and in_reply_to the seq of the message a reply answers.",
+      "description": "A message in the team's channel, which is where the channel is kept (docs/SPEC.md 5.9). author is an agent id, human, or catervas, and is who said it; the envelope names the agent for an agent's message and none for human or catervas, and the task when the message is about one. text is one line, not blank, and at most 2,000 characters: Catervas turns each line break into a space and refuses the rest when the message is posted, so that reading the log never fails on an old message. mentions are the agents Catervas found named as @<id> in text, never what the author said they were. thread names a ceremony's thread, and in_reply_to the seq of the message a reply answers.",
       "type": "object",
       "additionalProperties": false,
       "required": ["author", "kind", "text", "mentions"],
@@ -746,7 +746,7 @@
     },
     "retroAppendedBody": {
       "title": "Retro Appended Body",
-      "description": "The retro ceremony of sprint sprint_id, the latest ended, recorded what the next planning should know (docs/SPEC.md 5.9): text, appended to .farik/team/retro.md under the sprint's section, by appended_by. One per sprint, whichever retro session appends it. It is about no one contract.",
+      "description": "The retro ceremony of sprint sprint_id, the latest ended, recorded what the next planning should know (docs/SPEC.md 5.9): text, appended to .catervas/team/retro.md under the sprint's section, by appended_by. One per sprint, whichever retro session appends it. It is about no one contract.",
       "type": "object",
       "additionalProperties": false,
       "required": ["sprint_id", "text", "appended_by"],
@@ -769,7 +769,7 @@
     },
     "memoryWrittenBody": {
       "title": "Memory Written Body",
-      "description": "An agent replaced its notebook, .farik/agents/<id>/memory.md, with text through farik_write_memory (docs/SPEC.md 5.8), within policy.memory_cap_tokens; an empty text empties it. written_by is the agent. It is about no one contract.",
+      "description": "An agent replaced its notebook, .catervas/agents/<id>/memory.md, with text through catervas_write_memory (docs/SPEC.md 5.8), within policy.memory_cap_tokens; an empty text empties it. written_by is the agent. It is about no one contract.",
       "type": "object",
       "additionalProperties": false,
       "required": ["text", "written_by"],
@@ -780,7 +780,7 @@
     },
     "decisionWrittenBody": {
       "title": "Decision Written Body",
-      "description": "The Architect or the Product Manager recorded a decision through farik_write_decision (docs/SPEC.md 5.8): .farik/decisions/<number, four digits>-<slug>.md, which is never written over. written_by is the agent. It is about no one contract.",
+      "description": "The Architect or the Product Manager recorded a decision through catervas_write_decision (docs/SPEC.md 5.8): .catervas/decisions/<number, four digits>-<slug>.md, which is never written over. written_by is the agent. It is about no one contract.",
       "type": "object",
       "additionalProperties": false,
       "required": ["number", "slug", "title", "written_by"],
@@ -793,19 +793,19 @@
     },
     "teamPausedBody": {
       "title": "Team Paused Body",
-      "description": "The body of both team.paused and team.resumed: every agent of the team paused at once, or resumed. The two share one shape, so the one branch of the body choice serves both and the event's kind says which it is. by is the human, or farik when Farik paused the team itself, which it does for one reason alone: credential_refused, the model provider refused the AI account's credential (docs/SPEC.md 5.5), with detail saying what the provider said. Only the human resumes. It is about no one contract, and the team file is not written; the pause is what the log says last.",
+      "description": "The body of both team.paused and team.resumed: every agent of the team paused at once, or resumed. The two share one shape, so the one branch of the body choice serves both and the event's kind says which it is. by is the human, or catervas when Catervas paused the team itself, which it does for one reason alone: credential_refused, the model provider refused the AI account's credential (docs/SPEC.md 5.5), with detail saying what the provider said. Only the human resumes. It is about no one contract, and the team file is not written; the pause is what the log says last.",
       "type": "object",
       "additionalProperties": false,
       "required": ["by"],
       "properties": {
-        "by": { "type": "string", "enum": ["human", "farik"] },
+        "by": { "type": "string", "enum": ["human", "catervas"] },
         "reason": { "type": "string", "enum": ["credential_refused"] },
         "detail": { "type": "string" }
       }
     },
     "designPlanProposedBody": {
       "title": "Design Plan Proposed Body",
-      "description": "The UI/UX Designer ended its explore session with its plan for the task through farik_propose_design_plan (ADR 0026): plain text that opens with a summary for the user, then says what it saw, what it will change, which screens and sizes, and what it leaves alone. The envelope names the task, the Designer and the session. Until a later design_plan.approved, the governor denies the Designer's write_workspace, execute, git_local and git_remote calls on the task with design_plan_not_approved.",
+      "description": "The UI/UX Designer ended its explore session with its plan for the task through catervas_propose_design_plan (ADR 0026): plain text that opens with a summary for the user, then says what it saw, what it will change, which screens and sizes, and what it leaves alone. The envelope names the task, the Designer and the session. Until a later design_plan.approved, the governor denies the Designer's write_workspace, execute, git_local and git_remote calls on the task with design_plan_not_approved.",
       "type": "object",
       "additionalProperties": false,
       "required": ["plan"],
@@ -815,7 +815,7 @@
     },
     "reasonBody": {
       "title": "Reason Body",
-      "description": "The body of design_plan.approved, design_plan.returned and preview.stopped, which share one shape, so the one branch of the body choice serves all three and the event's kind says which it is. For design_plan.approved and design_plan.returned: the Product Manager's decision on the task's latest design plan, through farik_decide_design_plan (ADR 0026), and why; the envelope names the task, the Product Manager and the session, and a returned plan starts a new explore session with reason. For preview.stopped: Farik stopped the task's preview and its browser, and why, in plain words: the session ended, or the preview failed, with the output's last 40 lines (step 12's plan).",
+      "description": "The body of design_plan.approved, design_plan.returned and preview.stopped, which share one shape, so the one branch of the body choice serves all three and the event's kind says which it is. For design_plan.approved and design_plan.returned: the Product Manager's decision on the task's latest design plan, through catervas_decide_design_plan (ADR 0026), and why; the envelope names the task, the Product Manager and the session, and a returned plan starts a new explore session with reason. For preview.stopped: Catervas stopped the task's preview and its browser, and why, in plain words: the session ended, or the preview failed, with the output's last 40 lines (step 12's plan).",
       "type": "object",
       "additionalProperties": false,
       "required": ["reason"],
@@ -826,12 +826,12 @@
     "checkWidth": {
       "type": "string",
       "enum": ["phone", "desktop"],
-      "description": "The width farik_check_page opens a page at: phone is 360 CSS px, desktop 1280."
+      "description": "The width catervas_check_page opens a page at: phone is 360 CSS px, desktop 1280."
     },
     "checkTheme": {
       "type": "string",
       "enum": ["light", "dark"],
-      "description": "The colour scheme farik_check_page emulates."
+      "description": "The colour scheme catervas_check_page emulates."
     },
     "violation": {
       "title": "Violation",
@@ -860,7 +860,7 @@
     },
     "designReviewRecordedBody": {
       "title": "Design Review Recorded Body",
-      "description": "The UI/UX Designer's design review of a Software Developer's UI change, through farik_record_design_review (ADR 0026, step 12): whether it passes, the Designer's reasons, and the session's four latest checks, one per width and theme. A fail sends the change back in the Designer's name; only a pass since the task last entered verifying lets the reviewer's session start. The envelope names the task, the Designer and the session.",
+      "description": "The UI/UX Designer's design review of a Software Developer's UI change, through catervas_record_design_review (ADR 0026, step 12): whether it passes, the Designer's reasons, and the session's four latest checks, one per width and theme. A fail sends the change back in the Designer's name; only a pass since the task last entered verifying lets the reviewer's session start. The envelope names the task, the Designer and the session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["pass", "reasons", "checks"],
@@ -872,7 +872,7 @@
     },
     "previewPreparedBody": {
       "title": "Preview Prepared Body",
-      "description": "Farik ran the team's preview.prepare for the task, in the sandbox with the network on: tree is the task branch's HEAD^{tree} id the run was keyed on, and seconds how long it took. A later preview of the same tree and command reuses it.",
+      "description": "Catervas ran the team's preview.prepare for the task, in the sandbox with the network on: tree is the task branch's HEAD^{tree} id the run was keyed on, and seconds how long it took. A later preview of the same tree and command reuses it.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tree", "seconds"],
@@ -883,7 +883,7 @@
     },
     "previewStartedBody": {
       "title": "Preview Started Body",
-      "description": "Farik started the task's preview in its own container, with the network off, and it answered on port.",
+      "description": "Catervas started the task's preview in its own container, with the network off, and it answered on port.",
       "type": "object",
       "additionalProperties": false,
       "required": ["port"],
@@ -918,7 +918,7 @@
     },
     "pageCheckedBody": {
       "title": "Page Checked Body",
-      "description": "One run of farik_check_page: the page at path, opened at a width and in a theme, checked with axe-core for WCAG 2.2 A and AA, and its violations. screenshot is the file's name under .farik/local/screenshots/<task>/, which task.screenshot serves. The envelope names the task, the agent and the session.",
+      "description": "One run of catervas_check_page: the page at path, opened at a width and in a theme, checked with axe-core for WCAG 2.2 A and AA, and its violations. screenshot is the file's name under .catervas/local/screenshots/<task>/, which task.screenshot serves. The envelope names the task, the agent and the session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["width", "theme", "path", "violations", "screenshot"],
@@ -1063,7 +1063,7 @@
     },
     "marketingPlanProposedBody": {
       "title": "Marketing Plan Proposed Body",
-      "description": "The Marketing Specialist proposed a marketing plan through farik_propose_marketing_plan (docs/SPEC.md 6.5; ADR 0042): plan is its id, MP-<n>; text is the plan in full, which Farik also wrote to docs/marketing/plans/<plan>.md in the task's worktree; starts_on and ends_on are UTC dates, at most 92 days apart, both counted; budget.google_ads is at most budget.total and the campaigns' budgets add up to at most budget.google_ads; google_ads_account is present exactly when campaigns is not empty; replaces names an approved plan this one supersedes. The envelope names the task, the agent and the session; the task waits on the owner until a marketing_plan.approved or marketing_plan.returned of the plan.",
+      "description": "The Marketing Specialist proposed a marketing plan through catervas_propose_marketing_plan (docs/SPEC.md 6.5; ADR 0042): plan is its id, MP-<n>; text is the plan in full, which Catervas also wrote to docs/marketing/plans/<plan>.md in the task's worktree; starts_on and ends_on are UTC dates, at most 92 days apart, both counted; budget.google_ads is at most budget.total and the campaigns' budgets add up to at most budget.google_ads; google_ads_account is present exactly when campaigns is not empty; replaces names an approved plan this one supersedes. The envelope names the task, the agent and the session; the task waits on the owner until a marketing_plan.approved or marketing_plan.returned of the plan.",
       "type": "object",
       "additionalProperties": false,
       "required": ["plan", "title", "summary", "text", "starts_on", "ends_on", "currency", "budget", "campaigns", "posts", "measures", "proposed_by"],
@@ -1108,7 +1108,7 @@
     },
     "marketingPlanEndedBody": {
       "title": "Marketing Plan Ended Body",
-      "description": "An approved marketing plan ended (docs/SPEC.md 6.5; ADR 0042): why is replaced (a newer approved plan took its place, named by replaced_by), by_owner (the owner ended it, with note when they said why) or expired (its ends_on passed). About no one contract, so the envelope names no task, and no agent and no session: Farik or the owner ended it.",
+      "description": "An approved marketing plan ended (docs/SPEC.md 6.5; ADR 0042): why is replaced (a newer approved plan took its place, named by replaced_by), by_owner (the owner ended it, with note when they said why) or expired (its ends_on passed). About no one contract, so the envelope names no task, and no agent and no session: Catervas or the owner ended it.",
       "type": "object",
       "additionalProperties": false,
       "required": ["plan", "why"],
@@ -1136,7 +1136,7 @@
     },
     "socialPostMedia": {
       "title": "Social Post Media",
-      "description": "One picture or clip of a post: the https address Buffer fetches it from, and whether it is an image or a video, as the agent says and Farik checks against what the address answers.",
+      "description": "One picture or clip of a post: the https address Buffer fetches it from, and whether it is an image or a video, as the agent says and Catervas checks against what the address answers.",
       "type": "object",
       "additionalProperties": false,
       "required": ["url", "kind"],
@@ -1175,7 +1175,7 @@
     },
     "socialPostScheduledBody": {
       "title": "Social Post Scheduled Body",
-      "description": "A post is going out (docs/SPEC.md 6.5; ADR 0042). approved_by plan: the Marketing Specialist scheduled it with farik_schedule_post into the slot slot of the active plan plan, at least three hours ahead; the envelope names its task, agent and session, and the event's sequence number is the post's number. approved_by owner: the owner allowed a post that was requested; post is the request's number, and the envelope names the request's task and no agent and no session. channel is the network and buffer_channel Buffer's id for the channel; text is the post's words; media is up to four pictures or clips in order; at is when it goes out, with its offset; details is present on YouTube and Pinterest only. Farik hands it to Buffer an hour before at, or at once when the owner allowed it later than that.",
+      "description": "A post is going out (docs/SPEC.md 6.5; ADR 0042). approved_by plan: the Marketing Specialist scheduled it with catervas_schedule_post into the slot slot of the active plan plan, at least three hours ahead; the envelope names its task, agent and session, and the event's sequence number is the post's number. approved_by owner: the owner allowed a post that was requested; post is the request's number, and the envelope names the request's task and no agent and no session. channel is the network and buffer_channel Buffer's id for the channel; text is the post's words; media is up to four pictures or clips in order; at is when it goes out, with its offset; details is present on YouTube and Pinterest only. Catervas hands it to Buffer an hour before at, or at once when the owner allowed it later than that.",
       "type": "object",
       "additionalProperties": false,
       "required": ["channel", "buffer_channel", "text", "media", "at", "approved_by"],
@@ -1194,7 +1194,7 @@
     },
     "socialPostRequestedBody": {
       "title": "Social Post Requested Body",
-      "description": "The Marketing Specialist wrote a post that is not in the active plan, with farik_schedule_post and no slot (docs/SPEC.md 6.5; ADR 0042). It waits for the owner, who allows it (social_post.scheduled with approved_by owner and post) or does not (social_post.stopped by declined). The event's sequence number is the post's number; the envelope names its task, agent and session, and the task does not wait. The fields are those of social_post.scheduled.",
+      "description": "The Marketing Specialist wrote a post that is not in the active plan, with catervas_schedule_post and no slot (docs/SPEC.md 6.5; ADR 0042). It waits for the owner, who allows it (social_post.scheduled with approved_by owner and post) or does not (social_post.stopped by declined). The event's sequence number is the post's number; the envelope names its task, agent and session, and the task does not wait. The fields are those of social_post.scheduled.",
       "type": "object",
       "additionalProperties": false,
       "required": ["channel", "buffer_channel", "text", "media", "at"],
@@ -1209,7 +1209,7 @@
     },
     "socialPostSentBody": {
       "title": "Social Post Sent Body",
-      "description": "Farik handed a scheduled post to Buffer with its own create_post call (docs/SPEC.md 6.5; ADR 0042), an hour before it goes out: buffer_post is Buffer's id for it. About no one contract, so the envelope names no task, no agent and no session.",
+      "description": "Catervas handed a scheduled post to Buffer with its own create_post call (docs/SPEC.md 6.5; ADR 0042), an hour before it goes out: buffer_post is Buffer's id for it. About no one contract, so the envelope names no task, no agent and no session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["post", "buffer_post"],
@@ -1220,7 +1220,7 @@
     },
     "socialPostStoppedBody": {
       "title": "Social Post Stopped Body",
-      "description": "A post will not go out (docs/SPEC.md 6.5; ADR 0042). by owner: the owner stopped a scheduled post, with taken_back true when Farik had given it to Buffer and took it back with delete_post; by declined: the owner did not allow a requested post, with note when they said why; by plan_ended: the plan it was in ended and it had not reached Buffer. note is the owner's own words. About no one contract, so the envelope names no task, no agent and no session.",
+      "description": "A post will not go out (docs/SPEC.md 6.5; ADR 0042). by owner: the owner stopped a scheduled post, with taken_back true when Catervas had given it to Buffer and took it back with delete_post; by declined: the owner did not allow a requested post, with note when they said why; by plan_ended: the plan it was in ended and it had not reached Buffer. note is the owner's own words. About no one contract, so the envelope names no task, no agent and no session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["post", "by"],
@@ -1233,7 +1233,7 @@
     },
     "socialPostMissedBody": {
       "title": "Social Post Missed Body",
-      "description": "A post did not go out because its hand-over time passed with the post less than five minutes from its time (docs/SPEC.md 6.5; ADR 0042): why is not_running (Farik was not running), paused (the owner had paused the team) or undecided (a requested post the owner had not decided by its time). About no one contract, so the envelope names no task, no agent and no session.",
+      "description": "A post did not go out because its hand-over time passed with the post less than five minutes from its time (docs/SPEC.md 6.5; ADR 0042): why is not_running (Catervas was not running), paused (the owner had paused the team) or undecided (a requested post the owner had not decided by its time). About no one contract, so the envelope names no task, no agent and no session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["post", "why"],
@@ -1244,7 +1244,7 @@
     },
     "socialPostFailedBody": {
       "title": "Social Post Failed Body",
-      "description": "Farik could not give a post to Buffer (docs/SPEC.md 6.5; ADR 0042): reason is Farik's sentence, then Buffer's own words, cut, which are untrusted text. It is not tried again. About no one contract, so the envelope names no task, no agent and no session.",
+      "description": "Catervas could not give a post to Buffer (docs/SPEC.md 6.5; ADR 0042): reason is Catervas's sentence, then Buffer's own words, cut, which are untrusted text. It is not tried again. About no one contract, so the envelope names no task, no agent and no session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["post", "reason"],
@@ -1255,7 +1255,7 @@
     },
     "marketingCampaignCreatedBody": {
       "title": "Marketing Campaign Created Body",
-      "description": "Farik made a Google Ads campaign for a plan campaign of the active marketing plan, paused, on a session's call of create_search_campaign (docs/SPEC.md 6.7; ADR 0042): plan is the active plan, key the plan campaign's, account the ad account as NNN-NNN-NNNN, campaign and budget the resource names Google gave, budget_kind whether the budget is a total one for the campaign's run or a daily one, and amount its figure in the plan's currency. The envelope names the agent, the session and the task that asked, and the event is about no one contract.",
+      "description": "Catervas made a Google Ads campaign for a plan campaign of the active marketing plan, paused, on a session's call of create_search_campaign (docs/SPEC.md 6.7; ADR 0042): plan is the active plan, key the plan campaign's, account the ad account as NNN-NNN-NNNN, campaign and budget the resource names Google gave, budget_kind whether the budget is a total one for the campaign's run or a daily one, and amount its figure in the plan's currency. The envelope names the agent, the session and the task that asked, and the event is about no one contract.",
       "type": "object",
       "additionalProperties": false,
       "required": ["plan", "key", "account", "campaign", "budget", "budget_kind", "amount"],
@@ -1271,7 +1271,7 @@
     },
     "marketingBudgetReachedBody": {
       "title": "Marketing Budget Reached Body",
-      "description": "A budget of the active marketing plan was reached, and Farik paused the campaigns concerned itself (docs/SPEC.md 6.7; ADR 0042, step 08g): plan is the active plan; scope is campaign (a plan campaign's own budget, named by key) or plan (the plan's Google Ads budget); spent and budget are what Google reported against what the plan allows, in currency; paused lists the resource names of the campaigns Google accepted a pause for or reported already paused, and failed carries the first refusal's words, cut at 300 characters, when a pause was refused. Recorded by Farik: the envelope names no agent, no session and no task, and the event is about no one contract.",
+      "description": "A budget of the active marketing plan was reached, and Catervas paused the campaigns concerned itself (docs/SPEC.md 6.7; ADR 0042, step 08g): plan is the active plan; scope is campaign (a plan campaign's own budget, named by key) or plan (the plan's Google Ads budget); spent and budget are what Google reported against what the plan allows, in currency; paused lists the resource names of the campaigns Google accepted a pause for or reported already paused, and failed carries the first refusal's words, cut at 300 characters, when a pause was refused. Recorded by Catervas: the envelope names no agent, no session and no task, and the event is about no one contract.",
       "type": "object",
       "additionalProperties": false,
       "required": ["plan", "scope", "spent", "budget", "currency", "paused"],
@@ -1292,7 +1292,7 @@
     },
     "marketingCampaignPausedBody": {
       "title": "Marketing Campaign Paused Body",
-      "description": "Farik paused a Google Ads campaign it made, on its own and not on an agent's call (docs/SPEC.md 6.7; ADR 0042, step 08g): plan is the plan the campaign was made under, key its plan campaign's key, campaign its resource name, and why is plan_ended (no active plan carries it), budget_reached (a later read found it running after its cap) or connection_removed (the owner removed Google Ads). Recorded by Farik: the envelope names no agent, no session and no task, and the event is about no one contract.",
+      "description": "Catervas paused a Google Ads campaign it made, on its own and not on an agent's call (docs/SPEC.md 6.7; ADR 0042, step 08g): plan is the plan the campaign was made under, key its plan campaign's key, campaign its resource name, and why is plan_ended (no active plan carries it), budget_reached (a later read found it running after its cap) or connection_removed (the owner removed Google Ads). Recorded by Catervas: the envelope names no agent, no session and no task, and the event is about no one contract.",
       "type": "object",
       "additionalProperties": false,
       "required": ["plan", "key", "campaign", "why"],
@@ -1317,7 +1317,7 @@
     },
     "siteDecisionBody": {
       "title": "Site Decision Body",
-      "description": "What the owner decided about a site (docs/SPEC.md 6.10; ADR 0039), the body of site.approved, site.declined and site.removed: host is the site in its ASCII form; request, the sequence number of a site.requested, is on an approval that answers a request and on every decline, whose task is on the envelope too; note is the owner's own words, which the task's next session reads as the owner's. A site the owner added unasked is a site.approved of its host alone, with no task; a removal, of one the owner allowed or of one of Farik's, names its host alone, with no task. The three kinds share one shape since `{ host }`, `{ host, request }` and `{ request, host, note }` fit more than one of them, and the schema's choice of bodies must match exactly one; the reader holds each kind to its own: site.declined names its request, site.removed names its host alone, and a note goes with a request. The envelope names no agent and no session: only the owner decides.",
+      "description": "What the owner decided about a site (docs/SPEC.md 6.10; ADR 0039), the body of site.approved, site.declined and site.removed: host is the site in its ASCII form; request, the sequence number of a site.requested, is on an approval that answers a request and on every decline, whose task is on the envelope too; note is the owner's own words, which the task's next session reads as the owner's. A site the owner added unasked is a site.approved of its host alone, with no task; a removal, of one the owner allowed or of one of Catervas's, names its host alone, with no task. The three kinds share one shape since `{ host }`, `{ host, request }` and `{ request, host, note }` fit more than one of them, and the schema's choice of bodies must match exactly one; the reader holds each kind to its own: site.declined names its request, site.removed names its host alone, and a note goes with a request. The envelope names no agent and no session: only the owner decides.",
       "type": "object",
       "additionalProperties": false,
       "required": ["host"],
@@ -1345,7 +1345,7 @@
     },
     "purchaseOrderLine": {
       "title": "Purchase Order Line",
-      "description": "One line of a purchase order, as the agent wrote it, with the line's total Farik computed from the quantity and the unit price in hundredths. Untrusted text: item and unit are shown as text.",
+      "description": "One line of a purchase order, as the agent wrote it, with the line's total Catervas computed from the quantity and the unit price in hundredths. Untrusted text: item and unit are shown as text.",
       "type": "object",
       "additionalProperties": false,
       "required": ["item", "quantity", "unit", "unit_price", "line_total"],
@@ -1397,7 +1397,7 @@
     },
     "purchaseOrderPlacedBody": {
       "title": "Purchase Order Placed Body",
-      "description": "The owner placed an approved order and paid for it themselves, on placed_on, and marked it placed (docs/SPEC.md 6.10; ADR 0039). paid is what they paid, if they knew, and currency its currency, the order's when paid is given alone. The envelope names the order's task and no agent and no session: no Farik tool records a placing or a payment.",
+      "description": "The owner placed an approved order and paid for it themselves, on placed_on, and marked it placed (docs/SPEC.md 6.10; ADR 0039). paid is what they paid, if they knew, and currency its currency, the order's when paid is given alone. The envelope names the order's task and no agent and no session: no Catervas tool records a placing or a payment.",
       "type": "object",
       "additionalProperties": false,
       "required": ["order", "placed_on"],
@@ -1437,7 +1437,7 @@
     },
     "purchaseOrderExpiredBody": {
       "title": "Purchase Order Expired Body",
-      "description": "Farik closed an order by itself (docs/SPEC.md 6.10; ADR 0039): one not decided within 30 days of its drafting, or approved and not marked placed within 30 days of its approval. A placed order never expires. The envelope names the order's task and no agent and no session.",
+      "description": "Catervas closed an order by itself (docs/SPEC.md 6.10; ADR 0039): one not decided within 30 days of its drafting, or approved and not marked placed within 30 days of its approval. A placed order never expires. The envelope names the order's task and no agent and no session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["order"],
@@ -1447,7 +1447,7 @@
     },
     "renewalFlaggedBody": {
       "title": "Renewal Flagged Body",
-      "description": "Farik read the vendors register and found a renewal whose decision date is two weeks off or nearer (docs/SPEC.md 6.10; ADR 0039). The event's sequence number is the renewal's number. vendor is the register's own text (untrusted, on one line, 1 to 100 characters), renews_on the day it renews and decide_by the last day to change or cancel it. About no one contract, so the envelope names no task, no agent and no session.",
+      "description": "Catervas read the vendors register and found a renewal whose decision date is two weeks off or nearer (docs/SPEC.md 6.10; ADR 0039). The event's sequence number is the renewal's number. vendor is the register's own text (untrusted, on one line, 1 to 100 characters), renews_on the day it renews and decide_by the last day to change or cancel it. About no one contract, so the envelope names no task, no agent and no session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["vendor", "renews_on", "decide_by"],
@@ -1469,7 +1469,7 @@
     },
     "renewalCheckedBody": {
       "title": "Renewal Checked Body",
-      "description": "Farik's daily check of the vendors register ran (docs/SPEC.md 6.10; ADR 0039): due is how many renewals it flagged, unreadable how many rows held a date or a notice or a vendor it could not read. Recorded once per UTC day, which is how the check knows it ran. About no one contract, so the envelope names no task, no agent and no session.",
+      "description": "Catervas's daily check of the vendors register ran (docs/SPEC.md 6.10; ADR 0039): due is how many renewals it flagged, unreadable how many rows held a date or a notice or a vendor it could not read. Recorded once per UTC day, which is how the check knows it ran. About no one contract, so the envelope names no task, no agent and no session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["due", "unreadable"],
@@ -1512,7 +1512,7 @@
     },
     "dataPipelineEscalatedBody": {
       "title": "Data Pipeline Escalated Body",
-      "description": "A request goes to the owner (docs/SPEC.md 6.10; ADR 0039): the Product Manager passed it on, with its reason on one line of its own words (the envelope names the Product Manager and its decision session), or Farik did after three decision sessions ended without a word (the reason is Farik's sentence and the envelope names no agent and no session). pipeline is the request's number. About the request and no task of its own.",
+      "description": "A request goes to the owner (docs/SPEC.md 6.10; ADR 0039): the Product Manager passed it on, with its reason on one line of its own words (the envelope names the Product Manager and its decision session), or Catervas did after three decision sessions ended without a word (the reason is Catervas's sentence and the envelope names no agent and no session). pipeline is the request's number. About the request and no task of its own.",
       "type": "object",
       "additionalProperties": false,
       "required": ["pipeline", "reason"],
@@ -1565,7 +1565,7 @@
     },
     "mailboxConnectedBody": {
       "title": "Mailbox Connected Body",
-      "description": "The owner connected a mailbox for a purpose and Farik logged in to both of its servers (docs/SPEC.md 6.6, 6.10; ADR 0039). address is the one mail is sent from and read for. The password is in the OS keychain, never here. The envelope names no agent and no session.",
+      "description": "The owner connected a mailbox for a purpose and Catervas logged in to both of its servers (docs/SPEC.md 6.6, 6.10; ADR 0039). address is the one mail is sent from and read for. The password is in the OS keychain, never here. The envelope names no agent and no session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["purpose", "address"],
@@ -1576,7 +1576,7 @@
     },
     "mailboxDisconnectedBody": {
       "title": "Mailbox Disconnected Body",
-      "description": "The owner disconnected a mailbox: Farik forgot its password and stopped reading it; the messages and replies kept stay (docs/SPEC.md 6.6, 6.10). The envelope names no agent and no session.",
+      "description": "The owner disconnected a mailbox: Catervas forgot its password and stopped reading it; the messages and replies kept stay (docs/SPEC.md 6.6, 6.10). The envelope names no agent and no session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["purpose"],
@@ -1602,7 +1602,7 @@
     },
     "sellerMessageSentBody": {
       "title": "Seller Message Sent Body",
-      "description": "Farik sent a message to a seller because the owner pressed Send, or Approve and send for an order's (docs/SPEC.md 6.10; ADR 0039). message_id is the Message-ID it went out with, without angle brackets; sha256 is that of mail/out/<message>.sent.txt, the subject line, a blank line and exactly the text sent; edited is true when the owner changed the subject or the body. The envelope names no agent and no session: no Farik tool records a send.",
+      "description": "Catervas sent a message to a seller because the owner pressed Send, or Approve and send for an order's (docs/SPEC.md 6.10; ADR 0039). message_id is the Message-ID it went out with, without angle brackets; sha256 is that of mail/out/<message>.sent.txt, the subject line, a blank line and exactly the text sent; edited is true when the owner changed the subject or the body. The envelope names no agent and no session: no Catervas tool records a send.",
       "type": "object",
       "additionalProperties": false,
       "required": ["message", "message_id", "sha256", "edited"],
@@ -1615,7 +1615,7 @@
     },
     "sellerMessageFailedBody": {
       "title": "Seller Message Failed Body",
-      "description": "A mail server refused a message the owner pressed Send on; it waits to be tried again (docs/SPEC.md 6.10). why is Farik's own sentence, never the server's words. The envelope names no agent and no session.",
+      "description": "A mail server refused a message the owner pressed Send on; it waits to be tried again (docs/SPEC.md 6.10). why is Catervas's own sentence, never the server's words. The envelope names no agent and no session.",
       "type": "object",
       "additionalProperties": false,
       "required": ["message", "why"],
@@ -1648,7 +1648,7 @@
     },
     "sellerReplyReceivedBody": {
       "title": "Seller Reply Received Body",
-      "description": "Farik read a message in the procurement mailbox that answers a message it sent or comes from an address it wrote to, addressed to the procurement address (docs/SPEC.md 6.10, 8.6). reply is its number; message is the sent message it answers; from and subject are the seller's own words (untrusted; \"unknown sender\" when the message names none); the text and kept attachments are under mail/in/, and at most 100 attachments are listed, the first ones. The envelope names no agent and no session: a check is Farik's, with no model.",
+      "description": "Catervas read a message in the procurement mailbox that answers a message it sent or comes from an address it wrote to, addressed to the procurement address (docs/SPEC.md 6.10, 8.6). reply is its number; message is the sent message it answers; from and subject are the seller's own words (untrusted; \"unknown sender\" when the message names none); the text and kept attachments are under mail/in/, and at most 100 attachments are listed, the first ones. The envelope names no agent and no session: a check is Catervas's, with no model.",
       "type": "object",
       "additionalProperties": false,
       "required": ["reply", "message", "from", "subject", "attachments"],
@@ -1705,7 +1705,7 @@
     },
     "productDocWrittenBody": {
       "title": "Product Doc Written Body",
-      "description": "The Product Manager wrote a product document for an approved epic (docs/SPEC.md section 5.16). path is relative to .farik/product/.",
+      "description": "The Product Manager wrote a product document for an approved epic (docs/SPEC.md section 5.16). path is relative to .catervas/product/.",
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "written_by"],
@@ -1716,7 +1716,7 @@
     },
     "toolCalledBody": {
       "title": "Tool Called Body",
-      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one. A connector's call also names its server and the tool's tag, and a call the human allowed names approval, the sequence number of its tool_approval.requested, which this call uses up. A call the active marketing plan approved, a Farik connector's tool the kit marks as the plan's (ADR 0042), names marketing_plan, the plan's id, and neither approval nor allowance.",
+      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one. A connector's call also names its server and the tool's tag, and a call the human allowed names approval, the sequence number of its tool_approval.requested, which this call uses up. A call the active marketing plan approved, a Catervas connector's tool the kit marks as the plan's (ADR 0042), names marketing_plan, the plan's id, and neither approval nor allowance.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tool", "input"],
@@ -1760,7 +1760,7 @@
     },
     "sessionStartedBody": {
       "title": "Session Started Body",
-      "description": "A Claude Code session started (docs/SPEC.md sections 8.2 and 8.5): why, on which model, and how hard it thinks. The envelope names the session, the agent, and the task when the session has one; the exact system prompt it was given is kept in .farik/local/sessions/<session_id>/system-prompt.md. A conversation's in_reply_to is the seq of the latest message it was shown: the mentions up to it are answered, and one posted after it is still pending, even one posted before this event. A ceremony's thread says which ceremony it was. A chat session's in_reply_to is the user's message it answers, and its chat is the chat's agent (ADR 0026).",
+      "description": "A Claude Code session started (docs/SPEC.md sections 8.2 and 8.5): why, on which model, and how hard it thinks. The envelope names the session, the agent, and the task when the session has one; the exact system prompt it was given is kept in .catervas/local/sessions/<session_id>/system-prompt.md. A conversation's in_reply_to is the seq of the latest message it was shown: the mentions up to it are answered, and one posted after it is still pending, even one posted before this event. A ceremony's thread says which ceremony it was. A chat session's in_reply_to is the user's message it answers, and its chat is the chat's agent (ADR 0026).",
       "type": "object",
       "additionalProperties": false,
       "required": ["purpose", "model", "effort"],

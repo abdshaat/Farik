@@ -3,14 +3,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use catervas_core::contract::TaskId;
+use catervas_protocol::event::{CatervasEvent, EventBody, EventKind};
 use chrono::{DateTime, Utc};
-use farik_core::contract::TaskId;
-use farik_protocol::event::{EventBody, EventKind, FarikEvent};
 
 use crate::{EventLog, EventQuery, StoreError};
 
 /// What the owner said in a decision, when they said anything.
-fn note_of(body: &farik_protocol::event::SiteDecisionBody) -> Option<String> {
+fn note_of(body: &catervas_protocol::event::SiteDecisionBody) -> Option<String> {
     body.note
         .as_ref()
         .map(|note| note.as_str().to_string())
@@ -19,13 +19,13 @@ fn note_of(body: &farik_protocol::event::SiteDecisionBody) -> Option<String> {
 
 /// Whether `event` was recorded by the owner: its envelope names no agent and no session, since
 /// only the owner decides which sites the team may read.
-fn is_the_owners(event: &FarikEvent) -> bool {
+fn is_the_owners(event: &CatervasEvent) -> bool {
     event.envelope.ids.agent_id.is_none() && event.envelope.ids.session_id.is_none()
 }
 
-/// The sites the team's Procurement Specialist may read now: `farik`, the hosts of the running
+/// The sites the team's Procurement Specialist may read now: `catervas`, the hosts of the running
 /// release's own list, then each owner-recorded `site.approved` adding its host and each
-/// `site.removed` taking one away, in sequence order. Farik's list is never copied into the log,
+/// `site.removed` taking one away, in sequence order. Catervas's list is never copied into the log,
 /// so a site a release adds is open on upgrade and one it drops closes unless the owner allowed
 /// it, while a site the owner turned off stays off and one they allowed stays allowed. An event
 /// that names an agent or a session decides nothing.
@@ -35,13 +35,13 @@ fn is_the_owners(event: &FarikEvent) -> bool {
 /// What the log refused.
 pub fn approved_sites(
     log: &EventLog,
-    farik: &BTreeSet<String>,
+    catervas: &BTreeSet<String>,
 ) -> Result<BTreeSet<String>, StoreError> {
     let events = log.read(&EventQuery {
         kinds: vec![EventKind::SiteApproved, EventKind::SiteRemoved],
         ..EventQuery::default()
     })?;
-    let mut approved = farik.clone();
+    let mut approved = catervas.clone();
     for event in events.iter().filter(|event| is_the_owners(event)) {
         match &event.body {
             EventBody::SiteApproved(body) => {
@@ -161,10 +161,10 @@ pub fn site_requests(log: &EventLog) -> Result<Vec<SiteRequest>, StoreError> {
     Ok(requests)
 }
 
-/// One of Farik's own sites, as the running release lists it: the store keeps no copy of the list,
+/// One of Catervas's own sites, as the running release lists it: the store keeps no copy of the list,
 /// so whoever asks passes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FarikEntry {
+pub struct CatervasEntry {
     /// The shop's primary domain.
     pub host: String,
     /// The shop's name.
@@ -173,9 +173,9 @@ pub struct FarikEntry {
     pub category: String,
 }
 
-/// One of Farik's sites and whether the team may read it now.
+/// One of Catervas's sites and whether the team may read it now.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FarikRow {
+pub struct CatervasRow {
     /// The shop's primary domain.
     pub host: String,
     /// The shop's name.
@@ -188,7 +188,7 @@ pub struct FarikRow {
     pub at: Option<DateTime<Utc>>,
 }
 
-/// A site the owner allowed that is not on Farik's list.
+/// A site the owner allowed that is not on Catervas's list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnerRow {
     /// The site, in its ASCII form.
@@ -203,22 +203,22 @@ pub struct OwnerRow {
 /// Everything the agent's page and the command line show of the approved sites.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SiteList {
-    /// Farik's sites in the list's order.
-    pub farik: Vec<FarikRow>,
+    /// Catervas's sites in the list's order.
+    pub catervas: Vec<CatervasRow>,
     /// The owner's own sites, by host.
     pub owner: Vec<OwnerRow>,
     /// The requests nobody decided yet, by host.
     pub waiting: Vec<SiteRequest>,
 }
 
-/// The sites as the owner sees them: each of Farik's `farik` entries with whether it is on, the
+/// The sites as the owner sees them: each of Catervas's `catervas` entries with whether it is on, the
 /// owner's own sites, and the requests that wait.
 ///
 /// # Errors
 ///
 /// What the log refused.
-pub fn site_list(log: &EventLog, farik: &[FarikEntry]) -> Result<SiteList, StoreError> {
-    let hosts: BTreeSet<String> = farik.iter().map(|entry| entry.host.clone()).collect();
+pub fn site_list(log: &EventLog, catervas: &[CatervasEntry]) -> Result<SiteList, StoreError> {
+    let hosts: BTreeSet<String> = catervas.iter().map(|entry| entry.host.clone()).collect();
     let approved = approved_sites(log, &hosts)?;
     let events = log.read(&EventQuery {
         kinds: vec![EventKind::SiteApproved, EventKind::SiteRemoved],
@@ -243,9 +243,9 @@ pub fn site_list(log: &EventLog, farik: &[FarikEntry]) -> Result<SiteList, Store
             _ => {}
         }
     }
-    let farik_rows = farik
+    let catervas_rows = catervas
         .iter()
-        .map(|entry| FarikRow {
+        .map(|entry| CatervasRow {
             host: entry.host.clone(),
             shop: entry.shop.clone(),
             category: entry.category.clone(),
@@ -270,7 +270,7 @@ pub fn site_list(log: &EventLog, farik: &[FarikEntry]) -> Result<SiteList, Store
         .collect();
     waiting.sort_by(|a, b| (&a.host, a.request).cmp(&(&b.host, b.request)));
     Ok(SiteList {
-        farik: farik_rows,
+        catervas: catervas_rows,
         owner,
         waiting,
     })
@@ -337,19 +337,19 @@ mod tests {
     #[test]
     fn the_approved_sites_are_the_log_s() {
         let board = Board::new("sites-fold");
-        let farik = set(&["f.com"]);
-        assert_eq!(approved_sites(&board.log, &farik), Ok(set(&["f.com"])));
+        let catervas = set(&["f.com"]);
+        assert_eq!(approved_sites(&board.log, &catervas), Ok(set(&["f.com"])));
 
         owner(&board, 1, "site.approved", "a.com");
         owner(&board, 2, "site.approved", "b.com");
         owner(&board, 3, "site.removed", "a.com");
         owner(&board, 4, "site.removed", "f.com");
-        assert_eq!(approved_sites(&board.log, &farik), Ok(set(&["b.com"])));
+        assert_eq!(approved_sites(&board.log, &catervas), Ok(set(&["b.com"])));
 
         owner(&board, 5, "site.approved", "a.com");
         owner(&board, 6, "site.approved", "f.com");
         assert_eq!(
-            approved_sites(&board.log, &farik),
+            approved_sites(&board.log, &catervas),
             Ok(set(&["a.com", "b.com", "f.com"]))
         );
 
@@ -379,13 +379,13 @@ mod tests {
             json!({ "host": "a.com" }),
         );
         assert_eq!(
-            approved_sites(&board.log, &farik),
+            approved_sites(&board.log, &catervas),
             Ok(set(&["a.com", "b.com", "f.com"]))
         );
     }
 
     #[test]
-    fn a_new_farik_site_arrives_and_a_turn_off_stays() {
+    fn a_new_catervas_site_arrives_and_a_turn_off_stays() {
         let board = Board::new("sites-release");
         owner(&board, 1, "site.removed", "f.com");
         owner(&board, 2, "site.approved", "o.com");

@@ -1,5 +1,5 @@
 //! The Claude Code program as a runtime (`docs/SPEC.md` section 8.2): the command line a session
-//! is started with, the credential and environment it gets, and the oldest version Farik runs on.
+//! is started with, the credential and environment it gets, and the oldest version Catervas runs on.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -9,9 +9,9 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use farik_core::governor::permissions::PermissionTier;
-use farik_core::team::validate_team;
-use farik_store::files::yaml_value;
+use catervas_core::governor::permissions::PermissionTier;
+use catervas_core::team::validate_team;
+use catervas_store::files::yaml_value;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout};
@@ -26,7 +26,7 @@ use crate::session::{
 };
 use crate::stream::StreamParser;
 
-/// The oldest Claude Code Farik runs on: the one its flags and stream were measured against.
+/// The oldest Claude Code Catervas runs on: the one its flags and stream were measured against.
 pub const MIN_CLAUDE_VERSION: &str = "2.1.272";
 
 /// Claude Code's built-in tools, as `claude` 2.1.280 lists them. `allowed_builtins` asks
@@ -55,9 +55,9 @@ pub const BUILTIN_TOOLS: &[&str] = &[
     "Write",
 ];
 
-/// The name Farik's own MCP server has in every session; its tools are `mcp__farik__<name>`.
-const FARIK_SERVER: &str = "farik";
-/// The one tool ADR 0004 names: a session's shell is `farik_exec`.
+/// The name Catervas's own MCP server has in every session; its tools are `mcp__catervas__<name>`.
+const CATERVAS_SERVER: &str = "catervas";
+/// The one tool ADR 0004 names: a session's shell is `catervas_exec`.
 const REFUSED_BUILTIN: &str = "Bash";
 const API_KEY: &str = "ANTHROPIC_API_KEY";
 const OAUTH_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
@@ -81,7 +81,7 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long an error end waits for the rest of standard error once the group is killed.
 const TAIL_GRACE: Duration = Duration::from_millis(500);
 /// Why `send` refuses while a session runs.
-const ONE_MESSAGE: &str = "a Farik session takes one message; resume it for another";
+const ONE_MESSAGE: &str = "a Catervas session takes one message; resume it for another";
 
 /// A value that must not be printed: its `Debug` says `[redacted]`.
 #[derive(Clone, PartialEq, Eq)]
@@ -138,7 +138,7 @@ impl ClaudeCredential {
 }
 
 /// The variable of `env` a credential comes from, when one does: what cannot be removed from
-/// Farik, since the environment is the user's.
+/// Catervas, since the environment is the user's.
 #[must_use]
 pub fn credential_variable(env: &BTreeMap<String, String>) -> Option<&'static str> {
     [API_KEY, OAUTH_TOKEN]
@@ -166,19 +166,19 @@ pub fn credential_from_env(env: &BTreeMap<String, String>) -> Option<ClaudeCrede
 pub struct ClaudeConfig {
     /// The `claude` program.
     pub claude_path: PathBuf,
-    /// The `farik` program the hooks run.
+    /// The `catervas` program the hooks run.
     pub hook_command: PathBuf,
     /// The daemon's `daemon.json`, which the hooks read.
     pub daemon_file: PathBuf,
     /// The daemon itself: its port and token go into each session's MCP config.
     pub daemon: DaemonInfo,
-    /// `.farik/local/sessions`: each session's prompt and MCP config, under its id.
+    /// `.catervas/local/sessions`: each session's prompt and MCP config, under its id.
     pub sessions_dir: PathBuf,
     /// `<state>/skills/<local project id>` in the user's state folder, outside the project
     /// (ADR 0034): a session's plugin folder, with the skills it loads on demand, is written
     /// under its id and removed when the program exits.
     pub skills_dir: PathBuf,
-    /// `.farik/team.yaml`, read at each session start for the protected paths.
+    /// `.catervas/team.yaml`, read at each session start for the protected paths.
     pub team_file: PathBuf,
     /// The whole environment the program gets besides its credential; nothing else is inherited.
     pub env: BTreeMap<String, String>,
@@ -408,7 +408,7 @@ struct Process {
 enum Stop {
     /// The program's `result` line: the session is over, and the program may exit on its own.
     Result,
-    /// Farik stopped it; the group is killed.
+    /// Catervas stopped it; the group is killed.
     Killed(EndReason, String),
     /// The program closed its output without a result.
     Exited,
@@ -631,7 +631,7 @@ pub fn allowed_builtins(tiers: &BTreeSet<PermissionTier>) -> Vec<String> {
 ///
 /// # Errors
 ///
-/// `Spawn` when the spec names its own `farik` server, or the team file cannot be read, since a
+/// `Spawn` when the spec names its own `catervas` server, or the team file cannot be read, since a
 /// session without its protected paths would not be governed.
 pub fn claude_args(
     spec: &SessionSpec,
@@ -639,7 +639,7 @@ pub fn claude_args(
     session_dir: &Path,
     resume: bool,
 ) -> Result<Vec<String>, RuntimeError> {
-    refuse_a_farik_server(spec)?;
+    refuse_a_catervas_server(spec)?;
     let protected = protected_paths(&config.team_file)?;
     refuse_an_unexpressible_glob(&protected)?;
     let settings = settings_json(config, &protected);
@@ -675,7 +675,7 @@ pub fn claude_args(
         &session_dir.join(MCP_CONFIG_FILE).display().to_string(),
         "--strict-mcp-config",
         "--permission-prompt-tool",
-        "mcp__farik__permission",
+        "mcp__catervas__permission",
         "--max-turns",
         &spec.limits.max_tool_calls.saturating_add(1).to_string(),
         "--setting-sources",
@@ -701,18 +701,18 @@ pub fn claude_args(
 
 /// Writes `session_dir`'s two files, and the session's plugin folder under `config.skills_dir`
 /// when the spec has skills (ADR 0034): `system-prompt.md`, the spec's exact prompt, kept after the
-/// session as the record of what it was told; and `mcp.json`, mode 0600, naming Farik's server
+/// session as the record of what it was told; and `mcp.json`, mode 0600, naming Catervas's server
 /// with the daemon's token and the session's id, and the spec's other servers.
 ///
 /// # Errors
 ///
-/// `Spawn` when the spec names its own `farik` server or a file cannot be written.
+/// `Spawn` when the spec names its own `catervas` server or a file cannot be written.
 pub fn write_session_files(
     spec: &SessionSpec,
     config: &ClaudeConfig,
     session_dir: &Path,
 ) -> Result<(), RuntimeError> {
-    refuse_a_farik_server(spec)?;
+    refuse_a_catervas_server(spec)?;
     let io = |path: &Path, error: std::io::Error| RuntimeError::Spawn {
         detail: format!("{} cannot be written: {error}", path.display()),
     };
@@ -825,16 +825,17 @@ fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
     parts.next().is_none().then_some(version)
 }
 
-fn refuse_a_farik_server(spec: &SessionSpec) -> Result<(), RuntimeError> {
+fn refuse_a_catervas_server(spec: &SessionSpec) -> Result<(), RuntimeError> {
     if spec
         .mcp_servers
         .iter()
-        .any(|server| server.name == FARIK_SERVER)
+        .any(|server| server.name == CATERVAS_SERVER)
     {
         return Err(RuntimeError::Spawn {
-            detail: "the spec names a server `farik`, which is the name of Farik's own and is \
+            detail:
+                "the spec names a server `catervas`, which is the name of Catervas's own and is \
                      added by the runtime"
-                .to_string(),
+                    .to_string(),
         });
     }
     Ok(())
@@ -900,7 +901,7 @@ fn settings_json(config: &ClaudeConfig, protected: &[String]) -> Value {
         "permissions": {
             "deny": protected.iter().map(|path| format!("Read({path})")).collect::<Vec<_>>(),
         },
-        // A skill's body may hold `!` commands that run when it loads; Farik refuses such a
+        // A skill's body may hold `!` commands that run when it loads; Catervas refuses such a
         // skill (ADR 0034), and this stops one that gets through (a plugin's own, say).
         "disableSkillShellExecution": true,
     })
@@ -911,12 +912,12 @@ fn shell_quoted(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
-/// `mcp.json`: Farik's server with the daemon's token and the session's id, and the spec's
+/// `mcp.json`: Catervas's server with the daemon's token and the session's id, and the spec's
 /// servers. A user's connector holds no key: its stdio launcher, or its http headers' helper,
 /// asks the daemon for them (ADR 0030).
 fn mcp_config(spec: &SessionSpec, config: &ClaudeConfig) -> Value {
     let daemon = &config.daemon;
-    // `farik connector <run|headers> --daemon <daemon.json> --session <id> --server <name>`.
+    // `catervas connector <run|headers> --daemon <daemon.json> --session <id> --server <name>`.
     let launcher = |verb: &str, server: &str| -> Vec<String> {
         [
             "connector",
@@ -933,13 +934,13 @@ fn mcp_config(spec: &SessionSpec, config: &ClaudeConfig) -> Value {
     };
     let mut servers = serde_json::Map::new();
     servers.insert(
-        FARIK_SERVER.to_string(),
+        CATERVAS_SERVER.to_string(),
         json!({
             "type": "http",
             "url": format!("http://127.0.0.1:{}/mcp", daemon.port),
             "headers": {
                 "Authorization": format!("Bearer {}", daemon.token),
-                "X-Farik-Session": spec.session_id,
+                "X-Catervas-Session": spec.session_id,
             },
         }),
     );
@@ -978,10 +979,10 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
 
-    use farik_core::governor::permissions::PermissionTier;
-    use farik_core::team::fixtures::a_team_wire;
-    use farik_core::team::validate_team;
-    use farik_store::files::fixtures::{TempProject, a_team};
+    use catervas_core::governor::permissions::PermissionTier;
+    use catervas_core::team::fixtures::a_team_wire;
+    use catervas_core::team::validate_team;
+    use catervas_store::files::fixtures::{TempProject, a_team};
     use serde_json::{Value, json};
 
     use super::{
@@ -997,16 +998,16 @@ mod tests {
     fn config(project: &TempProject) -> ClaudeConfig {
         ClaudeConfig {
             claude_path: PathBuf::from("/usr/local/bin/claude"),
-            hook_command: PathBuf::from("/usr/local/bin/farik"),
-            daemon_file: project.root.join(".farik/local/daemon.json"),
+            hook_command: PathBuf::from("/usr/local/bin/catervas"),
+            daemon_file: project.root.join(".catervas/local/daemon.json"),
             daemon: DaemonInfo {
                 port: 47_123,
                 token: TOKEN.to_string(),
                 pid: 1,
             },
-            sessions_dir: project.root.join(".farik/local/sessions"),
+            sessions_dir: project.root.join(".catervas/local/sessions"),
             skills_dir: project.root.join("skills-state"),
-            team_file: project.root.join(".farik/team.yaml"),
+            team_file: project.root.join(".catervas/team.yaml"),
             env: BTreeMap::new(),
         }
     }
@@ -1093,7 +1094,7 @@ mod tests {
         );
         assert_eq!(
             value_after(&args, "--permission-prompt-tool"),
-            "mcp__farik__permission"
+            "mcp__catervas__permission"
         );
         assert_eq!(
             value_after(&args, "--max-turns"),
@@ -1203,7 +1204,7 @@ mod tests {
     fn lists_the_denied_tools_as_disallowed() {
         let project = a_project("claude-disallowed");
         let config = config(&project);
-        let definition = farik_roles::builtin_connector("playwright").expect("shipped");
+        let definition = catervas_roles::builtin_connector("playwright").expect("shipped");
         let spec = SessionSpec {
             disallowed_tools: crate::preview::disallowed_tools(&definition),
             ..spec()
@@ -1236,7 +1237,7 @@ mod tests {
     fn headers_helper_quotes_a_path_with_a_space() {
         let project = a_project("claude-helper-quoting");
         let config = ClaudeConfig {
-            hook_command: PathBuf::from("/opt/my tools/farik"),
+            hook_command: PathBuf::from("/opt/my tools/catervas"),
             daemon_file: PathBuf::from("/tmp/a b/it's/daemon.json"),
             ..config(&project)
         };
@@ -1278,7 +1279,7 @@ mod tests {
         // A stdio connector is the launcher, which Claude Code runs without a shell.
         let github = &file["mcpServers"]["github"];
         assert_eq!(github["type"], "stdio");
-        assert_eq!(github["command"], "/opt/my tools/farik");
+        assert_eq!(github["command"], "/opt/my tools/catervas");
         let launcher: Vec<String> = ["connector", "run"]
             .map(ToString::to_string)
             .into_iter()
@@ -1294,7 +1295,7 @@ mod tests {
         assert_eq!(linear.get("headers"), None, "{linear}");
         let helper = linear["headersHelper"].as_str().expect("a helper");
         let words = helper
-            .strip_prefix("'/opt/my tools/farik' ")
+            .strip_prefix("'/opt/my tools/catervas' ")
             .unwrap_or_else(|| panic!("the program is quoted first: {helper}"));
         let output = std::process::Command::new("sh")
             .arg("-c")
@@ -1315,12 +1316,12 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_spec_that_names_its_own_farik_server() {
-        let project = a_project("claude-farik-server");
+    fn refuses_a_spec_that_names_its_own_catervas_server() {
+        let project = a_project("claude-catervas-server");
         let config = config(&project);
         let spec = SessionSpec {
             mcp_servers: vec![McpServerConfig {
-                name: "farik".to_string(),
+                name: "catervas".to_string(),
                 transport: McpTransport::Http {
                     url: "http://127.0.0.1:1/mcp".to_string(),
                 },
@@ -1390,12 +1391,15 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
         let file: Value =
             serde_json::from_str(&std::fs::read_to_string(&path).expect("readable")).expect("JSON");
-        let farik = &file["mcpServers"]["farik"];
-        assert_eq!(farik["type"], "http");
-        assert_eq!(farik["url"], "http://127.0.0.1:47123/mcp");
-        assert_eq!(farik["headers"]["Authorization"], format!("Bearer {TOKEN}"));
+        let catervas = &file["mcpServers"]["catervas"];
+        assert_eq!(catervas["type"], "http");
+        assert_eq!(catervas["url"], "http://127.0.0.1:47123/mcp");
         assert_eq!(
-            farik["headers"]["X-Farik-Session"],
+            catervas["headers"]["Authorization"],
+            format!("Bearer {TOKEN}")
+        );
+        assert_eq!(
+            catervas["headers"]["X-Catervas-Session"],
             spec.session_id.as_str()
         );
         assert_eq!(
@@ -1424,7 +1428,7 @@ mod tests {
             assert_eq!(hooks.len(), 1, "{settings}");
             assert_eq!(hooks[0]["type"], "command");
             let line = hooks[0]["command"].as_str().expect("a command");
-            assert!(line.contains("/usr/local/bin/farik"), "{line}");
+            assert!(line.contains("/usr/local/bin/catervas"), "{line}");
             assert!(line.contains(&format!("hook {command} --daemon")), "{line}");
             assert!(line.contains(&daemon_file), "{line}");
         }
@@ -1442,7 +1446,7 @@ mod tests {
     fn makes_the_pre_tool_use_hook_block_when_it_cannot_run() {
         let project = a_project("claude-hook-fails-closed");
         let config = ClaudeConfig {
-            hook_command: PathBuf::from("/opt/it's here/farik"),
+            hook_command: PathBuf::from("/opt/it's here/catervas"),
             daemon_file: PathBuf::from("/tmp/a dir/daemon.json"),
             ..config(&project)
         };
@@ -1452,11 +1456,11 @@ mod tests {
         let settings = settings(&args);
         assert_eq!(
             settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
-            r"'/opt/it'\''s here/farik' hook pre-tool-use --daemon '/tmp/a dir/daemon.json' || exit 2"
+            r"'/opt/it'\''s here/catervas' hook pre-tool-use --daemon '/tmp/a dir/daemon.json' || exit 2"
         );
         assert_eq!(
             settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
-            r"'/opt/it'\''s here/farik' hook post-tool-use --daemon '/tmp/a dir/daemon.json'"
+            r"'/opt/it'\''s here/catervas' hook post-tool-use --daemon '/tmp/a dir/daemon.json'"
         );
     }
 
@@ -1465,12 +1469,12 @@ mod tests {
         let project = a_project("claude-hook-shell");
         let bin = project.root.join("a 'quoted' dir");
         std::fs::create_dir_all(&bin).expect("the directory");
-        let farik = bin.join("farik");
-        std::fs::write(&farik, "#!/bin/sh\nprintf '%s\\n' \"$@\"\nexit 1\n").expect("written");
-        std::fs::set_permissions(&farik, std::fs::Permissions::from_mode(0o755))
+        let catervas = bin.join("catervas");
+        std::fs::write(&catervas, "#!/bin/sh\nprintf '%s\\n' \"$@\"\nexit 1\n").expect("written");
+        std::fs::set_permissions(&catervas, std::fs::Permissions::from_mode(0o755))
             .expect("executable");
         let config = ClaudeConfig {
-            hook_command: farik.clone(),
+            hook_command: catervas.clone(),
             daemon_file: bin.join("daemon.json"),
             ..config(&project)
         };
@@ -1497,7 +1501,7 @@ mod tests {
                 bin.join("daemon.json").display()
             )
         );
-        std::fs::remove_file(&farik).expect("removed");
+        std::fs::remove_file(&catervas).expect("removed");
         assert_eq!(
             run(&command).status.code(),
             Some(2),

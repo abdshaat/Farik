@@ -1,4 +1,4 @@
-import { Button, Dialog, TextArea } from "@farik/ui";
+import { Button, Dialog, TextArea } from "@catervas/ui";
 import { useState } from "react";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
@@ -14,14 +14,14 @@ export type PipelineAsk = {
 	what: string;
 	/** The page the agent found it on, untrusted. */
 	url: string;
-	/** The site of `url` in its ASCII form, which Farik worked out. */
+	/** The site of `url` in its ASCII form, which Catervas worked out. */
 	host: string;
 	/** The agent's reason, untrusted. */
 	why: string;
 	cost: "free" | "paid" | "unknown";
 	needsAccount: boolean;
 	sendsProjectData: boolean;
-	/** The Product Manager's reason, untrusted; absent when Farik passed the request on. */
+	/** The Product Manager's reason, untrusted; absent when Catervas passed the request on. */
 	reason?: string;
 	/** The request the team gets if the owner approves, as it would be filed. */
 	requestText: string;

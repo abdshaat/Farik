@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://farik.dev/schemas/prices.schema.json",
-  "title": "FarikPriceTable",
-  "description": "The model price table Farik ships and the user may override in .farik/prices.json: what one million tokens cost, per model id, in US dollars. See docs/SPEC.md section 5.5.",
+  "$id": "https://catervas.dev/schemas/prices.schema.json",
+  "title": "CatervasPriceTable",
+  "description": "The model price table Catervas ships and the user may override in .catervas/prices.json: what one million tokens cost, per model id, in US dollars. See docs/SPEC.md section 5.5.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "source_url", "retrieved_at", "prices"],

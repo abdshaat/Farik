@@ -1,4 +1,4 @@
-import { Button, Choice, Switch } from "@farik/ui";
+import { Button, Choice, Switch } from "@catervas/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -11,7 +11,7 @@ import styles from "./pages.module.css";
 import { SavedTeams } from "./SavedTeams.tsx";
 import { HowToOpen, TeamRules } from "./TeamRules.tsx";
 
-const ADVANCED = "farik.advanced";
+const ADVANCED = "catervas.advanced";
 
 // Storage can refuse (a private window): the switch then lives only in memory.
 function readAdvanced(): boolean {
@@ -131,7 +131,7 @@ type AccountStatus = {
 	provider: string | null;
 	kind: "api_key" | "subscription_token" | null;
 	source: "environment" | "keychain" | "file" | null;
-	/** The variable a credential from the environment comes from, which Farik cannot remove. */
+	/** The variable a credential from the environment comes from, which Catervas cannot remove. */
 	environmentVariable?: string;
 	/** Whether the provider refused the key, so the team is paused until it is connected again. */
 	keyRefused?: boolean;

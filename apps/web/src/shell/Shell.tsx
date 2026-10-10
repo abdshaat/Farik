@@ -1,4 +1,4 @@
-import icon from "@farik/brand/assets/icons/icon-48.png";
+import icon from "@catervas/brand/assets/icons/icon-48.png";
 import { useSyncExternalStore } from "react";
 import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -36,7 +36,7 @@ export function Shell() {
 	const { status } = useConnection();
 	const { data } = useQuery<ServeStatus>("serve.status", {});
 	const path = useLocation().pathname;
-	// Nothing shows, and nothing is asked of the project, until Farik says where it stands.
+	// Nothing shows, and nothing is asked of the project, until Catervas says where it stands.
 	if (!data) return null;
 	// During setup, every path goes where "/" would.
 	if (landing(data) !== "/") return <Navigate to={landing(data)} replace />;

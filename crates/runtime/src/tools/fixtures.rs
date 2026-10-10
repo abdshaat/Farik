@@ -1,25 +1,25 @@
-//! A project the tools can be called on: a repository with `.farik/` initialised, a log in
-//! memory, the criterion library `farik-core`'s fixture describes, and a team of a Product Manager `pm` and two Software Developers `dev-a` and `dev-b`.
+//! A project the tools can be called on: a repository with `.catervas/` initialised, a log in
+//! memory, the criterion library `catervas-core`'s fixture describes, and a team of a Product Manager `pm` and two Software Developers `dev-a` and `dev-b`.
 
 use std::path::Path;
 use std::sync::Arc;
 
+use catervas_core::branch::task_branch;
+use catervas_core::contract::fixtures::a_contract_wire;
+use catervas_core::contract::{TaskId, validate_contract};
+use catervas_core::criteria::fixtures::a_criteria_library_wire;
+use catervas_core::criteria::validate_criteria;
+use catervas_core::governor::permissions::PermissionTier;
+use catervas_core::sprint::fixtures::an_open_sprint_wire;
+use catervas_core::sprint::validate_sprint;
+use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
+use catervas_core::team::{Team, validate_team};
+use catervas_protocol::clock::{Clock, FixedClock};
+use catervas_protocol::event::{CatervasEvent, EventIds, EventKind, NewEvent, event_from_value};
+use catervas_store::files::ProjectFiles;
+use catervas_store::git::fixtures::TempRepo;
+use catervas_store::{EventQuery, IN_MEMORY, Projections, open_event_log, open_projections};
 use chrono::{DateTime, TimeZone, Utc};
-use farik_core::branch::task_branch;
-use farik_core::contract::fixtures::a_contract_wire;
-use farik_core::contract::{TaskId, validate_contract};
-use farik_core::criteria::fixtures::a_criteria_library_wire;
-use farik_core::criteria::validate_criteria;
-use farik_core::governor::permissions::PermissionTier;
-use farik_core::sprint::fixtures::an_open_sprint_wire;
-use farik_core::sprint::validate_sprint;
-use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
-use farik_core::team::{Team, validate_team};
-use farik_protocol::clock::{Clock, FixedClock};
-use farik_protocol::event::{EventIds, EventKind, FarikEvent, NewEvent, event_from_value};
-use farik_store::files::ProjectFiles;
-use farik_store::git::fixtures::TempRepo;
-use farik_store::{EventQuery, IN_MEMORY, Projections, open_event_log, open_projections};
 use serde_json::{Value, json};
 
 use super::{ToolContext, ToolDeps, ToolError, call_tool};
@@ -95,7 +95,10 @@ pub(crate) fn browsing(wire: &mut Value) {
 /// `SKILL.md`, and, when `search` is given, the service `github` (a program started on the host,
 /// one key) with `search` tagged so and `create_issue` and `delete_repo` as they are in
 /// `a_kit_server`.
-pub(crate) fn a_developer_kit(skills: &[(&str, &str)], search: Option<&str>) -> farik_roles::Kit {
+pub(crate) fn a_developer_kit(
+    skills: &[(&str, &str)],
+    search: Option<&str>,
+) -> catervas_roles::Kit {
     let connectors: Vec<Value> = search
         .map(|tag| {
             json!({
@@ -132,8 +135,8 @@ pub(crate) fn a_developer_kit(skills: &[(&str, &str)], search: Option<&str>) -> 
         "skills": skills.iter().map(|(name, _)| name).collect::<Vec<_>>(),
         "connectors": connectors,
     });
-    farik_roles::parse_fixture_kit(
-        farik_core::contract::Role::SoftwareDeveloper,
+    catervas_roles::parse_fixture_kit(
+        catervas_core::contract::Role::SoftwareDeveloper,
         &file.to_string(),
         &[],
         &folders,
@@ -155,14 +158,14 @@ pub(crate) fn a_kit_server() -> Value {
 pub(crate) struct TestProject {
     pub(crate) repo: TempRepo,
     pub(crate) deps: Arc<ToolDeps>,
-    kits: Arc<std::sync::Mutex<Vec<farik_roles::Kit>>>,
+    kits: Arc<std::sync::Mutex<Vec<catervas_roles::Kit>>>,
 }
 
 impl TestProject {
     pub(crate) fn new(name: &str, team: &Team) -> Self {
         let repo = TempRepo::new(name);
         let files = Arc::new(ProjectFiles::open(repo.path.clone()));
-        files.init(team).expect(".farik/ is made");
+        files.init(team).expect(".catervas/ is made");
         files
             .write_criteria(
                 &validate_criteria(&a_criteria_library_wire()).expect("the fixture is a library"),
@@ -173,8 +176,8 @@ impl TestProject {
             Arc::new(open_projections(Arc::clone(&log)).expect("the projections open"));
         let clock: Arc<dyn Clock + Send + Sync> = Arc::new(FixedClock::new(at()));
         let ids = EventIds {
-            team_id: "farik".to_string(),
-            project_id: "farik".to_string(),
+            team_id: "catervas".to_string(),
+            project_id: "catervas".to_string(),
             ..EventIds::default()
         };
         let transitions = Arc::new(Transitions::new(
@@ -185,7 +188,7 @@ impl TestProject {
             Arc::clone(&clock),
             ids.clone(),
         ));
-        let kits: Arc<std::sync::Mutex<Vec<farik_roles::Kit>>> = Arc::default();
+        let kits: Arc<std::sync::Mutex<Vec<catervas_roles::Kit>>> = Arc::default();
         let held = Arc::clone(&kits);
         let deps = Arc::new(ToolDeps {
             log,
@@ -200,14 +203,14 @@ impl TestProject {
                     .lock()
                     .ok()
                     .and_then(|kits| kits.iter().find(|kit| kit.role == role).cloned());
-                swapped.map_or_else(|| farik_roles::load_kit(role), Ok)
+                swapped.map_or_else(|| catervas_roles::load_kit(role), Ok)
             }),
         });
         Self { repo, deps, kits }
     }
 
     /// Swaps in `kit` as its role's kit, for this project alone and from now on.
-    pub(crate) fn set_kit(&self, kit: farik_roles::Kit) {
+    pub(crate) fn set_kit(&self, kit: catervas_roles::Kit) {
         if let Ok(mut kits) = self.kits.lock() {
             kits.retain(|held| held.role != kit.role);
             kits.push(kit);
@@ -258,7 +261,7 @@ impl TestProject {
     }
 
     /// Every event of these kinds, oldest first; every event when `kinds` is empty.
-    pub(crate) fn events(&self, kinds: &[EventKind]) -> Vec<FarikEvent> {
+    pub(crate) fn events(&self, kinds: &[EventKind]) -> Vec<CatervasEvent> {
         self.deps
             .log
             .read(&EventQuery {
@@ -389,7 +392,7 @@ impl TestProject {
 
     /// A `task.transitioned` of `task` from `from` into `to`, by the governor, with `extra`
     /// merged over it (`assignee`, `reviewer`, and so on).
-    pub(crate) fn moved(&self, task: &str, from: &str, to: &str, extra: &Value) -> FarikEvent {
+    pub(crate) fn moved(&self, task: &str, from: &str, to: &str, extra: &Value) -> CatervasEvent {
         self.moved_at(at(), task, from, to, extra)
     }
 
@@ -401,7 +404,7 @@ impl TestProject {
         from: &str,
         to: &str,
         extra: &Value,
-    ) -> FarikEvent {
+    ) -> CatervasEvent {
         let mut body = json!({
             "from": from,
             "to": to,
@@ -427,9 +430,9 @@ impl TestProject {
         plan: &str,
         starts_on: &str,
         ends_on: &str,
-    ) -> FarikEvent {
+    ) -> CatervasEvent {
         let mut body =
-            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+            catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
         body["plan"] = json!(plan);
         body["starts_on"] = json!(starts_on);
         body["ends_on"] = json!(ends_on);
@@ -441,7 +444,7 @@ impl TestProject {
 
     /// The owner's approval of `plan` on `task`, with `note` (empty for none): no agent, no
     /// session.
-    pub(crate) fn plan_approved(&self, task: &str, plan: &str, note: &str) -> FarikEvent {
+    pub(crate) fn plan_approved(&self, task: &str, plan: &str, note: &str) -> CatervasEvent {
         self.record(
             task,
             "marketing_plan.approved",
@@ -458,12 +461,12 @@ impl TestProject {
         session: &str,
         day: &str,
         (usd, tokens): (f64, u64),
-    ) -> FarikEvent {
+    ) -> CatervasEvent {
         let mut wire = json!({
             "seq": 1,
             "recorded_at": format!("{day}T10:00:00Z"),
-            "team_id": "farik",
-            "project_id": "farik",
+            "team_id": "catervas",
+            "project_id": "catervas",
             "agent_id": agent,
             "session_id": session,
             "kind": "cost.recorded",
@@ -497,7 +500,7 @@ impl TestProject {
     }
 
     /// Appends one event about `task` (or none) and projects it, as a command does.
-    pub(crate) fn record(&self, task: &str, kind: &str, body: &Value) -> FarikEvent {
+    pub(crate) fn record(&self, task: &str, kind: &str, body: &Value) -> CatervasEvent {
         self.record_at(at(), task, kind, body)
     }
 
@@ -508,7 +511,7 @@ impl TestProject {
         task: &str,
         kind: &str,
         body: &Value,
-    ) -> FarikEvent {
+    ) -> CatervasEvent {
         self.record_by(None, recorded_at, task, kind, body)
     }
 
@@ -520,7 +523,7 @@ impl TestProject {
         task: &str,
         kind: &str,
         body: &Value,
-    ) -> FarikEvent {
+    ) -> CatervasEvent {
         self.record_in_at(recorded_at, (agent, None), task, kind, body)
     }
 
@@ -532,7 +535,7 @@ impl TestProject {
         task: &str,
         kind: &str,
         body: &Value,
-    ) -> FarikEvent {
+    ) -> CatervasEvent {
         self.record_in_at(at(), (agent, session), task, kind, body)
     }
 
@@ -543,12 +546,12 @@ impl TestProject {
         task: &str,
         kind: &str,
         body: &Value,
-    ) -> FarikEvent {
+    ) -> CatervasEvent {
         let mut wire = json!({
             "seq": 1,
             "recorded_at": recorded_at.to_rfc3339(),
-            "team_id": "farik",
-            "project_id": "farik",
+            "team_id": "catervas",
+            "project_id": "catervas",
             "kind": kind,
             "body": body,
         });

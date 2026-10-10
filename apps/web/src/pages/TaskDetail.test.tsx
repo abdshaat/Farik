@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	cleanup,
 	fireEvent,
@@ -84,7 +84,7 @@ const integration = {
 	kind: "integration",
 	agent_id: null,
 	title: "Gift cards",
-	line: "Farik could not add it to your project",
+	line: "Catervas could not add it to your project",
 };
 
 /** The task page for FRK-1, with `contract`, `waiting` and any other answer `overrides` gives. */
@@ -234,7 +234,9 @@ describe("task detail", () => {
 		fireEvent.click(screen.getByRole("tab", { name: "History" }));
 		const lines = within(panel()).getAllByRole("listitem");
 		expect(lines).toHaveLength(HISTORY.length + 1);
-		expect(lines[0]?.textContent).toContain("Farik moved it to In progress.");
+		expect(lines[0]?.textContent).toContain(
+			"Catervas moved it to In progress.",
+		);
 		expect(lines[0]?.textContent).toContain("task.transitioned");
 		expect(lines.at(-1)?.textContent).toContain("You asked for it.");
 		expect(lines.at(-1)?.textContent).toContain("task.created");
@@ -332,7 +334,7 @@ describe("task detail", () => {
 		expect(told).toHaveLength(KINDS.length);
 		expect(told).not.toContain(en.toldOther);
 		expect(told).toContain("You locked the plan.");
-		expect(told).toContain("Farik stopped a step Theo tried.");
+		expect(told).toContain("Catervas stopped a step Theo tried.");
 		expect(told).toContain("Ada sent it back.");
 		expect(new Set(told).size).toBe(KINDS.length);
 	});
@@ -494,7 +496,7 @@ describe("task detail", () => {
 		).toBeTruthy();
 		expect(
 			within(plan).getByText(
-				"Plans sent back: 1 of 3. If a third is sent back, Farik stops the task and asks you.",
+				"Plans sent back: 1 of 3. If a third is sent back, Catervas stops the task and asks you.",
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(returned.container);
@@ -936,11 +938,11 @@ describe("task detail", () => {
 		});
 		cleanup();
 
-		// Accepted and being added by Farik on its own, or through a pull request.
+		// Accepted and being added by Catervas on its own, or through a pull request.
 		await opened({ ...CONTRACT, status: "accepted" });
 		expect(
 			await screen.findByText(
-				"Accepted. Farik adds it to your project on its own.",
+				"Accepted. Catervas adds it to your project on its own.",
 			),
 		).toBeTruthy();
 		cleanup();
@@ -951,7 +953,7 @@ describe("task detail", () => {
 		});
 		expect(
 			await screen.findByText(
-				"Accepted. Farik opens a pull request for it, for you to merge.",
+				"Accepted. Catervas opens a pull request for it, for you to merge.",
 			),
 		).toBeTruthy();
 		cleanup();

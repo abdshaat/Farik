@@ -1,31 +1,31 @@
 .wrap {
 	overflow-x: auto;
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
 }
 
 .wrap:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
 .table {
 	width: 100%;
 	border-collapse: collapse;
-	color: var(--farik-color-ink);
+	color: var(--catervas-color-ink);
 }
 
 .caption {
-	padding-bottom: var(--farik-space-2);
-	color: var(--farik-color-ink-muted);
+	padding-bottom: var(--catervas-space-2);
+	color: var(--catervas-color-ink-muted);
 	text-align: start;
 }
 
 .table th,
 .table td {
-	padding: var(--farik-space-2) var(--farik-space-3);
-	border-bottom: 1px solid var(--farik-color-rule);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-bottom: 1px solid var(--catervas-color-rule);
 	text-align: start;
 }
 

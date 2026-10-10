@@ -1,4 +1,4 @@
-//! `farik serve` (`docs/SPEC.md` 4.1, 8.1): `farik run` that keeps driving when the board is idle,
+//! `catervas serve` (`docs/SPEC.md` 4.1, 8.1): `catervas run` that keeps driving when the board is idle,
 //! until a stop or Ctrl-C, and remembers the project it serves. With no project to serve it serves
 //! the first-run wizard, and takes on the project the wizard chooses, on the same port.
 
@@ -6,9 +6,9 @@ use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use farik_runtime::credential::load_credential;
-use farik_runtime::daemon::{DaemonState, PortChoice, SetupHost, candidates, serve_held};
-use farik_runtime::orchestrator::{TickRules, TickScope};
+use catervas_runtime::credential::load_credential;
+use catervas_runtime::daemon::{DaemonState, PortChoice, SetupHost, candidates, serve_held};
+use catervas_runtime::orchestrator::{TickRules, TickScope};
 use serde_json::json;
 use tokio::sync::watch;
 
@@ -32,7 +32,7 @@ enum Mode {
 
 /// Serves the project found here, else the one served last, else the wizard until it chooses one,
 /// and drives it with every rule until a stop or Ctrl-C, whatever the board. Answers the exit
-/// code: 130 after Ctrl-C, 1 after a refusal or a failed tick, 0 after `farik stop`.
+/// code: 130 after Ctrl-C, 1 after a refusal or a failed tick, 0 after `catervas stop`.
 pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32 {
     let runtime = match runtime() {
         Ok(runtime) => runtime,
@@ -85,7 +85,7 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
                         taking_on = false;
                         say(
                             &mut io.stderr,
-                            &format!("farik: the project could not be taken on: {error}"),
+                            &format!("catervas: the project could not be taken on: {error}"),
                         );
                         take_on_error = Some(error);
                         Mode::Setup(waited_on.take())
@@ -100,7 +100,7 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
 /// Where `serve` starts: the project it is run in, else the one `state.json` remembers, else the
 /// wizard. A project found with no credential for Claude Code starts on the wizard, chosen.
 fn found(io: &CliIo<'_>) -> Mode {
-    let project = |root: PathBuf| root.join(".farik/team.yaml").exists().then_some(root);
+    let project = |root: PathBuf| root.join(".catervas/team.yaml").exists().then_some(root);
     let root = repository_root(&io.cwd).ok().and_then(project).or_else(|| {
         state_dir(&io.env)
             .and_then(|directory| last_project(&directory))
@@ -129,7 +129,7 @@ async fn set_up(
     let lacks = if waiting.is_some() {
         "no AI account yet: connect one in the browser"
     } else {
-        "no project yet: farik is set up in the browser"
+        "no project yet: catervas is set up in the browser"
     };
     let (chosen, mut choice) = watch::channel(None);
     let host: Arc<dyn SetupHost> = Arc::new(CliHost {
@@ -177,7 +177,7 @@ fn hold(choice: PortChoice) -> Result<std::net::TcpListener, String> {
     candidates(choice)
         .into_iter()
         .find_map(|port| std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).ok())
-        .ok_or_else(|| "no port is free on 127.0.0.1 for farik serve".to_string())
+        .ok_or_else(|| "no port is free on 127.0.0.1 for catervas serve".to_string())
 }
 
 /// The port `held` is bound to.

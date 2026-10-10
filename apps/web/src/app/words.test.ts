@@ -41,7 +41,7 @@ describe("refusal sentences", () => {
 				en.refuseNotWaiting,
 			"review_first: the reviewer has not finished; send back once the review is in":
 				en.refuseReviewFirst,
-			"criteria_not_run: Farik has not yet run C1 on the integration branch":
+			"criteria_not_run: Catervas has not yet run C1 on the integration branch":
 				en.refuseChecksNotRun,
 			"criterion_failed: C1 failed on the integration branch: escalate the epic":
 				en.refuseChecksFailed,

@@ -1,12 +1,12 @@
-# Farik brand
+# Catervas brand
 
-Status: approved by the founder on 2026-09-26, together with the web UI design (phase 5, step 01); the palette changed on 2026-09-28 (see Colour). The final art waits on the files listed at the end.
-Source: the founder's brand kit, `docs/brand/brand-kit.png` (2026-09-25), and the founder's answers of the same day.
+Status: approved by the founder on 2026-09-26, together with the web UI design (phase 5, step 01); the palette changed on 2026-09-28 (see Colour). Renamed from Farik to Catervas by the founder on 2026-10-09 (ADR 0050), with the kit, the wordmark, the banner and the characters redrawn; the colours, type and logo mark hold. The final art waits on the files listed at the end.
+Source: the founder's brand kit, `docs/brand/brand-kit.png` (2026-09-25, renamed 2026-10-09; it still shows Signal Blue, which left the palette on 2026-09-28), and the founder's answers of the same day.
 Where this file and the kit disagree, the kit is the founder's intent. This file is what the apps build from.
 
 ## Name and descriptor
 
-- **Name:** Farik. It is written in capitals in the wordmark ("FARIK") and as "Farik" in running text.
+- **Name:** Catervas. It is written in capitals in the wordmark ("CATERVAS") and as "Catervas" in running text.
 - **Descriptor:** AI Harness Engine. It is set in capitals beside or under the wordmark.
 
 ## Taglines and voice
@@ -94,9 +94,9 @@ The fonts are bundled with the app and never loaded from a font CDN, because the
 The mark is four role faces around a gear, in a Clay Coral pixel frame on Midnight Terminal. The faces are the Product Manager (brown hair), the Developer (blue cap), the Scrum Master (glasses), and the Marketing Specialist (green cap).
 
 The kit shows three lockups:
-1. **Primary (stacked):** the mark, with "FARIK" to its right and "AI HARNESS ENGINE" under the wordmark.
+1. **Primary (stacked):** the mark, with "CATERVAS" to its right and "AI HARNESS ENGINE" under the wordmark.
 2. **Icon only:** the mark on its Midnight Terminal rounded square. This is the app icon, and it serves as the favicon at small sizes.
-3. **Horizontal:** the mark, then "FARIK", then a thin rule, then "AI HARNESS ENGINE".
+3. **Horizontal:** the mark, then "CATERVAS", then a thin rule, then "AI HARNESS ENGINE".
 
 Rules:
 - The wordmark is the supplied Soft Sand file on dark surfaces (see Files). The kit showed it in Clay Coral with a darker pixel shadow.
@@ -115,9 +115,23 @@ The characters are pixel-art people, one per role, each with a coloured role tag
 | Marketing Specialist | MKT, Heather | Creates content and drives growth. |
 | Architect | ARCH, Wheat | Designs systems and technical foundations. |
 
-The founder's character files of 2026-09-26 replace the kit's drawings. There are ten pixel-art people, each seated cross-legged at the same laptop, drawn in one pose and one scale on transparent backgrounds:
-- five are the roles' default characters: the Architect, Product Manager, Scrum Master, Developer and Marketing Specialist;
-- five more are extra characters any agent may wear.
+The founder's character files of 2026-10-09 replace the seated set of 2026-09-26, which replaced the kit's drawings. They are pixel-art people in glasses, drawn from the waist up at the same laptop, in one pose and one scale on transparent backgrounds. Each file in `docs/brand/assets/characters/` is named for the avatar key it serves; the founder's own file names are in the last column:
+
+| Key | Who wears it | Founder's file |
+|---|---|---|
+| `product-manager` | the Product Manager | Extra-1 |
+| `scrum-master` | the Scrum Master | Scrum-master |
+| `architect` | the Architect | Extra-2 |
+| `developer` | the Developer | Developer |
+| `marketing-specialist` | the Marketing Specialist | Extra-3 |
+| `finance-specialist` | the Finance Specialist (a copy of `extra-4`) | Financial analyst-Accounting |
+| `extra-1` | the UI/UX Designer | UI-UX engineer |
+| `extra-2` | an agent added by hand | Product-manager PM |
+| `extra-3` | an agent added by hand; the DevOps Engineer's in phase 11 | Dev-ops |
+| `extra-4` | the Finance Specialist, and any agent | Financial analyst-Accounting |
+| `extra-5` | the Procurement Specialist | Extra-4 |
+
+The founder chose on 2026-10-09 that the Architect wears Extra-2, the Marketing Specialist Extra-3, and the Product Manager Extra-1, so that the Product Manager does not look like the Finance Specialist.
 
 The characters are the agents' default avatars, which the user may change (spec F1). In the web UI they appear as square avatars cropped to the head and shoulders (`packages/brand/assets/avatars/`).
 
@@ -138,18 +152,18 @@ The office scene is a warm pixel-art room: wooden desks, plants, hanging lamps, 
 
 ## Files
 
-The founder supplied these on 2026-09-26. They are kept unchanged in `docs/brand/assets/`, and phase 6 step 01 builds `@farik/brand` from them:
+The founder supplied these on 2026-09-26, and the wordmark and the characters again on 2026-10-09. They are kept unchanged in `docs/brand/assets/`, and phase 6 step 01 builds `@catervas/brand` from them:
 
 | File | What it is |
 |---|---|
 | `logo-mark.png` | The mark, 1254 × 1254 px, on a transparent background. It is also the source of the app icons. |
-| `wordmark.png` | "FARIK" in Soft Sand, 1024 × 290 px, on a transparent background, for dark surfaces. On a light surface it sits on a Midnight Terminal tile, as the mark does. |
-| `characters/architect.png`, `product-manager.png`, `scrum-master.png`, `developer.png`, `marketing-specialist.png` | The roles' default characters, seated at a laptop, each 1254 × 1254 px on a transparent background |
-| `characters/extra-1.png` to `extra-5.png` | Five more characters in the same pose and scale, for any agent |
+| `wordmark-on-navy.png` | The founder's wordmark of 2026-10-09: "CATERVAS" in cream on navy, 2172 × 724 px. |
+| `wordmark.png` | "CATERVAS" in Soft Sand, 1024 × 162 px, on a transparent background, for dark surfaces: `wordmark-on-navy.png` with the navy keyed out and the edges trimmed, the one file here not kept unchanged. On a light surface it sits on a Midnight Terminal tile, as the mark does. |
+| `characters/<key>.png` | The eleven characters of the table in Characters, each 1254 × 1254 px on a transparent background |
 
-The 256 px square avatars of head and shoulders (`<key>-256.png`, ten of them) were derived from the characters by Farik, not supplied. They live in `packages/brand/assets/avatars/`, moved there from `docs/brand/assets/avatars/` in phase 6 step 01. The app icons (`icon-<n>.png` for 16, 32, 48, 180, 192, 512 and 1024 px) are a Lanczos resize of `logo-mark.png`, made by `pnpm --filter @farik/brand icons` and committed in `packages/brand/assets/icons/`.
+The 256 px square avatars of head and shoulders (`<key>-256.png`, eleven of them) were derived from the characters, not supplied: a square from the top left of each figure, as wide as the figure, Lanczos-resized to 256 px. They live in `packages/brand/assets/avatars/`, moved there from `docs/brand/assets/avatars/` in phase 6 step 01. The app icons (`icon-<n>.png` for 16, 32, 48, 180, 192, 512 and 1024 px) are a Lanczos resize of `logo-mark.png`, made by `pnpm --filter @catervas/brand icons` and committed in `packages/brand/assets/icons/`.
 
-The kit's rule that the wordmark is always Clay Coral gives way to the supplied file: the wordmark is Soft Sand on dark surfaces. The README's images (`docs/brand/readme/`: the banner, the team, and the avatars) are composed from these files.
+The kit's rule that the wordmark is always Clay Coral gives way to the supplied file: the wordmark is Soft Sand on dark surfaces. The README's images are in `docs/brand/readme/`: the banner is the founder's file of 2026-10-09 ("CATERVAS AI Harness Engine"), and the team card is composed from the characters.
 
 Still wanted:
 1. **For phase 15 only:** the office scene as layered pieces, and the characters' walking frames.

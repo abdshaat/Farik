@@ -1,5 +1,5 @@
-import type { Event } from "@farik/protocol-client";
-import { Avatar, type AvatarKey, Button, RoleTag } from "@farik/ui";
+import type { Event } from "@catervas/protocol-client";
+import { Avatar, type AvatarKey, Button, RoleTag } from "@catervas/ui";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -65,7 +65,7 @@ const threadWord = (thread: string) => {
 
 function nameOf(author: string, agents: Agent[]) {
 	if (author === "human") return t("channelYou");
-	if (author === "farik") return t("brand");
+	if (author === "catervas") return t("brand");
 	return agents.find((a) => a.id === author)?.displayName ?? author;
 }
 
@@ -78,7 +78,7 @@ function movedLine(text: string, agents: Agent[]): string | undefined {
 	if (!task || !from || !to || !by || !isStatus(from) || !isStatus(to))
 		return undefined;
 	const who =
-		by === "the governor" ? "farik" : by === "the human" ? "human" : by;
+		by === "the governor" ? "catervas" : by === "the human" ? "human" : by;
 	const said = movedWords(nameOf(who, agents), to, task);
 	return reason ? `${said} ${t("channelWhy", { reason })}` : said;
 }
@@ -524,9 +524,9 @@ function Meetings({
 	);
 }
 
-/** Today's "In the channel": the last two messages that are not Farik's own lines. */
+/** Today's "In the channel": the last two messages that are not Catervas's own lines. */
 export function ChannelPreview({ agents }: { agents: Agent[] }) {
-	// ponytail: the last 20 hold two that are not system lines unless Farik said 19 things in a row.
+	// ponytail: the last 20 hold two that are not system lines unless Catervas said 19 things in a row.
 	const { data } = useQuery<{ messages: Message[] }>("channel.messages", {
 		limit: 20,
 	});

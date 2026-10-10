@@ -1,5 +1,5 @@
-import { toCamel, toSnake } from "@farik/protocol-client";
-import { Button, Choice, Switch, TextArea, TextField } from "@farik/ui";
+import { toCamel, toSnake } from "@catervas/protocol-client";
+import { Button, Choice, Switch, TextArea, TextField } from "@catervas/ui";
 import { type ReactNode, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";

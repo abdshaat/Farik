@@ -1,8 +1,8 @@
-import { TextField } from "@farik/ui";
+import { TextField } from "@catervas/ui";
 import type { Refusal } from "../../app/refusals.ts";
 import { t } from "../../strings/t.ts";
 
-/** `team.yaml`'s `preview` (step 12, D2): how Farik opens the app for the UI/UX Designer. */
+/** `team.yaml`'s `preview` (step 12, D2): how Catervas opens the app for the UI/UX Designer. */
 export type Preview = {
 	prepare?: string;
 	start: string;

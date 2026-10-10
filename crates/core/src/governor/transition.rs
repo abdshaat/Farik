@@ -13,8 +13,8 @@ use chrono::{DateTime, Utc};
 
 use crate::budget::{BudgetConsequence, BudgetScope, BudgetState, check_budgets};
 use crate::contract::{TaskContract, TaskId, TaskStatus};
-use crate::generated::task_contract::FarikTaskContractKind as Kind;
-use crate::generated::task_contract::FarikTaskContractRisk as Risk;
+use crate::generated::task_contract::CatervasTaskContractKind as Kind;
+use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
 use crate::governor::done::{
     CriterionResult, DoneEvidence, evaluate_done, requires_human_acceptance,
 };
@@ -97,7 +97,7 @@ pub struct TransitionContext {
     pub blocker_resolution: Option<String>,
     /// When the task blocked, if it is blocked.
     pub blocked_at: Option<DateTime<Utc>>,
-    /// The runtime's clock, passed in because `farik-core` reads no clock of its own.
+    /// The runtime's clock, passed in because `catervas-core` reads no clock of its own.
     pub now: DateTime<Utc>,
     /// How long a task may stay blocked before it escalates
     /// (`escalation::DEFAULT_BLOCKED_LIMIT` when the team set nothing).
@@ -113,7 +113,7 @@ pub struct TransitionContext {
     pub budget: BudgetState,
     /// Whether a permission was denied on an action the task requires.
     pub permission_denied: bool,
-    /// Whether Farik could not run one of the task's criteria for its reviewer, for a reason that
+    /// Whether Catervas could not run one of the task's criteria for its reviewer, for a reason that
     /// is not the work's (5.4): the task goes to the human rather than back to its assignee.
     pub criterion_unrunnable: bool,
     /// Whether the task's preview could not be prepared or started for a session that needed it
@@ -429,7 +429,7 @@ fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext)
         ),
         GateId::GovernorEscalation => {
             open_or(governor_escalation_reason(context).is_some(), || {
-                "no budget whose consequence is escalation is exhausted, no permission was denied, and Farik ran every criterion it tried, so the governor has nothing to escalate"
+                "no budget whose consequence is escalation is exhausted, no permission was denied, and Catervas ran every criterion it tried, so the governor has nothing to escalate"
                     .to_string()
             })
         }
@@ -607,7 +607,7 @@ fn rejection_outcome(context: &TransitionContext) -> RejectionOutcome {
 /// Why the governor's own `any -> escalated` row is open, or `None` when it is not. The task's
 /// sessions are their own reason (5.7); every other exhausted budget is `budget`; then design plans
 /// returned as often as the task may be tried, `iterations` (ADR 0026); then a denied
-/// permission; then a preview that could not be made ready, `preview`; then a criterion Farik could
+/// permission; then a preview that could not be made ready, `preview`; then a criterion Catervas could
 /// not run for the reviewer, which asks the human and so is `explicit_request`. A user's `stop`
 /// reaches the table as the human's own row instead, which needs no gate.
 fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationReason> {
@@ -722,8 +722,8 @@ mod tests {
     };
     use crate::budget::{BudgetState, DEFAULT_SESSION_LIMITS, SessionLedger};
     use crate::contract::{Role, TaskStatus};
-    use crate::generated::task_contract::FarikTaskContractKind as Kind;
-    use crate::generated::task_contract::FarikTaskContractRisk as Risk;
+    use crate::generated::task_contract::CatervasTaskContractKind as Kind;
+    use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
     use crate::governor::done::{CriterionResult, DesignReviewNeed, DoneEvidence, RunBy};
     use crate::governor::escalation::{
         DEFAULT_BLOCKED_LIMIT, EscalationReason as Why, RejectionOutcome,
@@ -1608,9 +1608,9 @@ mod tests {
         let mut context = a_context();
         context.contract.status = TaskStatus::Verifying;
         context.contract.assignee_role = Role::FinanceSpecialist;
-        context.contract.allowed_paths = vec![".farik/local/finance/**".to_string()];
-        context.done.changed_paths = vec![".farik/local/finance/books.xlsx".to_string()];
-        context.done.protected_paths = vec![".farik/local/**".to_string()];
+        context.contract.allowed_paths = vec![".catervas/local/finance/**".to_string()];
+        context.done.changed_paths = vec![".catervas/local/finance/books.xlsx".to_string()];
+        context.done.protected_paths = vec![".catervas/local/**".to_string()];
         let accepted = ask(TaskStatus::Accepted, A::ProductManager, Some("pm-1"));
         assert_eq!(
             effects(&accepted, &context),
@@ -1797,7 +1797,7 @@ mod tests {
         let mut context = a_context();
         let request = ask(TaskStatus::Escalated, A::Governor, None);
         let nothing_to_escalate =
-            "no budget whose consequence is escalation is exhausted, no permission was denied, and Farik ran every criterion it tried, so the governor has nothing to escalate"
+            "no budget whose consequence is escalation is exhausted, no permission was denied, and Catervas ran every criterion it tried, so the governor has nothing to escalate"
                 .to_string();
         assert_eq!(
             one_gate(&request, &context),
@@ -1865,14 +1865,14 @@ mod tests {
             effects(&request, &context),
             [TransitionEffect::RaiseEscalation(Why::Permission)]
         );
-        // A permission is read before a criterion Farik could not run.
+        // A permission is read before a criterion Catervas could not run.
         context.criterion_unrunnable = true;
         assert_eq!(
             effects(&request, &context),
             [TransitionEffect::RaiseEscalation(Why::Permission)]
         );
-        // And a criterion Farik could not run for the reviewer, for a reason that is not the
-        // work's (5.4): Farik asks the human, which is an explicit request.
+        // And a criterion Catervas could not run for the reviewer, for a reason that is not the
+        // work's (5.4): Catervas asks the human, which is an explicit request.
         context.permission_denied = false;
         assert_eq!(
             effects(&request, &context),

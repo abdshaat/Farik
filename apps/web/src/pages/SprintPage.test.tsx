@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";

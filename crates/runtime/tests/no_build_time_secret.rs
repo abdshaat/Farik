@@ -1,6 +1,6 @@
-//! The open-source code never holds a credential of Farik's, and no source reads a variable at
+//! The open-source code never holds a credential of Catervas's, and no source reads a variable at
 //! build time but those Cargo sets (ADR 0044): a build with the variable set would carry it into
-//! every binary, where it protects nothing. Farik Cloud holds Farik's apps and their secrets from
+//! every binary, where it protects nothing. Catervas Cloud holds Catervas's apps and their secrets from
 //! phase 8.
 
 use std::path::{Path, PathBuf};
@@ -110,7 +110,7 @@ fn lets_the_names_cargo_sets_through() {
         "CARGO_PKG_NAME",
         "CARGO_PKG_VERSION",
         "CARGO_MANIFEST_DIR",
-        "CARGO_BIN_EXE_farik",
+        "CARGO_BIN_EXE_catervas",
     ] {
         let read = format!("{}\"{name}\")", concat!("en", "v!("));
         assert_eq!(build_time_reads(&format!("const A: &str = {read};")), []);

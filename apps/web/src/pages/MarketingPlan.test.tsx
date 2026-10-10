@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	cleanup,
 	fireEvent,
@@ -222,12 +222,14 @@ describe("marketing plan page", () => {
 				" ",
 			);
 		expect(css("MarketingPlan.module.css")).toMatch(
-			/\.bar \{[^}]*position: sticky;[^}]*bottom: var\(--farik-shell-bar-height, 0\);/,
+			/\.bar \{[^}]*position: sticky;[^}]*bottom: var\(--catervas-shell-bar-height, 0\);/,
 		);
 		const shell = css("../shell/Shell.module.css");
-		expect(shell).toMatch(/\.narrow \{[^}]*--farik-shell-bar-height: [^;]+;/);
 		expect(shell).toMatch(
-			/\.bar \{[^}]*height: var\(--farik-shell-bar-height\);/,
+			/\.narrow \{[^}]*--catervas-shell-bar-height: [^;]+;/,
+		);
+		expect(shell).toMatch(
+			/\.bar \{[^}]*height: var\(--catervas-shell-bar-height\);/,
 		);
 	});
 
@@ -593,7 +595,7 @@ describe("a plan's posts", () => {
 			"Missed the team was paused",
 		);
 		expect(slot("Meet the bakers").textContent).toContain(
-			"Missed Farik could not hand it to Buffer before its time.",
+			"Missed Catervas could not hand it to Buffer before its time.",
 		);
 		expect(slot("A rainy week ahead").textContent).toContain(
 			"Going out today at 18:00",
@@ -612,7 +614,7 @@ describe("a plan's posts", () => {
 		).toBeTruthy();
 		expect(
 			screen.getByText(
-				"Sent means Farik handed the post to Buffer for its time; you stop a post on Today.",
+				"Sent means Catervas handed the post to Buffer for its time; you stop a post on Today.",
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
@@ -758,7 +760,7 @@ describe("a plan's ads and their budget", () => {
 		// Why a price is not fixed, once, under the table; no day was fixed yet.
 		expect(
 			screen.getByText(
-				"A fixed price is a total that Google itself never charges past. Google keeps one only for a campaign of 3 to 90 days; any other has a daily budget, and since Google reports cost up to about an hour late, Farik may pause it after about an hour’s more spend.",
+				"A fixed price is a total that Google itself never charges past. Google keeps one only for a campaign of 3 to 90 days; any other has a daily budget, and since Google reports cost up to about an hour late, Catervas may pause it after about an hour’s more spend.",
 			),
 		).toBeTruthy();
 		expect(screen.queryByText(/Prices as on the day you approved/)).toBeNull();
@@ -767,7 +769,7 @@ describe("a plan's ads and their budget", () => {
 			name: "What approving lets Kai do",
 		});
 		expect(allows.textContent).toContain(
-			"Farik pauses a campaign when it reaches its budget. Bakery near me is not at a fixed price, so it may run over by about an hour’s spend.",
+			"Catervas pauses a campaign when it reaches its budget. Bakery near me is not at a fixed price, so it may run over by about an hour’s spend.",
 		);
 		expect(
 			screen.getByText(/^Approving lets Kai post these 6 posts and spend up to/)
@@ -822,13 +824,13 @@ describe("a plan's ads and their budget", () => {
 		).toBeTruthy();
 		expect(
 			within(spent).getByText(
-				"Google Ads’ own figures, read today at 10:15. Farik reads them every 15 minutes while it runs.",
+				"Google Ads’ own figures, read today at 10:15. Catervas reads them every 15 minutes while it runs.",
 			),
 		).toBeTruthy();
 		// A failed read is not shown while the last one worked.
 		expect(within(spent).queryByRole("status")).toBeNull();
 
-		// Each campaign against its budget, and where it stands: Farik paused Bakery near me.
+		// Each campaign against its budget, and where it stands: Catervas paused Bakery near me.
 		const rows = within(budgetTable()).getAllByRole("row");
 		expect(
 			within(rows[0] as HTMLElement)
@@ -850,8 +852,8 @@ describe("a plan's ads and their budget", () => {
 		);
 		expect(rows.at(-1)?.textContent).toBe("Total$450.00 USD$318.65");
 
-		// Each pause Farik made, with its time and why.
-		const paused = screen.getByRole("region", { name: "Ads Farik paused" });
+		// Each pause Catervas made, with its time and why.
+		const paused = screen.getByRole("region", { name: "Ads Catervas paused" });
 		expect(
 			within(paused)
 				.getAllByRole("listitem")
@@ -873,13 +875,13 @@ describe("a plan's ads and their budget", () => {
 			},
 		});
 		const spent = await screen.findByRole("region", { name: "Spent so far" });
-		// The last spend Farik read stays, with when, and the failure is said beside it.
+		// The last spend Catervas read stays, with when, and the failure is said beside it.
 		expect(spent.textContent).toContain("$318.65 of $450.00 USD");
 		expect(
 			within(spent).getByText("Google Ads’ own figures, read today at 10:15."),
 		).toBeTruthy();
 		expect(within(spent).getByRole("status").textContent).toBe(
-			"Farik can’t read the spend now: Kai's sign-in to Google has ended; sign Kai in again on Kai's page. Last tried today at 10:45; Farik tries again every 15 minutes. Until a read works, Farik cannot pause the ads at their budget.",
+			"Catervas can’t read the spend now: Kai's sign-in to Google has ended; sign Kai in again on Kai's page. Last tried today at 10:45; Catervas tries again every 15 minutes. Until a read works, Catervas cannot pause the ads at their budget.",
 		);
 	});
 
@@ -926,7 +928,7 @@ describe("a plan's ads and their budget", () => {
 		);
 		// The newest pause first.
 		expect(
-			within(screen.getByRole("region", { name: "Ads Farik paused" }))
+			within(screen.getByRole("region", { name: "Ads Catervas paused" }))
 				.getAllByRole("listitem")
 				.map((li) => li.textContent),
 		).toEqual([
@@ -971,7 +973,7 @@ describe("a plan's ads and their budget", () => {
 			cells(within(budgetTable()).getAllByRole("row")[3] as HTMLElement),
 		).toContain("Bakery near mePaused: Google Ads was removed");
 		expect(
-			within(screen.getByRole("region", { name: "Ads Farik paused" }))
+			within(screen.getByRole("region", { name: "Ads Catervas paused" }))
 				.getAllByRole("listitem")
 				.map((li) => li.textContent),
 		).toEqual(["Thu 12 Nov, 10:50Bakery near me: Google Ads was removed."]);
@@ -989,7 +991,7 @@ describe("a plan's ads and their budget", () => {
 		await screen.findByRole("heading", { level: 1, name: TITLE });
 		expect(screen.queryByRole("region", { name: "Spent so far" })).toBeNull();
 		expect(
-			screen.queryByRole("region", { name: "Ads Farik paused" }),
+			screen.queryByRole("region", { name: "Ads Catervas paused" }),
 		).toBeNull();
 	});
 
@@ -1009,7 +1011,7 @@ describe("a plan's ads and their budget", () => {
 		const [first] = within(dialog).getAllByText(/./, { selector: "p" });
 		expect(first?.textContent).toBe(`${TITLE}, MP-3, on day 32 of 42.`);
 		expect(dialog.textContent).toContain(
-			"Farik pauses its running ads within a minute. $318.65 is spent so far, by Google’s figures at 10:15.",
+			"Catervas pauses its running ads within a minute. $318.65 is spent so far, by Google’s figures at 10:15.",
 		);
 		expect(s.calls("command")).toHaveLength(0);
 	});
@@ -1023,7 +1025,7 @@ describe("a plan's ads and their budget", () => {
 			name: "End this plan now?",
 		});
 		expect(dialog.textContent).toContain(
-			"Farik pauses its running ads within a minute.",
+			"Catervas pauses its running ads within a minute.",
 		);
 		expect(dialog.textContent).not.toContain("is spent so far");
 	});

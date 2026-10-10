@@ -158,7 +158,7 @@ fn core_io(root: &Path) -> anyhow::Result<()> {
         return Ok(());
     }
     bail!(
-        "farik-core performs no I/O (hard rule 5):\n{}",
+        "catervas-core performs no I/O (hard rule 5):\n{}",
         findings.join("\n")
     );
 }

@@ -1,4 +1,4 @@
-//! Farik's wire types: the event envelope, the event kinds, the commands, and the traits that
+//! Catervas's wire types: the event envelope, the event kinds, the commands, and the traits that
 //! keep the machine's clock and its identifiers out of the crates that decide things.
 
 /// Time and identifiers, injected rather than read from the machine.
@@ -149,8 +149,9 @@ mod tests {
         let event: serde_json::Value =
             serde_json::from_str(include_str!("../../../docs/schemas/event.schema.json"))
                 .expect("the embedded event schema is valid JSON");
-        let contract: serde_json::Value = serde_json::from_str(farik_core::contract::SCHEMA_JSON)
-            .expect("the embedded contract schema is valid JSON");
+        let contract: serde_json::Value =
+            serde_json::from_str(catervas_core::contract::SCHEMA_JSON)
+                .expect("the embedded contract schema is valid JSON");
         let summary = &event["$defs"]["contractSummary"]["properties"];
         let fields = &contract["properties"];
         assert_eq!(summary["kind"]["enum"], fields["kind"]["enum"]);
@@ -162,7 +163,7 @@ mod tests {
         assert_eq!(summary["risk"]["enum"], fields["risk"]["enum"]);
         assert_eq!(summary["parent"]["pattern"], fields["parent"]["pattern"]);
         // Every copy of the task id's pattern, not only the summary's: the envelope's and the
-        // command's are what farik_core's TaskId::from_str is then handed.
+        // command's are what catervas_core's TaskId::from_str is then handed.
         let command: serde_json::Value =
             serde_json::from_str(include_str!("../../../docs/schemas/command.schema.json"))
                 .expect("the embedded command schema is valid JSON");

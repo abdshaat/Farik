@@ -51,7 +51,7 @@
       "h": 900,
       "is_interactive": true,
       "page": "setup",
-      "title": "Connect to Farik",
+      "title": "Connect to Catervas",
       "w": 1440,
       "x": 1520,
       "y": 2040
@@ -238,7 +238,7 @@
     "Site.dc.html": {
       "h": 2400,
       "page": "site",
-      "title": "Farik website",
+      "title": "Catervas website",
       "w": 1440,
       "x": 0,
       "y": 0
@@ -517,7 +517,7 @@
       "y": 0,
       "w": 1440,
       "h": 1095,
-      "title": "Signed in: the tab Farik serves",
+      "title": "Signed in: the tab Catervas serves",
       "page": "signin-skills",
       "is_interactive": true
     },
@@ -652,7 +652,7 @@
       "y": 0,
       "w": 1440,
       "h": 3841,
-      "title": "Ivo’s sites: Farik’s approved sites, the sites you allowed, Remove and Add a site (step 10b2)",
+      "title": "Ivo’s sites: Catervas’s approved sites, the sites you allowed, Remove and Add a site (step 10b2)",
       "page": "procurement",
       "is_interactive": true
     },
@@ -670,7 +670,7 @@
       "y": 0,
       "w": 1280,
       "h": 4082,
-      "title": "Today: a plan’s ads reached their budget, Farik could not pause them, the spend unread, ads still running (step 08g)",
+      "title": "Today: a plan’s ads reached their budget, Catervas could not pause them, the spend unread, ads still running (step 08g)",
       "page": "marketing",
       "is_interactive": true
     },
@@ -706,7 +706,7 @@
       "y": 0,
       "w": 1280,
       "h": 5750,
-      "title": "The plan’s spend and the ads Farik paused: running, unread, End, ended (step 08g)",
+      "title": "The plan’s spend and the ads Catervas paused: running, unread, End, ended (step 08g)",
       "page": "marketing",
       "is_interactive": true
     },
@@ -742,7 +742,7 @@
       "y": 0,
       "w": 1440,
       "h": 1742,
-      "title": "Remove Google Ads: Farik pauses the plan’s ads first, and Today when Google refused (step 08g)",
+      "title": "Remove Google Ads: Catervas pauses the plan’s ads first, and Today when Google refused (step 08g)",
       "page": "connectors",
       "is_interactive": true
     },
@@ -1121,7 +1121,7 @@
       "kind": "title1",
       "maxW": 4400,
       "page": "daily",
-      "text": "Farik: daily work",
+      "text": "Catervas: daily work",
       "w": 240,
       "x": 0,
       "y": -300
@@ -1130,7 +1130,7 @@
       "kind": "title1",
       "maxW": 4400,
       "page": "gates",
-      "text": "Farik: requests and approvals",
+      "text": "Catervas: requests and approvals",
       "w": 240,
       "x": 0,
       "y": -300
@@ -1139,7 +1139,7 @@
       "kind": "title1",
       "maxW": 4400,
       "page": "phone",
-      "text": "Farik: phone",
+      "text": "Catervas: phone",
       "w": 240,
       "x": 0,
       "y": -300
@@ -1148,7 +1148,7 @@
       "kind": "title1",
       "maxW": 4400,
       "page": "setup",
-      "text": "Farik: first run",
+      "text": "Catervas: first run",
       "w": 240,
       "x": 0,
       "y": -300
@@ -1157,7 +1157,7 @@
       "kind": "title1",
       "maxW": 4400,
       "page": "site",
-      "text": "Farik: the public website",
+      "text": "Catervas: the public website",
       "w": 240,
       "x": 0,
       "y": -300
@@ -1166,7 +1166,7 @@
       "kind": "title1",
       "maxW": 9020,
       "page": "team",
-      "text": "Farik: team and settings",
+      "text": "Catervas: team and settings",
       "w": 240,
       "x": 0,
       "y": -300
@@ -1444,5 +1444,5 @@
       "name": "DevOps Engineer"
     }
   ],
-  "title": "Farik web UI mockup"
+  "title": "Catervas web UI mockup"
 }

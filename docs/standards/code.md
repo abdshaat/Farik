@@ -19,7 +19,7 @@ The backend (every crate under `crates/`) is Rust. The front end (`packages/ui`,
 | Versioning and changelog | `git-cliff` from Conventional Commits; workspace version in the root `Cargo.toml` | | |
 | Continuous integration | GitHub Actions | | One workflow, `check`, runs `cargo xtask check --integration` on every pull request and on `main`. The flag adds the tests marked `#[ignore]` for needing a program the runner has; without it the same command runs everything else. |
 
-`cargo xtask check` is the single command that means "is this mergeable". It runs, in order: format check, clippy, tests, the bare-TODO check, and the no-I/O check on `farik-core`; once the front end exists it also runs `pnpm check` (typecheck, lint, format check, tests) for it. It exists from the first scaffold commit onward and it is never allowed to be red on `main`.
+`cargo xtask check` is the single command that means "is this mergeable". It runs, in order: format check, clippy, tests, the bare-TODO check, and the no-I/O check on `catervas-core`; once the front end exists it also runs `pnpm check` (typecheck, lint, format check, tests) for it. It exists from the first scaffold commit onward and it is never allowed to be red on `main`.
 
 ## Naming
 
@@ -33,7 +33,7 @@ The backend (every crate under `crates/`) is Rust. The front end (`packages/ui`,
 | Harness-assigned branch | left as assigned (e.g. `claude/...`); the pull request title carries the type | |
 | Commit message | Conventional Commits: `<type>(<scope>): <imperative subject>`, subject lower-case, no trailing period, under 72 characters; body explains why, not what | `feat(core): add definition-of-ready structural checks` |
 | Commit type | one of `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `build`, `ci`, `perf` | |
-| Commit scope | a crate name without the `farik-` prefix, a front-end package name without the `@farik/` prefix, or `docs`, `repo`, `roles`, `skills`, `xtask` | `core`, `store`, `runtime`, `protocol`, `cli`, `ui`, `desktop`, `web` |
+| Commit scope | a crate name without the `catervas-` prefix, a front-end package name without the `@catervas/` prefix, or `docs`, `repo`, `roles`, `skills`, `xtask` | `core`, `store`, `runtime`, `protocol`, `cli`, `ui`, `desktop`, `web` |
 | Pull request title | for a phase: `phase <n>: <name>`; otherwise the same format as a commit subject | `phase 0: foundation` |
 | Merge commit | phases merge with a merge commit, never squash, so task commits survive | |
 | Tag | `v<semver>` | `v0.1.0` |
@@ -55,13 +55,13 @@ The backend (every crate under `crates/`) is Rust. The front end (`packages/ui`,
 
 | Thing | Convention | Example |
 |---|---|---|
-| Backend crate | `farik-<name>`, directory `crates/<name>`, library name `farik_<name>` | `farik-core` in `crates/core` |
-| Binary crate | `farik` (the command line and daemon), in `crates/cli` | |
-| Front-end package | `@farik/<name>`, directory `packages/<name>` or `apps/<name>` | `@farik/ui` in `packages/ui` |
+| Backend crate | `catervas-<name>`, directory `crates/<name>`, library name `catervas_<name>` | `catervas-core` in `crates/core` |
+| Binary crate | `catervas` (the command line and daemon), in `crates/cli` | |
+| Front-end package | `@catervas/<name>`, directory `packages/<name>` or `apps/<name>` | `@catervas/ui` in `packages/ui` |
 | Rust module file | `snake_case.rs`; one primary type or function per module, named after it; a module with children is `<name>.rs` plus a `<name>/` directory, never `mod.rs` except for `generated/` | `transition_table.rs` |
 | Rust unit tests | `#[cfg(test)] mod tests` at the bottom of the module they test | |
 | Rust integration test | `crates/<name>/tests/<subject>.rs`; needs Docker, git, the file system, or a live service | `crates/runtime/tests/sandbox.rs` |
-| Rust live test | `crates/<name>/tests/live_<subject>.rs`, run only with `FARIK_LIVE_TESTS=1` | `crates/runtime/tests/live_claude.rs` |
+| Rust live test | `crates/<name>/tests/live_<subject>.rs`, run only with `CATERVAS_LIVE_TESTS=1` | `crates/runtime/tests/live_claude.rs` |
 | Generated Rust | one `typify::import_types!` module per schema in `crates/<name>/src/generated/mod.rs`, reading `docs/schemas/<schema>.schema.json` | `crate::generated::task_contract` |
 | Fixtures | `crates/<name>/src/<module>/fixtures.rs` exporting builder functions, `pub` so other crates' tests can use them | `contract/fixtures.rs` exporting `a_contract_wire()` |
 | TypeScript source file | `kebab-case.ts`; one primary export per file, file named after it | `daemon-client.ts` exports `DaemonClient` |
@@ -115,7 +115,7 @@ Anything that leaves a process or is written to disk uses `snake_case` keys. Rus
 | Exit criterion id | `C<n>` within a contract | `C3` |
 | Role id | `snake_case`, matches the schema enum | `product_manager` |
 | Permission tier | `snake_case` | `write_workspace` |
-| Environment variable | `FARIK_` prefix, `UPPER_SNAKE_CASE` | `FARIK_DAILY_BUDGET_USD` |
+| Environment variable | `CATERVAS_` prefix, `UPPER_SNAKE_CASE` | `CATERVAS_DAILY_BUDGET_USD` |
 | Database table | `snake_case`, plural; singular when the table holds one row by construction | `events`, `task_projections`, `projection_cursor` |
 | Database column | `snake_case`; foreign keys `<entity>_id`; timestamps `<verb>_at` | `task_id`, `created_at` |
 | Database index | `<table>_by_<column>` | `events_by_task` |
@@ -131,8 +131,8 @@ Anything that leaves a process or is written to disk uses `snake_case` keys. Rus
 | Skill name in frontmatter | same as the directory | |
 | Agent display name | free text, chosen by the user | |
 | Agent id | `kebab-case` slug of the display name, unique within a team | `maya-chen` |
-| Team-wide file | under `.farik/team/` | `.farik/team/retro.md` |
-| Per-agent file | under `.farik/agents/<agent_id>/` | `.farik/agents/maya-chen/memory.md` |
+| Team-wide file | under `.catervas/team/` | `.catervas/team/retro.md` |
+| Per-agent file | under `.catervas/agents/<agent_id>/` | `.catervas/agents/maya-chen/memory.md` |
 
 ### Tests
 
@@ -148,7 +148,7 @@ Anything that leaves a process or is written to disk uses `snake_case` keys. Rus
 
 Prefer plain functions and data over structs with methods. A struct with methods is fine when it holds state with invariants (the orchestrator, a session); it is not fine as a namespace for functions. In TypeScript the same holds for classes.
 
-`crates/core` (`farik-core`) performs no input or output. No file system, no network, no clock, no randomness, no environment variables, no async runtime. Anything it needs from the world is passed in. This is what makes it exhaustively testable and what makes the governance layer auditable. `cargo xtask core-io` fails the check when `crates/core/src` mentions `std::fs`, `std::net`, `std::process`, `std::env`, `std::time::SystemTime`, `tokio`, or `rand`, and a pull request that adds any of them is rejected without discussion.
+`crates/core` (`catervas-core`) performs no input or output. No file system, no network, no clock, no randomness, no environment variables, no async runtime. Anything it needs from the world is passed in. This is what makes it exhaustively testable and what makes the governance layer auditable. `cargo xtask core-io` fails the check when `crates/core/src` mentions `std::fs`, `std::net`, `std::process`, `std::env`, `std::time::SystemTime`, `tokio`, or `rand`, and a pull request that adds any of them is rejected without discussion.
 
 Errors are values at crate and package boundaries. Inside a crate, a panic is fine for a programmer error (a violated invariant), and only there. Across crates, functions return `Result` with a named error type; across front-end packages, a `Result` value. The reason: the governor's refusals are normal outcomes that agents and the UI must handle, not exceptions.
 
@@ -164,7 +164,7 @@ Unit tests test one unit through its public interface. They do not reach into pr
 
 Every transition in the governor's table has at least one test that exercises it and one that exercises its refusal. This is a standing requirement, not a suggestion; the table in `docs/SPEC.md` section 5.2 is the checklist.
 
-Tests never depend on wall-clock time, on the network, or on execution order. Time is injected. Anything that talks to a model, in Farik's case the Claude Code program, is behind an adapter, and the adapter has a recorded-transcript fake for tests.
+Tests never depend on wall-clock time, on the network, or on execution order. Time is injected. Anything that talks to a model, in Catervas's case the Claude Code program, is behind an adapter, and the adapter has a recorded-transcript fake for tests.
 
 A failing test is never skipped, disabled, or quarantined to get green. It is fixed or, if it was wrong, deleted with a commit message that says why.
 
@@ -176,4 +176,4 @@ When behavior changes, `docs/SPEC.md` changes in the same pull request. The spec
 
 ## Things deliberately left open
 
-Locale-specific naming in the UI (avatar packs, office themes) will be decided with the design system in Milestone 1. Names for the hosted tier's cloud resources are planned in `farik-ops` (ADR 0047).
+Locale-specific naming in the UI (avatar packs, office themes) will be decided with the design system in Milestone 1. Names for the hosted tier's cloud resources are planned in `catervas-ops` (ADR 0047).

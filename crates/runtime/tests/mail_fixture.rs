@@ -9,8 +9,8 @@ mod greenmail;
 #[path = "support/ports.rs"]
 mod ports;
 
-use farik_runtime::claude::Secret;
-use farik_runtime::mailbox::{
+use catervas_runtime::claude::Secret;
+use catervas_runtime::mailbox::{
     Known, MailboxError, MailboxSettings, Outgoing, Provider, Security, Server, Trust, check_login,
     fetch_replies, send,
 };
@@ -192,7 +192,7 @@ const DANA: Account = Account {
     address: "sales@pieboxpros.test",
 };
 
-/// What Farik knows of the mail it sent: one message, `m1`, to Dana.
+/// What Catervas knows of the mail it sent: one message, `m1`, to Dana.
 fn known() -> Known {
     Known {
         address: BUYING.address.to_string(),
@@ -222,7 +222,7 @@ async fn connected(
     GreenMail,
     MailboxSettings,
     Trust,
-    farik_runtime::mailbox::Ledger,
+    catervas_runtime::mailbox::Ledger,
 ) {
     let fixture = GreenMail::start(test, &[&BUYING, &DANA]);
     let trust = Trust::Root(fixture.ca_der.clone());

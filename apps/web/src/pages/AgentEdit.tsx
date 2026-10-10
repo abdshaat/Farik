@@ -1,4 +1,11 @@
-import { Button, Choice, Dialog, InfoTip, Switch, TextField } from "@farik/ui";
+import {
+	Button,
+	Choice,
+	Dialog,
+	InfoTip,
+	Switch,
+	TextField,
+} from "@catervas/ui";
 import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -70,7 +77,7 @@ type Checked = {
 };
 
 /** Each tier, in the order the page lists them, with its words. */
-/** The kit connector whose running ads Farik pauses before it is removed (step 08g). */
+/** The kit connector whose running ads Catervas pauses before it is removed (step 08g). */
 const GOOGLE_ADS = "google-ads";
 
 const TIERS = [
@@ -259,7 +266,7 @@ function Editor({
 	};
 	const paused = saved.status === "paused";
 	const custom = (saved.mcpServers ?? []).filter((c) => c.source === "custom");
-	// What Farik offers this role, and the kit services this agent holds that it no longer offers.
+	// What Catervas offers this role, and the kit services this agent holds that it no longer offers.
 	const offered: KitService[] =
 		kits.find((kit) => kit.role === saved.role)?.connectors ?? [];
 	const heldFromKit = (saved.mcpServers ?? []).filter(
@@ -285,7 +292,7 @@ function Editor({
 		const kept = stateOf(server);
 		if (kept?.auth !== "oauth")
 			return t(removeBody[kept?.storedIn ?? "none"], { server, name });
-		// Who signed the agent in: Farik's own app by name, else the address's host, else (a
+		// Who signed the agent in: Catervas's own app by name, else the address's host, else (a
 		// connector with no web address) the connector's own name.
 		const url = (saved.mcpServers ?? []).find((c) => c.name === server)?.url;
 		const host = kept.provider ?? (hostOf(url) || server);
@@ -296,7 +303,7 @@ function Editor({
 				file ? "connectorRemoveSignedFile" : "connectorRemoveSignedKeychain",
 				{ host },
 			);
-		// Where Farik is removed at the service, as a link when the app knows the page.
+		// Where Catervas is removed at the service, as a link when the app knows the page.
 		const settings = t("connectorSettings", { host });
 		const [before = "", after = ""] = t(
 			file
@@ -320,7 +327,7 @@ function Editor({
 	const [adding, setAdding] = useState<{
 		again?: McpServer;
 		ended?: boolean;
-		/** Who ended the sign-in, when Farik's own app signed it in: the provider, not the address. */
+		/** Who ended the sign-in, when Catervas's own app signed it in: the provider, not the address. */
 		endedBy?: string;
 		kit?: KitService;
 	}>();
@@ -656,7 +663,7 @@ function Editor({
 						</>
 					}
 				>
-					{/* Google Ads holds ads that run at Google: Farik pauses them before it lets go. */}
+					{/* Google Ads holds ads that run at Google: Catervas pauses them before it lets go. */}
 					{removing === GOOGLE_ADS && <p>{t("connectorRemoveGoogleAds")}</p>}
 					<p>{removeWords(removing)}</p>
 					<p className={styles.muted}>
@@ -795,7 +802,7 @@ function CustomRow({
 	state: ConnectorState["state"] | undefined;
 	storedIn: ConnectorState["storedIn"];
 	auth: ConnectorState["auth"];
-	/** Farik's own app that signed the agent in, when one did. */
+	/** Catervas's own app that signed the agent in, when one did. */
 	provider: ConnectorState["provider"];
 	name: string;
 	onAgain: () => void;
@@ -893,7 +900,7 @@ function KitRow({
 	held: McpServer | undefined;
 	state: ConnectorState["state"] | undefined;
 	storedIn: ConnectorState["storedIn"];
-	/** Farik's own app that signed the agent in, when one did: it, not the service's title, signed it in. */
+	/** Catervas's own app that signed the agent in, when one did: it, not the service's title, signed it in. */
 	provider: ConnectorState["provider"];
 	name: string;
 	/** What the agent has made of this service's spending tools this period. */

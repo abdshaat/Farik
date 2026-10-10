@@ -1,11 +1,11 @@
-import { Button, Dialog } from "@farik/ui";
+import { Button, Dialog } from "@catervas/ui";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
 import { type SkillShipped, useSkillFolder } from "../skills.ts";
 import { inOrder } from "./FileFrame.tsx";
 
 /**
- * A skill that comes with a role, read-only (spec 6.7). Farik ships it, pinned in the program,
+ * A skill that comes with a role, read-only (spec 6.7). Catervas ships it, pinned in the program,
  * so its text is shown as written and not in an `untrusted` frame.
  */
 export function SkillRead({

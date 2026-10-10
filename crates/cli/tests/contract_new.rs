@@ -1,4 +1,4 @@
-//! `farik contract new` (`docs/SPEC.md` 5.13): a request filed from a brief, its contract written
+//! `catervas contract new` (`docs/SPEC.md` 5.13): a request filed from a brief, its contract written
 //! with the Product Manager, and its questions asked at the terminal, driven by the recorded
 //! adapter through the harness's engine.
 //!
@@ -14,15 +14,15 @@ use std::io::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use farik::{Engine, Interrupts};
-use farik_protocol::command::{Command, RequestSize};
-use farik_protocol::event::{EventBody, EventKind};
-use farik_runtime::recorded::fixtures::{
+use catervas::{Engine, Interrupts};
+use catervas_protocol::command::{Command, RequestSize};
+use catervas_protocol::event::{EventBody, EventKind};
+use catervas_runtime::recorded::fixtures::{
     refine_asks_frk_1, refine_writes_epic_frk_1, refine_writes_task_frk_1, tool_runner,
     triage_frk_1_large,
 };
-use farik_runtime::{RecordedAdapter, RuntimeAdapter, Transcript};
-use farik_store::git::fixtures::TempRepo;
+use catervas_runtime::{RecordedAdapter, RuntimeAdapter, Transcript};
+use catervas_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
 use project::{
@@ -32,7 +32,7 @@ use project::{
 
 const BRIEF: &str = "Add done.txt and a check that it exists.";
 
-/// An engine replaying `transcripts`, whose Farik tool calls the driving process's daemon answers.
+/// An engine replaying `transcripts`, whose Catervas tool calls the driving process's daemon answers.
 fn recorded(transcripts: Vec<Transcript>) -> Engine {
     Engine::Given(Arc::new(move |daemon| {
         let adapter: Arc<dyn RuntimeAdapter> = Arc::new(RecordedAdapter::with_tools(
@@ -43,7 +43,7 @@ fn recorded(transcripts: Vec<Transcript>) -> Engine {
     }))
 }
 
-/// `farik contract new <args>` with `transcripts` and `stdin`.
+/// `catervas contract new <args>` with `transcripts` and `stdin`.
 fn contract_new(
     repository: &TempRepo,
     args: &[&str],
@@ -176,7 +176,7 @@ fn asks_its_questions_at_the_terminal() {
     assert_eq!(ran.out.matches("answer> ").count(), 2, "{}", ran.out);
     // The blank line is asked again, not sent as an answer for handle to refuse.
     assert!(
-        !ran.err.lines().any(|line| line.starts_with("farik: ")),
+        !ran.err.lines().any(|line| line.starts_with("catervas: ")),
         "{}",
         ran.err
     );
@@ -220,7 +220,7 @@ fn leaves_the_question_open_when_input_ends() {
     let n = question_seq(&repository);
     assert!(
         ran.out
-            .contains(&format!("the question stays open: farik answer {n}")),
+            .contains(&format!("the question stays open: catervas answer {n}")),
         "{}",
         ran.out
     );
@@ -255,7 +255,7 @@ fn ends_at_the_prompt_on_an_interrupt() {
     let n = question_seq(&repository);
     assert!(
         ran.out
-            .contains(&format!("the question stays open: farik answer {n}")),
+            .contains(&format!("the question stays open: catervas answer {n}")),
         "{}",
         ran.out
     );
@@ -339,7 +339,7 @@ fn locks_only_a_contract_the_product_manager_wrote() {
     assert!(!contract.locked);
     assert!(
         ran.out.contains(
-            "not locked: the Product Manager has written no contract for FRK-1 yet: run farik \
+            "not locked: the Product Manager has written no contract for FRK-1 yet: run catervas \
              contract lock FRK-1 once it has"
         ),
         "{}",
@@ -351,8 +351,13 @@ fn locks_only_a_contract_the_product_manager_wrote() {
 /// the run lock free.
 fn nothing_filed(repository: &TempRepo, before: usize) {
     assert_eq!(events(repository, &[]).len(), before);
-    assert!(!repository.path.join(".farik/contracts/FRK-1.yaml").exists());
-    assert!(!repository.path.join(".farik/local/daemon.json").exists());
+    assert!(
+        !repository
+            .path
+            .join(".catervas/contracts/FRK-1.yaml")
+            .exists()
+    );
+    assert!(!repository.path.join(".catervas/local/daemon.json").exists());
     the_run_lock_frees(repository);
 }
 
@@ -396,13 +401,13 @@ fn files_nothing_when_the_start_refuses() {
     let repository = a_team("new-start-refused-prices");
     let before = events(&repository, &[]).len();
     std::fs::write(
-        repository.path.join(".farik/prices.json"),
+        repository.path.join(".catervas/prices.json"),
         "{\"version\": 2}",
     )
     .expect("the override is written");
     let ran = contract_new(&repository, &["--brief", BRIEF], Vec::new(), "");
     assert_eq!(ran.code, 1, "{}", ran.out);
-    assert!(ran.err.contains(".farik/prices.json"), "{}", ran.err);
+    assert!(ran.err.contains(".catervas/prices.json"), "{}", ran.err);
     nothing_filed(&repository, before);
 }
 
@@ -445,8 +450,13 @@ fn refuses_a_brief_too_short_to_be_an_intent() {
 
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert_eq!(events(&repository, &[]).len(), before);
-    assert!(!repository.path.join(".farik/contracts/FRK-1.yaml").exists());
-    assert!(!repository.path.join(".farik/local/daemon.json").exists());
+    assert!(
+        !repository
+            .path
+            .join(".catervas/contracts/FRK-1.yaml")
+            .exists()
+    );
+    assert!(!repository.path.join(".catervas/local/daemon.json").exists());
 }
 
 #[test]
@@ -463,7 +473,12 @@ fn hands_the_request_to_the_driving_process() {
     );
 
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
-    assert!(repository.path.join(".farik/contracts/FRK-1.yaml").exists());
+    assert!(
+        repository
+            .path
+            .join(".catervas/contracts/FRK-1.yaml")
+            .exists()
+    );
     assert!(matches!(
         driver.commands().as_slice(),
         [Command::RequestTriage { task_id, size: RequestSize::Large, .. }]
@@ -477,5 +492,10 @@ fn hands_the_request_to_the_driving_process() {
     let ran = contract_new(&repository, &["--brief", BRIEF, "--lock"], Vec::new(), "");
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert_eq!(events(&repository, &[]).len(), before);
-    assert!(!repository.path.join(".farik/contracts/FRK-2.yaml").exists());
+    assert!(
+        !repository
+            .path
+            .join(".catervas/contracts/FRK-2.yaml")
+            .exists()
+    );
 }

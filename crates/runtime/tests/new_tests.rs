@@ -8,15 +8,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use farik_core::contract::fixtures::a_contract_wire;
-use farik_core::contract::{TaskId, validate_contract};
-use farik_core::governor::done::RunBy;
-use farik_runtime::criteria::{
+use catervas_core::contract::fixtures::a_contract_wire;
+use catervas_core::contract::{TaskId, validate_contract};
+use catervas_core::governor::done::RunBy;
+use catervas_runtime::criteria::{
     CriterionError, CriterionOutcome, NewTestsInput, check_new_tests, run_criteria,
 };
-use farik_runtime::{HostSandbox, HostSandboxFactory, Sandbox, SandboxError, SandboxFactory};
-use farik_store::Git;
-use farik_store::git::fixtures::TempRepo;
+use catervas_runtime::{HostSandbox, HostSandboxFactory, Sandbox, SandboxError, SandboxFactory};
+use catervas_store::Git;
+use catervas_store::git::fixtures::TempRepo;
 use serde_json::json;
 
 const COMMAND: &str = "sh run_tests.sh";
@@ -57,7 +57,7 @@ fn input<'a>(
 }
 
 fn base_worktree(repository: &TempRepo) -> PathBuf {
-    repository.path.join(".farik/local/worktrees/FRK-1-base")
+    repository.path.join(".catervas/local/worktrees/FRK-1-base")
 }
 
 fn assert_base_gone(repository: &TempRepo) {

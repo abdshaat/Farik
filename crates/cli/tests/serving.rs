@@ -1,5 +1,5 @@
-//! `farik serve` (`docs/SPEC.md` 8.1): the process that keeps driving when the board is idle,
-//! remembers its project, and ends as `farik run` does. Driven by the recorded adapter through
+//! `catervas serve` (`docs/SPEC.md` 8.1): the process that keeps driving when the board is idle,
+//! remembers its project, and ends as `catervas run` does. Driven by the recorded adapter through
 //! the harness's engine.
 //!
 //! Every test here passes a port the operating system assigned, never 7420, because tests run in
@@ -18,13 +18,13 @@ use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use catervas_core::governor::gates::DesignerBrowser;
+use catervas_protocol::clock::FixedClock;
+use catervas_protocol::event::{EventBody, EventKind};
+use catervas_runtime::recorded::fixtures::{refine_asks_frk_1, triage_frk_1_large};
+use catervas_runtime::sleep::Sleeper;
+use catervas_store::git::fixtures::TempRepo;
 use chrono::{DateTime, Utc};
-use farik_core::governor::gates::DesignerBrowser;
-use farik_protocol::clock::FixedClock;
-use farik_protocol::event::{EventBody, EventKind};
-use farik_runtime::recorded::fixtures::{refine_asks_frk_1, triage_frk_1_large};
-use farik_runtime::sleep::Sleeper;
-use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 use tokio::sync::Semaphore;
 
@@ -41,7 +41,7 @@ fn free_port() -> String {
 }
 
 fn daemon_file(repository: &TempRepo) -> std::path::PathBuf {
-    repository.path.join(".farik/local/daemon.json")
+    repository.path.join(".catervas/local/daemon.json")
 }
 
 /// Waits until `done` is true, and fails the test rather than hang when it is not within 30 s.
@@ -100,7 +100,7 @@ impl Sleeper for GatedSleeper {
     }
 }
 
-/// `farik serve --port <port>` in `root` on a thread, on an engine with no transcripts.
+/// `catervas serve --port <port>` in `root` on a thread, on an engine with no transcripts.
 fn serving(root: &Path, port: &str, env: Vec<(&str, String)>) -> std::thread::JoinHandle<Ran> {
     let root = root.to_path_buf();
     let port = port.to_string();
@@ -119,15 +119,18 @@ fn remembers_the_project_it_serves() {
     let repository = a_team("serve-remembers");
     let state = scratch("serve-state");
     // A state folder already there with a looser mode is tightened.
-    std::fs::create_dir_all(state.join("farik")).expect("the folder is made");
-    std::fs::set_permissions(state.join("farik"), std::fs::Permissions::from_mode(0o755))
-        .expect("the mode is set");
+    std::fs::create_dir_all(state.join("catervas")).expect("the folder is made");
+    std::fs::set_permissions(
+        state.join("catervas"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .expect("the mode is set");
     let serving = serving(
         &repository.path,
         &free_port(),
         vec![("XDG_CONFIG_HOME", state.display().to_string())],
     );
-    let file = state.join("farik/state.json");
+    let file = state.join("catervas/state.json");
     until("state.json is written", || file.exists());
 
     let mode = |path: &Path| {
@@ -137,7 +140,7 @@ fn remembers_the_project_it_serves() {
             .mode()
             & 0o777
     };
-    assert_eq!(mode(&state.join("farik")), 0o700);
+    assert_eq!(mode(&state.join("catervas")), 0o700);
     assert_eq!(mode(&file), 0o600);
     let written: Value =
         serde_json::from_str(&std::fs::read_to_string(&file).expect("state.json reads"))
@@ -166,7 +169,7 @@ fn writes_no_state_before_the_driver_starts() {
             .insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
     });
     assert_eq!(ran.code, 1, "{}\n{}", ran.out, ran.err);
-    assert!(!state.join("farik/state.json").exists(), "{}", ran.err);
+    assert!(!state.join("catervas/state.json").exists(), "{}", ran.err);
 }
 
 #[test]
@@ -263,7 +266,7 @@ fn waits_on_the_injected_clock_when_idle() {
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
 }
 
-/// A campaign Farik made for a plan, recorded in the project's log: the watch on the ad spend has
+/// A campaign Catervas made for a plan, recorded in the project's log: the watch on the ad spend has
 /// something to look at once it is there.
 fn a_campaign_was_made(repository: &TempRepo) {
     record(
@@ -317,7 +320,7 @@ fn watches_the_ad_spend_beside_its_ticks() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn stops_on_farik_stop() {
+fn stops_on_catervas_stop() {
     let repository = a_team("serve-stop");
     let serving = serving(&repository.path, &free_port(), Vec::new());
     until("the daemon is up", || daemon_file(&repository).exists());
@@ -350,7 +353,7 @@ fn links(text: &str) -> Vec<(u16, String)> {
     text.lines().filter_map(link_of).collect()
 }
 
-/// `farik serve` on a thread, printing into `out`.
+/// `catervas serve` on a thread, printing into `out`.
 fn serving_into(root: &Path, out: &SharedOut) -> std::thread::JoinHandle<Ran> {
     let root = root.to_path_buf();
     let port = free_port();
@@ -494,7 +497,7 @@ fn serve_status_has_no_credential_under_a_given_engine() {
     );
 }
 
-/// What `team.get` says `sandboxed` is while `farik serve` runs in `repository`.
+/// What `team.get` says `sandboxed` is while `catervas serve` runs in `repository`.
 fn sandboxed_while_serving(repository: &TempRepo) -> Value {
     let out = SharedOut::default();
     let serving = serving_into(&repository.path, &out);
@@ -524,7 +527,7 @@ fn tells_the_page_whether_it_runs_in_the_sandbox_by_the_setting() {
 
     let sandboxed = a_team("serve-sandboxed-docker");
     std::fs::write(
-        sandboxed.path.join(".farik/local/settings.json"),
+        sandboxed.path.join(".catervas/local/settings.json"),
         r#"{"sandbox":"docker"}"#,
     )
     .expect("the settings are written");
@@ -536,16 +539,16 @@ fn tells_the_page_whether_it_runs_in_the_sandbox_by_the_setting() {
 /// reconnects can ask it anything.
 fn told_at_listen<T: Send + 'static>(
     test: &str,
-    ask: impl Fn(&farik_runtime::tools::ToolContext) -> T + Send + Sync + 'static,
+    ask: impl Fn(&catervas_runtime::tools::ToolContext) -> T + Send + Sync + 'static,
 ) -> T {
-    use farik::Engine;
-    use farik_core::budget::DEFAULT_SESSION_LIMITS;
-    use farik_runtime::SessionPurpose;
-    use farik_runtime::daemon::SessionRegistration;
+    use catervas::Engine;
+    use catervas_core::budget::DEFAULT_SESSION_LIMITS;
+    use catervas_runtime::SessionPurpose;
+    use catervas_runtime::daemon::SessionRegistration;
 
     let repository = a_team(test);
     std::fs::write(
-        repository.path.join(".farik/local/settings.json"),
+        repository.path.join(".catervas/local/settings.json"),
         r#"{"sandbox":"docker"}"#,
     )
     .expect("the settings are written");
@@ -563,7 +566,7 @@ fn told_at_listen<T: Send + 'static>(
                 // then is what a page asked first would be told.
                 daemon.register_session(SessionRegistration {
                     session_id: "probe".to_string(),
-                    web: farik_core::governor::sites::WebAccess::Open,
+                    web: catervas_core::governor::sites::WebAccess::Open,
                     agent_id: "probe".to_string(),
                     task_id: None,
                     purpose: SessionPurpose::Triage,
@@ -574,7 +577,7 @@ fn told_at_listen<T: Send + 'static>(
                     cwd: std::path::PathBuf::new(),
                     executor: None,
                     limits: DEFAULT_SESSION_LIMITS,
-                    farik_tools: Vec::new(),
+                    catervas_tools: Vec::new(),
                     tiers: Vec::new(),
                     connectors: Vec::new(),
                     preview: None,
@@ -623,7 +626,7 @@ fn knows_what_runs_previews_from_the_moment_it_listens() {
     assert_eq!(browser, DesignerBrowser::NoPreview);
 }
 
-/// `farik serve <extra>` on a thread whose opener records what it is asked to open, and answers
+/// `catervas serve <extra>` on a thread whose opener records what it is asked to open, and answers
 /// `opened`.
 fn serving_opening(
     root: &Path,
@@ -721,7 +724,7 @@ fn the_e2e_binary_serves_with_recorded_sessions() {
 
     let repository = a_team("serve-e2e");
     let port = free_port();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_farik-e2e-serve"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_catervas-e2e-serve"))
         .args(["--port", &port])
         .current_dir(&repository.path)
         .stdout(Stdio::piped())
@@ -758,7 +761,7 @@ fn answers_the_setup_page_while_docker_info_hangs() {
     use std::io::{BufRead as _, BufReader};
     use std::process::{Command, Stdio};
 
-    // A `docker` whose `info` never answers by itself: Farik gives it 10 seconds.
+    // A `docker` whose `info` never answers by itself: Catervas gives it 10 seconds.
     let directory = scratch("serve-docker-hangs-bin");
     let source = directory.join("docker.txt");
     std::fs::write(
@@ -782,14 +785,19 @@ fn answers_the_setup_page_while_docker_info_hangs() {
     );
     let repository = a_team("serve-docker-hangs");
     std::fs::write(
-        repository.path.join(".farik/local/settings.json"),
+        repository.path.join(".catervas/local/settings.json"),
         r#"{"sandbox":"docker"}"#,
     )
     .expect("the settings are written");
 
     let port = free_port();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_farik-e2e-serve"))
-        .args(["--port", &port, "--sandbox-image", "farik-sandbox-unused"])
+    let mut child = Command::new(env!("CARGO_BIN_EXE_catervas-e2e-serve"))
+        .args([
+            "--port",
+            &port,
+            "--sandbox-image",
+            "catervas-sandbox-unused",
+        ])
         .env("PATH", path)
         .current_dir(&repository.path)
         .stdout(Stdio::piped())
@@ -865,7 +873,7 @@ fn cookie_set(answer: &str) -> Option<String> {
                     .to_string()
             })
             .filter(|pair| {
-                pair.starts_with("farik_session=") && pair.len() > "farik_session=".len()
+                pair.starts_with("catervas_session=") && pair.len() > "catervas_session=".len()
             })
     })
 }
@@ -880,7 +888,7 @@ fn admits_a_local_browser_without_a_code_in_preview_mode() {
     // Run outside any project: `--preview` makes its own.
     let folder = scratch("serve-preview");
     let port = free_port();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_farik-e2e-serve"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_catervas-e2e-serve"))
         .args(["--preview", "--port", &port])
         .current_dir(&folder)
         .stdout(Stdio::piped())
@@ -899,8 +907,8 @@ fn admits_a_local_browser_without_a_code_in_preview_mode() {
     // plan in sprints, so a request filed in it flows without one.
     let team = std::fs::read_to_string(
         std::env::temp_dir()
-            .join(format!("farik-git-preview-{}-ThreadId(1)", child.id()))
-            .join(".farik/team.yaml"),
+            .join(format!("catervas-git-preview-{}-ThreadId(1)", child.id()))
+            .join(".catervas/team.yaml"),
     )
     .unwrap_or_default();
     let admitted = get_as(port, &format!("localhost:{port}"), "/", None);
@@ -1086,7 +1094,7 @@ fn call_then_closed(port: u16, cookie: &str, method: &str, params: Value) -> (Va
     })
 }
 
-/// `farik serve` in setup mode or not, on a thread, with its link traded for a cookie.
+/// `catervas serve` in setup mode or not, on a thread, with its link traded for a cookie.
 struct Serving {
     out: SharedOut,
     err: SharedOut,
@@ -1096,7 +1104,7 @@ struct Serving {
     cookie: String,
 }
 
-/// `farik serve` in `cwd`, with `PATH`, `HOME` at `home`, the state folder at `state`, an API key
+/// `catervas serve` in `cwd`, with `PATH`, `HOME` at `home`, the state folder at `state`, an API key
 /// in the environment, and interrupts the test sends.
 fn serving_setup(cwd: &Path, home: &Path, state: &Path) -> Serving {
     let mut env = setup_env(home, state);
@@ -1115,7 +1123,7 @@ fn setup_env(home: &Path, state: &Path) -> std::collections::BTreeMap<String, St
     env
 }
 
-/// `farik serve` in `cwd` with `env` alone, on the recorded engine when `recorded_engine`, else on
+/// `catervas serve` in `cwd` with `env` alone, on the recorded engine when `recorded_engine`, else on
 /// Claude Code's, with interrupts the test sends.
 fn serving_in(
     cwd: &Path,
@@ -1134,7 +1142,7 @@ fn serving_in(
             io.env = env;
             io.stdout = Box::new(shared_out);
             io.stderr = Box::new(shared_err);
-            io.interrupts = farik::Interrupts::Channel(interrupts);
+            io.interrupts = catervas::Interrupts::Channel(interrupts);
         })
     });
     until("the link is printed", || {
@@ -1188,7 +1196,10 @@ fn serves_setup_outside_a_project() {
     let (ran, out, err) = serving.interrupted();
     assert_eq!(status["project_root"], Value::Null, "{status}");
     assert_eq!(ran.code, 130, "{out}\n{err}");
-    assert!(!cwd.join(".farik").exists(), "no daemon.json, nor anything");
+    assert!(
+        !cwd.join(".catervas").exists(),
+        "no daemon.json, nor anything"
+    );
 }
 
 #[test]
@@ -1196,10 +1207,10 @@ fn serves_setup_outside_a_project() {
 fn reopens_the_last_project() {
     let repository = a_team("setup-reopens");
     let (cwd, state) = setup_folders("setup-reopens");
-    std::fs::create_dir_all(state.join("farik")).expect("the folder");
+    std::fs::create_dir_all(state.join("catervas")).expect("the folder");
     let root = repository.path.canonicalize().expect("the root");
     std::fs::write(
-        state.join("farik/state.json"),
+        state.join("catervas/state.json"),
         json!({ "last_project": root.display().to_string() }).to_string(),
     )
     .expect("state.json");
@@ -1250,7 +1261,7 @@ fn creates_a_project_paused_with_its_first_request() {
         "{made}"
     );
     until("the team is driven", || {
-        root.join(".farik/local/daemon.json").exists()
+        root.join(".catervas/local/daemon.json").exists()
     });
     let (ran, out, err) = serving.interrupted();
     assert_eq!(ran.code, 130, "{out}\n{err}");
@@ -1258,18 +1269,19 @@ fn creates_a_project_paused_with_its_first_request() {
     assert!(root.join(".git").is_dir());
     let readme = std::fs::read_to_string(root.join("README.md")).expect("a README");
     assert!(readme.contains(description), "{readme}");
-    assert!(root.join(".farik/team.yaml").is_file());
-    assert!(root.join(".farik/local/setup-pending").is_file());
-    let log = farik_store::open_event_log(&root.join(".farik/local/farik.db"), project::at())
-        .expect("the log opens");
+    assert!(root.join(".catervas/team.yaml").is_file());
+    assert!(root.join(".catervas/local/setup-pending").is_file());
+    let log =
+        catervas_store::open_event_log(&root.join(".catervas/local/catervas.db"), project::at())
+            .expect("the log opens");
     let paused = log
-        .read(&farik_store::EventQuery {
+        .read(&catervas_store::EventQuery {
             kinds: vec![EventKind::TeamPaused],
-            ..farik_store::EventQuery::default()
+            ..catervas_store::EventQuery::default()
         })
         .expect("the log reads");
     assert_eq!(paused.len(), 1);
-    let contract = farik_store::files::ProjectFiles::open(root.clone())
+    let contract = catervas_store::files::ProjectFiles::open(root.clone())
         .read_contract(&"FRK-1".parse().expect("an id"))
         .expect("the first request is filed");
     assert_eq!(contract.intent.as_str(), description);
@@ -1297,7 +1309,7 @@ fn takes_on_the_chosen_project_on_the_same_port() {
     );
     assert!(closed, "the setup daemon closes the socket");
     until("the team is driven", || {
-        root.join(".farik/local/daemon.json").exists()
+        root.join(".catervas/local/daemon.json").exists()
     });
     let status = serve_status(serving.port, &serving.cookie);
     let stopped = run(&root, &["stop"]);
@@ -1319,7 +1331,7 @@ fn takes_on_the_chosen_project_on_the_same_port() {
         serving.out.text()
     );
     let written: Value = serde_json::from_str(
-        &std::fs::read_to_string(state.join("farik/state.json")).expect("state.json"),
+        &std::fs::read_to_string(state.join("catervas/state.json")).expect("state.json"),
     )
     .expect("JSON");
     assert_eq!(written["last_project"], json!(root.display().to_string()));
@@ -1345,10 +1357,10 @@ fn stays_in_setup_when_the_project_is_busy() {
     assert_eq!(refused["error"]["code"], -32005, "{refused}");
     assert_eq!(
         refused["error"]["message"],
-        "another farik is already running this project"
+        "another catervas is already running this project"
     );
     assert_eq!(status["project_root"], Value::Null, "{status}");
-    assert!(!state.join("farik/state.json").exists());
+    assert!(!state.join("catervas/state.json").exists());
     assert_eq!(ran.code, 130, "{out}\n{err}");
 }
 
@@ -1356,7 +1368,7 @@ fn stays_in_setup_when_the_project_is_busy() {
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn goes_back_to_setup_when_the_driver_cannot_start() {
     let repository = a_team("setup-cannot-start");
-    std::fs::write(repository.path.join(".farik/prices.json"), "not JSON").expect("written");
+    std::fs::write(repository.path.join(".catervas/prices.json"), "not JSON").expect("written");
     let home = repository.path.parent().expect("a parent").to_path_buf();
     let (cwd, state) = setup_folders("setup-cannot-start");
     let serving = serving_setup(&cwd, &home, &state);
@@ -1386,7 +1398,7 @@ fn goes_back_to_setup_when_the_driver_cannot_start() {
             .is_some_and(|why| why.contains("prices.json")),
         "{status}"
     );
-    assert!(!state.join("farik/state.json").exists());
+    assert!(!state.join("catervas/state.json").exists());
     // Serve never lets its port go, so nothing else can take it: setup is back on the port the
     // browser's tab is on, with no second link.
     assert!(
@@ -1444,7 +1456,7 @@ fn writes_no_sandbox_into_the_project() {
     let (ran, out, err) = serving.interrupted();
     assert_eq!(ran.code, 130, "{out}\n{err}");
     let settings: Value = serde_json::from_str(
-        &std::fs::read_to_string(repository.path.join(".farik/local/settings.json"))
+        &std::fs::read_to_string(repository.path.join(".catervas/local/settings.json"))
             .expect("settings.json"),
     )
     .expect("JSON");
@@ -1459,9 +1471,9 @@ fn refuses_paths_outside_home_and_bad_names() {
     let home = scratch("setup-guards-home");
     let shop = home.join("shop");
     std::fs::create_dir_all(shop.join("src")).expect("the folders");
-    farik_store::git::fixtures::git_in(&shop, &["init", "-b", "main"]);
-    // Home a git project itself, as some keep their dotfiles: Farik's settings would be in it.
-    farik_store::git::fixtures::git_in(&home, &["init", "-b", "main"]);
+    catervas_store::git::fixtures::git_in(&shop, &["init", "-b", "main"]);
+    // Home a git project itself, as some keep their dotfiles: Catervas's settings would be in it.
+    catervas_store::git::fixtures::git_in(&home, &["init", "-b", "main"]);
     // No credential kept, and none in the environment.
     let serving = serving_in(&cwd, setup_env(&home, &state), true);
     let description = "A shop for bread, with an order page and a daily menu.";
@@ -1524,9 +1536,9 @@ fn refuses_paths_outside_home_and_bad_names() {
             .join(&escaped[3..])
             .exists()
     );
-    assert!(!shop.join(".farik/team.yaml").exists());
-    assert!(!home.join(".farik").exists());
-    assert!(!state.join("farik/state.json").exists());
+    assert!(!shop.join(".catervas/team.yaml").exists());
+    assert!(!home.join(".catervas").exists());
+    assert!(!state.join("catervas/state.json").exists());
     assert_eq!(ran.code, 130, "{out}\n{err}");
 }
 
@@ -1578,7 +1590,7 @@ fn connecting_the_account_takes_the_waiting_project_on() {
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn keeps_waiting_on_the_project_after_a_failed_take_on() {
     let repository = a_team("setup-waits-again");
-    std::fs::write(repository.path.join(".farik/prices.json"), "not JSON").expect("written");
+    std::fs::write(repository.path.join(".catervas/prices.json"), "not JSON").expect("written");
     let (_home, state) = setup_folders("setup-waits-again");
     let (_claude, path) = project::a_claude_saying("setup-waits-claude", "2.1.300 (Claude Code)");
     let mut env = setup_env(&repository.path, &state);
@@ -1642,11 +1654,11 @@ impl Prober {
     }
 }
 
-/// The web app's Connect lists Farik's own connector by starting the program the process was
+/// The web app's Connect lists Catervas's own connector by starting the program the process was
 /// found at (ADR 0038).
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn connector_tools_runs_farik_s_own_connector() {
+fn connector_tools_runs_catervas_s_own_connector() {
     use futures_util::{SinkExt as _, StreamExt as _};
     use tokio_tungstenite::tungstenite::Message;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
@@ -1660,7 +1672,7 @@ fn connector_tools_runs_farik_s_own_connector() {
         run_with(&root, &["serve", "--port", &port_to_use], |io| {
             io.engine = recorded(Vec::new());
             io.stdout = Box::new(shared);
-            io.own_program = Some(std::path::PathBuf::from(env!("CARGO_BIN_EXE_farik")));
+            io.own_program = Some(std::path::PathBuf::from(env!("CARGO_BIN_EXE_catervas")));
             io.env
                 .insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
         })
@@ -1691,7 +1703,7 @@ fn connector_tools_runs_farik_s_own_connector() {
         let asked = json!({
             "jsonrpc": "2.0", "id": 1, "method": "connector.tools",
             "params": { "agent": "dev-a", "server": {
-                "name": "osv", "transport": "stdio", "command": "farik",
+                "name": "osv", "transport": "stdio", "command": "catervas",
                 "args": ["connector", "osv"], "credential_keys": []
             } }
         });

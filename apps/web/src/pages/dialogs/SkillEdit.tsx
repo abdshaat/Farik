@@ -1,4 +1,4 @@
-import { Button, Choice, Dialog, TextArea, TextField } from "@farik/ui";
+import { Button, Choice, Dialog, TextArea, TextField } from "@catervas/ui";
 import { useRef, useState } from "react";
 import { useConnection } from "../../app/connection.tsx";
 import { said } from "../../app/refusals.ts";
@@ -28,7 +28,7 @@ function fieldsOf(file: string) {
 	}
 }
 
-/** The frontmatter keys of `file`, other than `name` and `description`, which Farik drops. */
+/** The frontmatter keys of `file`, other than `name` and `description`, which Catervas drops. */
 function ignoredIn(file: string): string[] {
 	const head = /^---\n([\s\S]*?)\n---(\n|$)/.exec(file)?.[1] ?? "";
 	return [...head.matchAll(/^([A-Za-z][\w-]*):/gm)]
@@ -196,7 +196,7 @@ export function SkillEdit({
 					{replaces && (
 						<p>
 							<strong>
-								{t(ours ? "skillReplaces" : "skillReplacesFarik", {
+								{t(ours ? "skillReplaces" : "skillReplacesCatervas", {
 									role,
 									skill: named,
 									whom,

@@ -17,13 +17,13 @@ content alone fills the window, rather than a rail beside it too wide for a phon
 }
 
 /* On a phone the places are a sticky bar at the bottom, as tall as it says here, so that a page's
-own sticky bar can rest above it: `bottom: var(--farik-shell-bar-height, 0)`. Its padding twice,
+own sticky bar can rest above it: `bottom: var(--catervas-shell-bar-height, 0)`. Its padding twice,
 each place's twice, and one line of text. */
 .narrow {
-	--farik-shell-bar-height: calc(
-		var(--farik-space-2) *
+	--catervas-shell-bar-height: calc(
+		var(--catervas-space-2) *
 		4 +
-		var(--farik-type-body-line-height)
+		var(--catervas-type-body-line-height)
 	);
 	display: grid;
 	grid-template-rows: auto 1fr auto;
@@ -37,18 +37,18 @@ each place's twice, and one line of text. */
 	box-sizing: border-box;
 	display: flex;
 	flex-direction: column;
-	gap: var(--farik-space-1);
-	padding: var(--farik-space-4) var(--farik-space-3);
-	background: var(--farik-color-band);
-	color: var(--farik-color-band-ink);
+	gap: var(--catervas-space-1);
+	padding: var(--catervas-space-4) var(--catervas-space-3);
+	background: var(--catervas-color-band);
+	color: var(--catervas-color-band-ink);
 }
 
 .logo {
 	display: flex;
 	align-items: center;
-	gap: var(--farik-space-2);
-	margin: 0 var(--farik-space-2) var(--farik-space-4);
-	font: 600 13px / 18px var(--farik-type-code-family);
+	gap: var(--catervas-space-2);
+	margin: 0 var(--catervas-space-2) var(--catervas-space-4);
+	font: 600 13px / 18px var(--catervas-type-code-family);
 	letter-spacing: 0.12em;
 	text-transform: uppercase;
 }
@@ -59,35 +59,39 @@ each place's twice, and one line of text. */
 	padding: 0;
 	display: flex;
 	flex-direction: column;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 }
 
 .places a {
 	display: block;
-	padding: var(--farik-space-2);
-	border-radius: var(--farik-radius-control);
-	color: var(--farik-color-band-ink);
+	padding: var(--catervas-space-2);
+	border-radius: var(--catervas-radius-control);
+	color: var(--catervas-color-band-ink);
 	text-decoration: none;
 }
 
 .places a[aria-current="page"] {
 	background: color-mix(
 		in srgb,
-		var(--farik-color-band-ink) 12%,
-		var(--farik-color-band)
+		var(--catervas-color-band-ink) 12%,
+		var(--catervas-color-band)
 	);
 }
 
 .foot {
 	margin-top: auto;
 	display: grid;
-	gap: var(--farik-space-2);
-	padding: var(--farik-space-3) var(--farik-space-2) 0;
+	gap: var(--catervas-space-2);
+	padding: var(--catervas-space-3) var(--catervas-space-2) 0;
 	border-top: 1px solid
-		color-mix(in srgb, var(--farik-color-band-ink) 20%, var(--farik-color-band));
+		color-mix(
+			in srgb,
+			var(--catervas-color-band-ink) 20%,
+			var(--catervas-color-band)
+		);
 	font:
-		var(--farik-type-small-weight) var(--farik-type-small-size) /
-		var(--farik-type-small-line-height) var(--farik-type-small-family);
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
 }
 
 .foot p,
@@ -97,7 +101,7 @@ each place's twice, and one line of text. */
 
 .conn {
 	display: flex;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	align-items: center;
 }
 
@@ -105,7 +109,7 @@ each place's twice, and one line of text. */
 	width: 8px;
 	height: 8px;
 	border-radius: 50%;
-	background: var(--farik-color-status-done);
+	background: var(--catervas-color-status-done);
 }
 
 /* While connected the dot breathes, one slow 3 s cycle from the calm done green to halfway
@@ -119,8 +123,8 @@ It holds the calm green under reduced motion. */
 	50% {
 		background: color-mix(
 			in srgb,
-			var(--farik-color-status-done),
-			var(--farik-color-ready)
+			var(--catervas-color-status-done),
+			var(--catervas-color-ready)
 		);
 	}
 }
@@ -135,13 +139,13 @@ It holds the calm green under reduced motion. */
 .pause,
 .resume {
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }
 
 .pause button,
 .resume button {
 	white-space: nowrap;
-	padding-inline: var(--farik-space-3);
+	padding-inline: var(--catervas-space-3);
 }
 
 .pause button {
@@ -153,9 +157,9 @@ It holds the calm green under reduced motion. */
 }
 
 .resume button {
-	background: var(--farik-color-band-ink);
-	color: var(--farik-color-band);
-	border-color: var(--farik-color-band-ink);
+	background: var(--catervas-color-band-ink);
+	color: var(--catervas-color-band);
+	border-color: var(--catervas-color-band-ink);
 	font-weight: 600;
 	text-align: left;
 }
@@ -164,47 +168,47 @@ It holds the calm green under reduced motion. */
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	gap: var(--farik-space-3);
-	padding: var(--farik-space-3) var(--farik-space-4);
-	border-bottom: 1px solid var(--farik-color-rule);
+	gap: var(--catervas-space-3);
+	padding: var(--catervas-space-3) var(--catervas-space-4);
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .top .resume button {
-	background: var(--farik-color-ink);
-	color: var(--farik-color-page);
-	border-color: var(--farik-color-ink);
+	background: var(--catervas-color-ink);
+	color: var(--catervas-color-page);
+	border-color: var(--catervas-color-ink);
 }
 
 .content {
 	display: grid;
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 	align-content: start;
 	min-width: 0;
-	padding: var(--farik-space-5) var(--farik-space-4);
+	padding: var(--catervas-space-5) var(--catervas-space-4);
 }
 
 .banner {
 	margin: 0;
-	padding: var(--farik-space-3);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-rule);
-	border-radius: var(--farik-radius-raised);
+	padding: var(--catervas-space-3);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-raised);
 }
 
 .banner strong {
-	color: var(--farik-color-status-waiting);
+	color: var(--catervas-color-status-waiting);
 }
 
 .bar {
 	position: sticky;
 	bottom: 0;
 	box-sizing: border-box;
-	height: var(--farik-shell-bar-height);
-	background: var(--farik-color-band);
+	height: var(--catervas-shell-bar-height);
+	background: var(--catervas-color-band);
 }
 
 .bar .places {
 	flex-direction: row;
 	justify-content: space-around;
-	padding: var(--farik-space-2);
+	padding: var(--catervas-space-2);
 }

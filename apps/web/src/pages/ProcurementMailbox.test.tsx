@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -274,7 +274,7 @@ describe("the procurement mailbox page", () => {
 				(frame as { params: Record<string, unknown> }).params,
 			),
 		).toEqual([]);
-		// A refusal is said in Farik's words and the password is gone from the field.
+		// A refusal is said in Catervas's words and the password is gone from the field.
 		await s.fail(
 			frame,
 			-32000,

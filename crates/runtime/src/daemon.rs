@@ -1,4 +1,4 @@
-//! Farik's local service (`docs/SPEC.md` sections 8.2 and 8.6): the governor in front of every tool
+//! Catervas's local service (`docs/SPEC.md` sections 8.2 and 8.6): the governor in front of every tool
 //! call a session makes. Claude Code's `PreToolUse` hook asks it for allow or deny, its
 //! `PostToolUse` hook reports what came back, and the sessions it knows are the only ones it
 //! answers for.
@@ -17,10 +17,10 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
-use farik_core::budget::SessionLimits;
-use farik_core::contract::TaskId;
-use farik_core::governor::permissions::{PermissionTier, SessionConnector};
-use farik_core::governor::sites::WebAccess;
+use catervas_core::budget::SessionLimits;
+use catervas_core::contract::TaskId;
+use catervas_core::governor::permissions::{PermissionTier, SessionConnector};
+use catervas_core::governor::sites::WebAccess;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio::net::TcpListener;
@@ -28,14 +28,14 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use farik_protocol::command::{
+use catervas_protocol::command::{
     Command, CommandReply, ReplyKind, command_from_value, reply_to_value,
 };
-use farik_protocol::event::Thread;
+use catervas_protocol::event::Thread;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-use self::mcp::FarikMcp;
+use self::mcp::CatervasMcp;
 
 use crate::connectors::{ConnectorSecrets, MemoryConnectorSecrets, SecretAt};
 use crate::exec::Executor;
@@ -73,7 +73,7 @@ pub use team::{custom_entry, kit_entry, labelled, matches_kit, plan_tools_of};
 pub(crate) use team::{secret_at, with_server};
 
 /// What a daemon with no project answers what needs one.
-pub(crate) const NO_PROJECT: &str = "farik has no project yet";
+pub(crate) const NO_PROJECT: &str = "catervas has no project yet";
 
 /// Why the daemon could not do what it was asked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,13 +103,13 @@ impl std::error::Error for DaemonError {}
 
 /// One session the daemon answers for: who it is, what it works on, and where.
 pub struct SessionRegistration {
-    /// The id Farik gave Claude Code with `--session-id`, which every hook carries back.
+    /// The id Catervas gave Claude Code with `--session-id`, which every hook carries back.
     pub session_id: String,
     /// The agent the session is.
     pub agent_id: String,
     /// How far the session's web reading reaches (5.6, 6.10): fixed when the session starts, from
     /// its agent's role, as its connectors are. A session held to approved sites may `WebFetch`
-    /// and send a connector's `url` and `urls` only to a site the owner allowed or Farik ships.
+    /// and send a connector's `url` and `urls` only to a site the owner allowed or Catervas ships.
     pub web: WebAccess,
     /// The task it works on, when it works on one.
     pub task_id: Option<TaskId>,
@@ -125,10 +125,10 @@ pub struct SessionRegistration {
     pub executor: Option<Arc<dyn Executor>>,
     /// Its limits, of which the daemon holds `max_tool_calls`.
     pub limits: SessionLimits,
-    /// The Farik tools it was given (`SessionSpec::farik_tools`), by name without the
-    /// `mcp__farik__` prefix: the hook denies every other Farik tool (`tool_not_in_session`), and
+    /// The Catervas tools it was given (`SessionSpec::catervas_tools`), by name without the
+    /// `mcp__catervas__` prefix: the hook denies every other Catervas tool (`tool_not_in_session`), and
     /// the MCP server neither lists nor calls one.
-    pub farik_tools: Vec<String>,
+    pub catervas_tools: Vec<String>,
     /// The agent's tiers when the session started (spec 4.4): a grant or a revoke waits for the
     /// agent's next session, while a pause or a retirement stops this one at once.
     pub tiers: Vec<PermissionTier>,
@@ -138,7 +138,7 @@ pub struct SessionRegistration {
     /// The task's preview while the session runs, when it was given a connector.
     pub preview: Option<Arc<dyn RunningPreview>>,
     /// The names of the skills it loads on demand: the hook allows a `Skill` call for
-    /// `farik:<name>` of one of these and no other (ADR 0034).
+    /// `catervas:<name>` of one of these and no other (ADR 0034).
     pub skills: Vec<String>,
     /// The `skills/` folder of its plugin folder, when it has skills: `Read`, `Glob` and `Grep`
     /// there are allowed at tier `read`, whatever its worktree.
@@ -151,7 +151,7 @@ pub(crate) struct Session {
     pub(crate) registration: SessionRegistration,
     pub(crate) tool_calls: u32,
     pub(crate) stop_reason: Option<String>,
-    /// The sha256, in hex, of the ticket each Farik connector that signs in was launched with in
+    /// The sha256, in hex, of the ticket each Catervas connector that signs in was launched with in
     /// this session, by server (ADR 0038, ADR 0042): a call to `POST /connector/call` names its
     /// session by the ticket alone, and the ticket ends with the session.
     pub(crate) tickets: BTreeMap<String, String>,
@@ -205,10 +205,10 @@ pub struct DaemonState {
     /// The certificates a mailbox connection trusts: the platform's, unless a test names its own.
     #[cfg(test)]
     mail_trust: OnceLock<crate::mailbox::Trust>,
-    /// The apps Farik has registered with a service (ADR 0035), once a table is set; until then
+    /// The apps Catervas has registered with a service (ADR 0035), once a table is set; until then
     /// `REGISTERED_APPS`.
     registered_apps: OnceLock<&'static [crate::registered_apps::RegisteredApp]>,
-    /// Farik's own executable, which runs Farik's own connectors (ADR 0038), once it is set.
+    /// Catervas's own executable, which runs Catervas's own connectors (ADR 0038), once it is set.
     own_program: OnceLock<std::path::PathBuf>,
     /// One lock per connector entry, by account: refresh, connect, disconnect and the deletes each
     /// take it, so a token refreshed while the entry is removed is not kept (ADR 0033).
@@ -239,12 +239,12 @@ pub(crate) struct SpendRead {
     pub(crate) attempted_at: chrono::DateTime<chrono::Utc>,
     /// The last spend read and when, kept beside a later failure.
     pub(crate) spend: Option<(
-        farik_core::marketing::PlanSpend,
+        catervas_core::marketing::PlanSpend,
         chrono::DateTime<chrono::Utc>,
     )>,
     /// Why the last read failed and when, until a read works.
     pub(crate) failed: Option<(String, chrono::DateTime<chrono::Utc>)>,
-    /// Why a pause Farik meant to make was refused, or could not be tried, until a later pause of
+    /// Why a pause Catervas meant to make was refused, or could not be tried, until a later pause of
     /// the plan works.
     pub(crate) unstopped: Option<String>,
 }
@@ -256,13 +256,13 @@ pub(crate) struct SignedIn {
     pub(crate) lapsed: bool,
     /// The service has an endpoint to forget the grant at.
     pub(crate) revokes: bool,
-    /// What Farik's own app the grant was made with is called, when it was made with one.
+    /// What Catervas's own app the grant was made with is called, when it was made with one.
     pub(crate) provider: Option<String>,
     /// The page where that app is removed at the service.
     pub(crate) settings_url: Option<String>,
 }
 
-/// What the connector store held for one agent's server the last time Farik read it.
+/// What the connector store held for one agent's server the last time Catervas read it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Kept {
     /// An entry, connected as the definition this is the `spec_sha256` of, with these keys.
@@ -286,10 +286,10 @@ impl Kept {
     /// Whether `server` runs from what was kept: connected as the team file has it now, with
     /// every key it names. Short of a key, its launcher or headers helper would be refused, and
     /// Claude Code connects an http server without its headers then (finding I2).
-    pub(crate) fn runs(&self, server: &farik_core::team::CustomServer) -> bool {
+    pub(crate) fn runs(&self, server: &catervas_core::team::CustomServer) -> bool {
         let signs_in = server.oauth().is_some();
         matches!(self, Kept::Entry { spec_sha256, keys, signed_in, .. }
-            if *spec_sha256 == farik_core::team::spec_sha256(server)
+            if *spec_sha256 == catervas_core::team::spec_sha256(server)
                 && server.credential_keys.iter().all(|key| keys.contains(key))
                 // A server that signs in runs on a grant the service has not ended.
                 && (!signs_in || signed_in.as_ref().is_some_and(|grant| !grant.lapsed)))
@@ -378,7 +378,7 @@ impl DaemonState {
         self.registered_apps.set(apps).is_ok()
     }
 
-    /// The apps Farik has registered with a service, as this daemon signs in with them.
+    /// The apps Catervas has registered with a service, as this daemon signs in with them.
     pub(crate) fn registered_apps(&self) -> &'static [crate::registered_apps::RegisteredApp] {
         self.registered_apps
             .get()
@@ -417,7 +417,7 @@ impl DaemonState {
         &self.campaign_made
     }
 
-    /// Sets Farik's own executable; answers whether it was not set before.
+    /// Sets Catervas's own executable; answers whether it was not set before.
     pub fn set_own_program(&self, program: std::path::PathBuf) -> bool {
         self.own_program.set(program).is_ok()
     }
@@ -434,7 +434,7 @@ impl DaemonState {
             .ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    "there is no Farik state folder on this computer",
+                    "there is no Catervas state folder on this computer",
                 )
             })
     }
@@ -639,7 +639,7 @@ impl DaemonState {
     }
 
     /// Turns the browser routes on with `web`: until then, and under every driver but
-    /// `farik serve`, they answer 404. Answers `true`, or `false` when they were already on, and
+    /// `catervas serve`, they answer 404. Answers `true`, or `false` when they were already on, and
     /// the state they have is kept.
     pub fn set_web(&self, web: web::WebState) -> bool {
         self.web.set(web).is_ok()
@@ -781,7 +781,7 @@ impl DaemonState {
             .map(|session| session.tool_calls)
     }
 
-    /// What a Farik tool called from a session is called with: the registration's agent, task,
+    /// What a Catervas tool called from a session is called with: the registration's agent, task,
     /// session, and executor as they stand now, and the project's tools; `None` for a session the
     /// daemon does not answer for. The MCP server and a replayed session both take this path.
     #[must_use]
@@ -803,12 +803,12 @@ impl DaemonState {
         })
     }
 
-    /// The Farik tools a registered session was given, or `None` for one the daemon does not
+    /// The Catervas tools a registered session was given, or `None` for one the daemon does not
     /// answer for.
-    pub(crate) fn farik_tools(&self, session_id: &str) -> Option<Vec<String>> {
+    pub(crate) fn catervas_tools(&self, session_id: &str) -> Option<Vec<String>> {
         self.sessions()
             .get(session_id)
-            .map(|session| session.registration.farik_tools.clone())
+            .map(|session| session.registration.catervas_tools.clone())
     }
 
     /// The project's tools, or `None` in setup mode.
@@ -861,7 +861,7 @@ pub fn candidates(choice: PortChoice) -> Vec<u16> {
 pub struct DaemonConfig {
     /// The port to bind on `127.0.0.1`.
     pub port: PortChoice,
-    /// Where `daemon.json` is written: `.farik/local/daemon.json`; `None` writes none, as the
+    /// Where `daemon.json` is written: `.catervas/local/daemon.json`; `None` writes none, as the
     /// setup daemon, which no hook reaches, does not.
     pub daemon_file: Option<PathBuf>,
 }
@@ -935,7 +935,7 @@ impl DaemonHandle {
 
 /// Starts the daemon on `127.0.0.1`, on the configured port (`PortChoice`) or one the operating system picks,
 /// with a fresh token, and writes `daemon.json` (mode 0600) once it is listening. A file left by
-/// a daemon that crashed is overwritten: only the one `farik run` that owns the project serves.
+/// a daemon that crashed is overwritten: only the one `catervas run` that owns the project serves.
 ///
 /// # Errors
 ///
@@ -947,7 +947,7 @@ pub async fn serve(
     serve_on(bind(config.port).await?, config.daemon_file, state).await
 }
 
-/// `serve` on a socket its caller already holds and keeps when the daemon stops. `farik serve`
+/// `serve` on a socket its caller already holds and keeps when the daemon stops. `catervas serve`
 /// binds its port once and serves each of its daemons on it in turn, so between two of them the
 /// port is never free for another process to take; a browser connecting meanwhile waits in the
 /// socket's queue for the next one.
@@ -1077,8 +1077,8 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
         })
 }
 
-/// The routes, each behind the token: the two hooks, and Farik's MCP server for the session
-/// `X-Farik-Session` names. `cancel` ends every MCP session, whose event streams a graceful
+/// The routes, each behind the token: the two hooks, and Catervas's MCP server for the session
+/// `X-Catervas-Session` names. `cancel` ends every MCP session, whose event streams a graceful
 /// shutdown would otherwise wait on forever, and every browser socket, which it does not track.
 pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationToken) -> Router {
     router_serving::<app::WebApp>(state, token, cancel)
@@ -1092,7 +1092,7 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
 ) -> Router {
     let expected: Arc<str> = Arc::from(format!("Bearer {token}"));
     let server = StreamableHttpService::new(
-        || Ok(FarikMcp),
+        || Ok(CatervasMcp),
         Arc::new(LocalSessionManager::default()),
         // The stateful sessions Claude Code opens with `initialize` are the default.
         StreamableHttpServerConfig::default()
@@ -1116,7 +1116,7 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
         .fallback(get(app::app_from::<E>))
         .layer(Extension(cancel))
         .with_state(Arc::clone(&state));
-    // Outside the daemon-token layer: a Farik connector's shim holds no daemon token, only the
+    // Outside the daemon-token layer: a Catervas connector's shim holds no daemon token, only the
     // ticket its launch was given, which names its session (ADR 0038, ADR 0042).
     let calls = Router::new()
         .route("/connector/call", post(connector_call))
@@ -1197,7 +1197,7 @@ async fn command(State(state): State<Arc<DaemonState>>, Json(value): Json<Value>
 }
 
 /// What a command that is not one is answered: `invalid`, with every error the schema found.
-fn invalid(errors: &[farik_protocol::command::ValidationError]) -> CommandReply {
+fn invalid(errors: &[catervas_protocol::command::ValidationError]) -> CommandReply {
     CommandReply::Error {
         kind: ReplyKind::Invalid,
         detail: errors
@@ -1226,7 +1226,7 @@ async fn handled(state: &DaemonState, command: Command) -> CommandReply {
     }
 }
 
-/// What a Farik connector's shim asks: a tool and its arguments.
+/// What a Catervas connector's shim asks: a tool and its arguments.
 #[derive(serde::Deserialize)]
 struct CallAsk {
     tool: String,
@@ -1234,7 +1234,7 @@ struct CallAsk {
     arguments: Value,
 }
 
-/// `POST /connector/call` (ADR 0038, ADR 0042): a tool of Farik's Google Ads connector, run in the
+/// `POST /connector/call` (ADR 0038, ADR 0042): a tool of Catervas's Google Ads connector, run in the
 /// daemon for the session the `Authorization: Bearer <ticket>` names, as that session's agent.
 /// 401 for a ticket no live session holds. The answer is `{ "ok": … }` or `{ "error": "<code>:
 /// <words>" }`.
@@ -1265,7 +1265,7 @@ async fn connector_call(
     }
 }
 
-/// What `farik connector run` and `farik connector headers` ask: a server of a session.
+/// What `catervas connector run` and `catervas connector headers` ask: a server of a session.
 #[derive(Clone, serde::Deserialize)]
 struct LaunchAsk {
     session: String,
@@ -1388,7 +1388,7 @@ fn fresh_refusal(fresh: signed_in::Fresh, server: &str) -> Refusal {
 /// What the launch route answers for `asked`. No refusal names a key's value.
 async fn launch_answer(state: &Arc<DaemonState>, asked: &LaunchAsk) -> Result<Value, Refusal> {
     use crate::connectors::{ConnectorError, confirmed_entry, launch_headers, launch_spec};
-    use farik_core::team::CustomTransport;
+    use catervas_core::team::CustomTransport;
 
     let not_confirmed = {
         let server = asked.server.clone();
@@ -1462,9 +1462,9 @@ async fn launch_answer(state: &Arc<DaemonState>, asked: &LaunchAsk) -> Result<Va
                     "command": spec.command, "args": spec.args, "env": exposed(&spec.env),
                     "cwd": folder.display().to_string()
                 });
-                // A Farik connector that signs in is never given the grant: it calls the daemon
+                // A Catervas connector that signs in is never given the grant: it calls the daemon
                 // with a ticket that names this session (ADR 0038, ADR 0042).
-                if signs_in && farik_roles::is_farik_connector(command, args) {
+                if signs_in && catervas_roles::is_catervas_connector(command, args) {
                     let ticket = held
                         .issue_ticket(&session, &name)
                         .map_err(|error| failed(error.to_string()))?
@@ -1496,7 +1496,13 @@ async fn launch_answer(state: &Arc<DaemonState>, asked: &LaunchAsk) -> Result<Va
 fn launched_server(
     state: &DaemonState,
     asked: &LaunchAsk,
-) -> Result<(farik_core::team::CustomServer, crate::connectors::SecretAt), Refusal> {
+) -> Result<
+    (
+        catervas_core::team::CustomServer,
+        crate::connectors::SecretAt,
+    ),
+    Refusal,
+> {
     let not_in_session = || {
         (
             StatusCode::FORBIDDEN,
@@ -1541,7 +1547,7 @@ fn launched_server(
         .find(|agent| agent.id.as_str() == agent_id)
         .into_iter()
         .flat_map(|agent| agent.mcp_servers.iter().flatten())
-        .filter_map(farik_core::team::custom_server)
+        .filter_map(catervas_core::team::custom_server)
         .find(|server| server.name == asked.server)
         .ok_or_else(not_in_session)?;
     let at = state
@@ -1573,12 +1579,12 @@ mod tests {
 
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
-    use farik_core::budget::DEFAULT_SESSION_LIMITS;
+    use catervas_core::budget::DEFAULT_SESSION_LIMITS;
     use serde_json::Value;
     use tokio_util::sync::CancellationToken;
     use tower::ServiceExt;
 
-    use farik_protocol::event::EventKind;
+    use catervas_protocol::event::EventKind;
     use serde_json::json;
 
     use super::fixtures::{PRE_READ, TestDaemon};
@@ -1686,7 +1692,7 @@ mod tests {
         let handle = serve(
             DaemonConfig {
                 port: PortChoice::Preferred(held),
-                daemon_file: Some(daemon.project.repo.path.join(".farik/local/daemon.json")),
+                daemon_file: Some(daemon.project.repo.path.join(".catervas/local/daemon.json")),
             },
             daemon.state.clone(),
         )
@@ -1728,7 +1734,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn writes_the_daemon_file_and_removes_it_on_shutdown() {
         let daemon = TestDaemon::new("daemon-file", |_| {});
-        let daemon_file = daemon.project.repo.path.join(".farik/local/daemon.json");
+        let daemon_file = daemon.project.repo.path.join(".catervas/local/daemon.json");
         let handle = serve(
             DaemonConfig {
                 port: PortChoice::Any,
@@ -1764,7 +1770,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn replaces_a_daemon_file_a_crashed_daemon_left() {
         let daemon = TestDaemon::new("daemon-stale", |_| {});
-        let daemon_file = daemon.project.repo.path.join(".farik/local/daemon.json");
+        let daemon_file = daemon.project.repo.path.join(".catervas/local/daemon.json");
         std::fs::write(&daemon_file, r#"{"port":1,"token":"old","pid":1}"#).expect("written");
         std::fs::set_permissions(&daemon_file, std::fs::Permissions::from_mode(0o644))
             .expect("the mode is set");
@@ -1798,7 +1804,7 @@ mod tests {
         let handle = serve(
             DaemonConfig {
                 port: PortChoice::Any,
-                daemon_file: Some(daemon.project.repo.path.join(".farik/local/daemon.json")),
+                daemon_file: Some(daemon.project.repo.path.join(".catervas/local/daemon.json")),
             },
             daemon.state.clone(),
         )
@@ -1831,13 +1837,13 @@ mod tests {
         let executor: Arc<dyn Executor> = Arc::new(HostSandbox::new(daemon.worktree.clone()));
         daemon.state.register_session(SessionRegistration {
             session_id: "s-exec".to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: Some("FRK-1".parse().expect("a task id")),
             cwd: daemon.worktree.clone(),
             executor: Some(Arc::clone(&executor)),
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
+            catervas_tools: Vec::new(),
             tiers: Vec::new(),
             connectors: Vec::new(),
             preview: None,
@@ -2006,7 +2012,7 @@ mod tests {
                         .call(
                             "proc",
                             Some("FRK-1"),
-                            "farik_draft_seller_message",
+                            "catervas_draft_seller_message",
                             json!({ "seller": "Pie Box Pros", "to": DANA.address,
                                     "subject": "Quote", "body": "Please quote.",
                                     "purpose": "quote_request" }),
@@ -2055,7 +2061,7 @@ mod tests {
         use crate::tools::fixtures::at;
 
         let harness = Harness::new("daemon-chat-wakes", |_| {});
-        // Paused by the human: `farik serve` waits, and a chat is answered all the same.
+        // Paused by the human: `catervas serve` waits, and a chat is answered all the same.
         harness
             .project
             .record("", "team.paused", &json!({ "by": "human" }));
@@ -2155,13 +2161,13 @@ mod tests {
         for id in ["s-2", "s-1"] {
             state.register_session(SessionRegistration {
                 session_id: id.to_string(),
-                web: farik_core::governor::sites::WebAccess::Open,
+                web: catervas_core::governor::sites::WebAccess::Open,
                 agent_id: "dev-a".to_string(),
                 task_id: None,
                 cwd: daemon.worktree.clone(),
                 executor: None,
                 limits: DEFAULT_SESSION_LIMITS,
-                farik_tools: Vec::new(),
+                catervas_tools: Vec::new(),
                 tiers: Vec::new(),
                 connectors: Vec::new(),
                 preview: None,
@@ -2211,14 +2217,14 @@ mod tests {
         let handle = serve(
             DaemonConfig {
                 port: PortChoice::Any,
-                daemon_file: Some(daemon.project.repo.path.join(".farik/local/daemon.json")),
+                daemon_file: Some(daemon.project.repo.path.join(".catervas/local/daemon.json")),
             },
             daemon.state.clone(),
         )
         .await
         .expect("the daemon is up");
         let headers = format!(
-            "Host: 127.0.0.1\r\nAuthorization: Bearer {}\r\nX-Farik-Session: {}\r\n\
+            "Host: 127.0.0.1\r\nAuthorization: Bearer {}\r\nX-Catervas-Session: {}\r\n\
              Accept: application/json, text/event-stream\r\n",
             handle.info.token,
             super::fixtures::DEV_SESSION
@@ -2283,7 +2289,7 @@ mod tests {
             {
                 "name": "linear", "source": "custom", "transport": "http",
                 "url": "https://mcp.linear.example/mcp",
-                "headers": { "Authorization": "Bearer {API_KEY}", "X-Team": "farik" },
+                "headers": { "Authorization": "Bearer {API_KEY}", "X-Team": "catervas" },
                 "credential_keys": ["API_KEY"],
                 "tools": { "search": "network" }
             }
@@ -2347,7 +2353,7 @@ mod tests {
         ) -> Arc<dyn crate::connectors::ConnectorSecrets>,
     ) -> TestDaemon {
         use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
-        use farik_core::governor::permissions::SessionConnector;
+        use catervas_core::governor::permissions::SessionConnector;
 
         let daemon = TestDaemon::new(name, |_| {});
         let team = crate::tools::fixtures::a_team_of_three(|wire| {
@@ -2359,11 +2365,11 @@ mod tests {
             .files
             .write_team(&team)
             .expect("the team is written");
-        let servers: Vec<farik_core::team::CustomServer> = team.agents[1]
+        let servers: Vec<catervas_core::team::CustomServer> = team.agents[1]
             .mcp_servers
             .iter()
             .flatten()
-            .filter_map(farik_core::team::custom_server)
+            .filter_map(catervas_core::team::custom_server)
             .collect();
         let store = Arc::new(MemoryConnectorSecrets::default());
         if connected {
@@ -2373,7 +2379,7 @@ mod tests {
                     .secret_at(daemon.project.deps.files.root(), "dev-a", &server.name)
                     .expect("an address");
                 let entry = ConnectorEntry {
-                    spec_sha256: farik_core::team::spec_sha256(server),
+                    spec_sha256: catervas_core::team::spec_sha256(server),
                     keys: [(
                         "API_KEY".to_string(),
                         crate::claude::Secret::new(KEY_VALUE.to_string()),
@@ -2387,7 +2393,7 @@ mod tests {
         daemon.state.set_connector_secrets(through(store));
         daemon.state.register_session(SessionRegistration {
             session_id: "session-custom".to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             purpose: SessionPurpose::Implement,
@@ -2398,7 +2404,7 @@ mod tests {
             cwd: daemon.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
+            catervas_tools: Vec::new(),
             tiers: Vec::new(),
             connectors: servers
                 .into_iter()
@@ -2439,7 +2445,7 @@ mod tests {
         let (status, body) = launch(&daemon, "session-custom", "github").await;
         assert_eq!(status, StatusCode::OK, "{body}");
         let answer: Value = serde_json::from_str(&body).expect("JSON");
-        // It runs in a folder Farik keeps for it in the user's state folder, never the session's
+        // It runs in a folder Catervas keeps for it in the user's state folder, never the session's
         // worktree, nor anywhere in the repository (finding C1).
         let root = daemon.project.deps.files.root();
         let at = daemon
@@ -2464,7 +2470,7 @@ mod tests {
         let answer: Value = serde_json::from_str(&body).expect("JSON");
         assert_eq!(
             answer,
-            json!({ "headers": { "Authorization": format!("Bearer {KEY_VALUE}"), "X-Team": "farik" } })
+            json!({ "headers": { "Authorization": format!("Bearer {KEY_VALUE}"), "X-Team": "catervas" } })
         );
     }
 
@@ -2525,14 +2531,14 @@ mod tests {
             .mcp_servers
             .iter()
             .flatten()
-            .filter_map(farik_core::team::custom_server)
+            .filter_map(catervas_core::team::custom_server)
         {
             let at = daemon
                 .state
                 .secret_at(daemon.project.deps.files.root(), "dev-a", &server.name)
                 .expect("an address");
             let entry = crate::connectors::ConnectorEntry {
-                spec_sha256: farik_core::team::spec_sha256(&server),
+                spec_sha256: catervas_core::team::spec_sha256(&server),
                 keys: std::collections::BTreeMap::new(),
                 oauth: None,
             };
@@ -2614,7 +2620,7 @@ mod tests {
                 inner,
             })
         });
-        // `farik connector headers` gives up after eight seconds (`EXCHANGE_TIMEOUT`).
+        // `catervas connector headers` gives up after eight seconds (`EXCHANGE_TIMEOUT`).
         let (status, body) = tokio::time::timeout(
             std::time::Duration::from_secs(8),
             launch(&daemon, "session-custom", "linear"),
@@ -2638,53 +2644,53 @@ mod tests {
         launching_signed_in_as(name, fixture, expires_in, false)
     }
 
-    /// A grant the fixture honours, expiring `expires_in` from now: `Google test`'s, with `farik`.
+    /// A grant the fixture honours, expiring `expires_in` from now: `Google test`'s, with `catervas`.
     fn a_grant(
         fixture: &crate::oauth_fixture::Fixture,
         expires_in: chrono::Duration,
-        farik: bool,
+        catervas: bool,
     ) -> crate::sign_in::OAuthGrant {
         let now = chrono::Utc::now();
         let (access, refresh) = fixture.mint();
         crate::sign_in::OAuthGrant {
             issuer: fixture.origin.clone(),
             resource: fixture.mcp_url.clone(),
-            client_id: if farik {
+            client_id: if catervas {
                 "google-test-client"
             } else {
                 "client-kept"
             }
             .to_string(),
             token_endpoint: format!("{}/token", fixture.origin),
-            revocation_endpoint: (!farik).then(|| format!("{}/revoke", fixture.origin)),
+            revocation_endpoint: (!catervas).then(|| format!("{}/revoke", fixture.origin)),
             access_token: crate::claude::Secret::new(access),
             refresh_token: Some(crate::claude::Secret::new(refresh)),
             issued_at: now,
             expires_at: Some(now + expires_in),
             scopes: Vec::new(),
             lapsed: false,
-            app: farik.then(|| "google-test".to_string()),
+            app: catervas.then(|| "google-test".to_string()),
         }
     }
 
-    /// [`launching_signed_in`], or, with `farik`, for Farik's own connector `osv` signed in with
+    /// [`launching_signed_in`], or, with `catervas`, for Catervas's own connector `osv` signed in with
     /// `Google test`, started as the fixture's stdio server; the grant is the other answer.
     fn launching_signed_in_as(
         name: &str,
         fixture: &crate::oauth_fixture::Fixture,
         expires_in: chrono::Duration,
-        farik: bool,
+        catervas: bool,
     ) -> (TestDaemon, crate::sign_in::OAuthGrant) {
         use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets};
-        use farik_core::governor::permissions::SessionConnector;
+        use catervas_core::governor::permissions::SessionConnector;
 
         let daemon = TestDaemon::new(name, |_| {});
-        let name_kept = if farik { "osv" } else { "notion" };
+        let name_kept = if catervas { "osv" } else { "notion" };
         let team = crate::tools::fixtures::a_team_of_three(|wire| {
-            wire["agents"][1]["mcp_servers"] = if farik {
+            wire["agents"][1]["mcp_servers"] = if catervas {
                 json!([{
                     "name": "osv", "source": "custom", "transport": "stdio",
-                    "command": "farik", "args": ["connector", "osv"], "oauth": {},
+                    "command": "catervas", "args": ["connector", "osv"], "oauth": {},
                     "tools": { "search": "network" }
                 }])
             } else {
@@ -2705,10 +2711,10 @@ mod tests {
             .mcp_servers
             .iter()
             .flatten()
-            .find_map(farik_core::team::custom_server)
+            .find_map(catervas_core::team::custom_server)
             .expect("the signed-in server");
-        let grant = a_grant(fixture, expires_in, farik);
-        if farik {
+        let grant = a_grant(fixture, expires_in, catervas);
+        if catervas {
             assert!(
                 daemon
                     .state
@@ -2727,7 +2733,7 @@ mod tests {
             .save(
                 &at,
                 &ConnectorEntry {
-                    spec_sha256: farik_core::team::spec_sha256(&server),
+                    spec_sha256: catervas_core::team::spec_sha256(&server),
                     keys: std::collections::BTreeMap::new(),
                     oauth: Some(grant.clone()),
                 },
@@ -2736,7 +2742,7 @@ mod tests {
         daemon.state.set_connector_secrets(store);
         daemon.state.register_session(SessionRegistration {
             session_id: "session-signed".to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             purpose: SessionPurpose::Implement,
@@ -2747,7 +2753,7 @@ mod tests {
             cwd: daemon.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
+            catervas_tools: Vec::new(),
             tiers: Vec::new(),
             connectors: vec![SessionConnector {
                 server: server.name,
@@ -2858,7 +2864,7 @@ mod tests {
     async fn the_grant_never_leaves_the_daemon() {
         let fixture = crate::oauth_fixture::Fixture::start().await;
         let (daemon, grant) = launching_signed_in_as(
-            "launch-farik-never",
+            "launch-catervas-never",
             &fixture,
             chrono::Duration::minutes(60),
             true,
@@ -2886,7 +2892,7 @@ mod tests {
         assert_eq!(
             rest,
             json!({
-                "command": "farik", "args": ["connector", "osv"], "env": {},
+                "command": "catervas", "args": ["connector", "osv"], "env": {},
                 "cwd": folder.display().to_string()
             })
         );
@@ -2921,7 +2927,7 @@ mod tests {
 
         let fixture = crate::oauth_fixture::Fixture::start().await;
         let (daemon, grant) = launching_signed_in_as(
-            "launch-farik-ticket",
+            "launch-catervas-ticket",
             &fixture,
             chrono::Duration::minutes(60),
             true,
@@ -2972,14 +2978,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn a_lapsed_farik_connector_is_not_launched() {
+    async fn a_lapsed_catervas_connector_is_not_launched() {
         let fixture = crate::oauth_fixture::Fixture::start().await;
         fixture.set(|flags| {
             flags.client_secret = Some(crate::registered_apps::fixtures::SECRET.to_string());
         });
         // One whose sign-in the service has ended: refused, and taken from the session.
         let (daemon, mut lapsed) = launching_signed_in_as(
-            "launch-farik-lapsed",
+            "launch-catervas-lapsed",
             &fixture,
             chrono::Duration::minutes(60),
             true,
@@ -3013,7 +3019,7 @@ mod tests {
 
         // One expiring within a minute is refreshed, with the app's secret, before it answers.
         let (daemon, old) = launching_signed_in_as(
-            "launch-farik-refresh",
+            "launch-catervas-refresh",
             &fixture,
             chrono::Duration::seconds(30),
             true,

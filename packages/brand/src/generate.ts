@@ -16,23 +16,23 @@ export function generateCss(tokens: Tokens): string {
 	const shared: string[] = [];
 	for (const [name, s] of Object.entries(tokens.type)) {
 		shared.push(
-			`--farik-type-${name}-size: ${s.size}px;`,
-			`--farik-type-${name}-line-height: ${s.lineHeight}px;`,
-			`--farik-type-${name}-weight: ${s.weight};`,
-			`--farik-type-${name}-family: ${FAMILY[s.family]};`,
+			`--catervas-type-${name}-size: ${s.size}px;`,
+			`--catervas-type-${name}-line-height: ${s.lineHeight}px;`,
+			`--catervas-type-${name}-weight: ${s.weight};`,
+			`--catervas-type-${name}-family: ${FAMILY[s.family]};`,
 		);
 	}
 	for (const [k, n] of Object.entries(tokens.space))
-		shared.push(`--farik-space-${k}: ${n}px;`);
+		shared.push(`--catervas-space-${k}: ${n}px;`);
 	for (const [k, n] of Object.entries(tokens.radius))
-		shared.push(`--farik-radius-${k}: ${n}px;`);
+		shared.push(`--catervas-radius-${k}: ${n}px;`);
 	const theme = (t: ThemeName) =>
 		Object.entries(tokens.color[t]).map(
-			([k, hex]) => `--farik-color-${k}: ${hex};`,
+			([k, hex]) => `--catervas-color-${k}: ${hex};`,
 		);
 	const paint = [
-		"color: var(--farik-color-ink);",
-		"background-color: var(--farik-color-page);",
+		"color: var(--catervas-color-ink);",
+		"background-color: var(--catervas-color-page);",
 	];
 	return [
 		block(':root, [data-theme="light"]', [...theme("light"), ...shared]),

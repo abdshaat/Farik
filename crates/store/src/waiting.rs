@@ -5,17 +5,17 @@
 
 use std::str::FromStr;
 
-use chrono::{DateTime, FixedOffset};
-use farik_core::contract::{Role, TaskId, TaskKind, TaskStatus};
-use farik_core::governor::done::result_awaits_human;
-use farik_core::governor::permissions::ApprovalKey;
-use farik_core::governor::sites::site_of;
-use farik_core::marketing::{PostChannel, network_name};
-use farik_core::pipeline::PipelineCost;
-use farik_core::team::{Integration, Team};
-use farik_protocol::event::{
-    EventBody, EventKind, FarikEvent, SellerMessagePurpose, TaskStatusWire,
+use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
+use catervas_core::governor::done::result_awaits_human;
+use catervas_core::governor::permissions::ApprovalKey;
+use catervas_core::governor::sites::site_of;
+use catervas_core::marketing::{PostChannel, network_name};
+use catervas_core::pipeline::PipelineCost;
+use catervas_core::team::{Integration, Team};
+use catervas_protocol::event::{
+    CatervasEvent, EventBody, EventKind, SellerMessagePurpose, TaskStatusWire,
 };
+use chrono::{DateTime, FixedOffset};
 
 use crate::files::ProjectFiles;
 use crate::marketing::{PostMedia, PostState, marketing_plans, social_posts};
@@ -108,7 +108,7 @@ pub struct Waiting {
 
 /// A data pipeline request that waits for the owner, as its `data_pipeline.requested` recorded
 /// it. Every text field but `host` is the agent's own words, which are untrusted; `reason` is the
-/// Product Manager's, and absent when Farik passed the request on.
+/// Product Manager's, and absent when Catervas passed the request on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PipelineAsk {
     /// The request's number, the seq of its `data_pipeline.requested`.
@@ -193,7 +193,7 @@ pub struct OrderAsk {
     pub why: String,
     /// When it was drafted.
     pub at: DateTime<chrono::Utc>,
-    /// When Farik closes it by itself if nobody decides.
+    /// When Catervas closes it by itself if nobody decides.
     pub expires_at: DateTime<chrono::Utc>,
     /// The message that goes with it, while one waits.
     pub send: Option<OrderSend>,
@@ -275,7 +275,7 @@ pub struct OpenGrant {
 /// its `tool.called`, and its `session.started` and `session.ended`. A decision recorded with an
 /// agent or a session on its envelope was not the human's, and decides nothing.
 #[must_use]
-pub fn open_grants(events: &[FarikEvent]) -> Vec<OpenGrant> {
+pub fn open_grants(events: &[CatervasEvent]) -> Vec<OpenGrant> {
     events
         .iter()
         .filter_map(|asked| {
@@ -324,7 +324,7 @@ pub fn open_grants(events: &[FarikEvent]) -> Vec<OpenGrant> {
 
 /// The first decision the human recorded on `approval`, granted or refused.
 #[must_use]
-pub fn decision_on(events: &[FarikEvent], approval: u64) -> Option<&FarikEvent> {
+pub fn decision_on(events: &[CatervasEvent], approval: u64) -> Option<&CatervasEvent> {
     events.iter().find(|event| {
         let ids = &event.envelope.ids;
         ids.agent_id.is_none()
@@ -477,7 +477,7 @@ pub fn waiting(
 
 /// Whether the latest `review.recorded` since the task last entered `verifying` passed.
 #[must_use]
-pub fn review_passed(history: &[FarikEvent]) -> bool {
+pub fn review_passed(history: &[CatervasEvent]) -> bool {
     let since =
         last_move_into(history, TaskStatus::Verifying).map_or(0, |event| event.envelope.seq);
     history
@@ -493,21 +493,21 @@ pub fn review_passed(history: &[FarikEvent]) -> bool {
 
 /// Whether `event` is a `task.transitioned` into `status`.
 #[must_use]
-pub fn is_move_into(event: &FarikEvent, status: TaskStatus) -> bool {
+pub fn is_move_into(event: &CatervasEvent, status: TaskStatus) -> bool {
     matches!(&event.body, EventBody::TaskTransitioned(body) if wire_status(body.to) == Some(status))
 }
 
 /// The task's last `task.transitioned` into `status`.
 #[must_use]
-pub fn last_move_into(history: &[FarikEvent], status: TaskStatus) -> Option<&FarikEvent> {
+pub fn last_move_into(history: &[CatervasEvent], status: TaskStatus) -> Option<&CatervasEvent> {
     history
         .iter()
         .rev()
         .find(|event| is_move_into(event, status))
 }
 
-/// A wire status as the contract's own. The two lists are one, which a test in `farik-protocol`
-/// pins, so `None` is a log no Farik wrote.
+/// A wire status as the contract's own. The two lists are one, which a test in `catervas-protocol`
+/// pins, so `None` is a log no Catervas wrote.
 fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
     TaskStatus::from_str(&status.to_string()).ok()
 }
@@ -515,7 +515,7 @@ fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
 /// Every question nobody answered, by task.
 fn unanswered(
     board: &[TaskProjection],
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
     item: &impl Fn(&TaskProjection, WaitingKind, Option<&str>, String) -> Waiting,
 ) -> Vec<Waiting> {
     let mut waiting = Vec::new();
@@ -549,7 +549,7 @@ fn unanswered(
 /// Every connector call nobody allowed or refused, by task (ADR 0031).
 fn undecided(
     board: &[TaskProjection],
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
     team: &Team,
     item: &impl Fn(&TaskProjection, WaitingKind, Option<&str>, String) -> Waiting,
 ) -> Vec<Waiting> {
@@ -738,7 +738,7 @@ fn orders_waiting(
 }
 
 /// Every data pipeline request the owner has to decide, oldest first (ADR 0039): the ones the
-/// Product Manager passed on, or that Farik did after its three tries. An open one waits on the
+/// Product Manager passed on, or that Catervas did after its three tries. An open one waits on the
 /// Product Manager, not on the owner. Its row is about the task whose agent asked, which it does
 /// not hold, and its line says who asks for which source.
 fn pipelines_waiting(
@@ -772,7 +772,10 @@ fn pipelines_waiting(
                 cost: cost_of(body.cost),
                 needs_account: body.needs_account,
                 sends_project_data: body.sends_project_data,
-                reason: record.escalated_reason.clone().filter(|_| !record.by_farik),
+                reason: record
+                    .escalated_reason
+                    .clone()
+                    .filter(|_| !record.by_catervas),
                 at: record.requested_at,
             }),
             ..item(row, WaitingKind::DataPipeline, Some(&record.agent_id), line)
@@ -849,10 +852,10 @@ pub(crate) mod fixtures {
     use std::path::Path;
     use std::sync::Arc;
 
+    use catervas_core::contract::validate_contract;
+    use catervas_core::team::{Team, validate_team};
+    use catervas_protocol::event::{CatervasEvent, NewEvent, event_from_value};
     use chrono::{DateTime, TimeZone, Utc};
-    use farik_core::contract::validate_contract;
-    use farik_core::team::{Team, validate_team};
-    use farik_protocol::event::{FarikEvent, NewEvent, event_from_value};
     use serde_json::{Value, json};
 
     use crate::files::ProjectFiles;
@@ -868,7 +871,7 @@ pub(crate) mod fixtures {
     /// A team of Ada (Product Manager), Linus (Developer), and Grace (Architect), integrating by
     /// hand.
     pub(crate) fn a_team() -> Team {
-        let mut wire = farik_core::team::fixtures::a_team_wire();
+        let mut wire = catervas_core::team::fixtures::a_team_wire();
         wire["agents"] = json!([
             { "id": "ada", "display_name": "Ada", "role": "product_manager", "status": "active" },
             { "id": "linus", "display_name": "Linus", "role": "software_developer", "status": "active" },
@@ -889,7 +892,7 @@ pub(crate) mod fixtures {
         pub(crate) fn new(name: &str) -> Self {
             let project = TempProject::new(name);
             let files = project.files();
-            files.init(&a_team()).expect(".farik/ is made");
+            files.init(&a_team()).expect(".catervas/ is made");
             let log = Arc::new(
                 open_event_log(Path::new(IN_MEMORY), at(9, 0)).expect("a log in memory opens"),
             );
@@ -914,7 +917,7 @@ pub(crate) mod fixtures {
             agent: Option<&str>,
             kind: &str,
             body: Value,
-        ) -> FarikEvent {
+        ) -> CatervasEvent {
             self.put_with(when, task, agent, None, kind, body)
         }
 
@@ -931,7 +934,7 @@ pub(crate) mod fixtures {
             session: &str,
             kind: &str,
             body: Value,
-        ) -> FarikEvent {
+        ) -> CatervasEvent {
             self.put_with(when, task, Some(agent), Some(session), kind, body)
         }
 
@@ -947,10 +950,10 @@ pub(crate) mod fixtures {
             session: Option<&str>,
             kind: &str,
             body: Value,
-        ) -> FarikEvent {
+        ) -> CatervasEvent {
             let mut wire = json!({
                 "seq": 1, "recorded_at": when.to_rfc3339(),
-                "team_id": "farik", "project_id": "farik",
+                "team_id": "catervas", "project_id": "catervas",
                 "kind": kind, "body": body
             });
             if let Some(task) = task {
@@ -978,7 +981,7 @@ pub(crate) mod fixtures {
         /// Files `task`, titled `title`, in the files and the log, with `change` applied to the
         /// fixture contract.
         pub(crate) fn file(&self, task: &str, title: &str, change: impl FnOnce(&mut Value)) {
-            let mut wire = farik_core::contract::fixtures::a_contract_wire();
+            let mut wire = catervas_core::contract::fixtures::a_contract_wire();
             wire["id"] = json!(task);
             wire["title"] = json!(title);
             change(&mut wire);
@@ -1007,7 +1010,7 @@ pub(crate) mod fixtures {
             (from, to): (&str, &str),
             by: &str,
             people: (Option<&str>, Option<&str>),
-        ) -> FarikEvent {
+        ) -> CatervasEvent {
             let mut body = json!({
                 "from": from, "to": to, "actor": if by == "human" { "human" } else { "assignee" },
                 "requested_by": by, "gate": "none", "effects": [], "iteration": 0
@@ -1197,14 +1200,14 @@ mod tests {
     }
 
     /// Ada, Linus and Kai, the Marketing Specialist.
-    fn with_kai() -> farik_core::team::Team {
-        let mut wire = farik_core::team::fixtures::a_team_wire();
+    fn with_kai() -> catervas_core::team::Team {
+        let mut wire = catervas_core::team::fixtures::a_team_wire();
         wire["agents"] = json!([
             { "id": "ada", "display_name": "Ada", "role": "product_manager", "status": "active" },
             { "id": "linus", "display_name": "Linus", "role": "software_developer", "status": "active" },
             { "id": "kai", "display_name": "Kai", "role": "marketing_specialist", "status": "active" },
         ]);
-        farik_core::team::validate_team(&wire).expect("the fixture is a team")
+        catervas_core::team::validate_team(&wire).expect("the fixture is a team")
     }
 
     /// A request of Kai's for a post outside the plan, going out at `at`.
@@ -1251,7 +1254,10 @@ mod tests {
         assert_eq!(WaitingKind::SocialPost.as_str(), "social_post");
         let ask = row.post.as_ref().expect("the post's ask");
         assert_eq!(ask.post, post);
-        assert_eq!(ask.channel, farik_core::marketing::PostChannel::Instagram);
+        assert_eq!(
+            ask.channel,
+            catervas_core::marketing::PostChannel::Instagram
+        );
         assert_eq!(ask.text, "We open on Wednesday.");
         assert_eq!(
             ask.media,
@@ -1296,14 +1302,14 @@ mod tests {
     }
 
     /// Ada, Linus and Ivo, the Procurement Specialist.
-    fn with_ivo_buying() -> farik_core::team::Team {
-        let mut wire = farik_core::team::fixtures::a_team_wire();
+    fn with_ivo_buying() -> catervas_core::team::Team {
+        let mut wire = catervas_core::team::fixtures::a_team_wire();
         wire["agents"] = json!([
             { "id": "ada", "display_name": "Ada", "role": "product_manager", "status": "active" },
             { "id": "linus", "display_name": "Linus", "role": "software_developer", "status": "active" },
             { "id": "ivo", "display_name": "Ivo", "role": "procurement_specialist", "status": "active" },
         ]);
-        farik_core::team::validate_team(&wire).expect("the fixture is a team")
+        catervas_core::team::validate_team(&wire).expect("the fixture is a team")
     }
 
     #[test]
@@ -1463,7 +1469,7 @@ mod tests {
             ask.why,
             "Two of the five sellers show their prices only in a full browser."
         );
-        assert_eq!(ask.cost, farik_core::pipeline::PipelineCost::Paid);
+        assert_eq!(ask.cost, catervas_core::pipeline::PipelineCost::Paid);
         assert!(ask.needs_account);
         assert!(!ask.sends_project_data);
         assert_eq!(
@@ -1499,7 +1505,7 @@ mod tests {
             "a request holds no task"
         );
 
-        // Farik passes one on after three tries, with no reason of the manager's.
+        // Catervas passes one on after three tries, with no reason of the manager's.
         let second = request("Shippo", 8);
         board.put(
             at(9, 9),
@@ -1589,14 +1595,14 @@ mod tests {
         }
     }
     /// Ada, Linus and Kai, the Procurement Specialist.
-    fn with_kai_buying() -> farik_core::team::Team {
-        let mut wire = farik_core::team::fixtures::a_team_wire();
+    fn with_kai_buying() -> catervas_core::team::Team {
+        let mut wire = catervas_core::team::fixtures::a_team_wire();
         wire["agents"] = json!([
             { "id": "ada", "display_name": "Ada", "role": "product_manager", "status": "active" },
             { "id": "linus", "display_name": "Linus", "role": "software_developer", "status": "active" },
             { "id": "kai", "display_name": "Kai", "role": "procurement_specialist", "status": "active" },
         ]);
-        farik_core::team::validate_team(&wire).expect("the fixture is a team")
+        catervas_core::team::validate_team(&wire).expect("the fixture is a team")
     }
 
     /// A request of Kai's, in her session, to read `url`, on FRK-1.

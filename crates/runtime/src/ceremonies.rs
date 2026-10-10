@@ -1,13 +1,13 @@
 //! What the team's ceremonies are told (`docs/SPEC.md` section 5.9): the facts each is given,
 //! read from the log and the board.
 
-use chrono::{DateTime, NaiveTime, Utc};
-use farik_core::contract::{TaskId, TaskStatus};
-use farik_protocol::event::{
-    BudgetExhaustedBodyScope, EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent,
+use catervas_core::contract::{TaskId, TaskStatus};
+use catervas_protocol::event::{
+    BudgetExhaustedBodyScope, CatervasEvent, EscalationRaisedBodyReason, EventBody, EventKind,
     SessionEndedBodyReason, Thread,
 };
-use farik_store::{EventLog, EventQuery, Projections, StoreError};
+use catervas_store::{EventLog, EventQuery, Projections, StoreError};
+use chrono::{DateTime, NaiveTime, Utc};
 
 use crate::sprints::is_planning;
 use crate::transitions::is_move_into;
@@ -146,7 +146,10 @@ const CEREMONY_SESSIONS: usize = 3;
 /// whose `session.ended` says it completed, was aborted, or failed, or three such starts whatever
 /// their ends. One that stopped at a limit or at its model provider's limit is asked again, but not
 /// for ever.
-pub(crate) fn has_run(events: &[FarikEvent], is_ceremony: impl Fn(&FarikEvent) -> bool) -> bool {
+pub(crate) fn has_run(
+    events: &[CatervasEvent],
+    is_ceremony: impl Fn(&CatervasEvent) -> bool,
+) -> bool {
     let mut started: Vec<Option<&str>> = Vec::new();
     for event in events {
         let session_id = event.envelope.ids.session_id.as_deref();
@@ -187,7 +190,7 @@ pub fn standup_moves(
     sprint_id: &str,
     in_sprint: &[TaskId],
     now: DateTime<Utc>,
-) -> Result<Vec<FarikEvent>, StoreError> {
+) -> Result<Vec<CatervasEvent>, StoreError> {
     let events = log.read(&EventQuery {
         kinds: vec![
             EventKind::SprintStarted,
@@ -319,7 +322,7 @@ pub fn sprint_events(
     log: &EventLog,
     sprint: &EndedSprint,
     task_id: &TaskId,
-) -> Result<Vec<FarikEvent>, StoreError> {
+) -> Result<Vec<CatervasEvent>, StoreError> {
     Ok(log
         .read(&EventQuery {
             task_id: Some(task_id.clone()),
@@ -332,12 +335,12 @@ pub fn sprint_events(
 }
 
 /// Whether `event` is the start of a ceremony session in `thread`.
-fn in_thread(event: &FarikEvent, thread: Thread) -> bool {
+fn in_thread(event: &CatervasEvent, thread: Thread) -> bool {
     matches!(&event.body, EventBody::SessionStarted(body) if body.thread == Some(thread))
 }
 
 /// Whether `event` is the start of a standup: a `session.started` in the `standup` thread.
-fn is_standup(event: &FarikEvent) -> bool {
+fn is_standup(event: &CatervasEvent) -> bool {
     in_thread(event, Thread::Standup)
 }
 

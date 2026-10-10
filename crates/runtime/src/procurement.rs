@@ -22,26 +22,26 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use calamine::{Data, Range, Reader as _, Xlsx, open_workbook_from_rs};
-use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
-use farik_core::contract::{Role, TaskId};
-use farik_core::pipeline::PipelineCost;
-use farik_core::renewals::{RegisterRow, due_renewals};
-use farik_core::team::{Team, private_folder};
-use farik_protocol::event::{
+use catervas_core::contract::{Role, TaskId};
+use catervas_core::pipeline::PipelineCost;
+use catervas_core::renewals::{RegisterRow, due_renewals};
+use catervas_core::team::{Team, private_folder};
+use catervas_protocol::event::{
     EventBody, EventIds, MailboxConnectedBody, MailboxDisconnectedBody, MailboxPurpose,
     PurchaseOrderExpiredBody, PurchaseOrderStatus, RenewalCheckedBody, RenewalFlaggedBody,
     new_event,
 };
-use farik_roles::{Kit, KitConnector};
-use farik_store::pipelines::{PipelineRecord, data_pipelines};
-use farik_store::purchase_orders::{PurchaseOrderRecord, expires_at, overdue, purchase_orders};
-use farik_store::renewals::{last_check, renewals};
-use farik_store::requests::{
+use catervas_roles::{Kit, KitConnector};
+use catervas_store::pipelines::{PipelineRecord, data_pipelines};
+use catervas_store::purchase_orders::{PurchaseOrderRecord, expires_at, overdue, purchase_orders};
+use catervas_store::renewals::{last_check, renewals};
+use catervas_store::requests::{
     RequestError, file_request, placeholder_budget_usd, request_from_text,
 };
-use farik_store::seller_mail::{seller_mail, sent_on};
-use farik_store::waiting::PipelineAsk;
-use farik_store::{EventLog, StoreError};
+use catervas_store::seller_mail::{seller_mail, sent_on};
+use catervas_store::waiting::PipelineAsk;
+use catervas_store::{EventLog, StoreError};
+use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use serde_json::{Value, json};
 
 use crate::claude::Secret;
@@ -72,7 +72,7 @@ pub(crate) static MAIL: Mutex<()> = Mutex::new(());
 pub(crate) static RENEWALS: Mutex<()> = Mutex::new(());
 
 /// Held from the first read of the data pipeline requests to the record that changes them: by an
-/// agent's request, by each decision (the Product Manager's and the owner's) and by Farik's
+/// agent's request, by each decision (the Product Manager's and the owner's) and by Catervas's
 /// escalation after three tries, so that two of them never take one name or the limit, decide one
 /// request twice, or file its request twice. One lock for every project in the process.
 pub(crate) static PIPELINES: Mutex<()> = Mutex::new(());
@@ -145,7 +145,7 @@ pub fn pipeline_text(
 /// Adds to `row`, a `waiting.list` row of kind `data_pipeline`, the fields of the request that
 /// waits: its number, name, what it gives, the source's page as written and its site, why, the
 /// agent's three answers, the Product Manager's reason when it passed the request on, when the
-/// agent asked and, when given, the text an approval would file. The same row is `farik pipeline
+/// agent asked and, when given, the text an approval would file. The same row is `catervas pipeline
 /// list --json`'s.
 pub fn add_pipeline_fields(row: &mut Value, ask: &PipelineAsk, request_text: Option<&str>) {
     row["pipeline"] = json!(ask.pipeline);
@@ -298,7 +298,7 @@ fn time(at: DateTime<Utc>) -> String {
     at.to_rfc3339_opts(SecondsFormat::AutoSi, true)
 }
 
-/// One order as `purchase_orders.list` and the agent's `farik_read_purchase_orders` word it: its
+/// One order as `purchase_orders.list` and the agent's `catervas_read_purchase_orders` word it: its
 /// number, state, seller, total, task, agent and every day the log gives it, the latest status
 /// with who recorded it, when it closes by itself and whether it is overdue on `today`. With
 /// `detail`, also what the agent wrote: the contact, each line, delivery, terms, the seller's page,
@@ -401,7 +401,7 @@ pub fn purchase_orders_list(log: &EventLog, today: NaiveDate) -> Result<Value, S
     }))
 }
 
-/// `renewals.list`: the renewals Farik flagged that the owner has not dismissed, oldest first, and
+/// `renewals.list`: the renewals Catervas flagged that the owner has not dismissed, oldest first, and
 /// how many rows the last daily check could not read.
 ///
 /// # Errors
@@ -423,7 +423,7 @@ pub fn renewals_list(log: &EventLog) -> Result<Value, StoreError> {
     Ok(json!({ "open": open, "unreadable": unreadable }))
 }
 
-/// An event of Farik's own, recorded at `now`: about `task` when it is about one, and with no
+/// An event of Catervas's own, recorded at `now`: about `task` when it is about one, and with no
 /// agent and no session.
 fn record_event(
     tools: &ToolDeps,
@@ -641,10 +641,10 @@ fn checked_body(due: usize, unreadable: u32) -> Result<RenewalCheckedBody, serde
     }))
 }
 
-/// The folder of the procurement mailbox's files under `root`: `.farik/local/procurement/mail`.
+/// The folder of the procurement mailbox's files under `root`: `.catervas/local/procurement/mail`.
 const MAIL_FOLDER: &str = "mail";
 
-/// Whether the mailbox files can be kept: the folder `.farik/local/procurement/mail` of `deps`'s
+/// Whether the mailbox files can be kept: the folder `.catervas/local/procurement/mail` of `deps`'s
 /// project, made owner-only, refused if it or any part of its path is a link.
 pub(crate) fn mail_dir(deps: &ToolDeps) -> Result<std::path::PathBuf, MailboxRefusal> {
     use std::os::unix::fs::DirBuilderExt as _;
@@ -692,20 +692,20 @@ pub struct MailboxConnect {
     pub smtp: Server,
     /// The sign-in name.
     pub username: String,
-    /// The folder Farik reads.
+    /// The folder Catervas reads.
     pub folder: String,
-    /// What Farik adds under every message.
+    /// What Catervas adds under every message.
     pub signature: String,
-    /// Whether Farik says an AI assistant wrote it.
+    /// Whether Catervas says an AI assistant wrote it.
     pub disclose_ai: bool,
 }
 
-/// Why a mailbox command was refused: a code and Farik's words, which never quote the password.
+/// Why a mailbox command was refused: a code and Catervas's words, which never quote the password.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailboxRefusal {
     /// The refusal code the owner is shown.
     pub code: &'static str,
-    /// Farik's words.
+    /// Catervas's words.
     pub words: String,
 }
 
@@ -744,7 +744,7 @@ pub(crate) fn store_refusal(error: CredentialError) -> MailboxRefusal {
 pub(crate) fn mail_failed(error: impl std::fmt::Display) -> MailboxRefusal {
     MailboxRefusal::new(
         "mailbox_files",
-        format!("Farik could not keep the mailbox: {error}"),
+        format!("Catervas could not keep the mailbox: {error}"),
     )
 }
 
@@ -822,7 +822,7 @@ pub(crate) async fn connect_mailbox(
         .map_err(mail_failed)
 }
 
-/// Records `body` as Farik's own: the envelope names no agent and no session, and `task` when the
+/// Records `body` as Catervas's own: the envelope names no agent and no session, and `task` when the
 /// event is about one. Answers the event's number.
 pub(crate) fn record_unattended(
     deps: &ToolDeps,
@@ -979,11 +979,11 @@ pub(crate) fn mailbox_ledger(deps: &ToolDeps) -> Option<Ledger> {
     serde_json::from_str(&std::fs::read_to_string(at).ok()?).ok()
 }
 
-/// The most messages Farik sends to sellers in a UTC day.
+/// The most messages Catervas sends to sellers in a UTC day.
 pub const MOST_SENT_A_DAY: u32 = 50;
 
-/// What `procurement_mailbox.get` answers: whether a mailbox is connected and which, when Farik
-/// last read it and what failed, and how many messages went today of the most Farik sends.
+/// What `procurement_mailbox.get` answers: whether a mailbox is connected and which, when Catervas
+/// last read it and what failed, and how many messages went today of the most Catervas sends.
 ///
 /// # Errors
 ///
@@ -1022,10 +1022,10 @@ pub fn mailbox_state(deps: &ToolDeps) -> Result<Value, StoreError> {
 mod tests {
     use std::sync::Arc;
 
+    use catervas_protocol::clock::MovableClock;
+    use catervas_protocol::event::{EventBody, EventKind};
+    use catervas_store::purchase_orders::{OrderState, overdue, purchase_orders};
     use chrono::{DateTime, Duration, Utc};
-    use farik_protocol::clock::MovableClock;
-    use farik_protocol::event::{EventBody, EventKind};
-    use farik_store::purchase_orders::{OrderState, overdue, purchase_orders};
     use serde_json::json;
 
     use crate::orchestrator::fixtures::Harness;
@@ -1105,7 +1105,7 @@ mod tests {
         assert_eq!(
             (&ids.agent_id, &ids.session_id),
             (&None, &None),
-            "Farik's own"
+            "Catervas's own"
         );
         let EventBody::PurchaseOrderExpired(body) = &events[0].body else {
             panic!("an expiry");
@@ -1339,9 +1339,9 @@ mod tests {
         let orchestrator = retired.orchestrator_on(retired.recorded(Vec::new()), clock());
         for id in ["proc", "proc-2"] {
             orchestrator
-                .handle(farik_protocol::command::Command::AgentUpdate {
+                .handle(catervas_protocol::command::Command::AgentUpdate {
                     agent_id: id.to_string(),
-                    status: farik_core::team::AgentStatus::Retired,
+                    status: catervas_core::team::AgentStatus::Retired,
                 })
                 .await
                 .expect("the agent is retired");
@@ -1392,7 +1392,7 @@ mod tests {
             read_register(&path).expect("the register reads")
         };
         let row = |vendor: &str, renews_on: &str, notice: &str, status: &str| {
-            farik_core::renewals::RegisterRow {
+            catervas_core::renewals::RegisterRow {
                 vendor: vendor.to_string(),
                 renews_on: renews_on.to_string(),
                 notice_days: notice.to_string(),
@@ -1515,14 +1515,14 @@ mod tests {
 
     #[test]
     fn counts_past_a_million_are_held_to_a_million() {
-        use farik_protocol::event::event_from_value;
+        use catervas_protocol::event::event_from_value;
         // A register can hold more rows than the event's schema counts. The log reads every event
         // back through the schema, so one it refuses would fail every later read of its kind, the
         // next tick's included, and stop the team: the check records the most the schema counts.
         let wire = |body: &super::RenewalCheckedBody| {
             json!({
-                "seq": 1, "recorded_at": "2026-10-05T08:00:00Z", "team_id": "farik",
-                "project_id": "farik", "kind": "renewal.checked",
+                "seq": 1, "recorded_at": "2026-10-05T08:00:00Z", "team_id": "catervas",
+                "project_id": "catervas", "kind": "renewal.checked",
                 "body": serde_json::to_value(body).expect("a body is a value"),
             })
         };
@@ -1562,7 +1562,7 @@ mod tests {
 
     // The procurement mailbox (step 10f): connecting, disconnecting and what the page is told.
     mod mailbox {
-        use farik_protocol::event::{EventBody, EventKind};
+        use catervas_protocol::event::{EventBody, EventKind};
 
         use crate::claude::Secret;
         use crate::connectors::MemoryConnectorSecrets;

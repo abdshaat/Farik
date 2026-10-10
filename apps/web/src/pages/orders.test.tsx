@@ -1,5 +1,5 @@
-import { uiStrings } from "@farik/ui";
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { uiStrings } from "@catervas/ui";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -71,7 +71,7 @@ describe("the orders on the Procurement Specialist's page", () => {
 			screen.getByRole("heading", { name: en.sitesTitle }).closest("section"),
 		);
 		expect(section.textContent).toContain(
-			"Ivo suggests and tracks orders. Farik never orders or pays: you place each, then mark it placed and received.",
+			"Ivo suggests and tracks orders. Catervas never orders or pays: you place each, then mark it placed and received.",
 		);
 
 		// An approved order waits for the owner to place it, with the day it closes by itself.

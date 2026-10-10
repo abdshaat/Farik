@@ -1,4 +1,4 @@
-//! The orchestrator (`docs/SPEC.md` sections 5.2 and 5.5, F6): Farik running its team on its own.
+//! The orchestrator (`docs/SPEC.md` sections 5.2 and 5.5, F6): Catervas running its team on its own.
 //! Each tick reads the board, does the first thing on it that needs doing, running at most one
 //! session to its end, and says what it did.
 
@@ -8,17 +8,17 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use catervas_core::contract::{Role, TaskContract, TaskId};
+use catervas_core::governor::permissions::PermissionTier;
+use catervas_core::governor::sites::{WebAccess, web_access};
+use catervas_core::team::{Team, task_private_folder};
+use catervas_protocol::clock::IdSource;
+use catervas_protocol::command::{Command, CommandReply, ReplyKind};
+use catervas_roles::{KitError, RoleError};
+use catervas_store::baseline::{folder_in, make_private_directory};
+use catervas_store::files::FilesError;
+use catervas_store::{GitError, StoreError};
 use chrono::{DateTime, Utc};
-use farik_core::contract::{Role, TaskContract, TaskId};
-use farik_core::governor::permissions::PermissionTier;
-use farik_core::governor::sites::{WebAccess, web_access};
-use farik_core::team::{Team, task_private_folder};
-use farik_protocol::clock::IdSource;
-use farik_protocol::command::{Command, CommandReply, ReplyKind};
-use farik_roles::{KitError, RoleError};
-use farik_store::baseline::{folder_in, make_private_directory};
-use farik_store::files::FilesError;
-use farik_store::{GitError, StoreError};
 
 use crate::channel::ChannelError;
 use crate::cost::CostError;
@@ -78,7 +78,7 @@ pub struct OrchestratorDeps {
 pub enum OrchestratorError {
     /// The log or the board failed.
     Store(StoreError),
-    /// A file under `.farik/` could not be read or written.
+    /// A file under `.catervas/` could not be read or written.
     Files(FilesError),
     /// Git failed.
     Git(GitError),
@@ -273,7 +273,7 @@ pub enum Waited {
 }
 
 /// The longest `wait_until` sleeps before the board is ticked again: work filed straight into the
-/// store while a run waits, such as `farik task create` writing the store directly, does not
+/// store while a run waits, such as `catervas task create` writing the store directly, does not
 /// notify `commands` and would otherwise sit until the sleeping agent wakes.
 const RECHECK: chrono::Duration = chrono::Duration::seconds(60);
 
@@ -281,15 +281,15 @@ const RECHECK: chrono::Duration = chrono::Duration::seconds(60);
 /// refining ones.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TickRules {
-    /// Every rule, as `farik run` ticks.
+    /// Every rule, as `catervas run` ticks.
     #[default]
     All,
-    /// Plan without doing, as `farik plan` ticks: triage and `draft -> refining` (rule 10),
+    /// Plan without doing, as `catervas plan` ticks: triage and `draft -> refining` (rule 10),
     /// refining and the governor's judgment (rule 9), the plan sessions that assign and an
     /// approved epic's assignment (rule 8), and an epic's breakdown and close-out (rule 6 for an
     /// epic alone). No cleanup, integration, criterion run, worktree, or start of work.
     Planning,
-    /// Triage and refining alone (rules 9 and 10), as `farik contract new` ticks.
+    /// Triage and refining alone (rules 9 and 10), as `catervas contract new` ticks.
     Refining,
 }
 
@@ -421,7 +421,7 @@ pub struct RecoveryReport {
     pub tasks_resumed: u32,
 }
 
-/// Farik running a project's team. ponytail: one session at a time, a session pool when a team
+/// Catervas running a project's team. ponytail: one session at a time, a session pool when a team
 /// outgrows a WIP limit of one.
 pub struct Orchestrator {
     deps: OrchestratorDeps,
@@ -472,7 +472,7 @@ impl Orchestrator {
         // start no session, so a paused team has them too (ADR 0042).
         if scope.task_id.is_none() {
             rules::end_marketing_plans(&self.deps).await?;
-            // Posts go to Buffer between sessions, with no model, so under Farik's own pause
+            // Posts go to Buffer between sessions, with no model, so under Catervas's own pause
             // for a refused key too, and the owner's pause alone holds them (ADR 0042).
             rules::hand_over_posts(&self.deps).await?;
             // The orders nobody decided in time, and the renewals coming up, close and flag with
@@ -491,7 +491,7 @@ impl Orchestrator {
                 return Ok(report);
             }
             return Ok(TickReport::Idle {
-                why: "the team is paused; farik resume starts it again".to_string(),
+                why: "the team is paused; catervas resume starts it again".to_string(),
                 until: None,
             });
         }
@@ -548,7 +548,7 @@ impl Orchestrator {
         }
     }
 
-    /// Integrates an accepted task now, as the human asks (`farik integrate`), whatever
+    /// Integrates an accepted task now, as the human asks (`catervas integrate`), whatever
     /// escalations it carries: under `manual` a merge into the integration branch with no push,
     /// under `auto_merge` the merge and the push to `origin` when there is one, under
     /// `pull_request` a pull request opened when none was since acceptance, else the recorded one
@@ -729,17 +729,17 @@ pub fn result_of(reply: CommandReply) -> Result<CommandReport, CommandError> {
     }
 }
 
-/// A task's worktree, `.farik/local/worktrees/<id>` (5.14).
+/// A task's worktree, `.catervas/local/worktrees/<id>` (5.14).
 fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
     deps.tools
         .files
         .root()
-        .join(".farik/local/worktrees")
+        .join(".catervas/local/worktrees")
         .join(task_id.as_str())
 }
 
-/// Where a task's sessions work: its private folder, `.farik/local/finance` for a Finance
-/// Specialist's task and `.farik/local/procurement` for a Procurement Specialist's, made for its
+/// Where a task's sessions work: its private folder, `.catervas/local/finance` for a Finance
+/// Specialist's task and `.catervas/local/procurement` for a Procurement Specialist's, made for its
 /// owner alone when it is not there (6.6, 6.10); any other task's worktree (5.14). A session in a
 /// folder has no worktree, no branch and no sandbox.
 ///
@@ -760,18 +760,18 @@ fn session_dir(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Utc};
-    use farik_core::contract::TaskStatus;
-    use farik_protocol::event::{
+    use catervas_core::contract::TaskStatus;
+    use catervas_protocol::event::{
         CriterionRecordedBodyRunBy, EventBody, EventKind, NoteWrittenBodyKind,
         SessionStartedBodyPurpose,
     };
+    use chrono::{DateTime, Utc};
 
-    use farik_store::git::fixtures::git_output_in;
+    use catervas_store::git::fixtures::git_output_in;
 
-    use farik_core::contract::{TaskId, TaskKind};
-    use farik_protocol::command::{AcceptSubject, Command, RequestSize};
-    use farik_protocol::event::EscalationRaisedBodyReason;
+    use catervas_core::contract::{TaskId, TaskKind};
+    use catervas_protocol::command::{AcceptSubject, Command, RequestSize};
+    use catervas_protocol::event::EscalationRaisedBodyReason;
 
     use crate::orchestrator::fixtures::{Harness, run_until_idle_within_ten_seconds};
     use crate::recorded::fixtures::{

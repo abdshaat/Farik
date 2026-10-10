@@ -1,5 +1,5 @@
-//! The price table Farik ships (`docs/SPEC.md` section 5.5), copied from the provider's published
-//! table on the day named in `retrieved_at`. The user overrides it with `.farik/prices.json`.
+//! The price table Catervas ships (`docs/SPEC.md` section 5.5), copied from the provider's published
+//! table on the day named in `retrieved_at`. The user overrides it with `.catervas/prices.json`.
 
 use std::sync::LazyLock;
 

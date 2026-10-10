@@ -1,7 +1,7 @@
 //! A log that refuses one kind of event, for tests in this crate and in others that need an
 //! append to fail where the code under test cannot otherwise be made to fail it.
 
-use farik_protocol::event::EventKind;
+use catervas_protocol::event::EventKind;
 
 use super::EventLog;
 
@@ -49,7 +49,7 @@ pub fn append_unreadable(log: &EventLog, agent_id: &str, kind: EventKind) {
     log.connection()
         .execute(
             "INSERT INTO events (recorded_at, team_id, project_id, agent_id, kind, body)
-             VALUES ('2026-09-17T12:00:00Z', 'farik', 'farik', ?1, ?2, '{}')",
+             VALUES ('2026-09-17T12:00:00Z', 'catervas', 'catervas', ?1, ?2, '{}')",
             (agent_id, kind.to_string()),
         )
         .expect("the row is written");

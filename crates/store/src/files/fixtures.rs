@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use farik_core::team::{Team, validate_team};
+use catervas_core::team::{Team, validate_team};
 
 use super::ProjectFiles;
 
 /// A project of its own, in a directory removed when the value is dropped however the test ends.
 pub struct TempProject {
-    /// The repository root, which is where `.farik/` goes.
+    /// The repository root, which is where `.catervas/` goes.
     pub root: PathBuf,
 }
 
@@ -19,7 +19,7 @@ impl TempProject {
     #[must_use]
     pub fn new(name: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
-            "farik-files-{name}-{}-{:?}",
+            "catervas-files-{name}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -41,12 +41,12 @@ impl Drop for TempProject {
     }
 }
 
-/// The team `farik_core`'s own fixture describes, typed.
+/// The team `catervas_core`'s own fixture describes, typed.
 ///
 /// # Panics
 ///
-/// When that fixture stops being a team, which is a change to `farik-core`'s own tests.
+/// When that fixture stops being a team, which is a change to `catervas-core`'s own tests.
 #[must_use]
 pub fn a_team() -> Team {
-    validate_team(&farik_core::team::fixtures::a_team_wire()).expect("the fixture is a team")
+    validate_team(&catervas_core::team::fixtures::a_team_wire()).expect("the fixture is a team")
 }

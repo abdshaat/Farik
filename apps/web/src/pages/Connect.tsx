@@ -1,13 +1,13 @@
-import mark from "@farik/brand/assets/logo-mark-1254.png";
-import wordmark from "@farik/brand/assets/wordmark-1024.png";
-import { Button } from "@farik/ui";
+import mark from "@catervas/brand/assets/logo-mark-1254.png";
+import wordmark from "@catervas/brand/assets/wordmark-1024.png";
+import { Button } from "@catervas/ui";
 import { useConnection } from "../app/connection.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 
-const COMMAND = "farik serve";
+const COMMAND = "catervas serve";
 
-/** Why the page cannot work yet: no session, a used link, or Farik not answering. */
+/** Why the page cannot work yet: no session, a used link, or Catervas not answering. */
 export function Connect() {
 	const { status, linkUsed } = useConnection();
 	return (

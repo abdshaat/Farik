@@ -1,10 +1,10 @@
 //! A task's diff against the integration branch (`docs/SPEC.md` 5.14), and an epic's, which is
-//! its tasks' integrated diffs joined: for `farik task show --diff` and the browser alike.
+//! its tasks' integrated diffs joined: for `catervas task show --diff` and the browser alike.
 
-use farik_core::branch::task_branch;
-use farik_core::contract::{TaskContract, TaskKind};
-use farik_core::team::{Team, task_private_folder};
-use farik_protocol::event::{EventBody, FarikEvent};
+use catervas_core::branch::task_branch;
+use catervas_core::contract::{TaskContract, TaskKind};
+use catervas_core::team::{Team, task_private_folder};
+use catervas_protocol::event::{CatervasEvent, EventBody};
 
 use crate::baseline::{baseline_of, changes_since_baseline, folder_in};
 use crate::git::{Git, integration_branch};
@@ -38,8 +38,8 @@ pub fn diff_of(
     git: &Git,
     team: &Team,
     contract: &TaskContract,
-    history: &[FarikEvent],
-    children: &[(TaskContract, Vec<FarikEvent>)],
+    history: &[CatervasEvent],
+    children: &[(TaskContract, Vec<CatervasEvent>)],
 ) -> Result<TaskDiff, String> {
     // A task in a private folder has no branch, and its files are not shown: only which changed.
     // Once accepted, the move into `accepted` carries them, since the folder holds later tasks'
@@ -72,7 +72,7 @@ pub fn diff_of(
     if contract.kind != TaskKind::Epic {
         return Ok(counted(branch_diff(git, team, contract, history)?));
     }
-    let mut ordered: Vec<&(TaskContract, Vec<FarikEvent>)> = children
+    let mut ordered: Vec<&(TaskContract, Vec<CatervasEvent>)> = children
         .iter()
         .filter(|(_, history)| integrated(history).is_some())
         .collect();
@@ -93,7 +93,7 @@ pub fn diff_of(
 
 /// The files a task in a private folder changed, as its last move into `accepted` recorded them;
 /// none when it was not accepted, or was in a log from before the move recorded them.
-fn accepted_changes(history: &[FarikEvent]) -> Option<Vec<String>> {
+fn accepted_changes(history: &[CatervasEvent]) -> Option<Vec<String>> {
     history.iter().rev().find_map(|event| match &event.body {
         EventBody::TaskTransitioned(body) if body.to.to_string() == "accepted" => {
             body.changed.clone()
@@ -113,7 +113,7 @@ fn id_number(contract: &TaskContract) -> u64 {
 }
 
 /// The commit and the branch of the task's last integration, when it has one.
-fn integrated(history: &[FarikEvent]) -> Option<(String, String)> {
+fn integrated(history: &[CatervasEvent]) -> Option<(String, String)> {
     history.iter().rev().find_map(|event| match &event.body {
         EventBody::TaskIntegrated(body) => Some((body.sha.clone(), body.into.clone())),
         _ => None,
@@ -124,7 +124,7 @@ fn branch_diff(
     git: &Git,
     team: &Team,
     contract: &TaskContract,
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
 ) -> Result<String, String> {
     let branch = task_branch(contract);
     // `merge-base x x` answers `x`'s commit, and refuses a name that names none.
@@ -148,7 +148,7 @@ fn branch_diff(
                 let diff = git.diff(&into, &branch).map_err(words)?;
                 if diff.trim().is_empty() {
                     Ok(format!(
-                        "{branch} is wholly in {into}; its merge is not a commit farik can diff \
+                        "{branch} is wholly in {into}; its merge is not a commit catervas can diff \
                          against"
                     ))
                 } else {
@@ -192,26 +192,26 @@ fn counted(diff: String) -> TaskDiff {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::fixtures::a_contract_wire;
-    use farik_core::contract::{TaskContract, validate_contract};
-    use farik_core::team::fixtures::a_team_wire;
-    use farik_core::team::{Team, validate_team};
-    use farik_protocol::event::fixtures::an_event_wire;
-    use farik_protocol::event::{EventKind, FarikEvent, event_from_value};
+    use catervas_core::contract::fixtures::a_contract_wire;
+    use catervas_core::contract::{TaskContract, validate_contract};
+    use catervas_core::team::fixtures::a_team_wire;
+    use catervas_core::team::{Team, validate_team};
+    use catervas_protocol::event::fixtures::an_event_wire;
+    use catervas_protocol::event::{CatervasEvent, EventKind, event_from_value};
     use serde_json::{Value, json};
 
     use super::diff_of;
     use crate::baseline::copy_baseline;
     use crate::git::fixtures::TempRepo;
 
-    const FOLDER: &str = ".farik/local/finance";
+    const FOLDER: &str = ".catervas/local/finance";
 
     /// A Finance Specialist's task FRK-1, in its folder.
     fn a_finance_task() -> TaskContract {
         let mut wire = a_contract_wire();
         wire["assignee_role"] = json!("finance_specialist");
         wire["reviewer_role"] = json!("product_manager");
-        wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+        wire["allowed_paths"] = json!([".catervas/local/finance/**"]);
         wire["exit_criteria"] = json!([{
             "id": "C1",
             "text": "The books exist.",
@@ -226,7 +226,7 @@ mod tests {
     }
 
     /// FRK-1's move into `accepted`, which integrates nothing, naming `changed` when it is given.
-    fn its_acceptance(changed: Option<&[&str]>) -> FarikEvent {
+    fn its_acceptance(changed: Option<&[&str]>) -> CatervasEvent {
         let mut wire = an_event_wire(EventKind::TaskTransitioned);
         wire["body"] = json!({
             "from": "verifying",
@@ -245,7 +245,7 @@ mod tests {
         event_from_value(&wire).expect("a schema-valid event")
     }
 
-    fn files_of(repo: &TempRepo, history: &[FarikEvent]) -> Vec<String> {
+    fn files_of(repo: &TempRepo, history: &[CatervasEvent]) -> Vec<String> {
         let diff =
             diff_of(&repo.adapter(), &a_team(), &a_finance_task(), history, &[]).expect("the diff");
         assert!(diff.private_folder);

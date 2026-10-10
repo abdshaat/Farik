@@ -1,8 +1,8 @@
-//! `farik_chat_reply` (ADR 0026): an agent's one answer in its one-to-one chat, the one thing a
+//! `catervas_chat_reply` (ADR 0026): an agent's one answer in its one-to-one chat, the one thing a
 //! chat session writes.
 
-use farik_protocol::event::EventKind;
-use farik_store::EventQuery;
+use catervas_protocol::event::EventKind;
+use catervas_store::EventQuery;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -12,7 +12,7 @@ use super::{Call, ToolError, failed};
 use crate::chat::{ChatError, NewChatMessage, ProposedRequest, post_chat};
 use crate::session::SessionPurpose;
 
-/// `farik_chat_reply`'s input.
+/// `catervas_chat_reply`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChatReplyInput {
@@ -40,7 +40,7 @@ pub(super) fn chat_reply(call: &Call<'_>, input: ChatReplyInput) -> Result<Value
     let context = call.context;
     if context.purpose != SessionPurpose::Chat {
         return Err(refused(
-            "farik_chat_reply answers the user in a chat session, and this is not one",
+            "catervas_chat_reply answers the user in a chat session, and this is not one",
         ));
     }
     let deps = call.deps();
@@ -88,7 +88,7 @@ pub(super) fn chat_reply(call: &Call<'_>, input: ChatReplyInput) -> Result<Value
 mod tests {
     use std::num::NonZeroU64;
 
-    use farik_protocol::event::{EventBody, EventKind};
+    use catervas_protocol::event::{EventBody, EventKind};
     use serde_json::json;
 
     use crate::session::SessionPurpose;
@@ -120,7 +120,7 @@ mod tests {
         let mut context = project.context("pm", None);
         context.purpose = SessionPurpose::Chat;
         context.in_reply_to = Some(asked);
-        let reply = |input| run(&context, "farik_chat_reply", input);
+        let reply = |input| run(&context, "catervas_chat_reply", input);
 
         // A request outside its limits is refused, and does not use up the one reply.
         let too_short = reply(json!({
@@ -148,7 +148,7 @@ mod tests {
         conversation.session_id = "session-2".to_string();
         let elsewhere = run(
             &conversation,
-            "farik_chat_reply",
+            "catervas_chat_reply",
             json!({ "text": "Hello." }),
         )
         .expect_err("only a chat session replies in a chat");
@@ -204,7 +204,7 @@ mod tests {
                     .map(|_| {
                         scope.spawn(|| {
                             start.wait();
-                            run(&context, "farik_chat_reply", json!({ "text": "On it." }))
+                            run(&context, "catervas_chat_reply", json!({ "text": "On it." }))
                         })
                     })
                     .collect();

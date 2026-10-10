@@ -29,12 +29,12 @@ currency of its `currency` cell.
 
 ## 3. Read before you write
 
-`farik_write_sheet` replaces the whole workbook, and the founder may have edited it by hand. Read
-the register first with `farik_read_sheet`, keep every row and cell you read, and change only what
-the task asks. Farik keeps every earlier version.
+`catervas_write_sheet` replaces the whole workbook, and the founder may have edited it by hand. Read
+the register first with `catervas_read_sheet`, keep every row and cell you read, and change only what
+the task asks. Catervas keeps every earlier version.
 
 ## 4. Orders
 
-Each order that `farik_read_purchase_orders` gives as received is written into the register, with
+Each order that `catervas_read_purchase_orders` gives as received is written into the register, with
 what was paid, its `PO-<n>` number and its renewal day if it has one. Record what the founder
 recorded: never write that an order was placed or received when the order does not say so.

@@ -49,7 +49,7 @@ describe("RoleTag", () => {
 			"utf8",
 		);
 		expect(css).toMatch(
-			/\.uiUxDesigner \{\s*background: var\(--farik-color-role-ui-ux-designer\);\s*\}/,
+			/\.uiUxDesigner \{\s*background: var\(--catervas-color-role-ui-ux-designer\);\s*\}/,
 		);
 	});
 
@@ -72,7 +72,7 @@ describe("RoleTag", () => {
 			"utf8",
 		);
 		expect(css).toMatch(
-			/\.financeSpecialist \{\s*background: var\(--farik-color-role-finance-specialist\);\s*\}/,
+			/\.financeSpecialist \{\s*background: var\(--catervas-color-role-finance-specialist\);\s*\}/,
 		);
 	});
 
@@ -95,7 +95,7 @@ describe("RoleTag", () => {
 			"utf8",
 		);
 		expect(css).toMatch(
-			/\.procurementSpecialist \{\s*background: var\(--farik-color-role-procurement-specialist\);\s*\}/,
+			/\.procurementSpecialist \{\s*background: var\(--catervas-color-role-procurement-specialist\);\s*\}/,
 		);
 	});
 

@@ -1,26 +1,26 @@
 .steps {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 	margin: 0;
 	padding: 0;
 	list-style: none;
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
 }
 
 .step {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .current {
-	color: var(--farik-color-ink);
+	color: var(--catervas-color-ink);
 	font-weight: 700;
 }
 
 .number {
-	margin-inline-end: var(--farik-space-1);
+	margin-inline-end: var(--catervas-space-1);
 }
 
 .hidden {

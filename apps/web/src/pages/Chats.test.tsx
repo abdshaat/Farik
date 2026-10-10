@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	cleanup,
@@ -255,7 +255,7 @@ describe("chats", () => {
 			en.refuseAgentRetired,
 		);
 
-		// 4,000 characters, counted as Farik counts them, pass; 4,001 are refused before sending.
+		// 4,000 characters, counted as Catervas counts them, pass; 4,001 are refused before sending.
 		fireEvent.change(box, { target: { value: "😀".repeat(4000) } });
 		fireEvent.keyDown(box, { key: "Enter" });
 		await waitFor(() => expect(s.calls("command")).toHaveLength(3));

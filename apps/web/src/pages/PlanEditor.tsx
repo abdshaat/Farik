@@ -5,7 +5,7 @@ import {
 	TextArea,
 	TextField,
 	uiStrings,
-} from "@farik/ui";
+} from "@catervas/ui";
 import { type ReactNode, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -66,7 +66,7 @@ function Keyed({ name, children }: { name: string; children: ReactNode }) {
 	);
 }
 
-/** The plan editor: plain fields, Farik's check as you type, the lock, and Save. */
+/** The plan editor: plain fields, Catervas's check as you type, the lock, and Save. */
 export function PlanEditor() {
 	const { id = "" } = useParams();
 	const { data: team, error: e1 } = useQuery<{ team: Team }>("team.get", {});

@@ -30,6 +30,6 @@ smaller plan or a month-to-month term. Do not contact the seller yourself.
 
 ## 4. Write it down
 
-Write the review with `farik_write_evaluation`, and update the register as
+Write the review with `catervas_write_evaluation`, and update the register as
 `keeping-the-vendor-register` says. You recommend; the founder decides, and cancels or renews
 themselves.

@@ -6,12 +6,12 @@ use std::fmt;
 use std::path::Path;
 use std::time::Duration;
 
-use farik_core::contract::{ExitCriterion, TaskContract, TaskId, Verification};
-use farik_core::governor::done::{CriterionResult, RunBy};
-use farik_core::governor::paths::normalise;
-use farik_core::team::private_file_fault;
-use farik_store::baseline::folder_in;
-use farik_store::{Git, GitError};
+use catervas_core::contract::{ExitCriterion, TaskContract, TaskId, Verification};
+use catervas_core::governor::done::{CriterionResult, RunBy};
+use catervas_core::governor::paths::normalise;
+use catervas_core::team::private_file_fault;
+use catervas_store::baseline::folder_in;
+use catervas_store::{Git, GitError};
 
 use crate::exec::{ExecError, ExecResult, Executor};
 use crate::sandbox::{SandboxError, SandboxFactory};
@@ -166,7 +166,7 @@ pub fn run_criteria(
 /// host, with no sandbox: the artifact is a file named as the folder holds it (`books.xlsx`, and a
 /// note such as `evaluations/email-sending.md` in the procurement folder), and it passes when it is
 /// a regular file in `folder`, the folder's path from the project's `root`
-/// (`.farik/local/finance`), reached through no link: none of the folder's parts from `root` down
+/// (`.catervas/local/finance`), reached through no link: none of the folder's parts from `root` down
 /// is one, and none of the artifact's. A workbook is not text, so a criterion that searches it for
 /// strings fails; a criterion that is not an artifact is not judged here and fails. The result is
 /// stamped `run_by`.
@@ -243,7 +243,7 @@ pub fn check_artifact_in(
 
 /// Whether the diff from `input.base` to `input.head` adds a test file, and whether `command`
 /// fails with the head's test files on the base branch: in a detached worktree at the merge base,
-/// `<root>/.farik/local/worktrees/<id>-base` (one left by a crash removed first), in a sandbox
+/// `<root>/.catervas/local/worktrees/<id>-base` (one left by a crash removed first), in a sandbox
 /// from `create_base`. The sandbox is discarded and the worktree removed on every way out; when
 /// the run and the cleanup both fail, the run's error is the one returned.
 ///
@@ -272,7 +272,7 @@ pub fn check_new_tests(
     let worktree = input
         .git
         .root()
-        .join(".farik/local/worktrees")
+        .join(".catervas/local/worktrees")
         .join(format!("{}-base", input.task_id.as_str()));
     remove_base_worktree(input.git, &worktree)?;
     let ran = input
@@ -511,8 +511,8 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use farik_core::contract::ExitCriterion;
-    use farik_core::governor::done::RunBy;
+    use catervas_core::contract::ExitCriterion;
+    use catervas_core::governor::done::RunBy;
     use serde_json::{Value, json};
 
     use super::{CriterionOutcome, check_artifact_in, is_test_file, run_criterion};
@@ -523,7 +523,7 @@ mod tests {
 
     fn fresh_root(test: &str) -> PathBuf {
         let root =
-            std::env::temp_dir().join(format!("farik-criteria-{}-{test}", std::process::id()));
+            std::env::temp_dir().join(format!("catervas-criteria-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("a temporary directory can be made");
         root
@@ -695,7 +695,7 @@ mod tests {
     }
 
     /// The private folder of the projects these tests make.
-    const FOLDER: &str = ".farik/local/finance";
+    const FOLDER: &str = ".catervas/local/finance";
 
     /// The result of `check_artifact_in` on `criterion`, in the project at `root`, as its passed
     /// flag and its evidence.
@@ -736,9 +736,9 @@ mod tests {
             ("folder.xlsx", vec![], "is not a file"),
             ("linked.xlsx", vec![], "is a link"),
             ("year/pricing.xlsx", vec![], "passes through a link"),
-            ("../farik.db", vec![], "has a part that is not a name"),
+            ("../catervas.db", vec![], "has a part that is not a name"),
             (
-                ".farik/local/finance/books.xlsx",
+                ".catervas/local/finance/books.xlsx",
                 vec![],
                 "is not a path of 1 to 200",
             ),
@@ -768,7 +768,7 @@ mod tests {
 
     #[test]
     fn checks_a_note_in_the_procurement_folder() {
-        const PROCUREMENT: &str = ".farik/local/procurement";
+        const PROCUREMENT: &str = ".catervas/local/procurement";
         let root = fresh_root("artifact-note");
         let folder = root.join(PROCUREMENT);
         std::fs::create_dir_all(folder.join("evaluations")).expect("made");
@@ -815,11 +815,11 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         // The books are real, in a tree outside the project, which a link at each level of the
-        // folder's path would let a criterion pass for: `.farik`, `.farik/local` and the folder.
-        for linked in [".farik", ".farik/local", ".farik/local/finance"] {
+        // folder's path would let a criterion pass for: `.catervas`, `.catervas/local` and the folder.
+        for linked in [".catervas", ".catervas/local", ".catervas/local/finance"] {
             let name = linked.replace(['/', '.'], "-");
             let root = fresh_root(&format!("artifact-linked{name}"));
-            let rest = ".farik/local/finance"
+            let rest = ".catervas/local/finance"
                 .strip_prefix(linked)
                 .expect("a prefix")
                 .trim_start_matches('/');

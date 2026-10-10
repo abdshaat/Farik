@@ -6,11 +6,11 @@
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
-use farik_core::contract::{Role, TaskId, TaskStatus};
-use farik_core::sprint::Sprint;
-use farik_core::team::{AgentStatus, custom_server};
-use farik_protocol::event::{EventBody, EventKind, FarikEvent, MessageKind};
-use farik_store::{CostScope, CostWindow, EventQuery, HarnessMetrics, TaskProjection};
+use catervas_core::contract::{Role, TaskId, TaskStatus};
+use catervas_core::sprint::Sprint;
+use catervas_core::team::{AgentStatus, custom_server};
+use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, MessageKind};
+use catervas_store::{CostScope, CostWindow, EventQuery, HarnessMetrics, TaskProjection};
 use serde_json::{Value, json};
 
 use super::DaemonState;
@@ -119,7 +119,7 @@ fn task_costs(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
 }
 
 /// Each sprint's file, beside its row: the file's dates, status and budget; who started it; the
-/// first assigner that planned it, or none when only Farik did; what it spent; and how many of its
+/// first assigner that planned it, or none when only Catervas did; what it spent; and how many of its
 /// tasks are done (accepted or cancelled), as `sprint.current` counts them.
 fn sprints(deps: &ToolDeps) -> Result<Vec<(Sprint, Value)>, Failure> {
     let events = deps
@@ -222,7 +222,7 @@ fn sprint_get(deps: &ToolDeps, id: &str) -> Result<Value, Failure> {
 /// The ceremonies' posts from sprint `id`'s start until the next sprint starts, so that the review
 /// and the look back, which run after its end, are its: one meeting per ceremony session, oldest
 /// first, with its first post's seq and time and how many posts it has.
-fn meetings(events: &[FarikEvent], id: &str) -> Vec<Value> {
+fn meetings(events: &[CatervasEvent], id: &str) -> Vec<Value> {
     let Some(start) = events.iter().rposition(|event| {
         matches!(&event.body, EventBody::SprintStarted(body) if body.sprint_id.as_str() == id)
     }) else {
@@ -362,7 +362,7 @@ fn chat_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
 }
 
 /// `{ seq, at, author, text }` of a message in the channel or in a chat.
-fn last_line(event: &FarikEvent) -> Value {
+fn last_line(event: &CatervasEvent) -> Value {
     let (author, text) = match &event.body {
         EventBody::MessagePosted(body) => (&body.author, &body.text),
         EventBody::ChatMessagePosted(body) => (&body.author, &body.text),
@@ -371,11 +371,11 @@ fn last_line(event: &FarikEvent) -> Value {
     json!({ "seq": event.envelope.seq, "at": event.envelope.recorded_at, "author": author, "text": text })
 }
 
-/// `chats.list {}`: the channel's newest line that is not Farik's own, then every agent's chat in
+/// `chats.list {}`: the channel's newest line that is not Catervas's own, then every agent's chat in
 /// the team's order, with its newest message.
 fn chats_list(deps: &ToolDeps) -> Result<Value, Failure> {
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
-    // ponytail: reads the whole channel newest first to skip Farik's lines. Upgrade: a channel
+    // ponytail: reads the whole channel newest first to skip Catervas's lines. Upgrade: a channel
     // projection holding its newest line that is not a system one.
     let channel = deps
         .log
@@ -518,9 +518,9 @@ pub(super) fn allowances(state: &DaemonState, deps: &ToolDeps) -> Result<Value, 
 }
 
 /// The kit's plural noun for what a call of `tool` of its service `server` makes.
-fn kit_what(kit: &farik_roles::Kit, server: &str, tool: &str) -> Option<String> {
+fn kit_what(kit: &catervas_roles::Kit, server: &str, tool: &str) -> Option<String> {
     kit.connectors.iter().find_map(|connector| match connector {
-        farik_roles::KitConnector::Server {
+        catervas_roles::KitConnector::Server {
             entry, allowances, ..
         } if entry.name.as_str() == server => allowances.get(tool).map(|offer| offer.what.clone()),
         _ => None,
@@ -555,8 +555,8 @@ fn metrics_wire(metrics: &HarnessMetrics) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::team::AgentStatus;
-    use farik_protocol::event::{EventKind, NewEvent, event_from_value};
+    use catervas_core::team::AgentStatus;
+    use catervas_protocol::event::{EventKind, NewEvent, event_from_value};
     use serde_json::{Value, json};
 
     use super::super::gates::tests::query;
@@ -606,8 +606,8 @@ mod tests {
             &json!({
                 "seq": 1,
                 "recorded_at": at().to_rfc3339(),
-                "team_id": "farik",
-                "project_id": "farik",
+                "team_id": "catervas",
+                "project_id": "catervas",
                 "agent_id": agent,
                 "session_id": session,
                 "kind": "message.posted",
@@ -628,8 +628,8 @@ mod tests {
         let mut wire = json!({
             "seq": 1,
             "recorded_at": recorded_at,
-            "team_id": "farik",
-            "project_id": "farik",
+            "team_id": "catervas",
+            "project_id": "catervas",
             "agent_id": agent,
             "session_id": session,
             "kind": "cost.recorded",
@@ -685,7 +685,7 @@ mod tests {
         // The review and the look back run after the end, and are the sprint's.
         let review = posted(&harness, "pm", "c2", "review");
         let retro = posted(&harness, "pm", "c3", "retro");
-        // S2 is planned by Farik alone: a breakdown joining its epic's sprint.
+        // S2 is planned by Catervas alone: a breakdown joining its epic's sprint.
         harness.ready("FRK-3");
         harness.project.open_sprint("S2", None, &[]);
         plan_sprint(
@@ -811,8 +811,8 @@ mod tests {
             &json!({
                 "seq": 1,
                 "recorded_at": at().to_rfc3339(),
-                "team_id": "farik",
-                "project_id": "farik",
+                "team_id": "catervas",
+                "project_id": "catervas",
                 "task_id": "FRK-1",
                 "agent_id": "dev-a",
                 "session_id": "s-7",
@@ -1042,8 +1042,8 @@ mod tests {
         let mut wire = json!({
             "seq": 1,
             "recorded_at": at().to_rfc3339(),
-            "team_id": "farik",
-            "project_id": "farik",
+            "team_id": "catervas",
+            "project_id": "catervas",
             "kind": "message.posted",
             "body": { "author": author, "kind": kind, "text": text, "mentions": [] },
         });
@@ -1082,7 +1082,7 @@ mod tests {
         // Events that are not messages are not the channel's.
         harness.ready("FRK-1");
         let second = said(&harness, "human", "human", "Two.", &json!({}));
-        let third = said(&harness, "farik", "system", "Three.", &json!({}));
+        let third = said(&harness, "catervas", "system", "Three.", &json!({}));
 
         assert_eq!(page(&harness, &json!({ "limit": 2 })), [second, third]);
         // The page counts messages only, however many other events stand between them.
@@ -1233,7 +1233,7 @@ mod tests {
             .events(&[EventKind::SessionStarted])
             .into_iter()
             .map(|event| match event.body {
-                farik_protocol::event::EventBody::SessionStarted(body) => {
+                catervas_protocol::event::EventBody::SessionStarted(body) => {
                     (event.envelope.ids.agent_id, body.purpose.to_string())
                 }
                 other => panic!("a session's start, not {other:?}"),
@@ -1408,7 +1408,7 @@ mod tests {
         let answered = chatted(&harness, "dev-a", "dev-a", "Two.", Some(asked));
         let past = chatted(&harness, "old", "human", "Still there?", None);
         let hi = said(&harness, "human", "human", "Hi team.", &json!({}));
-        said(&harness, "farik", "system", "FRK-1 moved.", &json!({}));
+        said(&harness, "catervas", "system", "FRK-1 moved.", &json!({}));
 
         let listed = query(&harness.daemon, "chats.list", &json!({}), "chatsListResult");
 
@@ -1443,7 +1443,7 @@ mod tests {
     /// ended.
     fn chat_session(harness: &Harness, agent: &str, session: &str, in_reply_to: u64, ended: bool) {
         let envelope = json!({
-            "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "farik", "project_id": "farik",
+            "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "catervas", "project_id": "catervas",
             "agent_id": agent, "session_id": session,
         });
         let mut started = envelope.clone();
@@ -1526,7 +1526,7 @@ mod tests {
         harness.project.record(
             "",
             "team.paused",
-            &json!({ "by": "farik", "reason": "credential_refused", "detail": "401" }),
+            &json!({ "by": "catervas", "reason": "credential_refused", "detail": "401" }),
         );
         assert_eq!(
             waiting(&harness, "dev-a"),
@@ -1548,7 +1548,7 @@ mod tests {
     fn says_no_answer_after_a_failed_session() {
         let harness = Harness::new("board-chat-no-answer", |_| {});
         chatted(&harness, "dev-a", "human", "Status?", None);
-        // A session that ends without farik_chat_reply: its note is not one of a chat's tools.
+        // A session that ends without catervas_chat_reply: its note is not one of a chat's tools.
         let answer_nothing = crate::recorded::fixtures::review_answers_nothing;
         assert_eq!(tick_with(&harness, vec![answer_nothing()]), 1);
         assert_eq!(

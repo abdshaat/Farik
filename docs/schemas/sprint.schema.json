@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://farik.dev/schemas/sprint.schema.json",
-  "title": "FarikSprint",
-  "description": "A sprint the human starts, worked by the team until it is planned and ends, stored as .farik/sprints/S<n>.yaml. See docs/SPEC.md sections 3, 5.2, 5.3, 5.5, 5.11, 8.4 and 8.5.",
+  "$id": "https://catervas.dev/schemas/sprint.schema.json",
+  "title": "CatervasSprint",
+  "description": "A sprint the human starts, worked by the team until it is planned and ends, stored as .catervas/sprints/S<n>.yaml. See docs/SPEC.md sections 3, 5.2, 5.3, 5.5, 5.11, 8.4 and 8.5.",
   "type": "object",
   "additionalProperties": false,
   "required": [

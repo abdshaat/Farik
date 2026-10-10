@@ -1,12 +1,12 @@
-//! The renewals Farik flagged for the owner (`docs/SPEC.md` 6.10, ADR 0039), folded from the
+//! The renewals Catervas flagged for the owner (`docs/SPEC.md` 6.10, ADR 0039), folded from the
 //! three `renewal.` kinds of the project's log.
 
+use catervas_protocol::event::{EventBody, EventKind};
 use chrono::{DateTime, NaiveDate, Utc};
-use farik_protocol::event::{EventBody, EventKind};
 
 use crate::{EventLog, EventQuery, StoreError};
 
-/// One renewal Farik flagged, and whether the owner dismissed it.
+/// One renewal Catervas flagged, and whether the owner dismissed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenewalRecord {
     /// The renewal's number, the seq of its `renewal.flagged`.
@@ -17,7 +17,7 @@ pub struct RenewalRecord {
     pub renews_on: NaiveDate,
     /// The last day to change or cancel it.
     pub decide_by: NaiveDate,
-    /// When Farik flagged it.
+    /// When Catervas flagged it.
     pub flagged_at: DateTime<Utc>,
     /// Whether the owner dismissed it, by "Dismiss" or by sending a request to review it.
     pub dismissed: bool,

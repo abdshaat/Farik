@@ -1,10 +1,10 @@
-//! `farik pipeline list`: the data sources the Procurement Specialist asked for that the Product
+//! `catervas pipeline list`: the data sources the Procurement Specialist asked for that the Product
 //! Manager passed to the owner, or did not decide (`docs/SPEC.md` 6.10, ADR 0039). Approving and
-//! declining are commands, sent as `farik order approve` sends its own.
+//! declining are commands, sent as `catervas order approve` sends its own.
 
-use farik_core::contract::Role;
-use farik_runtime::procurement::{add_pipeline_fields, pipeline_text};
-use farik_store::waiting::{Waiting, waiting};
+use catervas_core::contract::Role;
+use catervas_runtime::procurement::{add_pipeline_fields, pipeline_text};
+use catervas_store::waiting::{Waiting, waiting};
 use serde_json::{Value, json};
 
 use crate::Report;
@@ -22,7 +22,7 @@ pub fn list(project: &Project) -> Result<Report, String> {
         .read_team()
         .map_err(|error| error.to_string())?;
     let projections = project.projections()?;
-    let kit = farik_roles::load_kit(Role::ProcurementSpecialist).ok();
+    let kit = catervas_roles::load_kit(Role::ProcurementSpecialist).ok();
     let mut lines = Vec::new();
     let mut rows = Vec::new();
     let listed =
@@ -63,9 +63,9 @@ fn line(item: &Waiting) -> String {
         return String::new();
     };
     let cost = match ask.cost {
-        farik_core::pipeline::PipelineCost::Free => "free",
-        farik_core::pipeline::PipelineCost::Paid => "costs money",
-        farik_core::pipeline::PipelineCost::Unknown => "cost not known",
+        catervas_core::pipeline::PipelineCost::Free => "free",
+        catervas_core::pipeline::PipelineCost::Paid => "costs money",
+        catervas_core::pipeline::PipelineCost::Unknown => "cost not known",
     };
     let mut parts = vec![
         ask.pipeline.to_string(),
@@ -93,10 +93,10 @@ fn line(item: &Waiting) -> String {
 
 #[cfg(test)]
 mod tests {
+    use catervas_core::contract::TaskId;
+    use catervas_core::pipeline::PipelineCost;
+    use catervas_store::waiting::{PipelineAsk, Waiting, WaitingKind};
     use chrono::Utc;
-    use farik_core::contract::TaskId;
-    use farik_core::pipeline::PipelineCost;
-    use farik_store::waiting::{PipelineAsk, Waiting, WaitingKind};
 
     use super::line;
 

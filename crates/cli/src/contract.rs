@@ -1,15 +1,15 @@
-//! `farik contract lock` and `farik contract unlock`: contract ownership (`docs/SPEC.md` section
+//! `catervas contract lock` and `catervas contract unlock`: contract ownership (`docs/SPEC.md` section
 //! 5.11).
 
+use catervas_protocol::event::EventIds;
+use catervas_store::requests::hold_contract;
 use chrono::{DateTime, Utc};
-use farik_protocol::event::EventIds;
-use farik_store::requests::hold_contract;
 use serde_json::json;
 
 use crate::Report;
 use crate::project::Project;
 
-/// Takes a contract, or gives it back, through `farik_store::requests::hold_contract`, the one
+/// Takes a contract, or gives it back, through `catervas_store::requests::hold_contract`, the one
 /// way every caller does it: the governor's `check_contract_write` decides, the file and the log
 /// record it.
 ///

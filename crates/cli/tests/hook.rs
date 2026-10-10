@@ -10,19 +10,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use catervas::{CliIo, run_cli};
+use catervas_core::budget::DEFAULT_SESSION_LIMITS;
+use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
+use catervas_core::team::validate_team;
+use catervas_protocol::clock::{Clock, FixedClock};
+use catervas_protocol::event::{EventIds, EventKind};
+use catervas_runtime::daemon::{
+    DaemonConfig, DaemonHandle, DaemonState, SessionRegistration, serve,
+};
+use catervas_runtime::transitions::Transitions;
+use catervas_runtime::{SessionPurpose, ToolDeps};
+use catervas_store::files::ProjectFiles;
+use catervas_store::git::fixtures::TempRepo;
+use catervas_store::{EventLog, EventQuery, IN_MEMORY, open_event_log, open_projections};
 use chrono::{DateTime, TimeZone, Utc};
-use farik::{CliIo, run_cli};
-use farik_core::budget::DEFAULT_SESSION_LIMITS;
-use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
-use farik_core::team::validate_team;
-use farik_protocol::clock::{Clock, FixedClock};
-use farik_protocol::event::{EventIds, EventKind};
-use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, SessionRegistration, serve};
-use farik_runtime::transitions::Transitions;
-use farik_runtime::{SessionPurpose, ToolDeps};
-use farik_store::files::ProjectFiles;
-use farik_store::git::fixtures::TempRepo;
-use farik_store::{EventLog, EventQuery, IN_MEMORY, open_event_log, open_projections};
 use serde_json::{Value, json};
 
 const SESSION: &str = "3f1c2a9e-8b7d-4e6f-9a01-2b3c4d5e6f70";
@@ -41,7 +43,7 @@ struct Ran {
     err: String,
 }
 
-/// Runs `farik hook <which> --daemon <daemon_file>` with `input` on its standard input.
+/// Runs `catervas hook <which> --daemon <daemon_file>` with `input` on its standard input.
 fn hook(which: &str, daemon_file: &Path, input: &str) -> Ran {
     hook_with(
         which,
@@ -51,7 +53,7 @@ fn hook(which: &str, daemon_file: &Path, input: &str) -> Ran {
     )
 }
 
-/// Runs `farik hook <which> --daemon <daemon>` in `cwd`, reading `stdin`.
+/// Runs `catervas hook <which> --daemon <daemon>` in `cwd`, reading `stdin`.
 fn hook_with(which: &str, daemon: &str, cwd: PathBuf, stdin: Box<dyn Read + Send>) -> Ran {
     let mut out = Vec::new();
     let mut err = Vec::new();
@@ -63,7 +65,7 @@ fn hook_with(which: &str, daemon: &str, cwd: PathBuf, stdin: Box<dyn Read + Send
             Arc::new(FixedClock::new(at())),
         );
         io.stdin = stdin;
-        let arguments: Vec<String> = ["farik", "hook", which, "--daemon", daemon]
+        let arguments: Vec<String> = ["catervas", "hook", which, "--daemon", daemon]
             .map(ToString::to_string)
             .to_vec();
         run_cli(&arguments, &mut io)
@@ -95,13 +97,13 @@ impl Served {
         ]);
         let team = validate_team(&wire).expect("a team");
         let files = Arc::new(ProjectFiles::open(repo.path.clone()));
-        files.init(&team).expect(".farik/ is made");
+        files.init(&team).expect(".catervas/ is made");
         let log = Arc::new(open_event_log(Path::new(IN_MEMORY), at()).expect("the log opens"));
         let projections = Arc::new(open_projections(Arc::clone(&log)).expect("projections"));
         let clock: Arc<dyn Clock + Send + Sync> = Arc::new(FixedClock::new(at()));
         let ids = EventIds {
-            team_id: "farik".to_string(),
-            project_id: "farik".to_string(),
+            team_id: "catervas".to_string(),
+            project_id: "catervas".to_string(),
             ..EventIds::default()
         };
         let transitions = Arc::new(Transitions::new(
@@ -120,17 +122,17 @@ impl Served {
             git: repo.adapter(),
             clock,
             ids,
-            kits: Arc::new(farik_roles::load_kit),
+            kits: Arc::new(catervas_roles::load_kit),
         })));
         state.register_session(SessionRegistration {
             session_id: SESSION.to_string(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: "dev-a".to_string(),
             task_id: None,
             cwd: repo.path.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
+            catervas_tools: Vec::new(),
             tiers: team.agents[1].tiers(&team.permissions()),
             connectors: Vec::new(),
             preview: None,
@@ -144,11 +146,11 @@ impl Served {
             .enable_all()
             .build()
             .expect("a runtime");
-        let daemon_file = repo.path.join(".farik/local/daemon.json");
+        let daemon_file = repo.path.join(".catervas/local/daemon.json");
         let handle = runtime
             .block_on(serve(
                 DaemonConfig {
-                    port: farik_runtime::daemon::PortChoice::Any,
+                    port: catervas_runtime::daemon::PortChoice::Any,
                     daemon_file: Some(daemon_file.clone()),
                 },
                 state,
@@ -191,7 +193,7 @@ fn denied_reason(out: &str) -> String {
 
 /// A directory of its own under the temporary directory.
 fn scratch(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("farik-hook-{name}-{}", std::process::id()));
+    let path = std::env::temp_dir().join(format!("catervas-hook-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&path);
     std::fs::create_dir_all(&path).expect("a scratch directory");
     path

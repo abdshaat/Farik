@@ -1,12 +1,12 @@
 //! A tool's refusals in the words an agent reads: each starts with its kind in `snake_case`, then
 //! `: `, then what it says, so that an agent and a test can both tell which rule refused.
 
-use farik_core::contract::{Role, TaskStatus};
-use farik_core::criteria::CriteriaError;
-use farik_core::governor::gates::ContractWriteRefusal;
-use farik_core::governor::permissions::{CommandRefusal, ToolRefusal};
-use farik_core::marketing::ProposalRefusal;
-use farik_core::team::AgentStatus;
+use catervas_core::contract::{Role, TaskStatus};
+use catervas_core::criteria::CriteriaError;
+use catervas_core::governor::gates::ContractWriteRefusal;
+use catervas_core::governor::permissions::{CommandRefusal, ToolRefusal};
+use catervas_core::marketing::ProposalRefusal;
+use catervas_core::team::AgentStatus;
 
 use super::ToolError;
 
@@ -22,8 +22,8 @@ pub(crate) enum Refusal {
     NoSuchTask { task_id: String },
     /// The tier or path check of 5.6 refused.
     Tool(ToolRefusal),
-    /// The Farik tool is not one the session was given: a triage session has
-    /// `farik_triage_request` alone (5.16), whatever its agent's tiers allow.
+    /// The Catervas tool is not one the session was given: a triage session has
+    /// `catervas_triage_request` alone (5.16), whatever its agent's tiers allow.
     ToolNotInSession { tool: String },
     /// The tool acts on the session's task and the session has none.
     NoTask,
@@ -67,9 +67,9 @@ pub(crate) enum Refusal {
     NotTheRunner { agent_id: String },
     /// The contract has no such criterion.
     UnknownCriterion { criterion_id: String },
-    /// The reviewer recorded a `command`, `test`, or `artifact` criterion, which Farik runs for
-    /// it, so that a reviewer cannot record a pass over Farik's failure.
-    CriterionRunByFarik {
+    /// The reviewer recorded a `command`, `test`, or `artifact` criterion, which Catervas runs for
+    /// it, so that a reviewer cannot record a pass over Catervas's failure.
+    CriterionRunByCatervas {
         criterion_id: String,
         method: String,
     },
@@ -216,7 +216,7 @@ impl Refusal {
                 "unknown_criterion",
                 format!("the contract has no criterion {criterion_id}"),
             ),
-            Self::CriterionRunByFarik { .. }
+            Self::CriterionRunByCatervas { .. }
             | Self::CriterionAnsweredByTheHuman { .. }
             | Self::NotTheNamedAgent { .. } => self.reach(),
             Self::Command(refusal) => command(refusal),
@@ -264,13 +264,13 @@ impl Refusal {
     /// criterion only the human answers.
     fn reach(&self) -> (&'static str, String) {
         match self {
-            Self::CriterionRunByFarik {
+            Self::CriterionRunByCatervas {
                 criterion_id,
                 method,
             } => (
-                "criterion_run_by_farik",
+                "criterion_run_by_catervas",
                 format!(
-                    "{criterion_id} is a {method} criterion, which Farik runs for the reviewer"
+                    "{criterion_id} is a {method} criterion, which Catervas runs for the reviewer"
                 ),
             ),
             Self::CriterionAnsweredByTheHuman { criterion_id } => (
@@ -401,7 +401,8 @@ fn command(refusal: &CommandRefusal) -> (&'static str, String) {
     match refusal {
         CommandRefusal::GitViaExec => (
             "git_via_exec",
-            "use farik_git_status, farik_git_diff, farik_git_commit, or farik_git_push".to_string(),
+            "use catervas_git_status, catervas_git_diff, catervas_git_commit, or catervas_git_push"
+                .to_string(),
         ),
         CommandRefusal::ForbiddenCommand { pattern } => (
             "command_forbidden",
@@ -450,7 +451,7 @@ fn contract_write(refusal: &ContractWriteRefusal) -> (&'static str, String) {
         ContractWriteRefusal::StoresFields { fields } => (
             "stores_fields",
             format!(
-                "{} are Farik's: it assigns the id and the stamps",
+                "{} are Catervas's: it assigns the id and the stamps",
                 listed(fields)
             ),
         ),

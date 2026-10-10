@@ -21,7 +21,7 @@ copy, and write it down so the user can disagree with it.
 - **What is the proof?** A number, a fact, a review or a demonstration the user can show.
 
 If the user can answer one of these and you cannot find it in the project, ask with
-`farik_ask_human`. Do not fill the gap with a guess.
+`catervas_ask_human`. Do not fill the gap with a guess.
 
 ## 2. Write the positioning
 

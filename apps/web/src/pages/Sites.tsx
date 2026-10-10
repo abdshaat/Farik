@@ -1,4 +1,4 @@
-import { Button, Dialog, InfoTip, Switch, TextField } from "@farik/ui";
+import { Button, Dialog, InfoTip, Switch, TextField } from "@catervas/ui";
 import { type FormEvent, useState } from "react";
 import { useQuery } from "../app/store.ts";
 import type { en } from "../strings/en.ts";
@@ -7,8 +7,8 @@ import { useCommand } from "./dialogs/StartSprint.tsx";
 import { listed } from "./marketing.ts";
 import styles from "./pages.module.css";
 
-/** One of Farik's own approved sites, and whether the team may read it now. */
-type FarikSite = {
+/** One of Catervas's own approved sites, and whether the team may read it now. */
+type CatervasSite = {
 	host: string;
 	shop: string;
 	category: string;
@@ -23,7 +23,7 @@ type OwnerSite = {
 	/** The request it answered, when the agent asked. */
 	request?: number;
 };
-type SiteList = { farik: FarikSite[]; owner: OwnerSite[] };
+type SiteList = { catervas: CatervasSite[]; owner: OwnerSite[] };
 
 /** What a kind of shop is called, by the daemon's word for it. */
 const CATEGORIES: Record<string, keyof typeof en> = {
@@ -72,7 +72,7 @@ function dayOf(time: string, now: Date): string {
 }
 
 /** "Amazon, eBay and Walmart", or "Amazon, eBay, Walmart and 3 more". */
-function named(shops: FarikSite[]): string {
+function named(shops: CatervasSite[]): string {
 	const names = shops.map((shop) => shop.shop);
 	return names.length <= NAMED
 		? listed(names)
@@ -83,7 +83,7 @@ function named(shops: FarikSite[]): string {
 }
 
 /** "5 shops, 1 turned off". */
-function counted(shops: FarikSite[]): string {
+function counted(shops: CatervasSite[]): string {
 	const off = shops.filter((shop) => !shop.on).length;
 	return (
 		(shops.length === 1
@@ -94,7 +94,7 @@ function counted(shops: FarikSite[]): string {
 }
 
 /**
- * "Sites it may read" on the Procurement Specialist's page: Farik's approved sites by kind of
+ * "Sites it may read" on the Procurement Specialist's page: Catervas's approved sites by kind of
  * shop, each with a switch, and the sites the owner allowed, each with a Remove, and "Add a
  * site". Every one acts at once, not through "Save changes" (spec 6.10).
  */
@@ -116,8 +116,8 @@ export function SitesSection({ name }: { name: string }) {
 	});
 	if (!data) return null;
 	const now = new Date();
-	const categories = [...new Set(data.farik.map((shop) => shop.category))];
-	const flip = (shop: FarikSite, on: boolean) =>
+	const categories = [...new Set(data.catervas.map((shop) => shop.category))];
+	const flip = (shop: CatervasSite, on: boolean) =>
 		toggle.send(
 			on
 				? { command: "site_add", body: { site: shop.host } }
@@ -135,14 +135,16 @@ export function SitesSection({ name }: { name: string }) {
 				<InfoTip id="sitesLead-info">{t("sitesLead", { name })}</InfoTip>
 			</div>
 			<div className={styles.titled}>
-				<h3 className={styles.subheading}>{t("sitesFarikTitle")}</h3>
-				<InfoTip id="sitesFarikNote-info">
-					{t("sitesFarikNote", { name })}
+				<h3 className={styles.subheading}>{t("sitesCatervasTitle")}</h3>
+				<InfoTip id="sitesCatervasNote-info">
+					{t("sitesCatervasNote", { name })}
 				</InfoTip>
 			</div>
 			<ul className={styles.siteCategories}>
 				{categories.map((category) => {
-					const shops = data.farik.filter((shop) => shop.category === category);
+					const shops = data.catervas.filter(
+						(shop) => shop.category === category,
+					);
 					// One with a shop turned off is open, so that what was changed is seen.
 					const isOpen = open[category] ?? shops.some((shop) => !shop.on);
 					const listId = `sites-${category}`;

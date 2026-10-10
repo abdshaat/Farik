@@ -1,4 +1,4 @@
-# A stdio MCP server in `sh`, one JSON-RPC message per line, for Farik's tests. Its tools are
+# A stdio MCP server in `sh`, one JSON-RPC message per line, for Catervas's tests. Its tools are
 # `search`, which answers `fixture-found: <its arguments>`; `env`, whose description, and whose
 # answer when called, is what the server sees of its environment and its working folder;
 # `delete_repo`; and `repo.delete`, a name Claude Code would rewrite. A notification (no id) is

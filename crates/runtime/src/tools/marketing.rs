@@ -1,4 +1,4 @@
-//! The Marketing Specialist's tools (ADR 0042): `farik_propose_marketing_plan`, which ends its
+//! The Marketing Specialist's tools (ADR 0042): `catervas_propose_marketing_plan`, which ends its
 //! session with a plan for the owner to approve. It acts on the task's worktree; a module of its
 //! own keeps the files it writes under `docs/marketing/` together.
 
@@ -7,14 +7,14 @@ use std::io::{ErrorKind, Write};
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
-use chrono::NaiveDate;
-use farik_core::contract::{Role, TaskId};
-use farik_core::marketing::{
+use catervas_core::contract::{Role, TaskId};
+use catervas_core::marketing::{
     Amount, PlanCampaign, PlanProposal, PostChannel, PostSlot, ProposalRefusal, check_proposal,
     parse_amount,
 };
-use farik_protocol::event::{EventBody, MarketingPlanProposedBody};
-use farik_store::marketing::{MarketingPlan, marketing_plans};
+use catervas_protocol::event::{EventBody, MarketingPlanProposedBody};
+use catervas_store::marketing::{MarketingPlan, marketing_plans};
+use chrono::NaiveDate;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -24,7 +24,7 @@ use super::refusal::Refusal;
 use super::{Call, TOOLS, ToolError, failed};
 use crate::session::SessionPurpose;
 
-/// `farik_propose_marketing_plan`'s input.
+/// `catervas_propose_marketing_plan`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProposeMarketingPlanInput {
@@ -33,7 +33,7 @@ pub struct ProposeMarketingPlanInput {
     /// Two or three plain sentences for the owner, 20 to 600 characters: what the plan does, what
     /// it costs and what they get. The owner reads this first.
     summary: String,
-    /// The plan in full, 200 to 16,000 characters. Farik also writes it to
+    /// The plan in full, 200 to 16,000 characters. Catervas also writes it to
     /// docs/marketing/plans/MP-<n>.md.
     text: String,
     /// The first day, as YYYY-MM-DD in UTC: yesterday's date or later.
@@ -122,7 +122,7 @@ pub(super) fn plan_file(number: u32) -> String {
 }
 
 /// The tool's name.
-const PROPOSE_TOOL: &str = "farik_propose_marketing_plan";
+const PROPOSE_TOOL: &str = "catervas_propose_marketing_plan";
 
 /// Held from taking a plan's number to recording it, so that two sessions in one daemon never take
 /// the same number. A second daemon on the same project would need the files' own check, which
@@ -137,7 +137,7 @@ fn refused(code: &'static str, detail: impl Into<String>) -> ToolError {
     .into()
 }
 
-/// A fault of the plan that Farik, not the checks of `farik_core`, found.
+/// A fault of the plan that Catervas, not the checks of `catervas_core`, found.
 fn fault(code: &'static str, field: &str, message: impl Into<String>) -> ProposalRefusal {
     ProposalRefusal {
         code,
@@ -146,7 +146,7 @@ fn fault(code: &'static str, field: &str, message: impl Into<String>) -> Proposa
     }
 }
 
-/// `farik_propose_marketing_plan`: checks the plan, numbers it, writes its text to the task's
+/// `catervas_propose_marketing_plan`: checks the plan, numbers it, writes its text to the task's
 /// worktree and records `marketing_plan.proposed`, from the Marketing Specialist's implement
 /// session about a task. The task then waits on the owner.
 pub(crate) fn propose_plan(
@@ -190,7 +190,7 @@ pub(crate) fn propose_plan(
                 "replaces",
                 format!("{replaced} is not an approved plan that is still in force"),
             )),
-            // The campaigns Farik made for the old plan hold its amounts in its currency, which
+            // The campaigns Catervas made for the old plan hold its amounts in its currency, which
             // the new plan's figures would be read as (ADR 0042, SPEC 6.7): a plan in another
             // currency is a new plan, started when the old one has ended.
             Some(plan) if plan.proposal.currency != proposal.currency => found.push(fault(
@@ -536,8 +536,8 @@ fn body_of(
 mod tests {
     use std::path::PathBuf;
 
-    use farik_core::team::fixtures::an_agent_wire;
-    use farik_protocol::event::{EventBody, EventKind};
+    use catervas_core::team::fixtures::an_agent_wire;
+    use catervas_protocol::event::{EventBody, EventKind};
     use serde_json::{Value, json};
 
     use crate::tools::fixtures::{TestProject, a_team_of_three};
@@ -569,7 +569,11 @@ mod tests {
             "in_progress",
             &json!({ "assignee": "kai", "reviewer": "pm" }),
         );
-        let worktree = project.repo.path.join(".farik/local/worktrees").join(task);
+        let worktree = project
+            .repo
+            .path
+            .join(".catervas/local/worktrees")
+            .join(task);
         project
             .deps
             .git
@@ -613,7 +617,7 @@ mod tests {
         project.call(
             "kai",
             Some(task),
-            "farik_propose_marketing_plan",
+            "catervas_propose_marketing_plan",
             plan.clone(),
         )
     }
@@ -952,13 +956,13 @@ mod tests {
         let kai = |purpose: crate::session::SessionPurpose, task: Option<&str>| {
             let mut context: ToolContext = project.context("kai", task);
             context.purpose = purpose;
-            crate::tools::fixtures::run(&context, "farik_propose_marketing_plan", a_plan())
+            crate::tools::fixtures::run(&context, "catervas_propose_marketing_plan", a_plan())
         };
 
         let developer = project.call(
             "dev-a",
             Some("FRK-2"),
-            "farik_propose_marketing_plan",
+            "catervas_propose_marketing_plan",
             a_plan(),
         );
         assert!(refused(developer.expect_err("a Developer")).starts_with("marketing_plan_refused"),);
@@ -984,7 +988,8 @@ mod tests {
 
     #[test]
     fn refuses_to_write_over_a_plan_that_is_there() {
-        let folder = std::env::temp_dir().join(format!("farik-plan-file-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("catervas-plan-file-{}", std::process::id()));
         let file = folder.join("docs/marketing/plans/MP-3.md");
         super::write_new(&file, "# MP-3: First\n").expect("a new file is written");
         let reason =

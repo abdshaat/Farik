@@ -1,4 +1,4 @@
-//! Farik's harness: schemas, the task state machine, the governor, and the cost model.
+//! Catervas's harness: schemas, the task state machine, the governor, and the cost model.
 //! This crate performs no I/O.
 
 /// The one place a task's branch name is made.

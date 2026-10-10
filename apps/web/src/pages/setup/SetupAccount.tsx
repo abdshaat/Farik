@@ -1,4 +1,4 @@
-import { Button, Choice, TextField } from "@farik/ui";
+import { Button, Choice, TextField } from "@catervas/ui";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
@@ -11,7 +11,7 @@ import { Wizard } from "./Wizard.tsx";
 type Kind = "subscription_token" | "api_key";
 const SETUP_TOKEN = "claude setup-token";
 
-/** Setup's second step: the key Farik's agents use, kept in the keychain or a private file. */
+/** Setup's second step: the key Catervas's agents use, kept in the keychain or a private file. */
 export function SetupAccount() {
 	const { client, status, reopen } = useConnection();
 	const navigate = useNavigate();
@@ -35,7 +35,7 @@ export function SetupAccount() {
 				kind,
 				secret,
 			})) as { storedIn: "keychain" | "file"; takingOn: boolean };
-			// A project that waited on the key is being taken on: Farik restarts on it.
+			// A project that waited on the key is being taken on: Catervas restarts on it.
 			if (answer.takingOn) {
 				reopen();
 				setOpening(true);
@@ -50,7 +50,7 @@ export function SetupAccount() {
 	};
 	const done = secret === "" && !!account?.source;
 
-	// Once the page is connected to the restarted Farik, it goes home.
+	// Once the page is connected to the restarted Catervas, it goes home.
 	useEffect(() => {
 		if (opening && status === "open") navigate("/", { replace: true });
 	}, [opening, status, navigate]);

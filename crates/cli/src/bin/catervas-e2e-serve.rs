@@ -1,4 +1,4 @@
-//! `farik serve` on recorded sessions, for the browser suites: `farik-e2e-serve --port <p>
+//! `catervas serve` on recorded sessions, for the browser suites: `catervas-e2e-serve --port <p>
 //! [--transcripts <name>,...] [--pace <ms>] [--no-keychain] [--sandbox-image <image>]
 //! [--preview]`, run in a project directory, or anywhere else for the first-run wizard.
 //! `--no-keychain` keeps the credential in the state folder's file alone. `--sandbox-image` runs
@@ -9,16 +9,16 @@
 //! one takes time, so that a page sees every state a task passes through. Once
 //! the named sessions are played, each new session waits until it is aborted, which the second
 //! Ctrl-C does. Built only with the `e2e` feature, so
-//! the shipped `farik` has no path to replay.
+//! the shipped `catervas` has no path to replay.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use farik::ids::SystemClock;
-use farik::{CliIo, Engine, Interrupts, run_cli};
-use farik_core::pricing::Usage;
-use farik_runtime::recorded::fixtures::{
+use catervas::ids::SystemClock;
+use catervas::{CliIo, Engine, Interrupts, run_cli};
+use catervas_core::pricing::Usage;
+use catervas_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_frk_1, ask_with_choices_frk_1, chat_answers_with_a_request,
     decide_design_plan_approves_frk_1, design_review_passes_frk_2, explore_checks_and_plans_frk_1,
     explore_plans_frk_1, implement_after_send_back_frk_1, implement_by_iris_page_frk_1,
@@ -31,10 +31,10 @@ use farik_runtime::recorded::fixtures::{
     review_answers_the_rubric_frk_1, review_answers_the_rubric_frk_2, review_writes_note,
     tool_runner, triage_frk_1_large, triage_frk_1_small_by_pm, triage_frk_2_small_by_pm,
 };
-use farik_runtime::{
+use catervas_runtime::{
     RecordedAdapter, RuntimeAdapter, RuntimeError, SessionHandle, SessionSpec, Transcript,
 };
-use farik_store::git::fixtures::TempRepo;
+use catervas_store::git::fixtures::TempRepo;
 
 /// The transcript a suite names.
 fn transcript(name: &str) -> Option<Transcript> {
@@ -158,8 +158,8 @@ fn main() -> std::process::ExitCode {
         adapter
     }));
     io.interrupts = Interrupts::CtrlC;
-    io.credential_stores = farik::system_credential_stores(&io.env, keychain);
-    let arguments = ["farik", "serve", "--no-open", "--port", &port].map(String::from);
+    io.credential_stores = catervas::system_credential_stores(&io.env, keychain);
+    let arguments = ["catervas", "serve", "--no-open", "--port", &port].map(String::from);
     let code = run_cli(&arguments, &mut io);
     drop(io);
     drop(own);
@@ -175,8 +175,8 @@ impl Drop for Removed {
     }
 }
 
-/// Makes `project` a Farik project, as `startServe` in the browser suites does for step 08's
-/// journeys: `farik init`, sandboxing off, and Mira (Product Manager), Ada (Architect) and Theo
+/// Makes `project` a Catervas project, as `startServe` in the browser suites does for step 08's
+/// journeys: `catervas init`, sandboxing off, and Mira (Product Manager), Ada (Architect) and Theo
 /// (Developer) as the team, which does not plan its work in sprints.
 fn recorded_team(
     project: &TempRepo,
@@ -189,11 +189,11 @@ fn recorded_team(
         Arc::new(SystemClock),
     );
     io.env.clone_from(env);
-    if run_cli(&["farik".to_string(), "init".to_string()], &mut io) != 0 {
-        return Err("farik init failed".to_string());
+    if run_cli(&["catervas".to_string(), "init".to_string()], &mut io) != 0 {
+        return Err("catervas init failed".to_string());
     }
-    project.write(".farik/local/settings.json", r#"{"sandbox":"none"}"#);
-    let path = project.path.join(".farik/team.yaml");
+    project.write(".catervas/local/settings.json", r#"{"sandbox":"none"}"#);
+    let path = project.path.join(".catervas/team.yaml");
     let yaml = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
     let (Some(start), Some(end)) = (yaml.find("agents:\n"), yaml.find("\nbudgets:")) else {
         return Err("team.yaml has no agents or budgets".to_string());
@@ -244,7 +244,7 @@ impl RuntimeAdapter for ThenWaits {
 
 fn usage() -> std::process::ExitCode {
     eprintln!(
-        "usage: farik-e2e-serve --port <p> [--transcripts <name>,...] [--pace <ms>] [--no-keychain] \
+        "usage: catervas-e2e-serve --port <p> [--transcripts <name>,...] [--pace <ms>] [--no-keychain] \
          [--sandbox-image <image>] [--preview]"
     );
     std::process::ExitCode::from(2)

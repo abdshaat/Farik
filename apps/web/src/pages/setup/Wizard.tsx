@@ -1,6 +1,6 @@
-import mark from "@farik/brand/assets/logo-mark-1254.png";
-import wordmark from "@farik/brand/assets/wordmark-1024.png";
-import { Stepper } from "@farik/ui";
+import mark from "@catervas/brand/assets/logo-mark-1254.png";
+import wordmark from "@catervas/brand/assets/wordmark-1024.png";
+import { Stepper } from "@catervas/ui";
 import type { ReactNode } from "react";
 import { t } from "../../strings/t.ts";
 import styles from "./setup.module.css";
@@ -17,7 +17,7 @@ const STEPS = [
 	t("wizardFinishing"),
 ];
 const LOOP = [t("loopPlan"), t("loopBuild"), t("loopIterate"), t("loopShip")];
-const NO_SANDBOX = "farik.noSandbox";
+const NO_SANDBOX = "catervas.noSandbox";
 
 /** The first run's two panels: the brand on the dark side, the step's question beside it. */
 export function Wizard(props: {

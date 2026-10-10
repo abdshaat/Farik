@@ -1,4 +1,4 @@
-import { Button, Dialog, TextArea } from "@farik/ui";
+import { Button, Dialog, TextArea } from "@catervas/ui";
 import { useId, useState } from "react";
 import { Link } from "react-router";
 import { t } from "../../strings/t.ts";

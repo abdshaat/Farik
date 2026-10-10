@@ -1,4 +1,4 @@
-import { Dialog } from "@farik/ui";
+import { Dialog } from "@catervas/ui";
 import { type ReactNode, useState } from "react";
 import { useConnection } from "../../app/connection.tsx";
 import { t } from "../../strings/t.ts";
@@ -74,7 +74,7 @@ function Download({ reply, file }: { reply: number; file: ReplyFile }) {
 
 /**
  * A reply from a seller, read: everything they wrote as text in one frame that says whose words
- * they are (no address or link in it is a link), the attachments Farik kept, and the owner's two
+ * they are (no address or link in it is a link), the attachments Catervas kept, and the owner's two
  * steps (spec 6.10, 8.6). `actions` are the row's buttons, which close it.
  */
 export function SellerReply({

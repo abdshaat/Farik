@@ -1,15 +1,15 @@
 .title {
 	margin: 0;
 	font:
-		var(--farik-type-title-weight) var(--farik-type-title-size) /
-		var(--farik-type-title-line-height) var(--farik-type-title-family);
+		var(--catervas-type-title-weight) var(--catervas-type-title-size) /
+		var(--catervas-type-title-line-height) var(--catervas-type-title-family);
 }
 
 .page {
 	display: grid;
 	/* A card's 16rem floor must not widen the column past a phone's screen. */
 	grid-template-columns: minmax(0, 1fr);
-	gap: var(--farik-space-6);
+	gap: var(--catervas-space-6);
 	max-width: 720px;
 }
 
@@ -17,14 +17,14 @@
 	display: grid;
 	/* As `.page`: a wide child must not widen the section, nested or not, past a phone's screen. */
 	grid-template-columns: minmax(0, 1fr);
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }
 
 .section h2 {
 	margin: 0;
 	font:
-		var(--farik-type-heading-weight) var(--farik-type-heading-size) /
-		var(--farik-type-heading-line-height) var(--farik-type-heading-family);
+		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
+		var(--catervas-type-heading-line-height) var(--catervas-type-heading-family);
 }
 
 .section p {
@@ -33,20 +33,20 @@
 }
 
 .muted {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .facts {
 	display: grid;
 	grid-template-columns: max-content 1fr;
-	gap: var(--farik-space-1) var(--farik-space-4);
+	gap: var(--catervas-space-1) var(--catervas-space-4);
 	margin: 0;
 }
 
 .facts dd {
 	margin: 0;
 	overflow-wrap: anywhere;
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 }
 
 /* The connect page is dark in both themes, like the rail. */
@@ -55,10 +55,10 @@
 	box-sizing: border-box;
 	display: grid;
 	align-content: start;
-	gap: var(--farik-space-4);
-	padding: var(--farik-space-7) var(--farik-space-4);
-	background: var(--farik-color-band);
-	color: var(--farik-color-band-ink);
+	gap: var(--catervas-space-4);
+	padding: var(--catervas-space-7) var(--catervas-space-4);
+	background: var(--catervas-color-band);
+	color: var(--catervas-color-band-ink);
 }
 
 .connect > * {
@@ -71,7 +71,7 @@
 .brand {
 	display: flex;
 	align-items: center;
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 }
 
 .mark {
@@ -81,7 +81,7 @@
 }
 
 .wordmark {
-	width: 168px;
+	width: 264px;
 	height: auto;
 }
 
@@ -92,26 +92,30 @@
 
 .steps {
 	display: grid;
-	gap: var(--farik-space-3);
-	padding-left: var(--farik-space-5);
+	gap: var(--catervas-space-3);
+	padding-left: var(--catervas-space-5);
 }
 
 .command {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 	align-items: center;
-	margin-top: var(--farik-space-2);
+	margin-top: var(--catervas-space-2);
 }
 
 .command code {
 	padding: 10px 14px;
 	border: 1px solid
-		color-mix(in srgb, var(--farik-color-band-ink) 30%, var(--farik-color-band));
-	border-radius: var(--farik-radius-control);
+		color-mix(
+			in srgb,
+			var(--catervas-color-band-ink) 30%,
+			var(--catervas-color-band)
+		);
+	border-radius: var(--catervas-radius-control);
 	font:
-		var(--farik-type-code-weight) var(--farik-type-code-size) /
-		var(--farik-type-code-line-height) var(--farik-type-code-family);
+		var(--catervas-type-code-weight) var(--catervas-type-code-size) /
+		var(--catervas-type-code-line-height) var(--catervas-type-code-family);
 }
 
 /* Outlined on the dark band, as in the Connect mockup. */
@@ -123,20 +127,20 @@
 }
 
 .retry {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 }
 
 .alert {
 	margin: 0;
-	padding: var(--farik-space-2) var(--farik-space-3);
-	border-left: 3px solid var(--farik-color-status-waiting);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
 }
 
 /* The Team page's cards: one column on a phone, as many as fit after. */
 .cards {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -145,11 +149,11 @@
 .card {
 	display: grid;
 	align-content: start;
-	gap: var(--farik-space-2);
-	padding: var(--farik-space-4);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-rule);
-	border-radius: var(--farik-radius-control);
+	gap: var(--catervas-space-2);
+	padding: var(--catervas-space-4);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
 }
 
 .card p {
@@ -159,7 +163,7 @@
 .cardHead {
 	display: flex;
 	align-items: center;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .face {
@@ -173,7 +177,7 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 /* Where a sign-in shows, a phone's footer puts Cancel above Next, each the full width (phase 7
@@ -191,7 +195,7 @@
 
 .field {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	font-weight: 600;
 }
 
@@ -199,21 +203,21 @@
 	font: inherit;
 	min-width: 0;
 	max-width: 100%;
-	padding: var(--farik-space-2);
-	color: var(--farik-color-ink);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
+	padding: var(--catervas-space-2);
+	color: var(--catervas-color-ink);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
 }
 
 .select:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
 .tiers {
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -223,7 +227,7 @@
 	display: grid;
 	grid-template-columns: max-content 1fr;
 	align-items: center;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 @media (max-width: 40rem) {
@@ -235,7 +239,7 @@
 /* Settings' UI paths: each glob with its Remove button. */
 .globs {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -245,11 +249,11 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .globs code {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 	overflow-wrap: anywhere;
 }
 
@@ -257,7 +261,7 @@
 .faces {
 	display: inline-flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 }
 
 .faces img {
@@ -271,28 +275,28 @@
 .groups {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 }
 
 .groups p {
-	margin: 0 0 var(--farik-space-2);
+	margin: 0 0 var(--catervas-space-2);
 }
 
 .groupTitle {
-	margin: 0 0 var(--farik-space-1);
-	padding-bottom: var(--farik-space-1);
-	border-bottom: 1px solid var(--farik-color-rule);
+	margin: 0 0 var(--catervas-space-1);
+	padding-bottom: var(--catervas-space-1);
+	border-bottom: 1px solid var(--catervas-color-rule);
 	font-size: inherit;
 }
 
 /* "What changes", below the four groups. */
 .changes {
-	margin-top: var(--farik-space-4);
+	margin-top: var(--catervas-space-4);
 }
 
 .people {
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -307,9 +311,9 @@
 
 .notice {
 	margin: 0;
-	padding: var(--farik-space-2) var(--farik-space-3);
-	border-left: 3px solid var(--farik-color-ink-muted);
-	background: var(--farik-color-surface);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-ink-muted);
+	background: var(--catervas-color-surface);
 }
 
 /* Settings' saved teams: one row each, its buttons beside it where they fit. */
@@ -318,7 +322,7 @@
 	margin: 0;
 	padding: 0;
 	list-style: none;
-	border-top: 1px solid var(--farik-color-ink);
+	border-top: 1px solid var(--catervas-color-ink);
 }
 
 .savedRows > li {
@@ -326,28 +330,28 @@
 	flex-wrap: wrap;
 	justify-content: space-between;
 	align-items: center;
-	gap: var(--farik-space-2) var(--farik-space-4);
-	padding: var(--farik-space-3) 0;
-	border-bottom: 1px solid var(--farik-color-rule);
+	gap: var(--catervas-space-2) var(--catervas-space-4);
+	padding: var(--catervas-space-3) 0;
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .savedRows > li > div {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	min-width: 0;
 }
 
 .savedRows code {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 }
 
 .confirm {
 	flex-basis: 100%;
 	display: grid;
-	gap: var(--farik-space-2);
-	padding: var(--farik-space-3);
-	border-left: 3px solid var(--farik-color-status-waiting);
-	background: var(--farik-color-surface);
+	gap: var(--catervas-space-2);
+	padding: var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
+	background: var(--catervas-color-surface);
 }
 
 .confirm p {
@@ -371,18 +375,18 @@
 }
 
 .waiting {
-	margin: var(--farik-space-2) 0 0;
+	margin: var(--catervas-space-2) 0 0;
 	padding: 0;
 	list-style: none;
-	border-top: 1px solid var(--farik-color-rule);
+	border-top: 1px solid var(--catervas-color-rule);
 }
 
 .waiting li {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-1) var(--farik-space-4);
-	padding: var(--farik-space-2) 0;
-	border-bottom: 1px solid var(--farik-color-rule);
+	gap: var(--catervas-space-1) var(--catervas-space-4);
+	padding: var(--catervas-space-2) 0;
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .waiting li span:nth-child(2) {
@@ -390,7 +394,7 @@
 }
 
 .waiting li span:first-child {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 }
 
 /* An agent's connectors and ConnectorAdd's tools: one ruled row each (phase 7 step 01's mockups). */
@@ -399,14 +403,14 @@
 	margin: 0;
 	padding: 0;
 	list-style: none;
-	border-top: 1px solid var(--farik-color-rule);
+	border-top: 1px solid var(--catervas-color-rule);
 }
 
 .ruled > li {
 	display: grid;
-	gap: var(--farik-space-1);
-	padding: var(--farik-space-3) 0;
-	border-bottom: 1px solid var(--farik-color-rule);
+	gap: var(--catervas-space-1);
+	padding: var(--catervas-space-3) 0;
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .ruled p {
@@ -416,7 +420,7 @@
 .code {
 	margin: 0;
 	padding: 0;
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 	overflow-wrap: anywhere;
 }
 
@@ -425,7 +429,7 @@
 .codeActions {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-2) var(--farik-space-3);
+	gap: var(--catervas-space-2) var(--catervas-space-3);
 }
 
 @media (max-width: 40rem) {
@@ -436,7 +440,7 @@
 
 /* The code a user types on a service's page: large, in the code face, spaced (phase 7 step 03b). */
 .userCode {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 	font-size: 32px;
 	line-height: 40px;
 	font-weight: 600;
@@ -448,34 +452,34 @@
 .labels {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }
 
 .labels label {
 	display: flex;
 	align-items: center;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	min-height: 44px;
-	padding: 0 var(--farik-space-3);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
-	background: var(--farik-color-surface);
+	padding: 0 var(--catervas-space-3);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-surface);
 	cursor: pointer;
 }
 
 .labels label:has(input:focus-visible) {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
 .tagWords {
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	margin: 0;
-	padding: var(--farik-space-3);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-rule);
-	border-radius: var(--farik-radius-control);
+	padding: var(--catervas-space-3);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
 }
 
 .tagWords dt {
@@ -491,7 +495,7 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: end;
-	gap: var(--farik-space-2) var(--farik-space-3);
+	gap: var(--catervas-space-2) var(--catervas-space-3);
 }
 
 .keyRow > * {
@@ -507,12 +511,12 @@
 	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }
 
 .group {
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	min-width: 0;
 	margin: 0;
 	padding: 0;
@@ -521,14 +525,14 @@
 
 .group > legend {
 	padding: 0;
-	margin-bottom: var(--farik-space-1);
+	margin-bottom: var(--catervas-space-1);
 	font-weight: 600;
 }
 
 /* The tool approval dialog: what the agent wants to send, framed as untrusted text. */
 .toolApproval {
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .toolApproval p,
@@ -543,13 +547,13 @@
 .toolApproval dl {
 	display: grid;
 	grid-template-columns: 6rem minmax(0, 1fr);
-	gap: var(--farik-space-1) var(--farik-space-3);
+	gap: var(--catervas-space-1) var(--catervas-space-3);
 	margin: 0;
 }
 
 .toolApproval dt,
 .toolHint {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .toolApproval dd {
@@ -560,14 +564,14 @@
 	margin: 0;
 	max-height: 18rem;
 	overflow: auto;
-	padding: var(--farik-space-2) var(--farik-space-3);
-	font-family: var(--farik-type-code-family);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	font-family: var(--catervas-type-code-family);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-control-border);
-	border-left: 3px solid var(--farik-color-ink);
-	border-radius: var(--farik-radius-control);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-left: 3px solid var(--catervas-color-ink);
+	border-radius: var(--catervas-radius-control);
 }
 
 .untrusted pre {
@@ -577,13 +581,13 @@
 }
 
 .untrusted:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
 /* A skill's instructions: the text is code-like, so it is set in the code face. */
 .code textarea {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 }
 
 /* A service of a role's kit: its words in one column and its buttons in the other, and on a phone
@@ -591,7 +595,7 @@
 .kitRow {
 	display: grid;
 	grid-template-columns: 1fr auto;
-	column-gap: var(--farik-space-3);
+	column-gap: var(--catervas-space-3);
 }
 
 .kitRow > .actions {
@@ -613,13 +617,13 @@
 
 /* A line that says a service needs the user: the one warning colour. */
 .warn {
-	color: var(--farik-color-status-waiting);
+	color: var(--catervas-color-status-waiting);
 }
 
 /* The dialog that asks about a site an agent wants to read. */
 .siteRequest {
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .siteRequest p {
@@ -628,12 +632,12 @@
 
 /* A name written in another alphabet: the warning stands out from the plain words around it. */
 .siteScript {
-	padding: var(--farik-space-2) var(--farik-space-3);
-	background: var(--farik-color-surface);
-	border-left: 3px solid var(--farik-color-status-waiting);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	background: var(--catervas-color-surface);
+	border-left: 3px solid var(--catervas-color-status-waiting);
 }
 
-/* The Procurement Specialist's sites: Farik's by kind of shop, then the ones the owner allowed. */
+/* The Procurement Specialist's sites: Catervas's by kind of shop, then the ones the owner allowed. */
 .siteCategories,
 .siteShops,
 .siteOwn {
@@ -643,11 +647,11 @@
 }
 
 .siteCategories {
-	border-top: 1px solid var(--farik-color-rule);
+	border-top: 1px solid var(--catervas-color-rule);
 }
 
 .siteCategories > li {
-	border-bottom: 1px solid var(--farik-color-rule);
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .siteCategory {
@@ -659,12 +663,12 @@
 .siteToggle {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-1) var(--farik-space-3);
+	gap: var(--catervas-space-1) var(--catervas-space-3);
 	box-sizing: border-box;
 	width: 100%;
 	min-height: 44px;
 	align-items: center;
-	padding: var(--farik-space-2) 0;
+	padding: var(--catervas-space-2) 0;
 	font: inherit;
 	text-align: start;
 	color: inherit;
@@ -682,18 +686,18 @@
 }
 
 .siteKind {
-	font-weight: var(--farik-type-heading-weight);
+	font-weight: var(--catervas-type-heading-weight);
 }
 
 .siteToggle:focus-visible,
 .siteRemove:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
 .siteShops {
 	display: grid;
-	padding-inline-start: var(--farik-space-4);
+	padding-inline-start: var(--catervas-space-4);
 }
 
 .siteShops > li {
@@ -701,17 +705,17 @@
 	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
-	gap: var(--farik-space-1) var(--farik-space-3);
-	padding: var(--farik-space-2) 0;
+	gap: var(--catervas-space-1) var(--catervas-space-3);
+	padding: var(--catervas-space-2) 0;
 }
 
 .siteState {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .siteOwn {
 	display: grid;
-	border-top: 1px solid var(--farik-color-rule);
+	border-top: 1px solid var(--catervas-color-rule);
 }
 
 .siteOwn > li {
@@ -719,31 +723,31 @@
 	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
-	gap: var(--farik-space-2) var(--farik-space-3);
-	padding: var(--farik-space-3) 0;
-	border-bottom: 1px solid var(--farik-color-rule);
+	gap: var(--catervas-space-2) var(--catervas-space-3);
+	padding: var(--catervas-space-3) 0;
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .siteText {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	min-width: 0;
 }
 
 .siteHost {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 	overflow-wrap: anywhere;
 }
 
 /* The site just added is marked, so that it is found in the list. */
 .siteNew {
-	padding-inline-start: var(--farik-space-3);
-	border-left: 3px solid var(--farik-color-status-waiting);
+	padding-inline-start: var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
 }
 
 .siteRemove {
 	min-height: 44px;
-	padding: 0 var(--farik-space-2);
+	padding: 0 var(--catervas-space-2);
 	font: inherit;
 	color: inherit;
 	text-decoration: underline;
@@ -756,7 +760,7 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: flex-end;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .siteAdd > :first-child {
@@ -764,13 +768,13 @@
 }
 
 .siteAdded {
-	font-weight: var(--farik-type-heading-weight);
+	font-weight: var(--catervas-type-heading-weight);
 }
 
 /* The owner's steps on a purchase order, in dialogs (spec 6.10). */
 .orderForm {
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .orderForm p {
@@ -778,13 +782,13 @@
 }
 
 .orderHint {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .dayField {
 	display: flex;
 	flex-direction: column;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 }
 
 .dayError {
@@ -794,17 +798,17 @@
 
 .dayField input {
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
-	padding: var(--farik-space-2) var(--farik-space-3);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
-	background: var(--farik-color-surface);
-	color: var(--farik-color-ink);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-surface);
+	color: var(--catervas-color-ink);
 }
 
 .dayField input:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -812,13 +816,13 @@
 .money {
 	display: grid;
 	grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .tick {
 	display: flex;
 	align-items: flex-start;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	min-height: 44px;
 }
 
@@ -829,14 +833,14 @@
 	margin: 0;
 	padding: 0;
 	list-style: none;
-	border-top: 1px solid var(--farik-color-rule);
+	border-top: 1px solid var(--catervas-color-rule);
 }
 
 .orders > li {
 	display: grid;
-	gap: var(--farik-space-2);
-	padding: var(--farik-space-3) 0;
-	border-bottom: 1px solid var(--farik-color-rule);
+	gap: var(--catervas-space-2);
+	padding: var(--catervas-space-3) 0;
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .orders p {
@@ -847,20 +851,20 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: baseline;
-	gap: var(--farik-space-1) var(--farik-space-3);
+	gap: var(--catervas-space-1) var(--catervas-space-3);
 }
 
 .orderNumber {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 }
 
 .orderSeller {
-	font-weight: var(--farik-type-heading-weight);
+	font-weight: var(--catervas-type-heading-weight);
 	overflow-wrap: anywhere;
 }
 
 .orderAmount {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 	font-variant-numeric: tabular-nums;
 }
 
@@ -868,21 +872,21 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-2) var(--farik-space-3);
+	gap: var(--catervas-space-2) var(--catervas-space-3);
 }
 
 .orderStatus {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-1) var(--farik-space-3);
+	gap: var(--catervas-space-1) var(--catervas-space-3);
 }
 
 /* A status word in a pill; the ones that ask for attention are told apart by their rule and colour. */
 .orderTag {
-	padding: 0 var(--farik-space-2);
-	font-weight: var(--farik-type-heading-weight);
-	border: 1px solid var(--farik-color-control-border);
+	padding: 0 var(--catervas-space-2);
+	font-weight: var(--catervas-type-heading-weight);
+	border: 1px solid var(--catervas-color-control-border);
 	border-radius: 999px;
 }
 
@@ -890,33 +894,33 @@
 .orderTag[data-status="problem"],
 .orderTag[data-status="overdue"] {
 	border-width: 2px;
-	border-color: var(--farik-color-status-waiting);
-	color: var(--farik-color-status-waiting);
+	border-color: var(--catervas-color-status-waiting);
+	color: var(--catervas-color-status-waiting);
 }
 
 .orderNote {
 	overflow-wrap: anywhere;
 }
 
-/* What the agent wrote, framed so that it is never taken for Farik's or the owner's own words. */
+/* What the agent wrote, framed so that it is never taken for Catervas's or the owner's own words. */
 .orderUntrusted {
 	margin: 0;
-	padding: var(--farik-space-2) var(--farik-space-3);
-	font-family: var(--farik-type-code-family);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	font-family: var(--catervas-type-code-family);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-control-border);
-	border-left: 3px solid var(--farik-color-ink);
-	border-radius: var(--farik-radius-control);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-left: 3px solid var(--catervas-color-ink);
+	border-radius: var(--catervas-radius-control);
 }
 
 .ordersRecent > li {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-1) var(--farik-space-3);
-	padding: var(--farik-space-2) 0;
-	border-bottom: 1px solid var(--farik-color-rule);
+	gap: var(--catervas-space-1) var(--catervas-space-3);
+	padding: var(--catervas-space-2) 0;
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 /* The request an approved data source files: the owner's words and the agent's, shown as text. */
@@ -927,14 +931,14 @@
 .pipelineFrame {
 	min-width: 0;
 	margin: 0;
-	padding: var(--farik-space-2) var(--farik-space-3);
-	font-family: var(--farik-type-code-family);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	font-family: var(--catervas-type-code-family);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-control-border);
-	border-left: 3px solid var(--farik-color-ink);
-	border-radius: var(--farik-radius-control);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-left: 3px solid var(--catervas-color-ink);
+	border-radius: var(--catervas-radius-control);
 }
 
 /* A heading, name or switch beside its logo and info button. */
@@ -942,5 +946,5 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }

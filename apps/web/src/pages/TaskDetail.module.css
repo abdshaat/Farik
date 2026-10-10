@@ -2,7 +2,7 @@
 .layout {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
-	gap: var(--farik-space-6);
+	gap: var(--catervas-space-6);
 }
 
 @media (min-width: 1024px) {
@@ -17,39 +17,39 @@
 .stack {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 	min-width: 0;
 }
 
 .stack {
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	justify-items: start;
 }
 
 .tabs {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-1) var(--farik-space-4);
-	border-bottom: 1px solid var(--farik-color-rule);
+	gap: var(--catervas-space-1) var(--catervas-space-4);
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .tab {
-	padding: var(--farik-space-2) 0;
+	padding: var(--catervas-space-2) 0;
 	border: 0;
 	border-bottom: 3px solid transparent;
 	background: transparent;
-	color: var(--farik-color-ink);
+	color: var(--catervas-color-ink);
 	font: inherit;
 	cursor: pointer;
 }
 
 .tab[aria-selected="true"] {
 	font-weight: 600;
-	border-bottom-color: var(--farik-color-ink);
+	border-bottom-color: var(--catervas-color-ink);
 }
 
 .tab:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -59,7 +59,7 @@
 
 .history {
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -68,21 +68,21 @@
 .history li {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-1) var(--farik-space-3);
+	gap: var(--catervas-space-1) var(--catervas-space-3);
 	overflow-wrap: anywhere;
 }
 
 .history time,
 .kind {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 	font:
-		var(--farik-type-small-weight) var(--farik-type-small-size) /
-		var(--farik-type-small-line-height) var(--farik-type-small-family);
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
 }
 
 .plain {
 	margin: 0;
-	padding-left: var(--farik-space-4);
+	padding-left: var(--catervas-space-4);
 }
 
 .cost {
@@ -101,19 +101,19 @@
 
 .cost th,
 .cost td {
-	padding: var(--farik-space-1) 0;
+	padding: var(--catervas-space-1) 0;
 }
 
 .total th,
 .total td {
-	border-top: 1px solid var(--farik-color-rule);
+	border-top: 1px solid var(--catervas-color-rule);
 	font-weight: 600;
 }
 
 /* The Designer's five steps, numbered as the mockup's side panel numbers them. */
 .steps {
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	margin: 0;
-	padding-left: var(--farik-space-5);
+	padding-left: var(--catervas-space-5);
 }

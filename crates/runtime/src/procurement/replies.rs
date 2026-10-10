@@ -1,5 +1,5 @@
 //! Reading the sellers' replies from the procurement mailbox (step 10f, `docs/SPEC.md` 6.10, 8.6):
-//! the check Farik runs by itself every 15 minutes with no model, what it keeps of each reply, and
+//! the check Catervas runs by itself every 15 minutes with no model, what it keeps of each reply, and
 //! the lists and the dismissal Today uses. A reply is a seller's words and untrusted.
 
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
+use catervas_protocol::event::{EventBody, SellerReplyDismissedBody, SellerReplyReceivedBody};
+use catervas_store::StoreError;
+use catervas_store::seller_mail::{MessageState, SellerMail, seller_mail};
 use chrono::{DateTime, Duration, Utc};
-use farik_protocol::event::{EventBody, SellerReplyDismissedBody, SellerReplyReceivedBody};
-use farik_store::StoreError;
-use farik_store::seller_mail::{MessageState, SellerMail, seller_mail};
 use serde_json::{Value, json};
 
 use super::{
@@ -26,16 +26,16 @@ use crate::tools::ToolDeps;
 /// How long after a check the next one is due.
 const EVERY: Duration = Duration::minutes(15);
 
-/// Farik's words when a reply cannot be kept or recorded: in the ledger and in the refusal, never
+/// Catervas's words when a reply cannot be kept or recorded: in the ledger and in the refusal, never
 /// the store's detail, which repeats what the seller wrote.
 const COULD_NOT_KEEP: &str =
-    "Farik could not keep a reply from the mailbox; it tries again in 15 minutes.";
+    "Catervas could not keep a reply from the mailbox; it tries again in 15 minutes.";
 
 /// The projects whose mailbox is being read now: at most one check at a time in each, so that a
 /// slow server never holds a tick and two checks never read one message twice.
 static CHECKING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
-/// What Farik knows of the mail it sent, from the log: the `Message-ID` of every message sent and
+/// What Catervas knows of the mail it sent, from the log: the `Message-ID` of every message sent and
 /// the addresses they went to.
 fn known_of(mail: &SellerMail, settings: &MailboxSettings) -> Known {
     let sent = mail
@@ -122,7 +122,7 @@ fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 /// Keeps one reply: its text and the files it keeps under `in/<yyyy-mm>/<r>/`, named by their
-/// bytes and numbered from 1, never by the seller's name for them; and records it, with Farik's own
+/// bytes and numbered from 1, never by the seller's name for them; and records it, with Catervas's own
 /// envelope. Answers whether it was recorded.
 fn keep_reply(
     deps: &ToolDeps,
@@ -200,7 +200,7 @@ fn write_ledger(deps: &ToolDeps, ledger: &Ledger) -> Result<(), MailboxRefusal> 
 }
 
 /// Reads the mailbox now: fetches what is new and for us, keeps and records each reply, and
-/// writes the ledger with when it ended and, when it failed, why in Farik's words. Answers how
+/// writes the ledger with when it ended and, when it failed, why in Catervas's words. Answers how
 /// many replies were recorded.
 ///
 /// # Errors
@@ -360,8 +360,8 @@ pub(crate) async fn finished_checks() {
     panic!("a check of the mailbox did not end within thirty seconds");
 }
 
-/// `seller_replies.list`: every reply Farik read, oldest first, with the message it answers
-/// (the seller and the subject Farik sent), what the seller wrote, its attachments (numbered from
+/// `seller_replies.list`: every reply Catervas read, oldest first, with the message it answers
+/// (the seller and the subject Catervas sent), what the seller wrote, its attachments (numbered from
 /// one) and whether the owner dismissed it. The order a reply is about is set for a reply to an
 /// order's message or a follow-up.
 ///
@@ -494,11 +494,11 @@ pub(crate) fn dismiss_reply(deps: &ToolDeps, reply: u64) -> Result<u64, MailboxR
 mod tests {
     use std::sync::Arc;
 
+    use catervas_protocol::clock::MovableClock;
+    use catervas_protocol::command::Command;
+    use catervas_protocol::event::{EventBody, EventKind};
+    use catervas_store::seller_mail::seller_mail;
     use chrono::Duration;
-    use farik_protocol::clock::MovableClock;
-    use farik_protocol::command::Command;
-    use farik_protocol::event::{EventBody, EventKind};
-    use farik_store::seller_mail::seller_mail;
     use serde_json::{Value, json};
 
     use super::{
@@ -601,7 +601,7 @@ mod tests {
         assert_eq!(
             (&ids.agent_id, &ids.session_id),
             (&None, &None),
-            "Farik's own"
+            "Catervas's own"
         );
         let EventBody::SellerReplyReceived(body) = &events[0].body else {
             panic!("a reply");
@@ -766,7 +766,7 @@ mod tests {
         let deps = &story.harness.project.deps;
         assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 1);
         assert_eq!(replies(), 4);
-        // A check that fails says why in Farik's words; the next good one clears it.
+        // A check that fails says why in Catervas's words; the next good one clears it.
         story
             .store
             .save(&story.at, &secret("changed-since"))
@@ -1036,8 +1036,8 @@ mod tests {
     async fn known_holds_only_what_was_sent() {
         let story = Story::new("known").await;
         let (_, id) = sent(&story).await;
-        // A message to another address that waits: Farik wrote nothing to that address yet, so a
-        // message from it is none of Farik's to open.
+        // A message to another address that waits: Catervas wrote nothing to that address yet, so a
+        // message from it is none of Catervas's to open.
         story.draft_as(json!({
             "seller": "Other Boxes", "to": "other@sellers.test", "subject": "Quote",
             "body": BODY, "purpose": "quote_request"
@@ -1087,7 +1087,7 @@ mod tests {
         reads: std::sync::atomic::AtomicI64,
     }
 
-    impl farik_protocol::clock::Clock for Ticking {
+    impl catervas_protocol::clock::Clock for Ticking {
         fn now(&self) -> chrono::DateTime<chrono::Utc> {
             let read = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             self.start + Duration::seconds(read)
@@ -1149,7 +1149,7 @@ mod tests {
 
     /// The words a reply that cannot be kept leaves in the ledger and the refusal.
     const COULD_NOT_KEEP: &str =
-        "Farik could not keep a reply from the mailbox; it tries again in 15 minutes.";
+        "Catervas could not keep a reply from the mailbox; it tries again in 15 minutes.";
 
     #[tokio::test]
     #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
@@ -1232,7 +1232,7 @@ mod tests {
         assert_eq!(check_now(deps, &mailer(&story)).await.expect("checked"), 0);
         assert_eq!(received().len(), 4);
 
-        // A reply Farik cannot keep (its folder cannot be made): the ledger says so in Farik's words
+        // A reply Catervas cannot keep (its folder cannot be made): the ledger says so in Catervas's words
         // and stops just before it; the refusal repeats those words and not the store's detail.
         std::fs::remove_dir_all(&inbox).expect("the folder goes");
         std::fs::write(&inbox, b"not a folder").expect("a file in its place");

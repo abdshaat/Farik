@@ -1,4 +1,4 @@
-import { Button, Dialog, TextArea, TextField } from "@farik/ui";
+import { Button, Dialog, TextArea, TextField } from "@catervas/ui";
 import { useState } from "react";
 import { t } from "../../strings/t.ts";
 import styles from "../pages.module.css";
@@ -10,7 +10,7 @@ import { visibly } from "./ToolApproval.tsx";
 
 /**
  * The address, its domain set apart in bold and the code face, in its ASCII form: the agent's own
- * spelling of what comes before the domain is kept, and the domain is the one Farik sends to.
+ * spelling of what comes before the domain is kept, and the domain is the one Catervas sends to.
  */
 export function ToAddress({
 	to,
@@ -34,7 +34,7 @@ export function ToAddress({
 
 /**
  * What a message goes out with that the owner did not read in the agent's draft: From, To (with
- * the warning for a domain nothing was sent to before), and the lines Farik adds (spec 6.10).
+ * the warning for a domain nothing was sent to before), and the lines Catervas adds (spec 6.10).
  */
 export function SendFields({
 	seller,

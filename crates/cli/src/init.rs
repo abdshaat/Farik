@@ -1,22 +1,24 @@
-//! `farik init`: make the repository this is run in a Farik project (F2).
+//! `catervas init`: make the repository this is run in a Catervas project (F2).
 
 use std::path::Path;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-use farik_core::team::{Team, defaults, validate_team};
-use farik_protocol::event::EventBody;
-use farik_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody, TeamUpdatedBody};
-use farik_store::files::{FilesError, ProjectFiles};
-use farik_store::{
+use catervas_core::team::{Team, defaults, validate_team};
+use catervas_protocol::event::EventBody;
+use catervas_protocol::generated::event::{
+    CriteriaUpdatedBody, ProjectScannedBody, TeamUpdatedBody,
+};
+use catervas_store::files::{FilesError, ProjectFiles};
+use catervas_store::{
     Git, ProjectScan, names_of, open_event_log, project_document, scan_project, seeded_library,
 };
+use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::project::{DATABASE, ProjectIds, directory_name, repository_root};
 use crate::{HUMAN, Report};
 
-/// Makes `.farik/`, the event log, the project scan and the criterion library, and records what it
+/// Makes `.catervas/`, the event log, the project scan and the criterion library, and records what it
 /// found.
 ///
 /// A second run is a rescan: the team file and everything a person has written are left alone, the
@@ -114,15 +116,18 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
 
     let mut lines = vec![scan.read_back.clone()];
     if team_was_written {
-        lines.push(format!("wrote .farik/team.yaml: {}", agent_ids.join(", ")));
+        lines.push(format!(
+            "wrote .catervas/team.yaml: {}",
+            agent_ids.join(", ")
+        ));
         lines.push(AUTO_MERGE_NOTICE.to_string());
     } else {
-        lines.push("kept the team already in .farik/team.yaml".to_string());
+        lines.push("kept the team already in .catervas/team.yaml".to_string());
     }
     lines.push(match names_of(&library.criteria).len() {
         0 => "no criteria: nothing in this repository says how it is tested".to_string(),
         count => format!(
-            "{count} criteria in .farik/team/criteria.yaml: {}",
+            "{count} criteria in .catervas/team/criteria.yaml: {}",
             names_of(&library.criteria).join(", ")
         ),
     });
@@ -144,12 +149,12 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
 /// ADR 0012).
 const AUTO_MERGE_NOTICE: &str = "Integration: auto_merge. Accepted work is merged into the \
                                  integration branch and pushed to origin when there is one; \
-                                 policy.integration in .farik/team.yaml changes it.";
+                                 policy.integration in .catervas/team.yaml changes it.";
 
 /// What a file holds, nothing when there is no such file, and a refusal when there is one and it
 /// cannot be read.
 ///
-/// `.farik/team.yaml` and `.farik/team/criteria.yaml` are files 5.13 expects people to hand-edit, so
+/// `.catervas/team.yaml` and `.catervas/team/criteria.yaml` are files 5.13 expects people to hand-edit, so
 /// one of them being unreadable is the ordinary way this command meets a mistake, and the answer is
 /// to say so rather than to write past it.
 fn absent_or<T>(read: Result<T, FilesError>) -> Result<Option<T>, String> {
@@ -175,7 +180,7 @@ fn absent_or<T>(read: Result<T, FilesError>) -> Result<Option<T>, String> {
 fn starter_team(project: &str) -> Result<Team, String> {
     let defaults = defaults();
     let wire = json!({
-        "name": if project.is_empty() { "Farik".to_string() } else { project.to_string() },
+        "name": if project.is_empty() { "Catervas".to_string() } else { project.to_string() },
         "agents": [
             {
                 "id": "product-manager",
@@ -200,7 +205,7 @@ fn starter_team(project: &str) -> Result<Team, String> {
     });
     validate_team(&wire).map_err(|errors| {
         format!(
-            "the team farik init writes is not one: {}",
+            "the team catervas init writes is not one: {}",
             errors
                 .iter()
                 .map(|error| format!("{} {}", error.path, error.message))
@@ -212,13 +217,13 @@ fn starter_team(project: &str) -> Result<Team, String> {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::Role;
+    use catervas_core::contract::Role;
 
     use super::starter_team;
 
     #[test]
     fn starts_a_project_with_the_two_agents_a_team_cannot_work_without() {
-        let team = starter_team("notes").expect("the team farik init writes is a team");
+        let team = starter_team("notes").expect("the team catervas init writes is a team");
         assert_eq!(team.name.as_str(), "notes", "named after the project");
         assert!(team.has_active(Role::ProductManager));
         assert!(team.has_active(Role::SoftwareDeveloper));
@@ -255,7 +260,10 @@ mod tests {
     #[test]
     fn starts_a_project_with_no_dollar_limit() {
         let team = starter_team("notes").expect("a team");
-        assert_eq!(team.budgets.daily_usd, None, "Farik ships no daily budget");
+        assert_eq!(
+            team.budgets.daily_usd, None,
+            "Catervas ships no daily budget"
+        );
         assert!(team.budgets.session.is_none());
         assert_eq!(
             team.rules().max_task_budget_usd,
@@ -279,7 +287,7 @@ mod tests {
 
     #[test]
     fn writes_a_starter_team_that_plans_in_sprints() {
-        // The founder's answer 1 (ADR 0028): `farik run` on a new project waits for a sprint.
+        // The founder's answer 1 (ADR 0028): `catervas run` on a new project waits for a sprint.
         assert!(starter_team("notes").expect("a team").plans_in_sprints());
     }
 
@@ -287,7 +295,7 @@ mod tests {
     fn names_a_team_after_something_when_the_directory_name_is_nothing() {
         assert_eq!(
             starter_team("").expect("a team").name.as_str(),
-            "Farik",
+            "Catervas",
             "a repository at the root of a volume has no directory name, and a blank team name is \
              one validate_team refuses"
         );

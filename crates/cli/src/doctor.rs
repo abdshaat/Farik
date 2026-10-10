@@ -1,22 +1,22 @@
-//! `farik doctor`: every way this project disagrees with itself.
+//! `catervas doctor`: every way this project disagrees with itself.
 //!
-//! Drift between the files and the log is `farik_store::reconcile`'s answer (D5). The five checks
+//! Drift between the files and the log is `catervas_store::reconcile`'s answer (D5). The five checks
 //! beyond it are the ones earlier steps of this phase recorded as being nobody's to report: a team
-//! rule that does not compile, a setting Farik does not know, a criterion whose verification matches
+//! rule that does not compile, a setting Catervas does not know, a criterion whose verification matches
 //! no branch of its `oneOf`, a repository with no working tree, and a team file or criterion library
 //! that is there and cannot be read. A sixth names each active agent's model that no price table
 //! prices (ADR 0015).
 
-use chrono::{DateTime, Utc};
-use farik_core::governor::paths::{
+use catervas_core::governor::paths::{
     GlobError, PathRefusal, check_allowed_paths, check_protected_paths,
 };
-use farik_core::governor::permissions::{CommandRefusal, evaluate_command};
-use farik_protocol::event::EventBody;
-use farik_protocol::generated::event::{DriftDetectedBody, DriftDetectedBodyDrift};
-use farik_runtime::cost::unpriced_models;
-use farik_store::files::FilesError;
-use farik_store::{Drift, reconcile};
+use catervas_core::governor::permissions::{CommandRefusal, evaluate_command};
+use catervas_protocol::event::EventBody;
+use catervas_protocol::generated::event::{DriftDetectedBody, DriftDetectedBodyDrift};
+use catervas_runtime::cost::unpriced_models;
+use catervas_store::files::FilesError;
+use catervas_store::{Drift, reconcile};
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::Report;
@@ -53,7 +53,7 @@ pub fn doctor(project: &Project, now: DateTime<Utc>) -> Result<Report, String> {
     }
 
     findings.extend(rules_that_do_not_compile(project));
-    findings.extend(settings_farik_does_not_know(project));
+    findings.extend(settings_catervas_does_not_know(project));
     findings.extend(criteria_that_match_no_branch(project));
     findings.extend(models_no_price_table_prices(project));
 
@@ -105,7 +105,7 @@ fn rules_that_do_not_compile(project: &Project) -> Vec<String> {
         check_protected_paths(&[], &rules.protected_paths)
     {
         found.push(format!(
-            ".farik/team.yaml: protected_paths has a glob that does not compile, {pattern:?}: \
+            ".catervas/team.yaml: protected_paths has a glob that does not compile, {pattern:?}: \
              {detail}. Until it is fixed it refuses every path check, which is every tool call an \
              agent makes (5.12)"
         ));
@@ -114,7 +114,7 @@ fn rules_that_do_not_compile(project: &Project) -> Vec<String> {
         check_allowed_paths(&[], &rules.allowed_paths_ceiling)
     {
         found.push(format!(
-            ".farik/team.yaml: allowed_paths_ceiling has a glob that does not compile, \
+            ".catervas/team.yaml: allowed_paths_ceiling has a glob that does not compile, \
              {pattern:?}: {detail}. Until it is fixed it refuses every contract's allowed paths \
              (5.12)"
         ));
@@ -123,7 +123,7 @@ fn rules_that_do_not_compile(project: &Project) -> Vec<String> {
         check_allowed_paths(&[], &rules.document_paths)
     {
         found.push(format!(
-            ".farik/team.yaml: document_paths has a glob that does not compile, {pattern:?}: \
+            ".catervas/team.yaml: document_paths has a glob that does not compile, {pattern:?}: \
              {detail}. Until it is fixed it refuses every task not assigned to the \
              software_developer (5.12)"
         ));
@@ -132,7 +132,7 @@ fn rules_that_do_not_compile(project: &Project) -> Vec<String> {
         evaluate_command("true", &rules)
     {
         found.push(format!(
-            ".farik/team.yaml: forbidden_commands has a pattern that is not a regular expression, \
+            ".catervas/team.yaml: forbidden_commands has a pattern that is not a regular expression, \
              {pattern:?}: {detail}. Until it is fixed it refuses every command the team runs (5.12)"
         ));
     }
@@ -146,14 +146,14 @@ fn models_no_price_table_prices(project: &Project) -> Vec<String> {
     match unpriced(project) {
         Ok(sentences) => sentences
             .into_iter()
-            .map(|sentence| format!(".farik/team.yaml: {sentence} (5.5)"))
+            .map(|sentence| format!(".catervas/team.yaml: {sentence} (5.5)"))
             .collect(),
         Err(sentence) => vec![sentence],
     }
 }
 
 /// One sentence per model an active agent uses that the project's prices do not price, in the
-/// words `farik doctor` and every driving start share: the model, the ids of the agents that use
+/// words `catervas doctor` and every driving start share: the model, the ids of the agents that use
 /// it, what that means, and how to price it.
 ///
 /// # Errors
@@ -170,20 +170,20 @@ pub(crate) fn unpriced(project: &Project) -> Result<Vec<String>, String> {
         .map(|(model, ids)| {
             format!(
                 "no price table prices {model} (used by {}): its usage is recorded at no cost, \
-                 and no dollar limit counts it. Add it to .farik/prices.json to price it",
+                 and no dollar limit counts it. Add it to .catervas/prices.json to price it",
                 ids.join(", ")
             )
         })
         .collect())
 }
 
-/// A key in `.farik/local/settings.json` that Farik does not know.
+/// A key in `.catervas/local/settings.json` that Catervas does not know.
 ///
 /// That file is the one structured file with no schema behind it, so a typo is read as silence
 /// rather than as a refusal, and the person goes on believing they set something.
-fn settings_farik_does_not_know(project: &Project) -> Vec<String> {
+fn settings_catervas_does_not_know(project: &Project) -> Vec<String> {
     const KNOWN: [&str; 1] = ["sandbox"];
-    let path = project.root.join(".farik/local/settings.json");
+    let path = project.root.join(".catervas/local/settings.json");
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Vec::new();
     };
@@ -193,17 +193,17 @@ fn settings_farik_does_not_know(project: &Project) -> Vec<String> {
             .filter(|key| !KNOWN.contains(&key.as_str()))
             .map(|key| {
                 format!(
-                    ".farik/local/settings.json: {key:?} is not a setting Farik knows, so it is \
+                    ".catervas/local/settings.json: {key:?} is not a setting Catervas knows, so it is \
                      read as nothing. The ones it knows are: {}",
                     KNOWN.join(", ")
                 )
             })
             .collect(),
         Ok(_) => vec![
-            ".farik/local/settings.json is not an object, so nothing in it is read".to_string(),
+            ".catervas/local/settings.json is not an object, so nothing in it is read".to_string(),
         ],
         Err(error) => vec![format!(
-            ".farik/local/settings.json is not JSON: {error}. Every setting in it is read as its \
+            ".catervas/local/settings.json is not JSON: {error}. Every setting in it is read as its \
              default"
         )],
     }
@@ -212,13 +212,13 @@ fn settings_farik_does_not_know(project: &Project) -> Vec<String> {
 /// A criterion whose `verification` matches no branch of its `oneOf`.
 ///
 /// The schema refuses it with the whole object and the word `oneOf`, naming neither the property nor
-/// the method. `.farik/team/criteria.yaml` is a file 5.13 expects people to hand-edit, so this says
+/// the method. `.catervas/team/criteria.yaml` is a file 5.13 expects people to hand-edit, so this says
 /// which method was meant and what that method wants.
 fn criteria_that_match_no_branch(project: &Project) -> Vec<String> {
     match project.files.read_criteria() {
         Ok(_) => Vec::new(),
         Err(FilesError::NotFound { .. }) => vec![
-            ".farik/team/criteria.yaml is not there: farik init writes it from what the repository \
+            ".catervas/team/criteria.yaml is not there: catervas init writes it from what the repository \
              says about itself"
                 .to_string(),
         ],

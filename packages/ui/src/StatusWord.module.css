@@ -3,21 +3,21 @@
 }
 
 .done {
-	color: var(--farik-color-status-done);
+	color: var(--catervas-color-status-done);
 }
 
 .working {
-	color: var(--farik-color-status-working);
+	color: var(--catervas-color-status-working);
 }
 
 .waiting {
-	color: var(--farik-color-status-waiting);
+	color: var(--catervas-color-status-waiting);
 }
 
 /* The same pale pill, Moss Text on the Added tint, in both themes (4.71:1). */
 .pill {
-	padding: 0 var(--farik-space-2);
+	padding: 0 var(--catervas-space-2);
 	border-radius: 999px;
-	background: var(--farik-color-ready);
-	color: var(--farik-color-ready-ink);
+	background: var(--catervas-color-ready);
+	color: var(--catervas-color-ready-ink);
 }

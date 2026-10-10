@@ -5,8 +5,8 @@
 //! still builds them, so `cargo fmt` and `clippy` hold them to the same standard as everything else
 //! and they cannot rot unnoticed (`docs/standards/code.md`, "Rust integration test").
 
-use farik_store::git::fixtures::{TempRepo, git_in, git_output_in};
-use farik_store::{Git, GitError, MergeOutcome};
+use catervas_store::git::fixtures::{TempRepo, git_in, git_output_in};
+use catervas_store::{Git, GitError, MergeOutcome};
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
@@ -17,13 +17,13 @@ fn knows_a_repository_from_a_directory_that_is_not_one() {
     std::fs::create_dir_all(&plain).expect("a plain directory");
     // A directory inside the repository is still inside it; one outside is not.
     assert!(Git::open(plain).is_repository());
-    assert!(!Git::open(std::env::temp_dir().join("farik-nowhere-at-all")).is_repository());
+    assert!(!Git::open(std::env::temp_dir().join("catervas-nowhere-at-all")).is_repository());
 }
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn reads_the_commit_at_the_tip_and_says_when_there_is_none() {
-    let empty = std::env::temp_dir().join(format!("farik-git-empty-{}", std::process::id()));
+    let empty = std::env::temp_dir().join(format!("catervas-git-empty-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&empty);
     std::fs::create_dir_all(&empty).expect("a directory");
     git_in(&empty, &["init", "-b", "main"]);
@@ -32,7 +32,7 @@ fn reads_the_commit_at_the_tip_and_says_when_there_is_none() {
             .head_summary()
             .expect("the read works"),
         None,
-        "a repository farik init has just made has no commit"
+        "a repository catervas init has just made has no commit"
     );
     let _ = std::fs::remove_dir_all(&empty);
 
@@ -69,8 +69,11 @@ fn answers_with_the_branch_it_is_on_when_there_is_no_remote_to_ask() {
     let git = repository.adapter();
     assert_eq!(git.current_branch().expect("the read works"), "main");
     assert_eq!(git.default_branch().expect("the read works"), "main");
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
-    assert_eq!(git.current_branch().expect("the read works"), "farik/FRK-1");
+    repository.git(&["checkout", "-b", "catervas/FRK-1"]);
+    assert_eq!(
+        git.current_branch().expect("the read works"),
+        "catervas/FRK-1"
+    );
 }
 
 #[test]
@@ -92,7 +95,7 @@ fn reads_the_default_branch_from_the_remote_that_records_it() {
     let origin = TempRepo::new("default-origin");
     origin.git(&["branch", "-m", "trunk"]);
     let clone = std::env::temp_dir().join(format!(
-        "farik-git-clone-{}-{:?}",
+        "catervas-git-clone-{}-{:?}",
         std::process::id(),
         std::thread::current().id()
     ));
@@ -107,8 +110,11 @@ fn reads_the_default_branch_from_the_remote_that_records_it() {
         ],
     );
     let git = Git::open(clone.clone());
-    git_in(&clone, &["checkout", "-b", "farik/FRK-1"]);
-    assert_eq!(git.current_branch().expect("the read works"), "farik/FRK-1");
+    git_in(&clone, &["checkout", "-b", "catervas/FRK-1"]);
+    assert_eq!(
+        git.current_branch().expect("the read works"),
+        "catervas/FRK-1"
+    );
     assert_eq!(
         git.default_branch().expect("the read works"),
         "trunk",
@@ -124,12 +130,12 @@ fn hands_back_a_patch_with_no_colour_in_it() {
     // reads a reviewer's answer; escape codes are neither.
     let repository = TempRepo::new("colour");
     let git = repository.adapter();
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.git(&["checkout", "-b", "catervas/FRK-1"]);
     repository.write("src/added.rs", "fn added() {}\n");
     repository.commit("feat: add a thing");
     repository.git(&["config", "color.ui", "always"]);
 
-    let patch = git.diff("main", "farik/FRK-1").expect("the read works");
+    let patch = git.diff("main", "catervas/FRK-1").expect("the read works");
     assert!(patch.contains("fn added()"), "the patch holds the change");
     assert!(
         !patch.contains('\u{1b}'),
@@ -151,23 +157,23 @@ fn makes_a_branch_and_a_worktree_for_a_task_and_takes_the_worktree_away_again() 
     repository.write("only-on-elsewhere.txt", "not where a task starts\n");
     repository.commit("docs: somewhere else entirely");
 
-    git.create_branch("farik/FRK-1", "main")
+    git.create_branch("catervas/FRK-1", "main")
         .expect("the branch is made");
     assert_eq!(
-        repository.git_output(&["rev-parse", "farik/FRK-1"]),
+        repository.git_output(&["rev-parse", "catervas/FRK-1"]),
         repository.git_output(&["rev-parse", "main"]),
         "the branch starts where it was told to"
     );
-    let taken = git.create_branch("farik/FRK-1", "main");
+    let taken = git.create_branch("catervas/FRK-1", "main");
     let Err(GitError::CommandFailed { command, stderr }) = taken else {
         panic!("a name is taken once: {taken:?}");
     };
-    assert_eq!(command, "branch farik/FRK-1 main");
+    assert_eq!(command, "branch catervas/FRK-1 main");
     // What git said, not how it said it: the sentence is translated, the branch name is not.
-    assert!(stderr.contains("farik/FRK-1"), "{stderr}");
+    assert!(stderr.contains("catervas/FRK-1"), "{stderr}");
 
-    let worktree = repository.path.join(".farik/local/worktrees/FRK-2");
-    git.create_worktree(&worktree, "farik/FRK-2", "main")
+    let worktree = repository.path.join(".catervas/local/worktrees/FRK-2");
+    git.create_worktree(&worktree, "catervas/FRK-2", "main")
         .expect("the worktree is made");
     assert!(
         worktree.join("README.md").is_file(),
@@ -190,8 +196,8 @@ fn makes_a_branch_and_a_worktree_for_a_task_and_takes_the_worktree_away_again() 
     assert!(!worktree.exists());
     assert!(
         repository
-            .git_output(&["branch", "--list", "farik/FRK-2"])
-            .contains("farik/FRK-2"),
+            .git_output(&["branch", "--list", "catervas/FRK-2"])
+            .contains("catervas/FRK-2"),
         "and the branch is kept"
     );
 }
@@ -199,14 +205,14 @@ fn makes_a_branch_and_a_worktree_for_a_task_and_takes_the_worktree_away_again() 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn calls_a_worktree_dirty_whatever_the_repository_is_configured_to_show() {
-    // A user with `status.showUntrackedFiles = no` does not get to tell Farik that a worktree full
+    // A user with `status.showUntrackedFiles = no` does not get to tell Catervas that a worktree full
     // of a session's output is clean. Its own fixture, because a setting stays in force for
     // everything after it: left in the test above, it would take the dirtiness out of the very
     // worktree whose removal that test forces.
     let repository = TempRepo::new("untracked-hidden");
     let git = repository.adapter();
-    let worktree = repository.path.join(".farik/local/worktrees/FRK-3");
-    git.create_worktree(&worktree, "farik/FRK-3", "main")
+    let worktree = repository.path.join(".catervas/local/worktrees/FRK-3");
+    git.create_worktree(&worktree, "catervas/FRK-3", "main")
         .expect("the worktree is made");
     std::fs::write(worktree.join("built-by-the-session.txt"), "output\n")
         .expect("something the session built");
@@ -236,7 +242,7 @@ fn refuses_a_tree_that_is_not_a_worktree_of_this_repository() {
         "{stderr}"
     );
 
-    let gone = git.is_clean(&repository.path.join(".farik/local/worktrees/FRK-9"));
+    let gone = git.is_clean(&repository.path.join(".catervas/local/worktrees/FRK-9"));
     let Err(GitError::CommandFailed { stderr, .. }) = gone else {
         panic!("a worktree that is not there is not git failing to run: {gone:?}");
     };
@@ -244,8 +250,8 @@ fn refuses_a_tree_that_is_not_a_worktree_of_this_repository() {
 
     // And a worktree of this repository is still an answer, which is the point of asking by
     // repository rather than by path.
-    let worktree = repository.path.join(".farik/local/worktrees/FRK-1");
-    git.create_worktree(&worktree, "farik/FRK-1", "main")
+    let worktree = repository.path.join(".catervas/local/worktrees/FRK-1");
+    git.create_worktree(&worktree, "catervas/FRK-1", "main")
         .expect("the worktree is made");
     assert!(git.is_clean(&worktree).expect("the read works"));
 }
@@ -255,7 +261,7 @@ fn refuses_a_tree_that_is_not_a_worktree_of_this_repository() {
 fn counts_the_commits_a_branch_added_and_names_every_path_it_touched() {
     let repository = TempRepo::new("changed-paths");
     let git = repository.adapter();
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.git(&["checkout", "-b", "catervas/FRK-1"]);
     repository.write("src/added.rs", "fn added() {}\n");
     repository.write("README.md", "the first line\nand a second\n");
     repository.commit("feat: add a thing");
@@ -268,23 +274,23 @@ fn counts_the_commits_a_branch_added_and_names_every_path_it_touched() {
     repository.git(&["checkout", "main"]);
     repository.write("src/only-on-main.rs", "fn elsewhere() {}\n");
     repository.commit("feat: something else entirely");
-    repository.git(&["checkout", "farik/FRK-1"]);
+    repository.git(&["checkout", "catervas/FRK-1"]);
 
-    assert_eq!(git.commit_count("main", "farik/FRK-1"), Ok(2));
+    assert_eq!(git.commit_count("main", "catervas/FRK-1"), Ok(2));
     assert_eq!(
-        git.commit_count("farik/FRK-1", "main"),
+        git.commit_count("catervas/FRK-1", "main"),
         Ok(1),
         "the other way is main's own commit, not the branch's two"
     );
     let mut changed = git
-        .changed_paths("main", "farik/FRK-1")
+        .changed_paths("main", "catervas/FRK-1")
         .expect("the read works");
     changed.sort();
     assert_eq!(changed, ["README.md", "src/added.rs"]);
     // git's own prefixes, whatever this repository is configured to use: a patch without them is
     // one nothing can apply, and a reviewer is handed this patch to read (5.6).
     repository.git(&["config", "diff.noprefix", "true"]);
-    let patch = git.diff("main", "farik/FRK-1").expect("the read works");
+    let patch = git.diff("main", "catervas/FRK-1").expect("the read works");
     assert!(patch.contains("fn added()"), "the patch holds the change");
     assert!(patch.contains("--- a/README.md"), "and the removal");
     assert!(patch.contains("+++ b/src/added.rs"), "with both prefixes");
@@ -318,7 +324,7 @@ fn lists_what_the_repository_tracks_and_not_what_it_ignores() {
             "a path with a space.md",
             "src/lib.rs"
         ],
-        "what git ignores is not content, and Farik does not have to know what to ignore"
+        "what git ignores is not content, and Catervas does not have to know what to ignore"
     );
 }
 
@@ -349,7 +355,7 @@ fn says_where_the_repository_begins_whatever_directory_it_was_opened_on() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn lists_what_is_staged_in_a_repository_with_no_commit() {
-    // A repository `farik init` has just made has an index and no commit, and onboarding scans it.
+    // A repository `catervas init` has just made has an index and no commit, and onboarding scans it.
     // The fixture commits, so the commit goes: `git rm --cached` alone would only unstage the file
     // and leave HEAD where it was, and the test would prove nothing about a repository with none.
     let repository = TempRepo::new("tracked-staged");
@@ -376,12 +382,12 @@ fn keeps_a_path_whose_name_begins_with_a_space() {
     // newline in a path; this is what keeps a space at the front of one.
     let repository = TempRepo::new("odd-path");
     let git = repository.adapter();
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.git(&["checkout", "-b", "catervas/FRK-1"]);
     repository.write(" leading.txt", "a path that starts with a space\n");
     repository.commit("feat: a path only a person could name");
 
     assert_eq!(
-        git.changed_paths("main", "farik/FRK-1")
+        git.changed_paths("main", "catervas/FRK-1")
             .expect("the read works"),
         [" leading.txt"]
     );
@@ -394,13 +400,13 @@ fn names_both_sides_of_a_file_that_moved() {
     // reported only by its new name would let work land at a path nobody allowed.
     let repository = TempRepo::new("renames");
     let git = repository.adapter();
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.git(&["checkout", "-b", "catervas/FRK-1"]);
     std::fs::create_dir_all(repository.path.join("docs")).expect("the directory it moves into");
     repository.git(&["mv", "README.md", "docs/README.md"]);
     repository.commit("docs: move the readme");
 
     let mut changed = git
-        .changed_paths("main", "farik/FRK-1")
+        .changed_paths("main", "catervas/FRK-1")
         .expect("the read works");
     changed.sort();
     assert_eq!(changed, ["README.md", "docs/README.md"]);
@@ -411,7 +417,7 @@ fn names_both_sides_of_a_file_that_moved() {
 fn merges_a_finished_task_into_the_integration_branch() {
     let repository = TempRepo::new("merge");
     let git = repository.adapter();
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.git(&["checkout", "-b", "catervas/FRK-1"]);
     repository.write("src/added.rs", "fn added() {}\n");
     repository.commit("feat: add a thing");
 
@@ -419,7 +425,7 @@ fn merges_a_finished_task_into_the_integration_branch() {
     // merge goes to the integration branch and comes back: this checkout is the user's own, not a
     // task's worktree, so what they have open is not the merge's to move.
     let outcome = git
-        .merge("main", "farik/FRK-1", "integrate FRK-1")
+        .merge("main", "catervas/FRK-1", "integrate FRK-1")
         .expect("the merge runs");
     let MergeOutcome::Merged { sha } = outcome else {
         panic!("it merged: {outcome:?}");
@@ -427,7 +433,7 @@ fn merges_a_finished_task_into_the_integration_branch() {
     assert_eq!(sha, repository.git_output(&["rev-parse", "main"]));
     assert_eq!(
         git.current_branch().expect("the read works"),
-        "farik/FRK-1",
+        "catervas/FRK-1",
         "and left the repository on the branch it found it on"
     );
     assert_eq!(
@@ -454,15 +460,15 @@ fn refuses_a_merge_that_failed_for_something_other_than_a_conflict() {
     // paper without a single commit having moved.
     let repository = TempRepo::new("merge-refused");
     let git = repository.adapter();
-    let refusal = git.merge("main", "farik/FRK-404", "integrate FRK-404");
+    let refusal = git.merge("main", "catervas/FRK-404", "integrate FRK-404");
     let Err(GitError::CommandFailed { command, stderr }) = refusal else {
         panic!("it refused: {refusal:?}");
     };
     assert_eq!(
-        command, "merge --no-ff -m integrate FRK-404 farik/FRK-404",
+        command, "merge --no-ff -m integrate FRK-404 catervas/FRK-404",
         "the merge's own refusal, not whatever an abort with nothing to abort says"
     );
-    assert!(stderr.contains("farik/FRK-404"), "{stderr}");
+    assert!(stderr.contains("catervas/FRK-404"), "{stderr}");
     assert_eq!(
         git.current_branch().expect("the read works"),
         "main",
@@ -493,17 +499,17 @@ fn names_what_conflicted_and_leaves_the_tree_as_it_was() {
     // a half-merged working tree behind for the next command to trip over.
     let repository = TempRepo::new("conflict");
     let git = repository.adapter();
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.git(&["checkout", "-b", "catervas/FRK-1"]);
     repository.write("README.md", "the branch's line\n");
     repository.commit("docs: the branch writes it");
     repository.git(&["checkout", "main"]);
     repository.write("README.md", "main's line\n");
     repository.commit("docs: main writes it too");
     let before = repository.git_output(&["rev-parse", "main"]);
-    repository.git(&["checkout", "farik/FRK-1"]);
+    repository.git(&["checkout", "catervas/FRK-1"]);
 
     let outcome = git
-        .merge("main", "farik/FRK-1", "integrate FRK-1")
+        .merge("main", "catervas/FRK-1", "integrate FRK-1")
         .expect("the merge runs and reports");
     assert_eq!(
         outcome,
@@ -516,7 +522,7 @@ fn names_what_conflicted_and_leaves_the_tree_as_it_was() {
     );
     assert_eq!(
         git.current_branch().expect("the read works"),
-        "farik/FRK-1",
+        "catervas/FRK-1",
         "and the repository is back on the branch it was on"
     );
     assert!(
@@ -599,7 +605,7 @@ fn makes_a_detached_worktree_at_a_commit() {
     repository.write("second.txt", "and a second\n");
     repository.commit("the second commit");
     let git = repository.adapter();
-    let path = repository.path.join(".farik/local/worktrees/FRK-1-base");
+    let path = repository.path.join(".catervas/local/worktrees/FRK-1-base");
     git.create_detached_worktree(&path, &first)
         .expect("the worktree is made");
     assert_eq!(git_output_in(&path, &["rev-parse", "HEAD"]), first);
@@ -623,15 +629,15 @@ fn pushes_a_branch_to_a_remote() {
     std::fs::create_dir_all(&origin).expect("a directory for the remote");
     git_in(&origin, &["init", "--bare", "-b", "main"]);
     repository.git(&["remote", "add", "origin", origin.to_str().expect("a path")]);
-    repository.git(&["branch", "farik/FRK-1"]);
+    repository.git(&["branch", "catervas/FRK-1"]);
 
     repository
         .adapter()
-        .push("origin", "farik/FRK-1")
+        .push("origin", "catervas/FRK-1")
         .expect("the branch is pushed");
 
     assert_eq!(
-        git_output_in(&origin, &["rev-parse", "farik/FRK-1"]),
+        git_output_in(&origin, &["rev-parse", "catervas/FRK-1"]),
         repository.git_output(&["rev-parse", "HEAD"])
     );
     let _ = std::fs::remove_dir_all(&origin);
@@ -641,13 +647,13 @@ fn pushes_a_branch_to_a_remote() {
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn reads_a_file_at_a_revision() {
     let repository = TempRepo::new("file-at");
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.git(&["checkout", "-b", "catervas/FRK-1"]);
     repository.write("tests/new.sh", "exit 0\n\n");
     repository.commit("add a test");
     repository.git(&["checkout", "main"]);
     let git = repository.adapter();
     assert_eq!(
-        git.file_at("farik/FRK-1", "tests/new.sh"),
+        git.file_at("catervas/FRK-1", "tests/new.sh"),
         Ok("exit 0\n\n".to_owned()),
         "the file as committed, trailing newlines and all"
     );
@@ -663,14 +669,14 @@ fn lists_added_and_modified_paths_but_not_deleted_ones() {
     let repository = TempRepo::new("added-or-modified");
     repository.write("doomed.txt", "going\n");
     repository.commit("a file to delete");
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.git(&["checkout", "-b", "catervas/FRK-1"]);
     repository.write("README.md", "changed\n");
     repository.write("tests/new.sh", "exit 0\n");
     std::fs::remove_file(repository.path.join("doomed.txt")).expect("the file is deleted");
     repository.commit("change, add, delete");
     let mut paths = repository
         .adapter()
-        .added_or_modified_paths("main", "farik/FRK-1")
+        .added_or_modified_paths("main", "catervas/FRK-1")
         .expect("the diff is read");
     paths.sort();
     assert_eq!(paths, ["README.md", "tests/new.sh"]);
@@ -681,14 +687,14 @@ fn lists_added_and_modified_paths_but_not_deleted_ones() {
 fn finds_the_merge_base_of_two_branches() {
     let repository = TempRepo::new("merge-base");
     let fork = repository.git_output(&["rev-parse", "HEAD"]);
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.git(&["checkout", "-b", "catervas/FRK-1"]);
     repository.write("task.txt", "the task\n");
     repository.commit("the task");
     repository.git(&["checkout", "main"]);
     repository.write("main.txt", "main moved on\n");
     repository.commit("main moves on");
     assert_eq!(
-        repository.adapter().merge_base("main", "farik/FRK-1"),
+        repository.adapter().merge_base("main", "catervas/FRK-1"),
         Ok(fork)
     );
 }
@@ -735,8 +741,8 @@ fn fast_forwards_a_branch_to_its_remote() {
             other.to_str().expect("a path"),
         ],
     );
-    git_in(&other, &["config", "user.name", "Farik Test"]);
-    git_in(&other, &["config", "user.email", "test@farik.invalid"]);
+    git_in(&other, &["config", "user.name", "Catervas Test"]);
+    git_in(&other, &["config", "user.email", "test@catervas.invalid"]);
     git_in(&other, &["config", "commit.gpgsign", "false"]);
     for branch in ["main", "develop"] {
         git_in(&other, &["checkout", branch]);
@@ -815,7 +821,7 @@ fn pushes_and_fetches_without_a_prompt() {
                 }
             }
             let _ = stream.write_all(
-                b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"farik\"\r\n\
+                b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"catervas\"\r\n\
                   Content-Length: 0\r\nConnection: close\r\n\r\n",
             );
         }
@@ -865,17 +871,18 @@ fn refuses_a_branch_name_git_would_read_as_another() {
     }
 }
 
-/// Set in the child that `commits_and_merges_as_farik_when_git_knows_nobody` runs itself as.
-const KNOWS_NOBODY: &str = "FARIK_TEST_GIT_KNOWS_NOBODY";
+/// Set in the child that `commits_and_merges_as_catervas_when_git_knows_nobody` runs itself as.
+const KNOWS_NOBODY: &str = "CATERVAS_TEST_GIT_KNOWS_NOBODY";
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn commits_and_merges_as_farik_when_git_knows_nobody() {
+fn commits_and_merges_as_catervas_when_git_knows_nobody() {
     // Git reads who someone is from the environment, and a test cannot change its own without
     // `unsafe`, so the test runs itself again as a child on a machine that knows nobody: no
     // global or system configuration, and a home with nothing in it.
     if std::env::var_os(KNOWS_NOBODY).is_none() {
-        let home = std::env::temp_dir().join(format!("farik-git-no-home-{}", std::process::id()));
+        let home =
+            std::env::temp_dir().join(format!("catervas-git-no-home-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(&home).expect("an empty home");
         let mut child =
@@ -883,7 +890,7 @@ fn commits_and_merges_as_farik_when_git_knows_nobody() {
         child
             .args([
                 "--exact",
-                "commits_and_merges_as_farik_when_git_knows_nobody",
+                "commits_and_merges_as_catervas_when_git_knows_nobody",
                 "--include-ignored",
                 "--nocapture",
             ])
@@ -912,7 +919,7 @@ fn commits_and_merges_as_farik_when_git_knows_nobody() {
         );
         return;
     }
-    let root = std::env::temp_dir().join(format!("farik-git-nobody-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("catervas-git-nobody-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("a directory");
     git_in(&root, &["init", "-b", "main"]);
@@ -923,20 +930,20 @@ fn commits_and_merges_as_farik_when_git_knows_nobody() {
     std::fs::write(root.join("first.txt"), "one\n").expect("a file");
     git.commit(&root, "the first commit", &["first.txt".to_string()])
         .expect("the commit works without an identity");
-    assert_eq!(author("main"), "farik <farik@localhost>");
+    assert_eq!(author("main"), "catervas <catervas@localhost>");
 
-    git_in(&root, &["checkout", "-b", "farik/FRK-1"]);
+    git_in(&root, &["checkout", "-b", "catervas/FRK-1"]);
     std::fs::write(root.join("second.txt"), "two\n").expect("a file");
     git.commit(&root, "the second commit", &["second.txt".to_string()])
         .expect("the commit works without an identity");
     let outcome = git
-        .merge("main", "farik/FRK-1", "integrate FRK-1")
+        .merge("main", "catervas/FRK-1", "integrate FRK-1")
         .expect("the merge works without an identity");
     assert!(
         matches!(outcome, MergeOutcome::Merged { .. }),
         "{outcome:?}"
     );
-    assert_eq!(author("main"), "farik <farik@localhost>");
+    assert_eq!(author("main"), "catervas <catervas@localhost>");
 
     // Half an identity is none, and an empty name is no name: git refuses a commit without both.
     for (name, email) in [
@@ -959,7 +966,7 @@ fn commits_and_merges_as_farik_when_git_knows_nobody() {
             .expect("the commit works with half an identity");
         assert_eq!(
             author("HEAD"),
-            "farik <farik@localhost>",
+            "catervas <catervas@localhost>",
             "with {name:?} and {email:?}"
         );
     }
@@ -971,7 +978,7 @@ fn commits_and_merges_as_farik_when_git_knows_nobody() {
 fn commits_and_merges_as_the_user_when_git_knows_them() {
     let repository = TempRepo::new("identity-kept");
     let git = repository.adapter();
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.git(&["checkout", "-b", "catervas/FRK-1"]);
     repository.write("added.txt", "added\n");
     git.commit(&repository.path, "add a file", &["added.txt".to_string()])
         .expect("the commit works");
@@ -979,13 +986,13 @@ fn commits_and_merges_as_the_user_when_git_knows_them() {
         repository.git_output(&["log", "-1", "--format=%an <%ae> %cn <%ce>", reference])
     };
     assert_eq!(
-        author("farik/FRK-1"),
-        "Farik Test <test@farik.invalid> Farik Test <test@farik.invalid>"
+        author("catervas/FRK-1"),
+        "Catervas Test <test@catervas.invalid> Catervas Test <test@catervas.invalid>"
     );
-    git.merge("main", "farik/FRK-1", "integrate FRK-1")
+    git.merge("main", "catervas/FRK-1", "integrate FRK-1")
         .expect("the merge works");
     assert_eq!(
         author("main"),
-        "Farik Test <test@farik.invalid> Farik Test <test@farik.invalid>"
+        "Catervas Test <test@catervas.invalid> Catervas Test <test@catervas.invalid>"
     );
 }

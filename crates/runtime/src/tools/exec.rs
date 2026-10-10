@@ -1,9 +1,9 @@
-//! `farik_exec`: the agent's shell, run in the task's sandbox.
+//! `catervas_exec`: the agent's shell, run in the task's sandbox.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use farik_core::governor::permissions::evaluate_command;
+use catervas_core::governor::permissions::evaluate_command;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -20,7 +20,7 @@ const MAX_TIMEOUT_SECONDS: u64 = 1800;
 /// flood its context.
 const SHOWN_BYTES: usize = 65_536;
 
-/// `farik_exec`'s input.
+/// `catervas_exec`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ExecInput {
@@ -129,7 +129,7 @@ mod tests {
         executor: Arc<dyn Executor>,
         input: Value,
     ) -> Result<Value, ToolError> {
-        project.call_with(executor, "dev-a", None, "farik_exec", input)
+        project.call_with(executor, "dev-a", None, "catervas_exec", input)
     }
 
     #[test]
@@ -171,7 +171,7 @@ mod tests {
             match exec(&project, recording.clone(), json!({ "command": command })) {
                 Err(ToolError::Refused { reason }) => {
                     assert!(reason.starts_with("git_via_exec: "), "{reason}");
-                    assert!(reason.contains("farik_git_status"), "{reason}");
+                    assert!(reason.contains("catervas_git_status"), "{reason}");
                 }
                 other => panic!("{command}: expected a refusal, got {other:?}"),
             }

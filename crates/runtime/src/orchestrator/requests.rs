@@ -3,21 +3,21 @@
 
 use std::sync::Arc;
 
-use farik_core::contract::{
+use catervas_core::contract::{
     ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
-use farik_core::governor::done::{CriterionResult, RunBy};
-use farik_core::governor::gates::fits_the_open_sprint;
-use farik_core::governor::readiness::{ReadinessRule, evaluate_readiness};
-use farik_core::governor::transition::TransitionRequest;
-use farik_core::governor::transition_table::TransitionActor;
-use farik_core::team::{Agent, Team};
-use farik_protocol::event::{
-    ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody,
-    EventKind, FarikEvent, NoteWrittenBodyKind, ReviewRecordedBody,
+use catervas_core::governor::done::{CriterionResult, RunBy};
+use catervas_core::governor::gates::fits_the_open_sprint;
+use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
+use catervas_core::governor::transition::TransitionRequest;
+use catervas_core::governor::transition_table::TransitionActor;
+use catervas_core::team::{Agent, Team};
+use catervas_protocol::event::{
+    CatervasEvent, ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy,
+    EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody,
 };
-use farik_store::TaskProjection;
-use farik_store::files::FilesError;
+use catervas_store::TaskProjection;
+use catervas_store::files::FilesError;
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
@@ -271,7 +271,7 @@ fn judge(
 /// Whether the contract is judged now: written since refining began with no refusal by the
 /// governor since that write, or, with no such write, filed whole and not refused since refining
 /// began. A raw request is not judged: its brief would fail and spend one of the three attempts.
-fn is_to_be_judged(contract: &TaskContract, history: &[FarikEvent], began: u64) -> bool {
+fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u64) -> bool {
     let refused_after = |after: u64| {
         history.iter().any(|event| {
             event.envelope.seq > after
@@ -291,7 +291,7 @@ fn is_to_be_judged(contract: &TaskContract, history: &[FarikEvent], began: u64) 
 }
 
 /// The failures of the last Definition of Ready judged since refining began, when it failed.
-fn last_readiness_failures(history: &[FarikEvent], began: u64) -> Vec<String> {
+fn last_readiness_failures(history: &[CatervasEvent], began: u64) -> Vec<String> {
     history
         .iter()
         .rev()
@@ -528,7 +528,7 @@ pub(super) fn epic_assignee<'a>(
     active(team, epic.assignee_id.as_deref())
 }
 
-/// Rule 5 for an epic (ADR 0013): nothing while a task under it awaits integration; then Farik
+/// Rule 5 for an epic (ADR 0013): nothing while a task under it awaits integration; then Catervas
 /// runs each mechanical criterion it has not run in this verification, on the integration branch's
 /// head. Then, for an epic whose row names a reviewer (the Product Manager, fixed when the Scrum
 /// Master was assigned it, whatever the team is now), its review; for one the human reviews,
@@ -539,7 +539,7 @@ pub(super) async fn verifying_epic(
     team: &Team,
     row: &TaskProjection,
     contract: &TaskContract,
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
     since: u64,
     waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
@@ -599,7 +599,7 @@ pub(super) async fn verifying_epic(
     Ok(Some(acted(row, pm, "verify", &end)))
 }
 
-/// Rule 5 for an epic the Product Manager reviews, once Farik's runs are recorded, judged on the
+/// Rule 5 for an epic the Product Manager reviews, once Catervas's runs are recorded, judged on the
 /// governor's own context for `verifying -> accepted`: the Product Manager's read-only `verify`
 /// session in the project root while there is no review note, after which its review is recorded;
 /// the rejection in its name when its results hold a failure; its review session again, told
@@ -611,7 +611,7 @@ async fn reviewed_by_the_product_manager(
     board: &[TaskProjection],
     row: &TaskProjection,
     contract: &TaskContract,
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
     waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let Some(pm) = active(team, row.reviewer_id.as_deref()) else {
@@ -690,7 +690,7 @@ fn tasks_under(
         .collect()
 }
 
-/// What Farik's runs of an epic's criteria came to.
+/// What Catervas's runs of an epic's criteria came to.
 enum EpicRan {
     /// This many criteria were run and recorded.
     Criteria(usize),
@@ -722,11 +722,11 @@ async fn run_on_the_integration_branch(
         let worktree = tools
             .files
             .root()
-            .join(".farik/local/worktrees")
+            .join(".catervas/local/worktrees")
             .join(format!("{}-base", contract.id.as_str()));
         let unrunnable = |id: &str, error: &dyn std::fmt::Display| {
             EpicRan::Unrunnable(format!(
-                "Farik could not run {id} on the integration branch for its reviewer: {error}"
+                "Catervas could not run {id} on the integration branch for its reviewer: {error}"
             ))
         };
         if let Err(error) = remove_base_worktree(git, &worktree).and_then(|()| {
@@ -797,7 +797,7 @@ async fn run_on_the_integration_branch(
     .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()))
 }
 
-/// Records one of Farik's runs of an epic's criterion as the reviewer's, recorded by the governor,
+/// Records one of Catervas's runs of an epic's criterion as the reviewer's, recorded by the governor,
 /// with no agent on its envelope, its evidence opening with the sha it ran at.
 fn record_governor_result(
     tools: &ToolDeps,
@@ -822,7 +822,7 @@ fn record_governor_result(
 
 /// The epic's `review.recorded`, once per verification, with the human as reviewer: the criteria
 /// with a reviewer's or the human's result, all passed, since the human accepted only once
-/// Farik's runs passed. The one review not recorded at a reviewer session's end.
+/// Catervas's runs passed. The one review not recorded at a reviewer session's end.
 fn record_epic_review(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -864,15 +864,15 @@ fn record_epic_review(
 mod tests {
     use std::sync::Arc;
 
-    use farik_core::contract::{TaskKind, TaskStatus};
-    use farik_core::team::{AgentStatus, Effort};
-    use farik_protocol::command::{AcceptSubject, Command, RequestSize};
-    use farik_protocol::event::{
-        CriterionRecordedBodyRunBy, EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent,
-        NewEvent, NoteWrittenBodyKind, RequestTriagedBodySize, TransitionActorWire,
+    use catervas_core::contract::{TaskKind, TaskStatus};
+    use catervas_core::team::{AgentStatus, Effort};
+    use catervas_protocol::command::{AcceptSubject, Command, RequestSize};
+    use catervas_protocol::event::{
+        CatervasEvent, CriterionRecordedBodyRunBy, EscalationRaisedBodyReason, EventBody,
+        EventKind, NewEvent, NoteWrittenBodyKind, RequestTriagedBodySize, TransitionActorWire,
         event_from_value,
     };
-    use farik_store::git::fixtures::git_output_in;
+    use catervas_store::git::fixtures::git_output_in;
     use serde_json::{Value, json};
 
     use crate::exec::ExecError;
@@ -886,17 +886,17 @@ mod tests {
         accept_frk_1, implement_finishes_frk_1, judge_frk_1_by_architect, judge_frk_1_fails,
         judge_frk_1_passes, plan_assigns_frk_1, plan_assigns_frk_2, plan_breaks_down_frk_1,
         plan_closes_epic_frk_1, planning_ceremony_frk_1_frk_3, refine_asks_frk_1,
-        refine_writes_epic_frk_1, refine_writes_task_frk_1, replays_farik_read_board,
+        refine_writes_epic_frk_1, refine_writes_task_frk_1, replays_catervas_read_board,
         review_epic_fails_frk_1, review_epic_frk_1, triage_by_sm_frk_1, triage_frk_1_large,
     };
     use crate::session::SessionPurpose;
     use crate::tools::fixtures::at;
 
-    fn task(id: &str) -> farik_core::contract::TaskId {
+    fn task(id: &str) -> catervas_core::contract::TaskId {
         id.parse().expect("a task id")
     }
 
-    fn last(harness: &Harness, kind: EventKind) -> Option<FarikEvent> {
+    fn last(harness: &Harness, kind: EventKind) -> Option<CatervasEvent> {
         harness.events(&[kind]).pop()
     }
 
@@ -917,7 +917,7 @@ mod tests {
             .collect()
     }
 
-    /// A request filed by the human and sized by them, `size`, as `farik triage` does.
+    /// A request filed by the human and sized by them, `size`, as `catervas triage` does.
     async fn a_sized_request(harness: &Harness, orchestrator: &Orchestrator, size: RequestSize) {
         harness.a_request("Add done.txt and its check");
         orchestrator
@@ -942,7 +942,7 @@ mod tests {
         report
     }
 
-    /// Calls a Farik tool as `agent` on `task`, as a session of theirs would.
+    /// Calls a Catervas tool as `agent` on `task`, as a session of theirs would.
     async fn call(
         harness: &Harness,
         agent: &str,
@@ -960,7 +960,7 @@ mod tests {
             harness,
             "pm",
             Some("FRK-1"),
-            "farik_write_contract",
+            "catervas_write_contract",
             json!({ "fields": { "budget": { "max_cost_usd": 50 } } }),
         )
         .await
@@ -983,7 +983,7 @@ mod tests {
         // The daemon holds the session to its one tool, whatever the agent's tiers allow.
         assert_eq!(
             witness.given_tools(),
-            vec![vec!["farik_triage_request".to_string()]]
+            vec![vec!["catervas_triage_request".to_string()]]
         );
 
         let started = adapter.started();
@@ -993,10 +993,13 @@ mod tests {
         assert_eq!(spec.agent_id, "pm");
         assert_eq!(spec.model, TRIAGE_MODEL);
         assert_eq!(spec.effort, Effort::Low);
-        assert_eq!(spec.farik_tools, vec!["farik_triage_request".to_string()]);
+        assert_eq!(
+            spec.catervas_tools,
+            vec!["catervas_triage_request".to_string()]
+        );
         assert_eq!(
             listed_tools(&spec.system_prompt),
-            vec!["farik_triage_request"]
+            vec!["catervas_triage_request"]
         );
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
         let triaged = last(&harness, EventKind::RequestTriaged).expect("the triage");
@@ -1008,7 +1011,7 @@ mod tests {
         assert_eq!(harness.row("FRK-1").kind, TaskKind::Epic);
     }
 
-    /// The Farik tools the prompt's `Your tools` section lists, in order.
+    /// The Catervas tools the prompt's `Your tools` section lists, in order.
     fn listed_tools(prompt: &str) -> Vec<&str> {
         let start = prompt.find("## Your tools\n").expect("a tools section");
         let section = &prompt[start + 1..];
@@ -1017,7 +1020,7 @@ mod tests {
             .lines()
             .filter_map(|line| line.strip_prefix("- "))
             .filter_map(|line| line.split(' ').next())
-            .filter(|name| name.starts_with("farik_"))
+            .filter(|name| name.starts_with("catervas_"))
             .collect()
     }
 
@@ -1053,7 +1056,7 @@ mod tests {
             wire["agents"]
                 .as_array_mut()
                 .expect("a list of agents")
-                .push(farik_core::team::fixtures::an_agent_wire(
+                .push(catervas_core::team::fixtures::an_agent_wire(
                     "ari",
                     "architect",
                 ));
@@ -1070,8 +1073,8 @@ mod tests {
         assert_eq!(started.len(), 2);
         assert_eq!(started[1].agent_id, "ari");
         assert_eq!(
-            started[1].farik_tools,
-            vec!["farik_record_judgment".to_string()]
+            started[1].catervas_tools,
+            vec!["catervas_record_judgment".to_string()]
         );
         let judged = last(&harness, EventKind::ContractJudged).expect("the judgment");
         let EventBody::ContractJudged(body) = &judged.body else {
@@ -1118,7 +1121,7 @@ mod tests {
             wire["agents"]
                 .as_array_mut()
                 .expect("a list of agents")
-                .push(farik_core::team::fixtures::an_agent_wire(
+                .push(catervas_core::team::fixtures::an_agent_wire(
                     "ari",
                     "architect",
                 ));
@@ -1152,10 +1155,13 @@ mod tests {
         assert_eq!(spec.purpose, SessionPurpose::Triage);
         assert_eq!(spec.agent_id, "sam");
         assert_eq!(spec.model, TRIAGE_MODEL);
-        assert_eq!(spec.farik_tools, vec!["farik_triage_request".to_string()]);
+        assert_eq!(
+            spec.catervas_tools,
+            vec!["catervas_triage_request".to_string()]
+        );
         assert_eq!(
             listed_tools(&spec.system_prompt),
-            vec!["farik_triage_request"]
+            vec!["catervas_triage_request"]
         );
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
         let triaged = last(&harness, EventKind::RequestTriaged).expect("the triage");
@@ -1239,7 +1245,7 @@ mod tests {
         assert_eq!(started.len(), 1);
         assert_eq!(started[0].purpose, SessionPurpose::Refine);
         assert!(
-            started[0].initial_prompt.contains("farik_ask_human"),
+            started[0].initial_prompt.contains("catervas_ask_human"),
             "{}",
             started[0].initial_prompt
         );
@@ -1255,8 +1261,8 @@ mod tests {
         let harness = Harness::new("req-answer-handed", |_| {});
         let adapter = harness.recorded(vec![
             refine_asks_frk_1(),
-            replays_farik_read_board(),
-            replays_farik_read_board(),
+            replays_catervas_read_board(),
+            replays_catervas_read_board(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Large).await;
@@ -1349,10 +1355,13 @@ mod tests {
         let spec = &started[1];
         assert_eq!(spec.agent_id, "sam");
         assert_eq!(spec.purpose, SessionPurpose::Refine);
-        assert_eq!(spec.farik_tools, vec!["farik_record_judgment".to_string()]);
+        assert_eq!(
+            spec.catervas_tools,
+            vec!["catervas_record_judgment".to_string()]
+        );
         assert_eq!(
             listed_tools(&spec.system_prompt),
-            vec!["farik_record_judgment"]
+            vec!["catervas_record_judgment"]
         );
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
         // The Scrum Master's own model and effort, not triage's.
@@ -1407,7 +1416,7 @@ mod tests {
         let adapter = harness.recorded(vec![
             refine_writes_task_frk_1(),
             judge_frk_1_fails(),
-            replays_farik_read_board(),
+            replays_catervas_read_board(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
@@ -1456,7 +1465,7 @@ mod tests {
             &harness,
             "pm",
             Some("FRK-1"),
-            "farik_write_contract",
+            "catervas_write_contract",
             json!({ "fields": { "scope": { "in_scope": ["done.txt"], "out_of_scope": [" "] } } }),
         )
         .await
@@ -1532,7 +1541,7 @@ mod tests {
         let harness = Harness::new("req-failing", |wire| {
             wire["rules"]["max_task_budget_usd"] = json!(5);
         });
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
         write_over_the_cap(&harness).await;
@@ -1764,7 +1773,7 @@ mod tests {
             &harness,
             "pm",
             None,
-            "farik_create_task",
+            "catervas_create_task",
             json!({ "parent": "FRK-1", "contract": contract }),
         )
         .await
@@ -1810,7 +1819,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn catches_up_with_another_process_before_each_tick() {
         let harness = Harness::new("req-catch-up", |_| {});
-        let adapter = harness.recorded(vec![refine_asks_frk_1(), replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![refine_asks_frk_1(), replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Large).await;
         orchestrator.tick().await.expect("the question is asked");
@@ -1821,8 +1830,8 @@ mod tests {
         let wire = json!({
             "seq": 1,
             "recorded_at": at().to_rfc3339(),
-            "team_id": "farik",
-            "project_id": "farik",
+            "team_id": "catervas",
+            "project_id": "catervas",
             "task_id": "FRK-1",
             "kind": "question.answered",
             "body": { "question_id": n, "answer": "Yes.", "answered_by": "human" },
@@ -2094,7 +2103,7 @@ mod tests {
         assert_eq!(spec.task_id, Some(task("FRK-1")));
         assert_eq!(spec.cwd, harness.project.repo.path);
         assert!(
-            spec.initial_prompt.contains("farik_create_task"),
+            spec.initial_prompt.contains("catervas_create_task"),
             "{}",
             spec.initial_prompt
         );
@@ -2185,14 +2194,14 @@ mod tests {
         let harness = Harness::new("epic-breaks-down-again", |_| {});
         an_epic_in_progress(&harness, |_| {});
         a_child(&harness, "cancelled");
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
 
         let spec = &adapter.started()[0];
         assert_eq!(spec.task_id, Some(task("FRK-1")));
-        // The breakdown's message, not the close-out's, which names `farik_create_task` too.
+        // The breakdown's message, not the close-out's, which names `catervas_create_task` too.
         assert!(
             spec.initial_prompt.starts_with("Break the epic FRK-1 down"),
             "{}",
@@ -2258,7 +2267,7 @@ mod tests {
             Arc::clone(&harness.daemon),
         ));
         let orchestrator = harness.orchestrator(witness.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         orchestrator
             .handle(Command::HumanAccept {
                 task_id: task("FRK-1"),
@@ -2287,7 +2296,7 @@ mod tests {
         let results = spec
             .initial_prompt
             .find("<untrusted source=\"results\">")
-            .expect("Farik's results, marked");
+            .expect("Catervas's results, marked");
         assert!(
             spec.initial_prompt[results..].contains(evidence.as_str()),
             "{}",
@@ -2344,9 +2353,9 @@ mod tests {
         let harness = Harness::new("epic-failed", |_| {});
         an_epic_verifying(&harness, |_| {});
         integrated(&harness, false);
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         assert!(
             !governor_runs(&harness, "FRK-1")[0].1,
             "done.txt is not on main"
@@ -2466,7 +2475,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn escalates_an_epic_whose_criterion_farik_could_not_run() {
+    async fn escalates_an_epic_whose_criterion_catervas_could_not_run() {
         let harness = Harness::new("epic-unrunnable", |_| {});
         an_epic_verifying(&harness, |_| {});
         integrated(&harness, true);
@@ -2504,10 +2513,12 @@ mod tests {
                 }));
         });
         integrated(&harness, true);
-        let adapter =
-            harness.recorded(vec![replays_farik_read_board(), replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![
+            replays_catervas_read_board(),
+            replays_catervas_read_board(),
+        ]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         orchestrator
             .handle(Command::HumanAccept {
                 task_id: task("FRK-1"),
@@ -2584,7 +2595,7 @@ mod tests {
     async fn breaks_an_epic_down_with_its_scrum_master() {
         let harness = Harness::new("epic-breakdown-sm", with_a_scrum_master);
         a_scrum_masters_epic_in_progress(&harness);
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
@@ -2626,7 +2637,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn refuses_the_humans_acceptance_of_an_epic_before_farik_ran_its_criteria() {
+    async fn refuses_the_humans_acceptance_of_an_epic_before_catervas_ran_its_criteria() {
         let harness = Harness::new("epic-sm-accept-early", with_a_scrum_master);
         a_scrum_masters_epic_verifying(&harness);
         integrated(&harness, true);
@@ -2660,7 +2671,7 @@ mod tests {
         ));
         let orchestrator = harness.orchestrator(witness.clone());
 
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         let runs = governor_runs(&harness, "FRK-1");
         assert_eq!(runs.len(), 1, "{runs:?}");
         assert!(
@@ -2734,9 +2745,12 @@ mod tests {
         let harness = Harness::new("epic-sm-rejects", with_a_scrum_master);
         a_scrum_masters_epic_verifying(&harness);
         integrated(&harness, true);
-        let adapter = harness.recorded(vec![review_epic_fails_frk_1(), replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![
+            review_epic_fails_frk_1(),
+            replays_catervas_read_board(),
+        ]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         orchestrator
             .tick()
             .await
@@ -2793,9 +2807,9 @@ mod tests {
             "note.written",
             &json!({ "kind": "review", "text": "It reads right.", "written_by": "pm" }),
         );
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
 
         orchestrator.tick().await.expect("the tick runs");
 
@@ -2835,7 +2849,7 @@ mod tests {
         integrated(&harness, true);
         let adapter = harness.recorded(vec![review_epic_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
 
         orchestrator.tick().await.expect("the tick runs");
 
@@ -2882,7 +2896,7 @@ mod tests {
         integrated(&harness, true);
         let adapter = harness.recorded(vec![accept_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         orchestrator
             .handle(Command::HumanAccept {
                 task_id: task("FRK-1"),
@@ -2927,7 +2941,7 @@ mod tests {
         );
         let adapter = harness.recorded(vec![review_epic_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
 
         orchestrator.tick().await.expect("the re-ask answers C2");
 
@@ -2974,7 +2988,7 @@ mod tests {
             "task.integrated",
             &json!({ "sha": "abd", "into": "main", "integrated_by": "governor" }),
         );
-        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the tick runs");
@@ -3057,7 +3071,7 @@ mod tests {
         an_epic_verifying(&harness, |_| {});
         integrated(&harness, true);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         orchestrator
             .handle(Command::HumanAccept {
                 task_id: task("FRK-1"),
@@ -3078,7 +3092,7 @@ mod tests {
         a_scrum_masters_epic_verifying(&harness);
         integrated(&harness, true);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator.tick().await.expect("Catervas runs C1");
         harness.asleep("pm", in_an_hour());
 
         waits_for(&orchestrator, "pm", in_an_hour()).await;

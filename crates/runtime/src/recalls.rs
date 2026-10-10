@@ -1,5 +1,5 @@
-//! Farik's own MCP server over the United States' product and vehicle safety agencies
-//! (`docs/SPEC.md` 6.7, ADR 0038), started by `farik connector recalls`: the CPSC's recalls of
+//! Catervas's own MCP server over the United States' product and vehicle safety agencies
+//! (`docs/SPEC.md` 6.7, ADR 0038), started by `catervas connector recalls`: the CPSC's recalls of
 //! products, NHTSA's recalls, complaints and crash ratings of vehicles, and vPIC's decoding of a
 //! VIN. It speaks to three fixed addresses, follows no redirect and uses no proxy, checks every
 //! input before it leaves, and asks for nothing an answer names. What the agencies answer is data
@@ -62,9 +62,9 @@ pub fn tool_names() -> Vec<&'static str> {
 
 /// How long one call to an agency may take.
 const TIMEOUT: Duration = Duration::from_secs(20);
-/// The most of an answer Farik reads.
+/// The most of an answer Catervas reads.
 const MAX_BODY: usize = 4 * 1024 * 1024;
-/// The most of a vehicle's complaints Farik reads: a popular car's are several megabytes.
+/// The most of a vehicle's complaints Catervas reads: a popular car's are several megabytes.
 const MAX_COMPLAINTS_BODY: usize = 8 * 1024 * 1024;
 /// The most product recalls an answer holds.
 const MAX_RECALLS: usize = 50;
@@ -80,7 +80,7 @@ const MAX_VEHICLES: usize = 10;
 const MAX_WORDS: usize = 100;
 /// The most characters a make or a model holds.
 const MAX_NAME: usize = 40;
-/// The earliest model year Farik asks about.
+/// The earliest model year Catervas asks about.
 const FIRST_YEAR: i64 = 1950;
 /// The fields of a decoded VIN an answer keeps, as vPIC names them.
 const VIN_FIELDS: [&str; 12] = [
@@ -207,7 +207,7 @@ impl Recalls {
         timeout: Duration,
     ) -> Result<Self, RecallsError> {
         let client = reqwest::Client::builder()
-            // Nothing an agency answers sends Farik anywhere else, and nothing is sent through a
+            // Nothing an agency answers sends Catervas anywhere else, and nothing is sent through a
             // proxy.
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
@@ -456,7 +456,7 @@ impl Recalls {
             .send()
             .await
             .map_err(|error| agency.trouble(error.is_timeout(), seconds))?;
-        // Whatever it says other than rows, a redirect included, is one sentence of Farik's.
+        // Whatever it says other than rows, a redirect included, is one sentence of Catervas's.
         if !response.status().is_success() {
             return Err(agency.refused());
         }
@@ -672,7 +672,7 @@ fn complaint_row(complaint: &Value) -> Value {
 }
 
 /// The name the server gives itself.
-const SERVER_NAME: &str = "farik-recalls";
+const SERVER_NAME: &str = "catervas-recalls";
 
 /// Every tool, with what it takes.
 fn descriptors() -> Vec<Tool> {
@@ -773,7 +773,7 @@ impl ServerHandler for Recalls {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        // As Farik's own server answers: protocol 2026-07-28 wants a list's freshness said.
+        // As Catervas's own server answers: protocol 2026-07-28 wants a list's freshness said.
         std::future::ready(Ok(ListToolsResult::with_all_items(descriptors())
             .with_ttl_ms(0)
             .with_cache_scope(CacheScope::Private)))
@@ -1013,7 +1013,7 @@ mod tests {
         found
     }
 
-    /// A recall as the CPSC writes it, with the fields Farik never reads among them.
+    /// A recall as the CPSC writes it, with the fields Catervas never reads among them.
     fn cpsc_recall(number: &str, date: &str, description: &str) -> Value {
         json!({
             "RecallID": 1234, "RecallNumber": number, "RecallDate": date,
@@ -1099,7 +1099,7 @@ mod tests {
             .expect("the server's answer to initialize");
         assert_eq!(
             info.server_info.as_ref().expect("a name").name,
-            "farik-recalls"
+            "catervas-recalls"
         );
         let tools = client.list_all_tools().await.expect("a list");
         let names: Vec<String> = tools.iter().map(|tool| tool.name.to_string()).collect();
@@ -1326,7 +1326,7 @@ mod tests {
                 "ModelYear": "2003", "Make": "HONDA", "Model": "ACCORD"
             })
         };
-        // The second recall says things in a way Farik does not read: neither is a flag.
+        // The second recall says things in a way Catervas does not read: neither is a flag.
         let mut odd = row("14V351");
         odd["parkIt"] = json!("yes");
         odd.as_object_mut()
@@ -1971,7 +1971,7 @@ mod tests {
     /// set to a fixture that records, asks a second fixture directly.
     #[tokio::test]
     async fn uses_no_proxy_from_the_environment() {
-        if let Ok(target) = std::env::var("FARIK_RECALLS_PROXY_CHILD") {
+        if let Ok(target) = std::env::var("CATERVAS_RECALLS_PROXY_CHILD") {
             asking_cpsc_at(&target)
                 .call(
                     "product_recalls",
@@ -1992,7 +1992,7 @@ mod tests {
                 "--exact",
                 "recalls::tests::uses_no_proxy_from_the_environment",
             ])
-            .env("FARIK_RECALLS_PROXY_CHILD", &target.address)
+            .env("CATERVAS_RECALLS_PROXY_CHILD", &target.address)
             .env("HTTP_PROXY", &through)
             .env("http_proxy", &through)
             .env("HTTPS_PROXY", &through)

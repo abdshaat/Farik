@@ -6,8 +6,8 @@ use std::process::{Command, Output};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use farik_core::contract::TaskId;
-use farik_core::team::Preview;
+use catervas_core::contract::TaskId;
+use catervas_core::team::Preview;
 
 use crate::exec::supervise;
 use crate::preview::{
@@ -31,8 +31,8 @@ const TAIL_LINES: usize = 40;
 
 /// Runs `prepare` as `$1` under `timeout`, its output kept in a file and only its last lines
 /// printed, so that a long install still ends with what failed.
-const PREPARE_SCRIPT: &str = "timeout -k 2 900 sh -c \"$1\" > /tmp/farik-prepare.log 2>&1; \
-     code=$?; tail -n 40 /tmp/farik-prepare.log; exit $code";
+const PREPARE_SCRIPT: &str = "timeout -k 2 900 sh -c \"$1\" > /tmp/catervas-prepare.log 2>&1; \
+     code=$?; tail -n 40 /tmp/catervas-prepare.log; exit $code";
 
 /// Whether `program info` succeeds within `limit`. A client that has not answered by then is
 /// killed and counts as no answer: a daemon that hangs would otherwise hold the caller for as long
@@ -141,8 +141,8 @@ impl PreviewFactory for DockerPreviewFactory {
             id("-g").map_err(|error| docker_error(&error))?
         );
         let labels = vec![
-            format!("farik.project={project_id}"),
-            format!("farik.task={}", task_id.as_str()),
+            format!("catervas.project={project_id}"),
+            format!("catervas.task={}", task_id.as_str()),
         ];
         let running = DockerPreview {
             name,
@@ -154,7 +154,7 @@ impl PreviewFactory for DockerPreviewFactory {
         if let Some(prepare) = &preview.prepare {
             running.prepare(&preparing, &mount, &self.image, prepare)?;
         }
-        let tree_label = format!("farik.tree={tree}");
+        let tree_label = format!("catervas.tree={tree}");
         let mut args = vec!["run", "-d", "--init", "--name", &running.name];
         args.extend(["--network", "none", "--mount", &mount, "-w", "/workspace"]);
         args.extend(["--user", &running.user]);
@@ -188,10 +188,13 @@ impl PreviewFactory for DockerPreviewFactory {
     }
 }
 
-/// `farik-<kind>-<project>-<task_id>` in Docker's alphabet: the task's `preview` container, and
+/// `catervas-<kind>-<project>-<task_id>` in Docker's alphabet: the task's `preview` container, and
 /// its `prepare` one.
 pub(crate) fn container_name(kind: &str, project_id: &str, task_id: &TaskId) -> String {
-    docker_name(&format!("farik-{kind}-{project_id}-{}", task_id.as_str()))
+    docker_name(&format!(
+        "catervas-{kind}-{project_id}-{}",
+        task_id.as_str()
+    ))
 }
 
 /// A preview container, by name, and what its browser needs to join it.
@@ -324,7 +327,8 @@ mod tests {
     /// thread's fork would inherit it until its exec, and running the script meanwhile fails with
     /// "text file busy".
     fn a_docker(test: &str, body: &str) -> String {
-        let dir = std::env::temp_dir().join(format!("farik-docker-{}-{test}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("catervas-docker-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("the folder is made");
         let program: PathBuf = dir.join("docker");
@@ -409,7 +413,7 @@ mod tests {
         let refuses = a_docker("refuses", "echo 'Cannot connect' >&2\nexit 1");
         assert!(!daemon_answers(&refuses, Duration::from_secs(30)));
         assert!(!daemon_answers(
-            "/nonexistent/farik-docker",
+            "/nonexistent/catervas-docker",
             Duration::from_secs(30)
         ));
     }

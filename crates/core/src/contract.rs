@@ -13,15 +13,15 @@ use crate::text::listed;
 // `summary` of the `task.created` and `contract.written` events is another thing: the log's
 // one-line summary of the contract. The two share a name and nothing else.
 pub use crate::generated::task_contract::{
-    ExitCriterion, ExitCriterionVerification as VerificationWire,
-    FarikTaskContract as TaskContract, FarikTaskContractBudget as Budget,
-    FarikTaskContractId as TaskId, FarikTaskContractKind as TaskKind,
-    FarikTaskContractNotes as Notes, FarikTaskContractRequirementsItem as Requirement,
-    FarikTaskContractRisk as Risk, FarikTaskContractStatus as TaskStatus, Role,
+    CatervasTaskContract as TaskContract, CatervasTaskContractBudget as Budget,
+    CatervasTaskContractId as TaskId, CatervasTaskContractKind as TaskKind,
+    CatervasTaskContractNotes as Notes, CatervasTaskContractRequirementsItem as Requirement,
+    CatervasTaskContractRisk as Risk, CatervasTaskContractStatus as TaskStatus, ExitCriterion,
+    ExitCriterionVerification as VerificationWire, Role,
 };
 
 /// A criterion's verification method with named variants. The generated wire enum names its
-/// variants by position; this is the one mapping `farik-core` keeps at its edge.
+/// variants by position; this is the one mapping `catervas-core` keeps at its edge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verification {
     /// Run a command; pass on the expected exit code and output.

@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../../strings/en.ts";
@@ -37,7 +37,7 @@ describe("a purchase order's dialog", () => {
 		);
 		expect(
 			within(dialog).getByText(
-				"You place this order and pay for it yourself; Farik never pays. Then mark it placed on Ivo’s page, and Ivo follows it up until it comes.",
+				"You place this order and pay for it yourself; Catervas never pays. Then mark it placed on Ivo’s page, and Ivo follows it up until it comes.",
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(container);
@@ -196,13 +196,13 @@ describe("a purchase order that can be emailed", () => {
 		await expectNoAxeViolations(container);
 		expect(
 			within(dialog).getByText(
-				/Farik emails this order to Pie Box Pros from your procurement mailbox/,
+				/Catervas emails this order to Pie Box Pros from your procurement mailbox/,
 			),
 		).toBeTruthy();
 		expect(within(dialog).getByText("Attached: PO-12.xlsx")).toBeTruthy();
 		expect(
 			within(dialog).getByText(
-				/No message from Farik has gone to pieboxpros.test before/,
+				/No message from Catervas has gone to pieboxpros.test before/,
 			),
 		).toBeTruthy();
 		// A failed send files nothing, and the dialog says why.
@@ -285,7 +285,7 @@ describe("a purchase order that can be emailed", () => {
 		expect(s.calls("request.file")).toHaveLength(0);
 	});
 
-	it("approve_alone_says_farik_never_pays", async () => {
+	it("approve_alone_says_catervas_never_pays", async () => {
 		const { s } = await todayWithMail({
 			waiting: [{ ...ORDER_ROW, send: SEND }],
 		});
@@ -299,7 +299,7 @@ describe("a purchase order that can be emailed", () => {
 		});
 		expect(
 			within(dialog).getByText(
-				/You place this order and pay for it yourself; Farik never pays/,
+				/You place this order and pay for it yourself; Catervas never pays/,
 			),
 		).toBeTruthy();
 		expect(s.calls("command")).toHaveLength(0);

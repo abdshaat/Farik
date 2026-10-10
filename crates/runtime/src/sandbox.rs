@@ -4,7 +4,7 @@
 use std::fmt;
 use std::path::Path;
 
-use farik_core::contract::TaskId;
+use catervas_core::contract::TaskId;
 
 use crate::exec::Executor;
 
@@ -16,7 +16,7 @@ pub mod docker;
 pub mod host;
 
 /// The image a task's container runs, tagged with this crate's version.
-pub const SANDBOX_IMAGE: &str = concat!("farik/sandbox:", env!("CARGO_PKG_VERSION"));
+pub const SANDBOX_IMAGE: &str = concat!("catervas/sandbox:", env!("CARGO_PKG_VERSION"));
 
 /// Why a sandbox could not be made or discarded.
 #[derive(Debug, Clone, PartialEq, Eq)]

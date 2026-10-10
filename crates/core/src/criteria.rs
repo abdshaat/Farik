@@ -13,8 +13,9 @@ use crate::text::listed;
 
 pub use crate::contract::{ExitCriterion, ValidationError};
 pub use crate::generated::criteria::{
-    CriterionTemplate, CriterionTemplateSource as CriterionSource,
-    CriterionTemplateVerification as TemplateVerification, FarikCriteriaLibrary as CriteriaLibrary,
+    CatervasCriteriaLibrary as CriteriaLibrary, CriterionTemplate,
+    CriterionTemplateSource as CriterionSource,
+    CriterionTemplateVerification as TemplateVerification,
 };
 use crate::generated::task_contract::{
     ExitCriterionId, ExitCriterionText, ExitCriterionVerification,
@@ -312,7 +313,7 @@ mod tests {
     #[test]
     fn reads_a_library_with_nothing_in_it() {
         // What a project whose scan found no check command starts with. A file that must hold at
-        // least one criterion would mean `farik init` could not write one.
+        // least one criterion would mean `catervas init` could not write one.
         assert!(
             library(&an_empty_criteria_library_wire())
                 .criteria

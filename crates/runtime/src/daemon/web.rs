@@ -14,16 +14,16 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use catervas_core::contract::{TaskId, TaskStatus};
+use catervas_core::governor::gates::in_the_backlog;
+use catervas_core::team::Team;
+use catervas_protocol::clock::Clock;
+use catervas_protocol::command::{Command, command_from_value, reply_to_value};
+use catervas_protocol::event::{EventBody, event_to_value};
+use catervas_protocol::rpc::{QueryName, rpc_request_from_value};
+use catervas_store::EventQuery;
+use catervas_store::projections::TaskProjection;
 use chrono::{DateTime, Utc};
-use farik_core::contract::{TaskId, TaskStatus};
-use farik_core::governor::gates::in_the_backlog;
-use farik_core::team::Team;
-use farik_protocol::clock::Clock;
-use farik_protocol::command::{Command, command_from_value, reply_to_value};
-use farik_protocol::event::{EventBody, event_to_value};
-use farik_protocol::rpc::{QueryName, rpc_request_from_value};
-use farik_store::EventQuery;
-use farik_store::projections::TaskProjection;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use tokio::task::JoinSet;
@@ -38,7 +38,7 @@ use crate::credential::CredentialStore;
 use crate::locked;
 use crate::sprints::sprint_hold;
 
-/// What the browser routes need, which only `farik serve` gives the daemon (`DaemonState::set_web`).
+/// What the browser routes need, which only `catervas serve` gives the daemon (`DaemonState::set_web`).
 pub struct WebState {
     /// The code the terminal printed last.
     pub codes: ConnectCodes,
@@ -57,7 +57,7 @@ pub struct WebState {
     pub take_on_error: Mutex<Option<String>>,
     /// Where the AI account's credential is kept, in the order they are tried.
     pub stores: Vec<Arc<dyn CredentialStore>>,
-    /// The environment `farik serve` was given, which a credential may come from.
+    /// The environment `catervas serve` was given, which a credential may come from.
     pub env: BTreeMap<String, String>,
     /// The credential the sessions start with, which connecting the account again replaces;
     /// `None` in setup mode or when the sessions are given one.
@@ -161,7 +161,7 @@ impl BrowserSessions {
     pub fn issue(&self, now: DateTime<Utc>) -> Result<String, DaemonError> {
         let secret = random_token()?;
         let mut memory = locked(&self.memory);
-        // ponytail: two `farik serve` processes (two projects) each read, change, and write the
+        // ponytail: two `catervas serve` processes (two projects) each read, change, and write the
         // one file, so an issue can drop the other's session issued between the two; a lock file
         // beside it fixes that if it ever bites.
         let mut sessions = self.load(&memory)?;
@@ -247,7 +247,7 @@ fn hash(secret: &str) -> String {
 
 /// What `/connect` answers a code that does not open.
 const USED_LINK: &str =
-    "this link has been used or is out of date; start farik serve again for a new one";
+    "this link has been used or is out of date; start catervas serve again for a new one";
 
 /// Whether a browser request comes from the daemon's own page: `Host` is `127.0.0.1:<port>` and
 /// `Origin` is `http://127.0.0.1:<port>`, exactly. `localhost` is refused on purpose, since the
@@ -290,7 +290,7 @@ fn local_preview(_: &WebState, _: &str) -> bool {
 /// The session cookie a new session's `secret` is set by.
 fn session_cookie(secret: &str) -> String {
     format!(
-        "farik_session={secret}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        "catervas_session={secret}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
         SESSION_DAYS * 24 * 60 * 60
     )
 }
@@ -368,7 +368,7 @@ fn session_cookies(headers: &HeaderMap) -> impl Iterator<Item = &str> {
         .iter()
         .filter_map(|value| value.to_str().ok())
         .flat_map(|value| value.split(';'))
-        .filter_map(|pair| pair.trim().strip_prefix("farik_session="))
+        .filter_map(|pair| pair.trim().strip_prefix("catervas_session="))
 }
 
 /// `GET /session`: 204 when the request carries a live session, 401 when it does not. The page
@@ -412,7 +412,7 @@ pub(super) async fn disconnect(
         StatusCode::NO_CONTENT,
         [(
             header::SET_COOKIE,
-            "farik_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
+            "catervas_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
         )],
     )
         .into_response()
@@ -558,7 +558,7 @@ async fn push(
         }
         let close = CloseFrame {
             code: close_code::ERROR,
-            reason: "farik could not read its event log".into(),
+            reason: "catervas could not read its event log".into(),
         };
         let _ = socket.send(Message::Close(Some(close))).await;
         return false;
@@ -748,7 +748,7 @@ fn failure(id: &Value, failed: Failure) -> Value {
 }
 
 /// `command { command }`: handled as `POST /command` handles it, and answered with the same
-/// reply, except `run_stop`, which a page cannot ask for: stopping `farik serve` from its own page
+/// reply, except `run_stop`, which a page cannot ask for: stopping `catervas serve` from its own page
 /// would leave the page with nothing to talk to.
 async fn command(state: &DaemonState, wire: &Value) -> Result<Value, Failure> {
     let reply = match command_from_value(wire) {
@@ -756,7 +756,7 @@ async fn command(state: &DaemonState, wire: &Value) -> Result<Value, Failure> {
         Ok(Command::RunStop) => {
             return Err(Failure::new(
                 REFUSED_HERE,
-                "stopping Farik is done where it runs; pause the team instead",
+                "stopping Catervas is done where it runs; pause the team instead",
             ));
         }
         Ok(command) => super::handled(state, command).await,
@@ -883,12 +883,12 @@ fn screenshot(deps: &crate::tools::ToolDeps, params: &Value) -> Result<Value, Fa
         .log
         .read(&EventQuery {
             task_id: Some(task_id.clone()),
-            kinds: vec![farik_protocol::event::EventKind::PageChecked],
+            kinds: vec![catervas_protocol::event::EventKind::PageChecked],
             ..EventQuery::default()
         })
         .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))?;
     let named = checked.iter().any(|event| {
-        matches!(&event.body, farik_protocol::event::EventBody::PageChecked(body)
+        matches!(&event.body, catervas_protocol::event::EventBody::PageChecked(body)
             if body.screenshot.as_str() == file)
     });
     if !named || file.contains(['/', '\\']) || file.starts_with('.') {
@@ -943,7 +943,7 @@ fn host_of(state: &DaemonState) -> Result<&Arc<dyn SetupHost>, Failure> {
     state.host().ok_or_else(|| {
         Failure::new(
             REFUSED_HERE,
-            "farik answers this only while it is being set up",
+            "catervas answers this only while it is being set up",
         )
     })
 }
@@ -1078,9 +1078,9 @@ mod tests {
     use tokio_util::sync::CancellationToken;
     use tower::ServiceExt;
 
-    use farik_protocol::command::Command;
-    use farik_protocol::event::{EventKind, NewEvent, event_from_value, event_to_value};
-    use farik_store::open_event_log;
+    use catervas_protocol::command::Command;
+    use catervas_protocol::event::{EventKind, NewEvent, event_from_value, event_to_value};
+    use catervas_store::open_event_log;
     use futures_util::{SinkExt as _, StreamExt as _};
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
@@ -1102,7 +1102,7 @@ mod tests {
     use crate::orchestrator::{CommandReport, command_handler};
     use crate::tools::ToolDeps;
     use crate::tools::fixtures::at;
-    use farik_protocol::clock::FixedClock;
+    use catervas_protocol::clock::FixedClock;
 
     /// The port the daemon under test says it is on; nothing binds it, since the requests go
     /// straight to the router.
@@ -1116,7 +1116,7 @@ mod tests {
     }
 
     fn scratch(test: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("farik-web-{}-{test}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("catervas-web-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("the folder is made");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
@@ -1269,7 +1269,7 @@ mod tests {
             .to_string();
         let parts: Vec<&str> = cookie.split(';').map(str::trim).collect();
         let secret = parts[0]
-            .strip_prefix("farik_session=")
+            .strip_prefix("catervas_session=")
             .expect("the cookie is the session");
         for part in ["HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=2592000"] {
             assert!(parts.contains(&part), "{cookie}");
@@ -1294,7 +1294,7 @@ mod tests {
             let body: Value = serde_json::from_str(&body_text(answer).await).expect("JSON");
             assert_eq!(
                 body,
-                json!({ "error": "this link has been used or is out of date; start farik serve again for a new one" })
+                json!({ "error": "this link has been used or is out of date; start catervas serve again for a new one" })
             );
         }
     }
@@ -1316,7 +1316,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn keeps_the_code_when_the_session_cannot_be_written() {
         let folder =
-            std::env::temp_dir().join(format!("farik-web-unwritten-{}", std::process::id()));
+            std::env::temp_dir().join(format!("catervas-web-unwritten-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).expect("made");
         let (daemon, code) =
@@ -1372,7 +1372,7 @@ mod tests {
             page("/", HOST),
             page("/settings", HOST),
             page("/session", HOST),
-            disconnect("farik_session=x"),
+            disconnect("catervas_session=x"),
         ] {
             let path = request.uri().to_string();
             let answer = fetch::<Fixture>(&daemon.state, request).await;
@@ -1456,7 +1456,7 @@ mod tests {
         assert_eq!(answer.status(), StatusCode::OK);
         assert_eq!(
             body_text(answer).await,
-            "The web app was not built into this farik. Run pnpm --filter @farik/web build, then build farik again."
+            "The web app was not built into this catervas. Run pnpm --filter @catervas/web build, then build catervas again."
         );
     }
 
@@ -1533,8 +1533,8 @@ mod tests {
     async fn tells_the_page_whether_it_has_a_session() {
         let (daemon, _) = served("app-session");
         let secret = a_session(&daemon);
-        let live = format!("theme=dark; farik_session={secret}");
-        let unknown = format!("farik_session={}", "0".repeat(64));
+        let live = format!("theme=dark; catervas_session={secret}");
+        let unknown = format!("catervas_session={}", "0".repeat(64));
         let asked = [
             (None, HOST, Some(live.as_str()), StatusCode::NO_CONTENT),
             (
@@ -1570,7 +1570,7 @@ mod tests {
         let (daemon, _) = served("app-disconnect");
         let secret = a_session(&daemon);
         let other = a_session(&daemon);
-        let carried = format!("farik_session=junk; farik_session={secret}");
+        let carried = format!("catervas_session=junk; catervas_session={secret}");
         let now = daemon.state.deps().expect("a project").clock.now();
         let web = daemon.state.web().expect("the browser routes are on");
 
@@ -1590,7 +1590,7 @@ mod tests {
         assert_eq!(answer.status(), StatusCode::NO_CONTENT);
         assert_eq!(
             header_of(&answer, &header::SET_COOKIE),
-            "farik_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"
+            "catervas_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"
         );
         assert!(!web.sessions.verify(&secret, now));
         // Another browser's session is not this one's to end.
@@ -1653,7 +1653,7 @@ mod tests {
         let handle = serve(
             DaemonConfig {
                 port: PortChoice::Any,
-                daemon_file: Some(root.join(".farik/local/daemon.json")),
+                daemon_file: Some(root.join(".catervas/local/daemon.json")),
             },
             Arc::clone(state),
         )
@@ -1715,7 +1715,7 @@ mod tests {
     /// A socket to `/rpc` from the daemon's own page, with the session `secret`.
     async fn open(port: u16, secret: &str) -> Socket {
         let origin = format!("http://127.0.0.1:{port}");
-        let cookie = format!("theme=dark; farik_session={secret}");
+        let cookie = format!("theme=dark; catervas_session={secret}");
         let (socket, _) = connect_async(upgrade(port, Some(&origin), Some(&cookie)))
             .await
             .expect("the socket opens");
@@ -1783,7 +1783,7 @@ mod tests {
     /// Fails unless `value` is what `definition` of the RPC schema says.
     fn conforms(value: &Value, definition: &str) {
         let schema: Value =
-            serde_json::from_str(farik_protocol::rpc::SCHEMA_JSON).expect("the schema is JSON");
+            serde_json::from_str(catervas_protocol::rpc::SCHEMA_JSON).expect("the schema is JSON");
         let root = json!({
             "$schema": schema["$schema"],
             "$ref": format!("#/$defs/{definition}"),
@@ -1800,10 +1800,10 @@ mod tests {
     }
 
     /// Appends a `team.paused` through `log`.
-    fn paused_through(log: &farik_store::event_log::EventLog) -> u64 {
+    fn paused_through(log: &catervas_store::event_log::EventLog) -> u64 {
         let event = event_from_value(&json!({
             "seq": 1, "recorded_at": "2026-09-28T10:00:00Z",
-            "team_id": "farik", "project_id": "farik",
+            "team_id": "catervas", "project_id": "catervas",
             "kind": "team.paused", "body": { "by": "human" }
         }))
         .expect("the fixture is an event");
@@ -1824,7 +1824,7 @@ mod tests {
         let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
         let port = handle.info.port;
         let own = format!("http://127.0.0.1:{port}");
-        let session = format!("farik_session={secret}");
+        let session = format!("catervas_session={secret}");
 
         let expired = daemon
             .state
@@ -1833,8 +1833,8 @@ mod tests {
             .sessions
             .issue(daemon.state.deps().expect("a project").clock.now() - Duration::days(31))
             .expect("a session");
-        let unknown = format!("farik_session={}", "0".repeat(64));
-        let expired = format!("farik_session={expired}");
+        let unknown = format!("catervas_session={}", "0".repeat(64));
+        let expired = format!("catervas_session={expired}");
         for cookie in [None, Some(unknown.as_str()), Some(expired.as_str())] {
             assert_eq!(
                 refused(upgrade(port, Some(&own), cookie)).await,
@@ -1856,8 +1856,8 @@ mod tests {
             );
         }
 
-        // A stale `farik_session` ahead of the live one does not hide it.
-        let shadowed = format!("farik_session=junk; farik_session={secret}");
+        // A stale `catervas_session` ahead of the live one does not hide it.
+        let shadowed = format!("catervas_session=junk; catervas_session={secret}");
         connect_async(upgrade(port, Some(&own), Some(&shadowed)))
             .await
             .expect("the live session behind a stale one opens");
@@ -1909,7 +1909,7 @@ mod tests {
     async fn streams_events_after_the_sequence_asked() {
         let daemon = TestDaemon::new("rpc-streams", |_| {});
         // A log in a file, so that another handle on it is another writer, as another process is.
-        let path = daemon.project.repo.path.join(".farik/local/stream.db");
+        let path = daemon.project.repo.path.join(".catervas/local/stream.db");
         let log = Arc::new(open_event_log(&path, at()).expect("the log opens"));
         let other = open_event_log(&path, at()).expect("the log opens again");
         let deps = &daemon.project.deps;
@@ -1934,7 +1934,7 @@ mod tests {
             let note = next(&mut socket).await;
             assert_eq!(note["method"], "event", "{note}");
             assert_eq!(note["params"]["event"]["seq"], seq, "{note}");
-            farik_protocol::rpc::rpc_notification_from_value(&note)
+            catervas_protocol::rpc::rpc_notification_from_value(&note)
                 .unwrap_or_else(|errors| panic!("{note}: {errors:?}"));
         }
 
@@ -1950,7 +1950,11 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn closes_the_socket_when_the_log_cannot_be_read() {
         let daemon = TestDaemon::new("rpc-unreadable", |_| {});
-        let path = daemon.project.repo.path.join(".farik/local/unreadable.db");
+        let path = daemon
+            .project
+            .repo
+            .path
+            .join(".catervas/local/unreadable.db");
         let log = Arc::new(open_event_log(&path, at()).expect("the log opens"));
         let deps = &daemon.project.deps;
         let state = Arc::new(DaemonState::new(Arc::new(ToolDeps {
@@ -1985,7 +1989,10 @@ mod tests {
         };
         let closed = closed.expect("the close frame has a code");
         assert_eq!(u16::from(closed.code), 1011);
-        assert_eq!(closed.reason.as_str(), "farik could not read its event log");
+        assert_eq!(
+            closed.reason.as_str(),
+            "catervas could not read its event log"
+        );
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
     }
@@ -2151,7 +2158,7 @@ mod tests {
             .deps
             .files
             .root()
-            .join(".farik/contracts/FRK-2.yaml");
+            .join(".catervas/contracts/FRK-2.yaml");
         std::fs::write(&contract, "not: [a contract\n").expect("written");
         let (handle, mut socket) = driven(&harness).await;
         let listed = query(&mut socket, 1, "tasks.list", &json!({}), "tasksListResult").await;
@@ -2305,7 +2312,7 @@ mod tests {
             .project
             .repo
             .path
-            .join(".farik/local/screenshots/FRK-2");
+            .join(".catervas/local/screenshots/FRK-2");
         std::fs::create_dir_all(&folder).expect("made");
         std::fs::write(folder.join("s-1-phone-dark.png"), png).expect("written");
         let shot = query(
@@ -2331,7 +2338,7 @@ mod tests {
         .await;
         assert_eq!(
             defaults["ui_paths"],
-            json!(farik_core::governor::team_rules::DEFAULT_UI_PATHS)
+            json!(catervas_core::governor::team_rules::DEFAULT_UI_PATHS)
         );
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
@@ -2344,11 +2351,11 @@ mod tests {
         checked(&harness, "FRK-1", "phone", "light", "s-1-phone-light.png");
         let root = &harness.project.repo.path;
         for task in ["FRK-1", "FRK-2"] {
-            let folder = root.join(".farik/local/screenshots").join(task);
+            let folder = root.join(".catervas/local/screenshots").join(task);
             std::fs::create_dir_all(&folder).expect("made");
             std::fs::write(folder.join("s-1-phone-light.png"), b"png").expect("written");
         }
-        std::fs::write(root.join(".farik/local/screenshots/x.png"), b"png").expect("written");
+        std::fs::write(root.join(".catervas/local/screenshots/x.png"), b"png").expect("written");
         let (handle, mut socket) = driven(&harness).await;
 
         for (id, file) in [(1, "../x.png"), (2, "s-1-phone-light.png")] {
@@ -2748,7 +2755,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn refuses_to_stop_farik_from_the_browser() {
+    async fn refuses_to_stop_catervas_from_the_browser() {
         let daemon = TestDaemon::new("rpc-stop", |_| {});
         let handled: Arc<std::sync::Mutex<Vec<Command>>> = Arc::default();
         let seen = Arc::clone(&handled);
@@ -2772,7 +2779,7 @@ mod tests {
                 "jsonrpc": "2.0", "id": 1,
                 "error": {
                     "code": -32003,
-                    "message": "stopping Farik is done where it runs; pause the team instead"
+                    "message": "stopping Catervas is done where it runs; pause the team instead"
                 }
             })
         );
@@ -2805,7 +2812,7 @@ mod tests {
                 .push(json!({ "open": path, "no_sandbox": no_sandbox }));
             if path == "busy" {
                 return Err(SetupError::Refused(
-                    "another farik is already running this project".to_string(),
+                    "another catervas is already running this project".to_string(),
                 ));
             }
             Ok(self.home.join(path))
@@ -2968,7 +2975,7 @@ mod tests {
         .await;
         assert_eq!(
             busy["error"],
-            json!({ "code": -32005, "message": "another farik is already running this project" })
+            json!({ "code": -32005, "message": "another catervas is already running this project" })
         );
         conforms(&busy, "rpcFailure");
         assert_eq!(
@@ -3077,7 +3084,7 @@ mod tests {
             &format!("echo \"$@\" > '{}/args'", recorded.display()),
         );
         let (state, _) = in_setup(&bin, &format!("{}:/usr/bin:/bin", bin.display()));
-        let image = farik_roles::builtin_connector("playwright")
+        let image = catervas_roles::builtin_connector("playwright")
             .expect("shipped")
             .image;
 
@@ -3120,7 +3127,7 @@ mod tests {
             assert_eq!(answer.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
             assert_eq!(
                 body_text(answer).await,
-                "farik has no project yet",
+                "catervas has no project yet",
                 "{path}"
             );
         }

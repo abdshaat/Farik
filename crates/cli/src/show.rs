@@ -1,9 +1,9 @@
-//! `farik task show`: one contract, and what happened to it (F3).
+//! `catervas task show`: one contract, and what happened to it (F3).
 
-use farik_core::contract::{TaskContract, TaskId, TaskKind};
-use farik_protocol::event::{FarikEvent, event_to_value};
-use farik_store::requests::board_row_json;
-use farik_store::{CostProjection, CostScope, EventQuery, Git, TaskProjection};
+use catervas_core::contract::{TaskContract, TaskId, TaskKind};
+use catervas_protocol::event::{CatervasEvent, event_to_value};
+use catervas_store::requests::board_row_json;
+use catervas_store::{CostProjection, CostScope, EventQuery, Git, TaskProjection};
 use serde_json::{Value, json};
 
 use crate::Report;
@@ -52,13 +52,13 @@ pub fn show(project: &Project, task_id: &str, with_diff: bool) -> Result<Report,
     ];
     if row.is_none() {
         lines.push(
-            "the log has never heard of this task, so the status above is the file's own: farik \
+            "the log has never heard of this task, so the status above is the file's own: catervas \
              doctor says where the files and the log disagree"
                 .to_string(),
         );
     } else if status != contract.status.to_string() {
         lines.push(format!(
-            "the file says {} and the log says {status}: farik doctor reports that",
+            "the file says {} and the log says {status}: catervas doctor reports that",
             contract.status
         ));
     }
@@ -115,7 +115,7 @@ pub fn show(project: &Project, task_id: &str, with_diff: bool) -> Result<Report,
             "locked": contract.locked,
             "events": events
                 .iter()
-                .map(farik_protocol::event::event_to_value)
+                .map(catervas_protocol::event::event_to_value)
                 .collect::<Vec<_>>(),
         }),
         json_lines: None,
@@ -143,14 +143,14 @@ pub(crate) fn body_lines(contract: &TaskContract) -> Vec<String> {
             "  {} {} [{}]",
             criterion.id.as_str(),
             criterion.text.as_str(),
-            farik_core::contract::Verification::from(&criterion.verification).method()
+            catervas_core::contract::Verification::from(&criterion.verification).method()
         ));
     }
     lines
 }
 
 /// One event as a line: its number, its time, its kind, and what it said.
-pub(crate) fn event_line(event: &FarikEvent) -> String {
+pub(crate) fn event_line(event: &CatervasEvent) -> String {
     let mut line = format!(
         "  {:>4} {} {}",
         event.envelope.seq,
@@ -196,7 +196,7 @@ fn cost_json(cost: &CostProjection) -> Value {
 const SUMMARY_LIMIT: usize = 200;
 
 /// What an event said, in a few words, for the kinds a person reads a task's story by.
-fn summary(event: &FarikEvent) -> Option<String> {
+fn summary(event: &CatervasEvent) -> Option<String> {
     let value = event_to_value(event);
     let body = &value["body"];
     let text = |field: &str| body[field].as_str().unwrap_or_default().to_string();
@@ -301,21 +301,21 @@ fn cut(text: &str, limit: usize) -> String {
     }
 }
 
-/// The task's branch's diff against the integration branch (5.14), as `farik_store::diff` gives
+/// The task's branch's diff against the integration branch (5.14), as `catervas_store::diff` gives
 /// it; an epic, which has no branch, is refused.
 fn diff_of(
     project: &Project,
     task_id: &TaskId,
     contract: &TaskContract,
-    events: &[FarikEvent],
+    events: &[CatervasEvent],
 ) -> Result<String, String> {
     if contract.kind == TaskKind::Epic {
         return Err(format!(
-            "{} is an epic and has no branch: farik task show <task> --diff shows each of its \
+            "{} is an epic and has no branch: catervas task show <task> --diff shows each of its \
              tasks'",
             task_id.as_str()
         ));
     }
     let git = Git::open(project.root.clone());
-    farik_store::diff::diff_of(&git, &project.team, contract, events, &[]).map(|diff| diff.diff)
+    catervas_store::diff::diff_of(&git, &project.team, contract, events, &[]).map(|diff| diff.diff)
 }

@@ -1,30 +1,30 @@
 .page {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
-	gap: var(--farik-space-6);
+	gap: var(--catervas-space-6);
 	max-width: 760px;
 }
 
 .title {
 	margin: 0;
 	font:
-		var(--farik-type-title-weight) var(--farik-type-title-size) /
-		var(--farik-type-title-line-height) var(--farik-type-title-family);
+		var(--catervas-type-title-weight) var(--catervas-type-title-size) /
+		var(--catervas-type-title-line-height) var(--catervas-type-title-family);
 }
 
 .muted {
 	margin: 0;
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 /* The team band is dark in both themes, like the rail. */
 .band {
 	display: grid;
-	gap: var(--farik-space-3);
-	padding: var(--farik-space-4);
-	background: var(--farik-color-band);
-	color: var(--farik-color-band-ink);
-	border-radius: var(--farik-radius-raised);
+	gap: var(--catervas-space-3);
+	padding: var(--catervas-space-4);
+	background: var(--catervas-color-band);
+	color: var(--catervas-color-band-ink);
+	border-radius: var(--catervas-radius-raised);
 }
 
 .band p {
@@ -40,7 +40,7 @@
 .agents {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr));
-	gap: var(--farik-space-4);
+	gap: var(--catervas-space-4);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -48,7 +48,7 @@
 
 .agent {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	align-content: start;
 }
 
@@ -56,19 +56,19 @@
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }
 
 .line {
 	overflow-wrap: anywhere;
 	font:
-		var(--farik-type-small-weight) var(--farik-type-small-size) /
-		var(--farik-type-small-line-height) var(--farik-type-small-family);
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
 }
 
 .request {
 	display: grid;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 }
 
 .label {
@@ -78,12 +78,12 @@
 .prompt {
 	display: flex;
 	align-items: flex-start;
-	gap: var(--farik-space-2);
-	padding: var(--farik-space-3);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
-	font-family: var(--farik-type-code-family);
+	gap: var(--catervas-space-2);
+	padding: var(--catervas-space-3);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	font-family: var(--catervas-type-code-family);
 }
 
 .prompt textarea {
@@ -93,12 +93,12 @@
 	padding: 0;
 	border: 0;
 	background: transparent;
-	color: var(--farik-color-ink);
+	color: var(--catervas-color-ink);
 	font: inherit;
 }
 
 .prompt textarea:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -106,7 +106,7 @@
 	flex: none;
 	width: 10px;
 	height: 20px;
-	background: var(--farik-color-status-done);
+	background: var(--catervas-color-status-done);
 	animation: blink 1.1s steps(1) infinite;
 }
 
@@ -124,26 +124,26 @@
 
 .alert {
 	margin: 0;
-	padding: var(--farik-space-2) var(--farik-space-3);
-	border-left: 3px solid var(--farik-color-status-waiting);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
 }
 
 .section {
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .section h2 {
 	margin: 0;
 	font:
-		var(--farik-type-heading-weight) var(--farik-type-heading-size) /
-		var(--farik-type-heading-line-height) var(--farik-type-heading-family);
+		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
+		var(--catervas-type-heading-line-height) var(--catervas-type-heading-family);
 }
 
 .rows,
 .moved {
 	display: grid;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -155,11 +155,11 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-3);
-	padding: var(--farik-space-3);
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-rule);
-	border-radius: var(--farik-radius-control);
+	gap: var(--catervas-space-3);
+	padding: var(--catervas-space-3);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
 }
 
 .row > img {
@@ -171,7 +171,7 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 	flex: 1 1 16rem;
 	min-width: 0;
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	overflow-wrap: anywhere;
 }
 
@@ -182,14 +182,14 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 	justify-content: center;
 	min-height: 44px;
 	margin-inline-start: auto;
-	padding: var(--farik-space-2) var(--farik-space-4);
+	padding: var(--catervas-space-2) var(--catervas-space-4);
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
-	background: var(--farik-color-surface);
-	color: var(--farik-color-ink);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-surface);
+	color: var(--catervas-color-ink);
 	text-decoration: none;
 	white-space: nowrap;
 }
@@ -207,7 +207,7 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 	border: 0;
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	margin-inline-start: auto;
 }
 
@@ -225,12 +225,12 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 .moved li {
 	display: grid;
 	grid-template-columns: 4rem minmax(0, 1fr);
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .moved time {
-	color: var(--farik-color-ink-muted);
-	font-family: var(--farik-type-code-family);
+	color: var(--catervas-color-ink-muted);
+	font-family: var(--catervas-type-code-family);
 }
 
 /* A plan's summary on its row: two lines, the rest on the plan's page. */
@@ -245,46 +245,46 @@ it drops below them and runs the row's width. Rows without an avatar line up the
 .figures {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--farik-space-1) var(--farik-space-3);
-	color: var(--farik-color-ink-muted);
+	gap: var(--catervas-space-1) var(--catervas-space-3);
+	color: var(--catervas-color-ink-muted);
 }
 
 .amount {
-	color: var(--farik-color-ink);
-	font-family: var(--farik-type-code-family);
+	color: var(--catervas-color-ink);
+	font-family: var(--catervas-type-code-family);
 	font-variant-numeric: tabular-nums;
 }
 
 /* A site an agent asks to read: the site's name and the page are code, never links. */
 .host {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 	font-weight: inherit;
 }
 
 .address {
-	font-family: var(--farik-type-code-family);
+	font-family: var(--catervas-type-code-family);
 	overflow-wrap: anywhere;
 }
 
-/* The agent's reason, in its own words, framed so it is never taken for Farik's. */
+/* The agent's reason, in its own words, framed so it is never taken for Catervas's. */
 .frame {
 	min-width: 0;
 	margin: 0;
-	padding: var(--farik-space-2) var(--farik-space-3);
-	font-family: var(--farik-type-code-family);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	font-family: var(--catervas-type-code-family);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	background: var(--farik-color-surface);
-	border: 1px solid var(--farik-color-control-border);
-	border-left: 3px solid var(--farik-color-ink);
-	border-radius: var(--farik-radius-control);
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-left: 3px solid var(--catervas-color-ink);
+	border-radius: var(--catervas-radius-control);
 }
 
 /* A name written in another alphabet: the warning stands out from the plain words around it. */
 .script {
 	margin: 0;
-	padding: var(--farik-space-2) var(--farik-space-3);
-	border-left: 3px solid var(--farik-color-status-waiting);
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
 }
 
 /* A purchase order on its row: the lines as a table, which stacks each line under its item on a
@@ -297,15 +297,15 @@ phone, then the total, the order's facts and the file. */
 
 .lines th,
 .lines td {
-	padding: var(--farik-space-1) var(--farik-space-2);
+	padding: var(--catervas-space-1) var(--catervas-space-2);
 	text-align: start;
 	vertical-align: top;
-	border-bottom: 1px solid var(--farik-color-rule);
+	border-bottom: 1px solid var(--catervas-color-rule);
 }
 
 .lines th {
-	color: var(--farik-color-ink-muted);
-	font-weight: var(--farik-type-body-weight);
+	color: var(--catervas-color-ink-muted);
+	font-weight: var(--catervas-type-body-weight);
 }
 
 .lines td:nth-child(n + 2),
@@ -331,16 +331,16 @@ phone, then the total, the order's facts and the file. */
 	}
 
 	.lines tr {
-		padding: var(--farik-space-2) 0;
-		border-bottom: 1px solid var(--farik-color-rule);
+		padding: var(--catervas-space-2) 0;
+		border-bottom: 1px solid var(--catervas-color-rule);
 	}
 
 	.lines td,
 	.lines td:nth-child(n + 2) {
 		display: flex;
 		justify-content: space-between;
-		gap: var(--farik-space-3);
-		padding: var(--farik-space-1) 0;
+		gap: var(--catervas-space-3);
+		padding: var(--catervas-space-1) 0;
 		border: 0;
 		text-align: end;
 		white-space: normal;
@@ -348,7 +348,7 @@ phone, then the total, the order's facts and the file. */
 
 	.lines td::before {
 		content: attr(data-label);
-		color: var(--farik-color-ink-muted);
+		color: var(--catervas-color-ink-muted);
 		text-align: start;
 	}
 }
@@ -359,18 +359,18 @@ phone, then the total, the order's facts and the file. */
 
 .about {
 	display: grid;
-	gap: var(--farik-space-1);
+	gap: var(--catervas-space-1);
 	margin: 0;
 }
 
 .about > div {
 	display: grid;
 	grid-template-columns: 6rem minmax(0, 1fr);
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 }
 
 .about dt {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 }
 
 .about dd {
@@ -390,7 +390,7 @@ phone, then the total, the order's facts and the file. */
 }
 
 .comparisonText:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -398,7 +398,7 @@ phone, then the total, the order's facts and the file. */
 	display: inline-flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--farik-space-2) var(--farik-space-3);
+	gap: var(--catervas-space-2) var(--catervas-space-3);
 }
 
 .downloadLink {
@@ -407,14 +407,14 @@ phone, then the total, the order's facts and the file. */
 	border: 0;
 	background: none;
 	font: inherit;
-	color: var(--farik-color-link);
+	color: var(--catervas-color-link);
 	text-decoration: underline;
 	text-underline-offset: 3px;
 	cursor: pointer;
 }
 
 .downloadLink:focus-visible {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -427,10 +427,10 @@ phone, then the total, the order's facts and the file. */
 	justify-content: center;
 	width: 32px;
 	height: 32px;
-	color: var(--farik-color-ink);
+	color: var(--catervas-color-ink);
 }
 
-/* Why a data source comes to the owner: Farik's sentences, then the Product Manager's reason. */
+/* Why a data source comes to the owner: Catervas's sentences, then the Product Manager's reason. */
 .pipelineWhy {
 	min-width: 0;
 	margin: 0;

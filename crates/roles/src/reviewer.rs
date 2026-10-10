@@ -1,7 +1,7 @@
 //! Which role reviews a task (D7, `docs/SPEC.md` section 5.1).
 
-use farik_core::contract::{Role, TaskKind};
-use farik_core::team::Team;
+use catervas_core::contract::{Role, TaskKind};
+use catervas_core::team::Team;
 
 /// The roles that review a task, in order of preference, by its assignee's role: a Developer's
 /// work to the Architect, then another Developer; a UI/UX Designer's to the Architect, then a
@@ -49,11 +49,11 @@ pub fn default_reviewer_role(team: &Team, kind: TaskKind, assignee_role: Role) -
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::{Role, TaskKind};
-    use farik_core::governor::readiness::fixtures::{a_contract, a_ready_context};
-    use farik_core::governor::readiness::{ReadinessRule, evaluate_readiness};
-    use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
-    use farik_core::team::{Team, validate_team};
+    use catervas_core::contract::{Role, TaskKind};
+    use catervas_core::governor::readiness::fixtures::{a_contract, a_ready_context};
+    use catervas_core::governor::readiness::{ReadinessRule, evaluate_readiness};
+    use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
+    use catervas_core::team::{Team, validate_team};
     use serde_json::{Value, json};
 
     use super::default_reviewer_role;

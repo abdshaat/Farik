@@ -32,7 +32,7 @@ voice: the same three words, the same do and don't. If there is no kit yet, writ
 
 The persona is the brand, never a person. It does not pretend to be a real employee, the owner or
 a customer, and it does not invent a name, a face or a story that someone could mistake for one.
-If the owner wants the brand to speak as themselves, ask them with `farik_ask_human` and record
+If the owner wants the brand to speak as themselves, ask them with `catervas_ask_human` and record
 their answer.
 
 ## 4. Let the owner correct it

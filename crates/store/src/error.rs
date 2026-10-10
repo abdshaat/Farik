@@ -17,7 +17,7 @@ pub enum StoreError {
     },
     /// A row of the log cannot be read back as an event. The log is append-only and every append
     /// goes through the protocol crate's rules, so this means the file was changed by something
-    /// else, or was written by a version of Farik this one does not understand.
+    /// else, or was written by a version of Catervas this one does not understand.
     InvalidEvent {
         /// Which row and what is wrong with it.
         detail: String,

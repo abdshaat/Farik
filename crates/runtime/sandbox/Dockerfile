@@ -1,6 +1,6 @@
-# The image a task's container runs (`docs/SPEC.md` 8.3), tagged `farik/sandbox:<crate version>`.
-# It ships with Farik and is built by hand for now, with
-# `docker build -t farik/sandbox:<crate version> crates/runtime/sandbox`: neither `farik run` nor CI
+# The image a task's container runs (`docs/SPEC.md` 8.3), tagged `catervas/sandbox:<crate version>`.
+# It ships with Catervas and is built by hand for now, with
+# `docker build -t catervas/sandbox:<crate version> crates/runtime/sandbox`: neither `catervas run` nor CI
 # builds it or checks that it is there (phase 3 step 15).
 #
 # The container runs as the user's own uid, which has no passwd entry here, so HOME is /tmp and

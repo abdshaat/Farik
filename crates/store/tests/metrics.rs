@@ -4,15 +4,15 @@
 
 use std::sync::Arc;
 
+use catervas_core::contract::fixtures::a_contract_wire;
+use catervas_core::contract::validate_contract;
+use catervas_protocol::event::fixtures::{a_contract_summary_wire, an_event_wire};
+use catervas_protocol::event::{CostRecordedBodyPurpose, EventKind, NewEvent, event_from_value};
+use catervas_store::files::FilesError;
+use catervas_store::files::fixtures::TempProject;
+use catervas_store::metrics::{HarnessMetrics, MessageCounts, MetricsError};
+use catervas_store::{EventLog, Projections, open_event_log, open_projections};
 use chrono::{TimeZone, Utc};
-use farik_core::contract::fixtures::a_contract_wire;
-use farik_core::contract::validate_contract;
-use farik_protocol::event::fixtures::{a_contract_summary_wire, an_event_wire};
-use farik_protocol::event::{CostRecordedBodyPurpose, EventKind, NewEvent, event_from_value};
-use farik_store::files::FilesError;
-use farik_store::files::fixtures::TempProject;
-use farik_store::metrics::{HarnessMetrics, MessageCounts, MetricsError};
-use farik_store::{EventLog, Projections, open_event_log, open_projections};
 use serde_json::{Value, json};
 
 /// A project with a log on disk and the projections of it, both empty.
@@ -30,7 +30,8 @@ impl Recorded {
             .single()
             .expect("a real hour");
         let log = Arc::new(
-            open_event_log(&project.root.join(".farik/local/farik.db"), at).expect("the log opens"),
+            open_event_log(&project.root.join(".catervas/local/catervas.db"), at)
+                .expect("the log opens"),
         );
         let projections = open_projections(Arc::clone(&log)).expect("the projections open");
         Self {
@@ -133,7 +134,7 @@ impl Recorded {
         }
         let session = self
             .log
-            .read(&farik_store::EventQuery::default())
+            .read(&catervas_store::EventQuery::default())
             .expect("the log reads")
             .len();
         wire["agent_id"] = json!("dev-a");
@@ -557,7 +558,7 @@ fn counts_messages_by_kind() {
     recorded.posted("dev-a", "reaction");
     recorded.posted("dev-b", "reaction");
     recorded.posted("dev-a", "ambient");
-    recorded.posted("farik", "system");
+    recorded.posted("catervas", "system");
     recorded.sprint_ended("S1", &[]);
     recorded.posted("dev-a", "reply");
     recorded.sprint_started("S2", None);
@@ -603,7 +604,7 @@ fn counts_messages_by_kind() {
 #[test]
 fn refuses_metrics_over_an_accepted_contract_it_cannot_read() {
     let recorded = recorded_project("unreadable");
-    std::fs::remove_file(recorded.project.root.join(".farik/contracts/FRK-2.yaml"))
+    std::fs::remove_file(recorded.project.root.join(".catervas/contracts/FRK-2.yaml"))
         .expect("the contract file is removed");
     let refusal = recorded.metrics().expect_err("FRK-2's contract is gone");
     assert!(

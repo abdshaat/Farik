@@ -57,7 +57,7 @@ pub fn check_allowed_paths(
 /// Refuses every path that matches a protected glob (spec 5.6 and 5.12), whatever the tool's
 /// tier. Paths are normalised as in `check_allowed_paths`, protected globs match without regard
 /// to letter case (a case-insensitive file system would open `.ENV` as `.env`), and a directory
-/// that a glob such as `.farik/local/**` names is protected like its children. A bare name such
+/// that a glob such as `.catervas/local/**` names is protected like its children. A bare name such
 /// as `.env` names the file at the project root only; `**/.env` names it anywhere. An absolute
 /// path, an empty path, or a path with a `..` segment is always refused, so that no path reaches
 /// a protected file by climbing.
@@ -81,7 +81,7 @@ pub fn check_protected_paths(
 /// absolute (a leading separator or a drive letter), or has a `..` segment.
 ///
 /// Public because the same question is asked twice: here, of a path a change touched, and in
-/// `farik-store`'s file adapter, of a path a tool call wants to write under `.farik/product/`. Two
+/// `catervas-store`'s file adapter, of a path a tool call wants to write under `.catervas/product/`. Two
 /// answers to "does this path climb out" would be two definitions of a safe path.
 #[must_use]
 pub fn normalise(path: &str) -> Option<String> {
@@ -97,17 +97,17 @@ pub fn normalise(path: &str) -> Option<String> {
     Some(segments.join("/"))
 }
 
-/// The directory whose files change only through Farik's tools (`docs/SPEC.md` sections 5.3, 5.4,
+/// The directory whose files change only through Catervas's tools (`docs/SPEC.md` sections 5.3, 5.4,
 /// 5.8): contracts, decisions, notebooks, the retro, the team file.
-pub const FARIK_DIRECTORY: &str = ".farik";
+pub const CATERVAS_DIRECTORY: &str = ".catervas";
 
-/// Whether a path, or a glob of paths, names or could match something under `.farik/`: its first
+/// Whether a path, or a glob of paths, names or could match something under `.catervas/`: its first
 /// segment, after `.` segments are dropped and each `{a,b}` is expanded, is `**` or matches
-/// `.farik` regardless of letter case, and the glob goes on below it or is that one name. `*` or
+/// `.catervas` regardless of letter case, and the glob goes on below it or is that one name. `*` or
 /// `*.md` alone match only files at the root. A first segment that does not compile is taken to
 /// reach, so that the check fails closed.
 #[must_use]
-pub fn reaches_the_farik_directory(glob: &str) -> bool {
+pub fn reaches_the_catervas_directory(glob: &str) -> bool {
     expand_braces(&glob.replace('\\', "/")).iter().any(|glob| {
         let mut segments = glob
             .split('/')
@@ -122,7 +122,7 @@ pub fn reaches_the_farik_directory(glob: &str) -> bool {
             .case_insensitive(true)
             .build()
             .map_or(true, |compiled| {
-                compiled.compile_matcher().is_match(FARIK_DIRECTORY)
+                compiled.compile_matcher().is_match(CATERVAS_DIRECTORY)
             });
         let is_wildcard = first.contains(['*', '?', '[']);
         names_it && (segments.next().is_some() || !is_wildcard)
@@ -138,7 +138,7 @@ const MARKETING_DIRECTORY: [&str; 2] = ["docs", "marketing"];
 /// of letter case and either ends the glob as a literal, or its second segment holds `**`, or
 /// matches `marketing` and the glob goes on or is a literal there. A segment that does not compile
 /// cannot be read, so the glob is taken to reach: the check fails closed as
-/// `reaches_the_farik_directory` does.
+/// `reaches_the_catervas_directory` does.
 #[must_use]
 pub fn reaches_the_marketing_directory(glob: &str) -> bool {
     expand_braces(&glob.replace('\\', "/")).iter().any(|glob| {
@@ -339,7 +339,13 @@ mod tests {
 
     #[test]
     fn refuses_a_path_that_matches_a_protected_glob() {
-        let protected = strings(&[".env", ".env.*", "**/*.pem", "**/*.key", ".farik/local/**"]);
+        let protected = strings(&[
+            ".env",
+            ".env.*",
+            "**/*.pem",
+            "**/*.key",
+            ".catervas/local/**",
+        ]);
         assert_eq!(
             check_protected_paths(
                 &strings(&[
@@ -347,7 +353,7 @@ mod tests {
                     ".env",
                     ".env.local",
                     "certs/server.pem",
-                    ".farik/local/settings.json"
+                    ".catervas/local/settings.json"
                 ]),
                 &protected
             ),
@@ -355,7 +361,7 @@ mod tests {
                 ".env",
                 ".env.local",
                 "certs/server.pem",
-                ".farik/local/settings.json"
+                ".catervas/local/settings.json"
             ]))
         );
     }
@@ -453,10 +459,10 @@ mod tests {
     fn protects_a_directory_named_by_a_glob_over_its_children() {
         assert_eq!(
             check_protected_paths(
-                &strings(&[".farik/local", ".farik/local/", ".farik"]),
-                &strings(&[".farik/local/**"])
+                &strings(&[".catervas/local", ".catervas/local/", ".catervas"]),
+                &strings(&[".catervas/local/**"])
             ),
-            Err(violations(&[".farik/local", ".farik/local/"]))
+            Err(violations(&[".catervas/local", ".catervas/local/"]))
         );
     }
 }

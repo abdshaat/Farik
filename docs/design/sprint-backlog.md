@@ -7,14 +7,14 @@ ADR 0028 records the decision. It is the design input to phase 6 step 15, and th
 
 ## Why
 
-`farik serve` runs every rule all the time. With no sprint open, a task that becomes ready is assigned at once, so a sprint can never gather two requests (the milestone runbook's readiness review, finding B1; the runbook is now step 16). The founder decided that a team may plan work in sprints:
+`catervas serve` runs every rule all the time. With no sprint open, a task that becomes ready is assigned at once, so a sprint can never gather two requests (the milestone runbook's readiness review, finding B1; the runbook is now step 16). The founder decided that a team may plan work in sprints:
 - the team keeps preparing work at any time;
 - nothing new is assigned or built outside an open sprint, and work already under way when the policy is switched on finishes;
 - ready work waits in a Backlog ("Should be in a backlog");
 - work that becomes ready during a sprint waits for the next one;
 - starting a sprint plans what is waiting.
 
-The policy is on for new teams, `farik init`'s starter team among them, and off for existing projects, and Settings switches it.
+The policy is on for new teams, `catervas init`'s starter team among them, and off for existing projects, and Settings switches it.
 
 ## The policy on the wire
 
@@ -31,11 +31,11 @@ The defaults:
 - **An old team file** has no key, so the policy is off and the project behaves exactly as before.
 - **A team that setup makes** (`team.propose`, then `team.start`) has `plan_in_sprints: true`, written out so the user sees it in the file. `team.propose` answers `true` whatever the file says, since setup only ever makes a new team.
 - **`settings.defaults`**, which Settings' "Put back the default" reads, answers `true`.
-- **`farik init`'s starter team** has `plan_in_sprints: true` (the founder, 2026-10-01; open question 1). It takes its policy from `farik_core::team::defaults()`, which `settings.defaults` answers too, so one value serves both. "Put back the default" on an old project's Planning section therefore turns the policy on. `farik run` on a new project ends idle until `farik sprint start`. Tests and journeys that drive work without a sprint say `plan_in_sprints: false` in their team.
+- **`catervas init`'s starter team** has `plan_in_sprints: true` (the founder, 2026-10-01; open question 1). It takes its policy from `catervas_core::team::defaults()`, which `settings.defaults` answers too, so one value serves both. "Put back the default" on an old project's Planning section therefore turns the policy on. `catervas run` on a new project ends idle until `catervas sprint start`. Tests and journeys that drive work without a sprint say `plan_in_sprints: false` in their team.
 
 ## What is gated, and what is not
 
-With the policy on, Farik holds two kinds of **task** (`kind: task`) outside the open sprint, or any such task while no sprint is open:
+With the policy on, Catervas holds two kinds of **task** (`kind: task`) outside the open sprint, or any such task while no sprint is open:
 - **a `ready` task**: it is not assigned (rule 8, and the assignment gate refuses an agent's or the human's ask). This is the one hold on new work, and it is enough: every task is built only after `ready` to `assigned`.
 - **a task an ended sprint left for the Backlog**: it is not started (rule 7, `assigned` to `in_progress`), worked on (rule 6, an implement session) or reworked after a rejection (rule 3) until a sprint plans it.
 
@@ -80,7 +80,7 @@ A row is **in the Backlog** when:
 - its status is `ready`, `assigned`, `in_progress` or `rejected`; and
 - it is an epic, or a task that `waits_for_a_sprint`.
 
-That covers a ready task, an epic being broken down or broken down, its ready tasks, and work left by a sprint ended early. Work under way at the switch keeps its lane (To do, In progress, Review), because it is being built. A `blocked`, `escalated` or `verifying` row keeps its lane. The predicate is `in_the_backlog` in `farik-core`, and the daemon answers it per row, so the Board does not work it out again.
+That covers a ready task, an epic being broken down or broken down, its ready tasks, and work left by a sprint ended early. Work under way at the switch keeps its lane (To do, In progress, Review), because it is being built. A `blocked`, `escalated` or `verifying` row keeps its lane. The predicate is `in_the_backlog` in `catervas-core`, and the daemon answers it per row, so the Board does not work it out again.
 
 **Waiting in the Backlog is not blocked.** A Backlog row stays in its status, so:
 - the blocked-age rule (`blocked_limit_hours`, `blocker_age`) never counts the wait;
@@ -89,14 +89,14 @@ That covers a ready task, an epic being broken down or broken down, its ready ta
 
 Nothing escalates because a sprint was not started.
 
-A marked task under an epic that left the Backlog (the epic `escalated`, say) cannot be planned alone, because `farik_plan_sprint` refuses a task with a parent. It waits until its epic is back in the Backlog.
+A marked task under an epic that left the Backlog (the epic `escalated`, say) cannot be planned alone, because `catervas_plan_sprint` refuses a task with a parent. It waits until its epic is back in the Backlog.
 
 ## The planning ceremony
 
 Starting a sprint plans the Backlog, through the planning ceremony that exists (spec 5.9):
 - **With the policy on, the candidates are the Backlog's rows with no parent**: ready tasks, and epics that are ready, being broken down, or broken down. An epic brings every task under it, as today.
 - **Off,** the candidates stay "`ready`, no parent, in no sprint".
-- **`farik_plan_sprint` accepts what the candidates are.** Under the policy that means a Backlog row with no parent, so a task under way since the switch, which is not in the Backlog, is not planned. Off, it accepts only `ready` tasks and approved epics, as today.
+- **`catervas_plan_sprint` accepts what the candidates are.** Under the policy that means a Backlog row with no parent, so a task under way since the switch, which is not in the Backlog, is not planned. Off, it accepts only `ready` tasks and approved epics, as today.
 - **The planning message** names its list "the candidates, each waiting in the Backlog", and gives an epic's task count beside its contract.
 - **The rest is unchanged:** planning runs once per sprint, and a planning that plans nothing is not asked again.
 
@@ -158,13 +158,13 @@ A template holds `policy.plan_in_sprints`, optional in `team-template.schema.jso
 
 **`tasks.list` rows gain `backlog: boolean`**, false whenever the policy is off.
 
-**An idle tick** whose Backlog holds work while no sprint is open says "the ready work waits for a sprint". So `farik run` ends with that line, and after its closing list of what waits on the user it prints "start a sprint: <n> waits in the Backlog (`farik sprint start`)" (with `--json`, `{"backlog": {"count": n}}`). The line is not a kind of waiting, so Today's "Waiting on you" does not show it.
+**An idle tick** whose Backlog holds work while no sprint is open says "the ready work waits for a sprint". So `catervas run` ends with that line, and after its closing list of what waits on the user it prints "start a sprint: <n> waits in the Backlog (`catervas sprint start`)" (with `--json`, `{"backlog": {"count": n}}`). The line is not a kind of waiting, so Today's "Waiting on you" does not show it.
 
-`farik board` is not changed in this step.
+`catervas board` is not changed in this step.
 
 ## Open questions for the founder, answered on 2026-10-01
 
-1. `farik init`'s starter team: **on**, as setup's teams. The command line ends idle until `farik sprint start`.
+1. `catervas init`'s starter team: **on**, as setup's teams. The command line ends idle until `catervas sprint start`.
 2. A Backlog waiting with no sprint open as a row in Today's "Waiting on you": not asked separately; the approved TodayBacklog mockup has the line in the team band only, so that is what is built.
 3. Turning the policy on while tasks are under way outside a sprint: **the started work finishes; only new work waits for a sprint**, over the design's "stop after the current session". The rule is in "What is gated, and what is not".
 4. A sprint ended early under the policy: **its unfinished tasks wait in the Backlog** for the next sprint, as the design proposed.

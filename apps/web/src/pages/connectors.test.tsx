@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	cleanup,
@@ -378,7 +378,7 @@ describe("connectors on the agent page", () => {
 			});
 			expect(
 				within(dialog).getByText(
-					`Theo stops using ${server} from the next piece of work. Farik deletes the keys you gave it for Theo ${from}`,
+					`Theo stops using ${server} from the next piece of work. Catervas deletes the keys you gave it for Theo ${from}`,
 				),
 			).toBeTruthy();
 			await expectNoAxeViolations(container);
@@ -426,7 +426,7 @@ describe("connectors on the agent page", () => {
 		const notion = row("notion");
 		expect(
 			within(notion).getByText(
-				"Farik cannot read Theo’s keys for notion right now",
+				"Catervas cannot read Theo’s keys for notion right now",
 			),
 		).toBeTruthy();
 		expect(within(notion).queryByText(en.connectorAgain)).toBeNull();
@@ -606,7 +606,7 @@ describe("connectors on the agent page", () => {
 		expect(field("Part 1").getAttribute("aria-invalid")).not.toBe("true");
 	});
 
-	it("connector_add_says_when_farik_settings_folder_is_inside_the_project", async () => {
+	it("connector_add_says_when_catervas_settings_folder_is_inside_the_project", async () => {
 		// Re-review 2 m1: no stdio server starts among the project's files, and the page says why.
 		const { s } = await opened([]);
 		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
@@ -625,7 +625,7 @@ describe("connectors on the agent page", () => {
 		await s.fail(
 			asked,
 			-32005,
-			"state_inside_project: Farik's settings folder, /home/u/app/.cfg/farik, is inside this project",
+			"state_inside_project: Catervas's settings folder, /home/u/app/.cfg/catervas, is inside this project",
 		);
 		expect(
 			await within(dialog).findByText(en.addStateInsideProject),
@@ -715,7 +715,7 @@ describe("connectors on the agent page", () => {
 		expect(
 			radios.filter((r) => r.checked).map((r) => r.labels?.[0]?.textContent),
 		).toEqual([en.tagExternal]);
-		// A tool Farik cannot pass on is shown, never offered a label.
+		// A tool Catervas cannot pass on is shown, never offered a label.
 		expect(
 			within(dialog).queryByRole("group", { name: "records.export" }),
 		).toBeNull();
@@ -811,7 +811,7 @@ describe("connectors on the agent page", () => {
 			errors: [
 				{
 					path: "/agents/1/mcp_servers/0/name",
-					message: "connector_name_reserved: farik is a name Farik keeps",
+					message: "connector_name_reserved: catervas is a name Catervas keeps",
 					code: "invalid",
 				},
 				{
@@ -826,7 +826,7 @@ describe("connectors on the agent page", () => {
 		expect(within(dialog).getByText(en.addNameReserved)).toBeTruthy();
 		expect(within(dialog).getByText(en.addKeyWrong)).toBeTruthy();
 		expect(
-			within(dialog).queryByText(/does not match|is a name Farik keeps/),
+			within(dialog).queryByText(/does not match|is a name Catervas keeps/),
 		).toBeNull();
 		await expectNoAxeViolations(container);
 
@@ -912,11 +912,11 @@ describe("connectors on the agent page", () => {
 		await s.fail(
 			await sent(s, "connector.connect"),
 			-32005,
-			"tag_unknown_tool: delete_records is not a tool this server lists that Farik can use; its tools are list_bases",
+			"tag_unknown_tool: delete_records is not a tool this server lists that Catervas can use; its tools are list_bases",
 		);
 		expect(
 			await within(dialog).findByText(
-				"airtable’s tools changed since Farik listed them. Press “Next: list its tools” to list them again, then label each one.",
+				"airtable’s tools changed since Catervas listed them. Press “Next: list its tools” to list them again, then label each one.",
 			),
 		).toBeTruthy();
 		expect(within(dialog).queryByText(/tag_unknown_tool/)).toBeNull();
@@ -981,7 +981,7 @@ describe("connectors on the agent page", () => {
 			expect(await within(dialog).findByText(words)).toBeTruthy();
 			expect(
 				within(dialog).getByText(
-					"1 Only reads, 1 Changes things, asks you, 1 Farik can’t use",
+					"1 Only reads, 1 Changes things, asks you, 1 Catervas can’t use",
 				),
 			).toBeTruthy();
 			await expectNoAxeViolations(container);
@@ -1390,7 +1390,7 @@ describe("signing in to a service", () => {
 		expect(within(dialog).getByText(en.addSignedIn)).toBeTruthy();
 		expect(
 			within(dialog).getByText(
-				"Theo uses Notion as you. Farik keeps the sign-in in your keychain.",
+				"Theo uses Notion as you. Catervas keeps the sign-in in your keychain.",
 			),
 		).toBeTruthy();
 		expect(
@@ -1423,12 +1423,12 @@ describe("signing in to a service", () => {
 	it.each([
 		[
 			"access_denied",
-			"You said no on mcp.notion.com’s page, so Farik isn’t connected.",
+			"You said no on mcp.notion.com’s page, so Catervas isn’t connected.",
 		],
 		["sign_in_timed_out", "The sign-in took longer than 10 minutes."],
 		[
 			"sign_in_mismatch",
-			"Something didn’t match on the way back from mcp.notion.com, so Farik stopped to keep you safe.",
+			"Something didn’t match on the way back from mcp.notion.com, so Catervas stopped to keep you safe.",
 		],
 		[
 			"sign_in_failed",
@@ -1484,11 +1484,11 @@ describe("signing in to a service", () => {
 		for (const [code, sentence] of [
 			[
 				"sign_in_not_supported",
-				"api.githubcopilot.com doesn’t let Farik sign in by itself yet. If it gives you a key, paste it below.",
+				"api.githubcopilot.com doesn’t let Catervas sign in by itself yet. If it gives you a key, paste it below.",
 			],
 			[
 				"sign_in_failed",
-				"Farik couldn’t sign in to api.githubcopilot.com. If it gives you a key, paste it below.",
+				"Catervas couldn’t sign in to api.githubcopilot.com. If it gives you a key, paste it below.",
 			],
 		] as const) {
 			const page = await askedToSignIn("https://api.githubcopilot.com/mcp");
@@ -1541,7 +1541,7 @@ describe("signing in to a service", () => {
 		const linear = row("linear");
 		expect(
 			within(linear).getByText(
-				"mcp.linear.app ended Farik’s sign-in. Sign in again to use it.",
+				"mcp.linear.app ended Catervas’s sign-in. Sign in again to use it.",
 			),
 		).toBeTruthy();
 		expect(within(linear).queryByText(en.connectorAgain)).toBeNull();
@@ -1572,7 +1572,7 @@ describe("signing in to a service", () => {
 		).toBeTruthy();
 		expect(
 			within(dialog).getByText(
-				"mcp.linear.app ended Farik’s sign-in. Sign in again to use linear.",
+				"mcp.linear.app ended Catervas’s sign-in. Sign in again to use linear.",
 			),
 		).toBeTruthy();
 		expect(
@@ -1586,11 +1586,11 @@ describe("signing in to a service", () => {
 		for (const [server, words] of [
 			[
 				"notion",
-				"Farik deletes the sign-in from your keychain and asks mcp.notion.com to forget it.",
+				"Catervas deletes the sign-in from your keychain and asks mcp.notion.com to forget it.",
 			],
 			[
 				"linear",
-				"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in mcp.linear.app’s settings.",
+				"Catervas deletes the sign-in from your keychain. To remove Catervas completely, also remove it in mcp.linear.app’s settings.",
 			],
 		] as const) {
 			fireEvent.click(
@@ -1617,7 +1617,7 @@ const KIT_NOTION = {
 	about: "Notion is where your team keeps docs, notes and plans.",
 	why: "Reads your product docs, so plans start from what you already wrote.",
 	setup:
-		"On Notion’s page, choose “New integration”, name it Farik and pick your workspace. Copy the value labelled “Internal Integration Secret”.",
+		"On Notion’s page, choose “New integration”, name it Catervas and pick your workspace. Copy the value labelled “Internal Integration Secret”.",
 	key_page: "https://www.notion.so/profile/integrations",
 	labels: {
 		search: "search pages",
@@ -1649,7 +1649,7 @@ const KIT_POSTHOG = {
 	auth: "keys",
 	credential_keys: ["POSTHOG_KEY"],
 };
-/** A kit service that signs in through Farik Cloud, which no build can reach before the web launch. */
+/** A kit service that signs in through Catervas Cloud, which no build can reach before the web launch. */
 const KIT_ADS = {
 	name: "google-ads",
 	title: "Google Ads",
@@ -1771,7 +1771,7 @@ describe("a role's kit on the agent page", () => {
 		expect(
 			within(linear).queryByRole("button", { name: /Connect/ }),
 		).toBeNull();
-		// Farik updated it: Connect again, with the reason, and Remove.
+		// Catervas updated it: Connect again, with the reason, and Remove.
 		const posthog = kitRow("PostHog");
 		expect(within(posthog).getByText(en.kitAgain)).toBeTruthy();
 		expect(
@@ -1780,7 +1780,7 @@ describe("a role's kit on the agent page", () => {
 		expect(
 			within(posthog).getByRole("button", { name: "Remove posthog" }),
 		).toBeTruthy();
-		// Farik no longer offers it: Remove alone, whatever the entry says.
+		// Catervas no longer offers it: Remove alone, whatever the entry says.
 		const gone = kitRow("plausible");
 		expect(within(gone).getByText(en.kitGone)).toBeTruthy();
 		expect(
@@ -1798,7 +1798,7 @@ describe("a role's kit on the agent page", () => {
 	});
 
 	it("agent_edit_says_a_kit_service_comes_at_launch", async () => {
-		// Google Ads signs in through Farik Cloud, which comes with the web launch (ADR 0044): until
+		// Google Ads signs in through Catervas Cloud, which comes with the web launch (ADR 0044): until
 		// then the row says so, in place of a Connect that could not work.
 		const { container } = await openedWithKit([KIT_ADS, KIT_NOTION], [], []);
 		const ads = kitRow("Google Ads");
@@ -2014,10 +2014,10 @@ describe("a role's kit on the agent page", () => {
 		// Each tool by its kit label, or by its name with `_` and `-` read as spaces.
 		expect(list("Theo can now")).toEqual(["search pages", "API post search"]);
 		expect(list("Theo asks you first before")).toEqual(["create a page"]);
-		expect(list("Farik never offers")).toEqual(["delete a page"]);
+		expect(list("Catervas never offers")).toEqual(["delete a page"]);
 		expect(
 			within(dialog).getByText(
-				"Theo’s key is kept in your computer’s keychain. Theo never sees it: Farik hands it to Notion.",
+				"Theo’s key is kept in your computer’s keychain. Theo never sees it: Catervas hands it to Notion.",
 			),
 		).toBeTruthy();
 		expect(
@@ -2076,7 +2076,7 @@ describe("a role's kit on the agent page", () => {
 
 	it("kit_screens_never_name_the_plumbing", () => {
 		const plumbing = /\b(mcp|oauth|token)/i;
-		// Farik's own words for these screens.
+		// Catervas's own words for these screens.
 		const own = Object.entries(en)
 			.filter(([key]) => key.startsWith("kit"))
 			.map(([key, words]) => [key, words]);
@@ -2093,12 +2093,12 @@ describe("a role's kit on the agent page", () => {
 	});
 });
 
-// ---- Farik's own apps: GitHub, signed in to with a code (phase 7 step 03b) ----
+// ---- Catervas's own apps: GitHub, signed in to with a code (phase 7 step 03b) ----
 
 const GITHUB_ADDRESS = "https://api.githubcopilot.com/mcp/";
-const INSTALL_URL = "https://github.com/apps/farik/installations/new";
+const INSTALL_URL = "https://github.com/apps/catervas/installations/new";
 const GITHUB_SETTINGS = "https://github.com/settings/apps/authorizations";
-/** What `connector.sign_in` answers for Farik's GitHub App: the page to type the code on, and the code. */
+/** What `connector.sign_in` answers for Catervas's GitHub App: the page to type the code on, and the code. */
 const GITHUB_OFFER = {
 	attempt: ATTEMPT,
 	authorize_url: "https://github.com/login/device",
@@ -2133,7 +2133,7 @@ const ENDED_GITHUB_ROW = {
 	state: "sign_in_again",
 };
 
-describe("signing in with one of Farik's own apps", () => {
+describe("signing in with one of Catervas's own apps", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
@@ -2161,7 +2161,7 @@ describe("signing in with one of Farik's own apps", () => {
 		expect(within(dialog).getByText("WDJB-MJHT")).toBeTruthy();
 		expect(
 			within(dialog).getByText(
-				"Only enter a code that this page shows you. Farik never sends you a code in a chat.",
+				"Only enter a code that this page shows you. Catervas never sends you a code in a chat.",
 			),
 		).toBeTruthy();
 		expect(within(dialog).getByText("Waiting for you on GitHub…")).toBeTruthy();
@@ -2195,11 +2195,11 @@ describe("signing in with one of Farik's own apps", () => {
 		).toBeTruthy();
 		expect(
 			within(dialog).getByText(
-				"To let Theo read private repositories, install Farik on them on GitHub.",
+				"To let Theo read private repositories, install Catervas on them on GitHub.",
 			),
 		).toBeTruthy();
 		const link = within(dialog).getByRole("link", {
-			name: "Install Farik on GitHub",
+			name: "Install Catervas on GitHub",
 		});
 		expect(link.getAttribute("href")).toBe(INSTALL_URL);
 		expect(link.getAttribute("target")).toBe("_blank");
@@ -2221,11 +2221,11 @@ describe("signing in with one of Farik's own apps", () => {
 			}),
 		).toBeTruthy();
 		expect(within(dialog).getByText("GitHub lets you sign in.")).toBeTruthy();
-		// Farik offers this sign-in to GitHub's own address only, so no "for <host>" line says it.
+		// Catervas offers this sign-in to GitHub's own address only, so no "for <host>" line says it.
 		expect(within(dialog).queryByText(/^for /)).toBeNull();
 		expect(
 			within(dialog).getByText(
-				"Farik shows you a short code to type on GitHub’s page.",
+				"Catervas shows you a short code to type on GitHub’s page.",
 			),
 		).toBeTruthy();
 		expect(within(dialog).queryByText(en.addSignInNote)).toBeNull();
@@ -2325,7 +2325,7 @@ describe("signing in with one of Farik's own apps", () => {
 		vi.useRealTimers();
 		expect(
 			await within(dialog).findByText(
-				"You said no on GitHub’s page, so Farik isn’t connected.",
+				"You said no on GitHub’s page, so Catervas isn’t connected.",
 			),
 		).toBeTruthy();
 	});
@@ -2368,7 +2368,7 @@ describe("signing in with one of Farik's own apps", () => {
 		expect(settings.getAttribute("target")).toBe("_blank");
 		expect(settings.getAttribute("rel")).toContain("noopener");
 		expect((settings.parentElement as HTMLElement).textContent).toBe(
-			"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in GitHub’s settings.",
+			"Catervas deletes the sign-in from your keychain. To remove Catervas completely, also remove it in GitHub’s settings.",
 		);
 		expect(
 			within(dialog).getByText(
@@ -2385,7 +2385,7 @@ describe("signing in with one of Farik's own apps", () => {
 		const ended = row("github_work");
 		expect(
 			within(ended).getByText(
-				"GitHub ended Farik’s sign-in. Sign in again to use it.",
+				"GitHub ended Catervas’s sign-in. Sign in again to use it.",
 			),
 		).toBeTruthy();
 		expect(within(ended).queryByText(/api\.githubcopilot\.com/)).toBeNull();
@@ -2397,7 +2397,7 @@ describe("signing in with one of Farik's own apps", () => {
 		});
 		expect(
 			within(again).getByText(
-				"GitHub ended Farik’s sign-in. Sign in again to use github_work.",
+				"GitHub ended Catervas’s sign-in. Sign in again to use github_work.",
 			),
 		).toBeTruthy();
 		expect(
@@ -2420,7 +2420,7 @@ describe("signing in with one of Farik's own apps", () => {
 			name: "google_ads",
 			source: "kit",
 			transport: "stdio",
-			command: "farik",
+			command: "catervas",
 			args: ["connector", "google-ads"],
 			oauth: {},
 			tools: { search: "network" },
@@ -2450,7 +2450,7 @@ describe("signing in with one of Farik's own apps", () => {
 		});
 		expect(
 			within(dialog).getByText(
-				"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in google_ads’s settings.",
+				"Catervas deletes the sign-in from your keychain. To remove Catervas completely, also remove it in google_ads’s settings.",
 			),
 		).toBeTruthy();
 		expect(within(dialog).queryByRole("link")).toBeNull();
@@ -2468,7 +2468,7 @@ describe("signing in with one of Farik's own apps", () => {
 			name: "google_ads",
 			source: "kit",
 			transport: "stdio",
-			command: "farik",
+			command: "catervas",
 			args: ["connector", "google-ads"],
 			oauth: {},
 			tools: { search: "network" },
@@ -2493,13 +2493,13 @@ describe("signing in with one of Farik's own apps", () => {
 		const ads = kitRow("Google Ads");
 		expect(
 			within(ads).getByText(
-				"Google ended Farik’s sign-in. Sign in again to use it.",
+				"Google ended Catervas’s sign-in. Sign in again to use it.",
 			),
 		).toBeTruthy();
 	});
 
 	it("agent_edit_names_the_provider_of_a_connector_with_no_web_address", async () => {
-		// Google Ads is Farik's own connector from a kit: a command, no address, signed in through
+		// Google Ads is Catervas's own connector from a kit: a command, no address, signed in through
 		// Google (step 08e). Its row and its Remove name Google, not the kit's title.
 		const service = {
 			...KIT_LINEAR,
@@ -2511,7 +2511,7 @@ describe("signing in with one of Farik's own apps", () => {
 			name: "google_ads",
 			source: "kit",
 			transport: "stdio",
-			command: "farik",
+			command: "catervas",
 			args: ["connector", "google-ads"],
 			oauth: {},
 			tools: { search: "network" },
@@ -2549,7 +2549,7 @@ describe("signing in with one of Farik's own apps", () => {
 			"https://myaccount.google.com/connections",
 		);
 		expect((settings.parentElement as HTMLElement).textContent).toBe(
-			"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in Google’s settings.",
+			"Catervas deletes the sign-in from your keychain. To remove Catervas completely, also remove it in Google’s settings.",
 		);
 		await expectNoAxeViolations(container);
 	});
@@ -2572,7 +2572,7 @@ describe("removing Google Ads from an agent", () => {
 		name: "google-ads",
 		source: "kit",
 		transport: "stdio",
-		command: "farik",
+		command: "catervas",
 		args: ["connector", "google-ads"],
 		oauth: {},
 		tools: { search: "network" },
@@ -2599,14 +2599,14 @@ describe("removing Google Ads from an agent", () => {
 		const dialog = await screen.findByRole("dialog", {
 			name: "Remove Google Ads from Theo?",
 		});
-		// Without the connection Farik could not stop the ads at their budget, so it pauses them first;
+		// Without the connection Catervas could not stop the ads at their budget, so it pauses them first;
 		// if Google refuses, Google Ads goes all the same, and what that leaves running is said now.
 		const paragraphs = within(dialog)
 			.getAllByText(/./, { selector: "p" })
 			.map((p) => p.textContent);
 		expect(paragraphs).toEqual([
-			"Farik pauses your marketing plan’s running ads first, since without this connection it could not stop them at their budget. If Google refuses, Google Ads is removed anyway, and the ads keep running at Google until their end date or their budget there; pause them in Google Ads.",
-			"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in Google’s settings.",
+			"Catervas pauses your marketing plan’s running ads first, since without this connection it could not stop them at their budget. If Google refuses, Google Ads is removed anyway, and the ads keep running at Google until their end date or their budget there; pause them in Google Ads.",
+			"Catervas deletes the sign-in from your keychain. To remove Catervas completely, also remove it in Google’s settings.",
 			"To use it again, add it again and sign in.",
 		]);
 		// The pause stops ads another Marketing Specialist may run, so nobody is "not affected".

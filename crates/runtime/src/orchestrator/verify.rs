@@ -1,4 +1,4 @@
-//! Rule 5 of the order, a task `verifying` (`docs/SPEC.md` 5.4): Farik runs the contract's
+//! Rule 5 of the order, a task `verifying` (`docs/SPEC.md` 5.4): Catervas runs the contract's
 //! `command`, `test`, and `artifact` criteria itself, as the reviewer, in the task's sandbox; the
 //! reviewer's fresh session answers the `review` criteria and writes the review note; a failed
 //! review is filed as a rejection in the reviewer's name, with its note; a passed one goes to the
@@ -7,20 +7,20 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use farik_core::branch::task_branch;
-use farik_core::contract::{ExitCriterion, TaskContract, TaskId, TaskStatus, wire_method};
-use farik_core::governor::done::{CriterionResult, RunBy, requires_human_acceptance};
-use farik_core::governor::gates::Rejection;
-use farik_core::governor::team_rules::is_ui_change;
-use farik_core::governor::transition::{TransitionContext, TransitionRequest};
-use farik_core::governor::transition_table::TransitionActor;
-use farik_core::team::{Agent, Team, task_private_folder};
-use farik_protocol::event::{
-    CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody, EventIds, FarikEvent,
+use catervas_core::branch::task_branch;
+use catervas_core::contract::{ExitCriterion, TaskContract, TaskId, TaskStatus, wire_method};
+use catervas_core::governor::done::{CriterionResult, RunBy, requires_human_acceptance};
+use catervas_core::governor::gates::Rejection;
+use catervas_core::governor::team_rules::is_ui_change;
+use catervas_core::governor::transition::{TransitionContext, TransitionRequest};
+use catervas_core::governor::transition_table::TransitionActor;
+use catervas_core::team::{Agent, Team, task_private_folder};
+use catervas_protocol::event::{
+    CatervasEvent, CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody, EventIds,
     NoteWrittenBodyKind, ReviewRecordedBody, new_event,
 };
-use farik_store::baseline::{FolderChangeKind, baseline_of, changes_since_baseline, folder_in};
-use farik_store::{EventQuery, Git, TaskProjection};
+use catervas_store::baseline::{FolderChangeKind, baseline_of, changes_since_baseline, folder_in};
+use catervas_store::{EventQuery, Git, TaskProjection};
 
 use super::design::DESIGN_REVIEW_TOOLS;
 use super::messages::{
@@ -43,12 +43,12 @@ use crate::transitions::{
     refusal_details,
 };
 
-/// Who records the criteria Farik runs for the reviewer: Farik ran them, as `requested_by:
+/// Who records the criteria Catervas runs for the reviewer: Catervas ran them, as `requested_by:
 /// "governor"` names the governor's own moves.
 pub(super) const GOVERNOR: &str = "governor";
 
 /// Rule 5: a task `verifying`, with no refusal since it last moved there. In order: the criteria
-/// Farik runs that it has not run in this verification, one at a time, each recorded before the
+/// Catervas runs that it has not run in this verification, one at a time, each recorded before the
 /// next runs; then, judged on the governor's own context for `verifying -> accepted`, the
 /// reviewer's session when there is no review note, the rejection when the reviewer's results hold
 /// a failure, the reviewer's session again when a criterion is unanswered, and the Product
@@ -84,9 +84,9 @@ pub(super) async fn verifying(
     let Some(reviewer) = active(team, row.reviewer_id.as_deref()) else {
         return Ok(None);
     };
-    let ran = match run_what_farik_runs(orchestrator, team, &contract, &history, since).await? {
-        FarikRan::Criteria(ran) => ran,
-        FarikRan::Unrunnable(why) => return escalate(deps, team, row, &why),
+    let ran = match run_what_catervas_runs(orchestrator, team, &contract, &history, since).await? {
+        CatervasRan::Criteria(ran) => ran,
+        CatervasRan::Unrunnable(why) => return escalate(deps, team, row, &why),
     };
     let context = context(deps, team, &row.task_id)?;
     if let Some(handled) = design_review_first(
@@ -134,8 +134,8 @@ pub(super) async fn verifying(
     .await
 }
 
-/// What Farik's runs for the reviewer came to.
-enum FarikRan {
+/// What Catervas's runs for the reviewer came to.
+enum CatervasRan {
     /// This many criteria were run and recorded.
     Criteria(usize),
     /// One could not be run, for a reason that is not the work's, in these words.
@@ -149,13 +149,13 @@ enum FarikRan {
 /// assignee's, so that nothing the assignee's commands left outside the worktree reaches them (5.4
 /// item 1). A criterion whose container went is recorded failed, with the error as its evidence,
 /// and the next runs in a new sandbox; any other error stops the runs, to be escalated.
-async fn run_what_farik_runs(
+async fn run_what_catervas_runs(
     orchestrator: &Orchestrator,
     team: &Team,
     contract: &TaskContract,
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
     since: u64,
-) -> Result<FarikRan, OrchestratorError> {
+) -> Result<CatervasRan, OrchestratorError> {
     let deps = &orchestrator.deps;
     let pending: Vec<&ExitCriterion> = contract
         .exit_criteria
@@ -168,7 +168,7 @@ async fn run_what_farik_runs(
         })
         .collect();
     if pending.is_empty() {
-        return Ok(FarikRan::Criteria(0));
+        return Ok(CatervasRan::Criteria(0));
     }
     // A task in a private folder has no worktree, branch or sandbox to run anything in (6.6).
     if let Some(folder) = task_private_folder(contract) {
@@ -219,8 +219,8 @@ async fn run_what_farik_runs(
                 }]
             }
             Err(error) => {
-                return Ok(FarikRan::Unrunnable(format!(
-                    "Farik could not run {} for the reviewer: {error}",
+                return Ok(CatervasRan::Unrunnable(format!(
+                    "Catervas could not run {} for the reviewer: {error}",
                     criterion.id.as_str()
                 )));
             }
@@ -229,10 +229,10 @@ async fn run_what_farik_runs(
             record_run(deps, contract, result)?;
         }
     }
-    Ok(FarikRan::Criteria(pending.len()))
+    Ok(CatervasRan::Criteria(pending.len()))
 }
 
-/// Records `result` as the reviewer's run, which Farik made.
+/// Records `result` as the reviewer's run, which Catervas made.
 fn record_run(
     deps: &OrchestratorDeps,
     contract: &TaskContract,
@@ -254,7 +254,7 @@ fn record_run(
     Ok(())
 }
 
-/// `run_what_farik_runs` for a task in a private folder: each `artifact` criterion is checked on
+/// `run_what_catervas_runs` for a task in a private folder: each `artifact` criterion is checked on
 /// the host, as a file in the folder (`check_artifact_in`), and recorded before the next. A
 /// `command` or `test` criterion cannot be run for it, the folder being no worktree, and is not
 /// the work's fault, so it is escalated (readiness refuses one, so it is a contract edited by
@@ -264,11 +264,11 @@ fn run_in_the_folder(
     contract: &TaskContract,
     pending: &[&ExitCriterion],
     folder: &str,
-) -> Result<FarikRan, OrchestratorError> {
+) -> Result<CatervasRan, OrchestratorError> {
     for criterion in pending {
         if wire_method(&criterion.verification) != Some("artifact") {
-            return Ok(FarikRan::Unrunnable(format!(
-                "Farik could not run {} for the reviewer: a task in a private folder has no \
+            return Ok(CatervasRan::Unrunnable(format!(
+                "Catervas could not run {} for the reviewer: a task in a private folder has no \
                  worktree to run a command or a test in",
                 criterion.id.as_str()
             )));
@@ -279,7 +279,7 @@ fn run_in_the_folder(
             record_run(deps, contract, result)?;
         }
     }
-    Ok(FarikRan::Criteria(pending.len()))
+    Ok(CatervasRan::Criteria(pending.len()))
 }
 
 /// The contract's criteria, in its order, that one of `answers` failed.
@@ -296,16 +296,16 @@ pub(super) fn failed(contract: &TaskContract, answers: &[CriterionResult]) -> Ve
         .collect()
 }
 
-/// Whether a criterion Farik could not run is recorded failed rather than escalated: only when the
+/// Whether a criterion Catervas could not run is recorded failed rather than escalated: only when the
 /// task's container went, which the work's own commands can cause and a new sandbox answers.
 /// Git, the base-branch sandbox, a file written into the base worktree, or a command that would not
-/// start are Farik's to fix, not the assignee's, so a failure would send the task back to someone
+/// start are Catervas's to fix, not the assignee's, so a failure would send the task back to someone
 /// who cannot fix it.
 pub(super) fn fails_the_criterion(error: &CriterionError) -> bool {
     matches!(error, CriterionError::Exec(ExecError::ContainerGone))
 }
 
-/// Escalates the task as the governor, in the words of what Farik could not run; a refusal passes
+/// Escalates the task as the governor, in the words of what Catervas could not run; a refusal passes
 /// the task over, and rule 5 does not ask again until it moves.
 pub(super) fn escalate(
     deps: &OrchestratorDeps,
@@ -350,7 +350,7 @@ async fn design_review_first(
     row: &TaskProjection,
     contract: &TaskContract,
     changed_paths: &[String],
-    history: &[FarikEvent],
+    history: &[CatervasEvent],
     waiting: &mut Waiting,
     ran: usize,
 ) -> Result<Option<Option<TickReport>>, OrchestratorError> {
@@ -427,7 +427,7 @@ fn reject_as_designer(
                 reasons,
             }),
             session_id,
-            filed_by_farik: true,
+            filed_by_catervas: true,
             ..TransitionAsk::default()
         },
         team,
@@ -448,7 +448,7 @@ fn reject_as_designer(
 }
 
 /// The reviewer's `verify` session, in the task's worktree (or its private folder) with the read tier's built-ins and no
-/// executor, told what Farik found and, when `unanswered` names any, which criteria it still has
+/// executor, told what Catervas found and, when `unanswered` names any, which criteria it still has
 /// to answer; then `review.recorded` when the review is complete.
 async fn review(
     orchestrator: &Orchestrator,
@@ -571,7 +571,7 @@ pub(super) fn record_review(
 }
 
 /// Files `verifying -> rejected` in the reviewer's name, with the failed criteria and the review
-/// note as the reasons, from the session that wrote the note (5.4: Farik files it).
+/// note as the reasons, from the session that wrote the note (5.4: Catervas files it).
 pub(super) fn reject(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -600,7 +600,7 @@ pub(super) fn reject(
                 reasons: review_note,
             }),
             session_id,
-            filed_by_farik: true,
+            filed_by_catervas: true,
             ..TransitionAsk::default()
         },
         team,
@@ -717,10 +717,10 @@ pub(super) fn reviewer_results(context: &TransitionContext) -> Vec<CriterionResu
         .collect()
 }
 
-/// The results Farik recorded as the governor since `since`, the latest per criterion. Farik's own
+/// The results Catervas recorded as the governor since `since`, the latest per criterion. Catervas's own
 /// carry no agent on their envelope; `recorded_by` alone would trust an agent the team named
 /// `governor`.
-pub(super) fn governor_results(history: &[FarikEvent], since: u64) -> Vec<CriterionResult> {
+pub(super) fn governor_results(history: &[CatervasEvent], since: u64) -> Vec<CriterionResult> {
     let mut results: Vec<CriterionResult> = Vec::new();
     for event in history
         .iter()
@@ -756,7 +756,7 @@ pub(super) fn is_human(criterion: &ExitCriterion) -> bool {
     wire_method(&criterion.verification) == Some("human")
 }
 
-/// A `command`, `test`, or `artifact` criterion: one Farik runs itself.
+/// A `command`, `test`, or `artifact` criterion: one Catervas runs itself.
 pub(super) fn is_mechanical(criterion: &ExitCriterion) -> bool {
     matches!(
         wire_method(&criterion.verification),
@@ -768,7 +768,7 @@ pub(super) fn is_mechanical(criterion: &ExitCriterion) -> bool {
 pub(super) fn history(
     deps: &OrchestratorDeps,
     task_id: &TaskId,
-) -> Result<Vec<FarikEvent>, OrchestratorError> {
+) -> Result<Vec<CatervasEvent>, OrchestratorError> {
     Ok(deps.tools.log.read(&EventQuery {
         task_id: Some(task_id.clone()),
         ..EventQuery::default()
@@ -776,7 +776,7 @@ pub(super) fn history(
 }
 
 /// The sequence number of the task's last move into `verifying`, or 0.
-pub(super) fn since_verifying(history: &[FarikEvent]) -> u64 {
+pub(super) fn since_verifying(history: &[CatervasEvent]) -> u64 {
     last_move_into(history, TaskStatus::Verifying).map_or(0, |event| event.envelope.seq)
 }
 
@@ -819,10 +819,10 @@ mod tests {
     use std::collections::BTreeSet;
     use std::sync::Arc;
 
-    use farik_core::contract::TaskStatus;
-    use farik_core::governor::permissions::PermissionTier;
-    use farik_protocol::event::{EscalationRaisedBodyReason, EventBody, EventKind};
-    use farik_store::GitError;
+    use catervas_core::contract::TaskStatus;
+    use catervas_core::governor::permissions::PermissionTier;
+    use catervas_protocol::event::{EscalationRaisedBodyReason, EventBody, EventKind};
+    use catervas_store::GitError;
     use serde_json::{Value, json};
 
     use super::fails_the_criterion;
@@ -834,7 +834,7 @@ mod tests {
     use crate::recorded::Transcript;
     use crate::recorded::fixtures::{
         design_review_fails_frk_2, design_review_passes_frk_2, implement_css_frk_2,
-        replays_farik_read_board, review_writes_note,
+        replays_catervas_read_board, review_writes_note,
     };
     use crate::sandbox::SandboxError;
     use crate::session::{SessionPurpose, SessionSpec};
@@ -967,15 +967,15 @@ mod tests {
         );
         let review = &started[1];
         assert_eq!(
-            review.farik_tools,
+            review.catervas_tools,
             [
-                "farik_read_task",
-                "farik_read_board",
-                "farik_read_rules",
-                "farik_read_criteria",
-                "farik_read_decisions",
-                "farik_check_page",
-                "farik_record_design_review",
+                "catervas_read_task",
+                "catervas_read_board",
+                "catervas_read_rules",
+                "catervas_read_criteria",
+                "catervas_read_decisions",
+                "catervas_check_page",
+                "catervas_record_design_review",
             ]
         );
         assert_eq!(
@@ -992,9 +992,13 @@ mod tests {
         );
         // The Architect's review is not the Designer's: no browser, no page check.
         assert!(started[2].mcp_servers.is_empty());
-        assert!(!started[2].farik_tools.iter().any(
-            |tool| tool.starts_with("farik_check_page") || tool == "farik_record_design_review"
-        ));
+        assert!(
+            !started[2]
+                .catervas_tools
+                .iter()
+                .any(|tool| tool.starts_with("catervas_check_page")
+                    || tool == "catervas_record_design_review")
+        );
         assert_eq!(harness.events(&[EventKind::PageChecked]).len(), 4);
         let recorded = harness.events(&[EventKind::DesignReviewRecorded]);
         assert_eq!(recorded.len(), 1);
@@ -1145,7 +1149,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_on_a_designer_without_its_browser() {
-        // Playwright switched off for Iris: Farik gives her no work, so no design review starts.
+        // Playwright switched off for Iris: Catervas gives her no work, so no design review starts.
         let harness = a_harness("design-review-no-connector", |wire| {
             browsing(wire);
             wire["agents"][3]
@@ -1183,7 +1187,7 @@ mod tests {
             .expect("written");
         let (started, _) = ticked(
             &harness,
-            vec![replays_farik_read_board(), replays_farik_read_board()],
+            vec![replays_catervas_read_board(), replays_catervas_read_board()],
             3,
         )
         .await;

@@ -1,5 +1,5 @@
 //! Transcripts recorded from `claude` 2.1.280 with `--model haiku` on 2026-09-22, trimmed of
-//! hook lines, thinking signatures, and machine paths; and transcripts of Farik tool calls,
+//! hook lines, thinking signatures, and machine paths; and transcripts of Catervas tool calls,
 //! hand-written in the same shapes, which no recording can hold because the answers depend on the
 //! project a test builds. For tests, in this crate and in others.
 
@@ -7,13 +7,13 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use farik_core::budget::DEFAULT_SESSION_LIMITS;
-use farik_core::pricing::Usage;
-use farik_core::team::Effort;
+use catervas_core::budget::DEFAULT_SESSION_LIMITS;
+use catervas_core::pricing::Usage;
+use catervas_core::team::Effort;
 use serde_json::json;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
-use super::{FARIK_PREFIX, ToolRunner, Transcript};
+use super::{CATERVAS_PREFIX, ToolRunner, Transcript};
 #[cfg(unix)]
 use crate::daemon::{DaemonState, HookRequest, decide_pre_tool_use};
 use crate::session::{
@@ -34,7 +34,7 @@ pub fn a_session_spec() -> SessionSpec {
         system_prompt: "You are a Software Developer.".to_string(),
         model: "claude-haiku-4-5-20251001".to_string(),
         effort: Effort::High,
-        farik_tools: vec!["farik_read_task".to_string()],
+        catervas_tools: vec!["catervas_read_task".to_string()],
         builtin_tools: ["Glob", "Grep", "Read", "ToolSearch"]
             .map(str::to_string)
             .to_vec(),
@@ -65,7 +65,7 @@ pub fn hits_the_turn_limit() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/hits_the_turn_limit.jsonl"))
 }
 
-/// A Read, then a Write the `PreToolUse` hook denied with `farik says no`, and a successful end.
+/// A Read, then a Write the `PreToolUse` hook denied with `catervas says no`, and a successful end.
 #[must_use]
 pub fn hook_denies_a_write() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/hook_denies_a_write.jsonl"))
@@ -115,21 +115,23 @@ pub fn success_with_is_error() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/success_with_is_error.jsonl"))
 }
 
-/// A call of `mcp__farik__farik_read_board` with no input, its answer, and a successful end.
+/// A call of `mcp__catervas__catervas_read_board` with no input, its answer, and a successful end.
 /// Hand-written in the shapes above; with `RecordedAdapter::with_tools` the answer is the runner's.
 #[must_use]
-pub fn replays_farik_read_board() -> Transcript {
-    Transcript::from_jsonl(include_str!("transcripts/replays_farik_read_board.jsonl"))
+pub fn replays_catervas_read_board() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/replays_catervas_read_board.jsonl"
+    ))
 }
 
-/// The Product Manager's plan session: `farik_assign_task` of FRK-1 to `dev-a`, reviewed by
+/// The Product Manager's plan session: `catervas_assign_task` of FRK-1 to `dev-a`, reviewed by
 /// `dev-b`, and a successful end. Hand-written.
 #[must_use]
 pub fn plan_assigns_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_assigns_frk_1.jsonl"))
 }
 
-/// `dev-a`'s implement session of FRK-1, done: `touch done.txt` through `farik_exec`, a commit of
+/// `dev-a`'s implement session of FRK-1, done: `touch done.txt` through `catervas_exec`, a commit of
 /// it, C1 recorded as passed, a completion note, and `verifying` asked for. Hand-written.
 #[must_use]
 pub fn implement_finishes_frk_1() -> Transcript {
@@ -143,14 +145,14 @@ pub fn implement_stops_early() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/implement_stops_early.jsonl"))
 }
 
-/// `dev-a`'s implement session of FRK-1 saying so in the channel: one `farik_post_message`, and a
+/// `dev-a`'s implement session of FRK-1 saying so in the channel: one `catervas_post_message`, and a
 /// successful end. Hand-written.
 #[must_use]
 pub fn implement_reacts_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/implement_reacts_frk_1.jsonl"))
 }
 
-/// `dev-a`'s conversation session answering a mention: one `farik_post_message`, and a
+/// `dev-a`'s conversation session answering a mention: one `catervas_post_message`, and a
 /// successful end. Hand-written.
 #[must_use]
 pub fn reply_to_a_mention() -> Transcript {
@@ -158,7 +160,7 @@ pub fn reply_to_a_mention() -> Transcript {
 }
 
 /// Mira's chat session answering "Could customers also pay with Apple Pay?": a
-/// `farik_read_board`, then one `farik_chat_reply` proposing the request "Let customers pay with
+/// `catervas_read_board`, then one `catervas_chat_reply` proposing the request "Let customers pay with
 /// Apple Pay", and a successful end. Hand-written.
 #[must_use]
 pub fn chat_answers_with_a_request() -> Transcript {
@@ -200,21 +202,21 @@ pub fn accept_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/accept_frk_1.jsonl"))
 }
 
-/// The Product Manager's triage of FRK-1: `farik_triage_request` of size `large`, "A file and the
+/// The Product Manager's triage of FRK-1: `catervas_triage_request` of size `large`, "A file and the
 /// check that it exists.". Hand-written.
 #[must_use]
 pub fn triage_frk_1_large() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/triage_frk_1_large.jsonl"))
 }
 
-/// The Scrum Master's triage of FRK-1: `farik_triage_request` of size `small`, "One file and its
+/// The Scrum Master's triage of FRK-1: `catervas_triage_request` of size `small`, "One file and its
 /// check: a task.". Hand-written.
 #[must_use]
 pub fn triage_by_sm_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/triage_by_sm_frk_1.jsonl"))
 }
 
-/// The Scrum Master's judgment of FRK-1: `farik_record_judgment` answering yes to each of the
+/// The Scrum Master's judgment of FRK-1: `catervas_record_judgment` answering yes to each of the
 /// default two questions, "One file in five dollars, and C1 fails while done.txt is missing.".
 /// Hand-written.
 #[must_use]
@@ -222,7 +224,7 @@ pub fn judge_frk_1_passes() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/judge_frk_1_passes.jsonl"))
 }
 
-/// The Scrum Master's judgment of FRK-1: `farik_record_judgment` answering yes to the first of the
+/// The Scrum Master's judgment of FRK-1: `catervas_record_judgment` answering yes to the first of the
 /// default two questions and no to the second, "C1 checks that done.txt exists, not what it
 /// says.". Hand-written.
 #[must_use]
@@ -230,7 +232,7 @@ pub fn judge_frk_1_fails() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/judge_frk_1_fails.jsonl"))
 }
 
-/// The Architect's judgment of FRK-1: `farik_record_judgment` answering yes to each of the
+/// The Architect's judgment of FRK-1: `catervas_record_judgment` answering yes to each of the
 /// default two questions, "The design is one file, and C1 fails while done.txt is missing.".
 /// Hand-written.
 #[must_use]
@@ -239,13 +241,13 @@ pub fn judge_frk_1_by_architect() -> Transcript {
 }
 
 /// The Product Manager's refine session of FRK-1 that asks the human "Should done.txt be empty?"
-/// with `farik_ask_human`, and nothing else. Hand-written.
+/// with `catervas_ask_human`, and nothing else. Hand-written.
 #[must_use]
 pub fn refine_asks_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/refine_asks_frk_1.jsonl"))
 }
 
-/// The Product Manager's refine session of FRK-1 as an epic: `farik_write_contract` with its intent
+/// The Product Manager's refine session of FRK-1 as an epic: `catervas_write_contract` with its intent
 /// and summary, `product_manager` as assignee role and the human as reviewer, `done.txt` its one
 /// allowed path, C1 (`command`, `test -f done.txt`) and C2 (`review`), one item out of scope, risk
 /// `low`, and a budget of 5 dollars and 10 sessions. Hand-written.
@@ -254,14 +256,14 @@ pub fn refine_writes_epic_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/refine_writes_epic_frk_1.jsonl"))
 }
 
-/// The Product Manager's refine session of FRK-1 as a task: `farik_write_contract` restating the
+/// The Product Manager's refine session of FRK-1 as a task: `catervas_write_contract` restating the
 /// request's fields, with a summary. Hand-written.
 #[must_use]
 pub fn refine_writes_task_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/refine_writes_task_frk_1.jsonl"))
 }
 
-/// The Product Manager's plan session breaking epic FRK-1 down: `farik_create_task` of one task
+/// The Product Manager's plan session breaking epic FRK-1 down: `catervas_create_task` of one task
 /// under it, "Add done.txt", with the request's fields and a budget of 2 dollars. Hand-written.
 #[must_use]
 pub fn plan_breaks_down_frk_1() -> Transcript {
@@ -269,7 +271,7 @@ pub fn plan_breaks_down_frk_1() -> Transcript {
 }
 
 /// The Product Manager's plan session assigning FRK-2 to `dev-a`, reviewed by `dev-b`, with
-/// `farik_assign_task`. Hand-written.
+/// `catervas_assign_task`. Hand-written.
 #[must_use]
 pub fn plan_assigns_frk_2() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_assigns_frk_2.jsonl"))
@@ -284,7 +286,7 @@ pub fn plan_closes_epic_frk_1() -> Transcript {
 }
 
 /// The Scrum Master's planning ceremony of the open sprint: two posts, the plan and the
-/// escalation digest, then `farik_plan_sprint` of FRK-1, then "S1 holds FRK-1, within its
+/// escalation digest, then `catervas_plan_sprint` of FRK-1, then "S1 holds FRK-1, within its
 /// budget.". Hand-written.
 #[must_use]
 pub fn planning_ceremony_frk_1() -> Transcript {
@@ -292,7 +294,7 @@ pub fn planning_ceremony_frk_1() -> Transcript {
 }
 
 /// The assigner's planning ceremony of S1 under the policy "plan work in sprints": one post, then
-/// `farik_plan_sprint` of the epic FRK-1, which brings its task FRK-2, and the task FRK-3, then
+/// `catervas_plan_sprint` of the epic FRK-1, which brings its task FRK-2, and the task FRK-3, then
 /// "S1 holds FRK-1, its task FRK-2, and FRK-3.". Hand-written.
 #[must_use]
 pub fn planning_ceremony_frk_1_frk_3() -> Transcript {
@@ -309,7 +311,7 @@ pub fn plan_breaks_down_frk_2() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_breaks_down_frk_2.jsonl"))
 }
 
-/// As `planning_ceremony_frk_1_frk_3`, for the step 15 browser journey: `farik_plan_sprint` of the
+/// As `planning_ceremony_frk_1_frk_3`, for the step 15 browser journey: `catervas_plan_sprint` of the
 /// task FRK-1 and the epic FRK-2, which brings its task FRK-3. Hand-written.
 #[must_use]
 pub fn planning_ceremony_frk_1_frk_2() -> Transcript {
@@ -332,8 +334,8 @@ pub fn review() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/review.jsonl"))
 }
 
-/// The Scrum Master's retro of S1: one post, then `farik_append_retro` of "Keep the tasks small:
-/// FRK-1 passed its review the first time.", then a second `farik_append_retro`, then "The retro
+/// The Scrum Master's retro of S1: one post, then `catervas_append_retro` of "Keep the tasks small:
+/// FRK-1 passed its review the first time.", then a second `catervas_append_retro`, then "The retro
 /// is recorded.". Hand-written.
 #[must_use]
 pub fn retro() -> Transcript {
@@ -342,7 +344,7 @@ pub fn retro() -> Transcript {
 
 // Step 08's journeys, on a team of Mira (Product Manager), Ada (Architect) and Theo (Developer).
 
-/// The Product Manager's triage of FRK-1, with no Scrum Master: `farik_triage_request` of size
+/// The Product Manager's triage of FRK-1, with no Scrum Master: `catervas_triage_request` of size
 /// `small`, "One file and its check: a task.". Hand-written.
 #[must_use]
 pub fn triage_frk_1_small_by_pm() -> Transcript {
@@ -375,7 +377,7 @@ pub fn refine_writes_high_risk_frk_1() -> Transcript {
     ))
 }
 
-/// The Product Manager's plan session: `farik_assign_task` of FRK-1 to `theo`, reviewed by `ada`.
+/// The Product Manager's plan session: `catervas_assign_task` of FRK-1 to `theo`, reviewed by `ada`.
 /// Hand-written.
 #[must_use]
 pub fn plan_assigns_frk_1_to_theo() -> Transcript {
@@ -409,14 +411,14 @@ pub fn plan_assigns_frk_1_to_iris() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_assigns_frk_1_to_iris.jsonl"))
 }
 
-/// `iris`'s explore session of FRK-1: `farik_propose_design_plan` of a plan for the sign-in page,
+/// `iris`'s explore session of FRK-1: `catervas_propose_design_plan` of a plan for the sign-in page,
 /// which opens with its summary, and a successful end. Hand-written.
 #[must_use]
 pub fn explore_plans_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/explore_plans_frk_1.jsonl"))
 }
 
-/// The Product Manager's decision on FRK-1's plan: `farik_decide_design_plan` approving it, "The
+/// The Product Manager's decision on FRK-1's plan: `catervas_decide_design_plan` approving it, "The
 /// plan keeps to the sign-in page and says what it leaves alone.". Hand-written.
 #[must_use]
 pub fn decide_design_plan_approves_frk_1() -> Transcript {
@@ -425,7 +427,7 @@ pub fn decide_design_plan_approves_frk_1() -> Transcript {
     ))
 }
 
-/// The Product Manager's decision on FRK-1's plan: `farik_decide_design_plan` returning it, "Say
+/// The Product Manager's decision on FRK-1's plan: `catervas_decide_design_plan` returning it, "Say
 /// what the page looks like in the dark theme too.". Hand-written.
 #[must_use]
 pub fn decide_design_plan_returns_frk_1() -> Transcript {
@@ -435,7 +437,7 @@ pub fn decide_design_plan_returns_frk_1() -> Transcript {
 }
 
 /// The Product Manager's decision session of data pipeline request number `pipeline`:
-/// `farik_decide_data_pipeline` with `decision` (`approve`, `decline` or `escalate`) and `reason`.
+/// `catervas_decide_data_pipeline` with `decision` (`approve`, `decline` or `escalate`) and `reason`.
 /// Hand-written.
 #[must_use]
 pub fn decide_data_pipeline(pipeline: u64, decision: &str, reason: &str) -> Transcript {
@@ -469,8 +471,8 @@ pub fn implement_css_frk_2() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/implement_css_frk_2.jsonl"))
 }
 
-/// `iris`'s design review of FRK-2: `farik_check_page` of `/` at each width in each theme, then
-/// `farik_record_design_review` passing it. Hand-written.
+/// `iris`'s design review of FRK-2: `catervas_check_page` of `/` at each width in each theme, then
+/// `catervas_record_design_review` passing it. Hand-written.
 #[must_use]
 pub fn design_review_passes_frk_2() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/design_review_passes_frk_2.jsonl"))
@@ -495,8 +497,8 @@ pub fn refine_writes_page_task_for_iris_frk_1() -> Transcript {
     ))
 }
 
-/// `iris`'s explore session of FRK-1 with the browser: `farik_check_page` of `/` at phone width
-/// in the light theme, then `farik_propose_design_plan` of a plan that opens "The sign-in page
+/// `iris`'s explore session of FRK-1 with the browser: `catervas_check_page` of `/` at phone width
+/// in the light theme, then `catervas_propose_design_plan` of a plan that opens "The sign-in page
 /// never says where to sign in". Hand-written.
 #[must_use]
 pub fn explore_checks_and_plans_frk_1() -> Transcript {
@@ -523,7 +525,7 @@ pub fn review_answers_the_rubric_frk_1() -> Transcript {
     ))
 }
 
-/// The Product Manager's triage of FRK-2, with no Scrum Master: `farik_triage_request` of size
+/// The Product Manager's triage of FRK-2, with no Scrum Master: `catervas_triage_request` of size
 /// `small`. Hand-written.
 #[must_use]
 pub fn triage_frk_2_small_by_pm() -> Transcript {
@@ -738,7 +740,7 @@ impl SessionHandle for WaitingSession {
     }
 }
 
-/// Answers a replayed Farik tool call as a real session's would be: the `PreToolUse` decision
+/// Answers a replayed Catervas tool call as a real session's would be: the `PreToolUse` decision
 /// first, a deny answered `{"error": "<reason>"}`; then the tool, called with the session's tool
 /// context as the daemon has it at that moment, an error answered `{"error": "<its words>"}`. No
 /// `PostToolUse` is recorded.
@@ -764,7 +766,7 @@ pub fn tool_runner(daemon: Arc<DaemonState>) -> ToolRunner {
             let Some(context) = daemon.tool_context(&session_id) else {
                 return json!({ "error": format!("the daemon answers for no session {session_id}") });
             };
-            let name = tool.strip_prefix(FARIK_PREFIX).unwrap_or(&tool);
+            let name = tool.strip_prefix(CATERVAS_PREFIX).unwrap_or(&tool);
             match call_tool(&context, name, input).await {
                 Ok(answer) => answer,
                 Err(error) => json!({ "error": error.to_string() }),

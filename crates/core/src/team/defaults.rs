@@ -1,5 +1,5 @@
 //! What putting a setting back puts back (`docs/SPEC.md` section 10): the schema's defaults plus
-//! the starter values `farik init` writes, held in one place that `farik init` and the web page
+//! the starter values `catervas init` writes, held in one place that `catervas init` and the web page
 //! both read.
 
 use serde_json::json;

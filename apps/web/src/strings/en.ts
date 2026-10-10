@@ -7,21 +7,21 @@ export const en = {
 	noPage: "No page here",
 	noPageHome: "Go to the start page",
 	linkUsed:
-		"This start link was already used. Each link works once, so run farik serve again for a new one.",
-	noSessionTitle: "Open Farik from its start link",
+		"This start link was already used. Each link works once, so run catervas serve again for a new one.",
+	noSessionTitle: "Open Catervas from its start link",
 	noSessionBody:
-		"For your safety, this page only works when opened from the link Farik gives you. Each link works once, so an old one from your history will not open it.",
-	lostTitle: "Farik stopped answering",
+		"For your safety, this page only works when opened from the link Catervas gives you. Each link works once, so an old one from your history will not open it.",
+	lostTitle: "Catervas stopped answering",
 	lostBody:
-		"Your team is safe. Nothing is lost while this page waits. If you closed the Farik window on your computer, start it again and this page reconnects by itself.",
+		"Your team is safe. Nothing is lost while this page waits. If you closed the Catervas window on your computer, start it again and this page reconnects by itself.",
 	lostRetry: "Trying again in 5 seconds",
 	stepTerminal: "Open the Terminal app on your computer.",
 	stepType: "Type this and press Enter:",
 	stepOpen:
-		"Farik prints a link that starts with http://127.0.0.1. Open it in this browser.",
+		"Catervas prints a link that starts with http://127.0.0.1. Open it in this browser.",
 	desktopLater: "The desktop app, coming later, will skip these steps.",
 	copy: "Copy",
-	brand: "Farik",
+	brand: "Catervas",
 	navRail: "Main",
 	navBar: "Places",
 	connected: "Connected",
@@ -50,13 +50,13 @@ export const en = {
 	advanced: "Advanced settings",
 	advancedSwitch: "Show advanced settings",
 	advancedBody:
-		"Farik’s defaults are safe, and you never need to change them. Turning this on shows the detailed settings in each screen: what each agent may do, the team’s rules, the list of checks Farik can run, the models, and how Farik judges a plan ready.",
+		"Catervas’s defaults are safe, and you never need to change them. Turning this on shows the detailed settings in each screen: what each agent may do, the team’s rules, the list of checks Catervas can run, the models, and how Catervas judges a plan ready.",
 	advancedSafe:
-		"Farik refuses any change that would leave your team unable to work, and says what to change instead.",
-	thisComputer: "Farik on this computer",
+		"Catervas refuses any change that would leave your team unable to work, and says what to change instead.",
+	thisComputer: "Catervas on this computer",
 	connectedLead: "Connected.",
 	connectedBody:
-		"This page talks to Farik running on your computer, and nothing leaves it except the requests to the AI models.",
+		"This page talks to Catervas running on your computer, and nothing leaves it except the requests to the AI models.",
 	projectFolder: "Project folder",
 	address: "Address",
 	disconnect: "Disconnect this browser",
@@ -81,11 +81,11 @@ export const en = {
 	continue: "Continue",
 	computerTitle: "Checking your computer",
 	computerLead:
-		"Farik needs three programs. It looked for each one and changed nothing.",
+		"Catervas needs three programs. It looked for each one and changed nothing.",
 	computerClaude: "Claude Code, which your agents run in",
 	computerGit: "git, which keeps your project’s history",
 	computerDocker: "Docker, which keeps your agents’ commands in a safe box",
-	computerImage: "The safe box itself, which Farik prepares in Docker",
+	computerImage: "The safe box itself, which Catervas prepares in Docker",
 	checking: "Looking…",
 	ready: "Ready",
 	notFound: "Not found",
@@ -95,7 +95,7 @@ export const en = {
 	claudeMissing:
 		"Install Claude Code from claude.com/claude-code, then press Check again.",
 	claudeTooOld:
-		"Farik needs a newer Claude Code. Type claude update in the Terminal, then press Check again.",
+		"Catervas needs a newer Claude Code. Type claude update in the Terminal, then press Check again.",
 	gitMissing: "Install git from git-scm.com, then press Check again.",
 	dockerMissing:
 		"Install Docker Desktop from docker.com, start it, then press Check again.",
@@ -103,23 +103,23 @@ export const en = {
 		"Docker is installed but not running. Start Docker Desktop, then press Check again.",
 	dockerOrWithout:
 		"Or continue without it: your agents’ commands then run directly on this computer.",
-	imageMissing: "Farik prepares it once. It takes a few minutes.",
+	imageMissing: "Catervas prepares it once. It takes a few minutes.",
 	prepare: "Prepare it",
 	computerBrowser: "Browser for the UI/UX Designer",
 	browserMissing:
-		"Your UI/UX Designer opens your app in this browser, inside the safe box. Farik fetches it once. It takes a few minutes.",
+		"Your UI/UX Designer opens your app in this browser, inside the safe box. Catervas fetches it once. It takes a few minutes.",
 	fetchIt: "Fetch it",
 	noDockerWarning:
-		"Without Docker, a mistaken or tricked agent command can reach any file you can, and the keys you gave your agents’ connectors. Farik reminds you of this every time it starts.",
+		"Without Docker, a mistaken or tricked agent command can reach any file you can, and the keys you gave your agents’ connectors. Catervas reminds you of this every time it starts.",
 	checkAgain: "Check again",
 	continueWithoutDocker: "Continue without Docker",
 	accountTitle: "Connect your AI account",
 	accountLead:
-		"Your agents think with Claude, and your account pays for it. Farik keeps the key safely on this computer and never shows it to an agent.",
+		"Your agents think with Claude, and your account pays for it. Catervas keeps the key safely on this computer and never shows it to an agent.",
 	accountKind: "Your Claude account",
 	subscription: "I have a Claude subscription (Pro or Max)",
 	subscriptionNote:
-		"Recommended if you already pay for Claude. Make a key for Farik in two steps:",
+		"Recommended if you already pay for Claude. Make a key for Catervas in two steps:",
 	subscriptionStepType: "Open the Terminal and type",
 	subscriptionStepPaste:
 		"Sign in when your browser opens, then paste the key it prints here.",
@@ -132,29 +132,29 @@ export const en = {
 	saveContinue: "Save and continue",
 	storedKeychain: "Your key is saved in your computer’s keychain.",
 	storedFile:
-		"Your key is saved in a private file on this computer, because it has no keychain Farik can use.",
-	accountFound: "Farik already has your key. You can go on.",
+		"Your key is saved in a private file on this computer, because it has no keychain Catervas can use.",
+	accountFound: "Catervas already has your key. You can go on.",
 	projectTitle: "Is this for a project you already have?",
 	projectLead:
-		"Farik works inside a folder on this computer. Your team keeps its plans and notes there, next to your work.",
+		"Catervas works inside a folder on this computer. Your team keeps its plans and notes there, next to your work.",
 	projectChoice: "Project",
 	projectExisting: "Yes, I have a project folder",
 	projectExistingNote:
 		"Pick the folder. It needs to be a git repository, which most code projects already are.",
 	projectNew: "No, start a new one",
 	projectNewNote:
-		"Tell the team what you want to make, in a few sentences. Farik makes a new folder for it.",
+		"Tell the team what you want to make, in a few sentences. Catervas makes a new folder for it.",
 	newWhat: "What do you want to make?",
 	newWhatHint:
 		"For example: an ordering site for my bakery, where customers pick up in the morning. At least 20 characters.",
 	newName: "What should the project be called?",
-	newNameHint: "Farik makes the folder {folder}.",
+	newNameHint: "Catervas makes the folder {folder}.",
 	newWhere: "Where should the folder go?",
 	choose: "Choose",
 	browserTitle: "Choose your project folder",
 	browserParentTitle: "Choose where the new folder goes",
 	browserLead:
-		"These are the folders in your home folder. Farik only looks at folder names here.",
+		"These are the folders in your home folder. Catervas only looks at folder names here.",
 	folders: "Folders",
 	home: "Home",
 	upOne: ".. (up one folder)",
@@ -165,20 +165,20 @@ export const en = {
 	openFolder: "Open folder",
 	useFolder: "Use this folder",
 	browserNote:
-		"A folder that is not a git project can’t be used yet. For a new project, go back and choose “No, start a new one”: Farik makes the folder and sets up git for you.",
+		"A folder that is not a git project can’t be used yet. For a new project, go back and choose “No, start a new one”: Catervas makes the folder and sets up git for you.",
 	opening: "Opening your project…",
-	takeOnError: "Farik could not open that project.",
-	scanTitle: "Here is what Farik found in your project",
+	takeOnError: "Catervas could not open that project.",
+	scanTitle: "Here is what Catervas found in your project",
 	scanLead:
-		"Farik read the folder without changing anything. Your team starts from this, so tell us if something is wrong.",
-	scanFound: "What Farik found",
+		"Catervas read the folder without changing anything. Your team starts from this, so tell us if something is wrong.",
+	scanFound: "What Catervas found",
 	scanWhat: "What it is",
 	scanTested: "How it is tested",
 	scanChecked: "How it is checked",
 	scanLast: "Last change",
 	scanPrivate: "Kept private",
 	scanWorkspace: "a workspace of {count} packages",
-	scanUnknown: "Farik could not tell",
+	scanUnknown: "Catervas could not tell",
 	scanTestsIn: "Tested with {location}",
 	scanNoTests: "No tests found",
 	scanNoChecks: "No checks found",
@@ -186,7 +186,7 @@ export const en = {
 	scanPrivateNote: "No agent will ever open them.",
 	scanNothingPrivate: "Nothing private found",
 	scanChecksNote:
-		"The checks found become your first checks. Farik runs them itself on every piece of work before it reaches you.",
+		"The checks found become your first checks. Catervas runs them itself on every piece of work before it reaches you.",
 	scanWrong: "Something is wrong",
 	scanWrongField: "What is wrong?",
 	scanWrongHint:
@@ -214,7 +214,7 @@ export const en = {
 		"Finds sellers and prices for anything you need to buy, asks them for quotes, and sets up orders for you to approve.",
 	setupMoreRoles: "More roles",
 	setupMoreRolesNote:
-		"Roles Farik does not suggest. Tick one to add it to your team; a team has seven people at most.",
+		"Roles Catervas does not suggest. Tick one to add it to your team; a team has seven people at most.",
 	teamName: "Name for the {role}",
 	teamAdd: "Add someone",
 	teamContinueSix: "Continue with these six",
@@ -229,7 +229,7 @@ export const en = {
 	roleProcurement: "Procurement Specialist",
 	mayTitle: "What may your team do on its own?",
 	mayLead:
-		"Two things can cause real harm, so Farik asks you about them directly. Nothing runs until you answer both.",
+		"Two things can cause real harm, so Catervas asks you about them directly. Nothing runs until you answer both.",
 	mayCommands: "May the team run commands on this computer?",
 	mayCommandsNote:
 		"Running the tests and trying the app needs this. Commands run in a sealed box, away from your other files.",
@@ -239,12 +239,12 @@ export const en = {
 	mayCommandsNo: "No, nobody may",
 	mayCommandsNoNote: "The team can plan and write, but cannot test anything.",
 	mayStillChecks:
-		"Farik still runs every check itself; the agents cannot run commands.",
+		"Catervas still runs every check itself; the agents cannot run commands.",
 	mayPush: "May the Developer send its work to your online repository?",
 	mayPushNoteOne:
-		"Only {name}, the Developer, ever sends code, and only to its own fix or feature branch. Farik sends the other agents’ documents itself. Nothing reaches your main branch without you.",
+		"Only {name}, the Developer, ever sends code, and only to its own fix or feature branch. Catervas sends the other agents’ documents itself. Nothing reaches your main branch without you.",
 	mayPushNoteMany:
-		"Only the Developers ever send code, and only to their own fix or feature branches. Farik sends the other agents’ documents itself. Nothing reaches your main branch without you.",
+		"Only the Developers ever send code, and only to their own fix or feature branches. Catervas sends the other agents’ documents itself. Nothing reaches your main branch without you.",
 	mayPushYes: "Yes, on its own branches",
 	mayPushYesNote: "Useful if you review work on GitHub.",
 	mayPushNo: "No, keep everything on this computer",
@@ -271,15 +271,15 @@ export const en = {
 	finishLead:
 		"Accepted work has to be added to your project. Choose how much you want to do by hand.",
 	finishChoice: "Accepted work",
-	finishAuto: "Farik adds it for me",
+	finishAuto: "Catervas adds it for me",
 	finishAutoNote:
-		"Recommended. Farik adds the work to your project as soon as you accept it, and sends it to your online repository if you have one.",
+		"Recommended. Catervas adds the work to your project as soon as you accept it, and sends it to your online repository if you have one.",
 	finishPullRequest: "Open a pull request on GitHub for each piece",
 	finishPullRequestNote:
 		"You, or someone you trust, merges each one on GitHub. Needs the GitHub app on this computer.",
 	finishManual: "I will add each one myself",
 	finishManualNote:
-		"Farik waits. Each accepted piece shows an “Add to project” button until you press it.",
+		"Catervas waits. Each accepted piece shows an “Add to project” button until you press it.",
 	finishSafe:
 		"Rules for the whole team, the checks every piece of work must pass, and how plans are judged are already set to safe choices.",
 	startTeam: "Start the team",
@@ -305,7 +305,7 @@ export const en = {
 	ruleMaxCostHint: "In US dollars. Leave it empty for no limit.",
 	alwaysOn: "Always on",
 	checksTitle: "Checks for every piece of work",
-	checksLead: "Farik runs these itself before work reaches you.",
+	checksLead: "Catervas runs these itself before work reaches you.",
 	checkFound: "Found in your project. Runs: {command}",
 	checkYours: "Added by you.",
 	checkReviewed: "Someone on the team reviewed it",
@@ -325,7 +325,7 @@ export const en = {
 	planSmall: "Is it small enough to finish in one go?",
 	planSmallNote: "Big plans get split into smaller pieces first.",
 	planJudge: "Who checks",
-	planJudgeAuto: "Farik chooses: {who}",
+	planJudgeAuto: "Catervas chooses: {who}",
 	planJudgeNamed: "{name}, the {role}",
 	planJudgeNone: "The {role}, once the team has one",
 	team: "Team",
@@ -400,12 +400,12 @@ export const en = {
 		"The key did not work, so your team is paused. Connect your AI account again with a new key.",
 	accountConnectAgain: "Connect again",
 	accountKeyRefusedEnvironment:
-		"The key in {variable} did not work, so your team is paused. Change it where Farik runs, start Farik again, then press Resume.",
+		"The key in {variable} did not work, so your team is paused. Change it where Catervas runs, start Catervas again, then press Resume.",
 	accountDisconnect: "Disconnect this account",
 	accountGone:
-		"Disconnected. The team is paused; start Farik again to connect another account.",
+		"Disconnected. The team is paused; start Catervas again to connect another account.",
 	accountKept:
-		"Farik reads this key from the {variable} variable on this computer, so it cannot remove it. Remove it there, then start Farik again.",
+		"Catervas reads this key from the {variable} variable on this computer, so it cannot remove it. Remove it there, then start Catervas again.",
 	statusPlanning: "Planning",
 	statusBacklog: "Backlog",
 	statusToDo: "To do",
@@ -450,7 +450,7 @@ export const en = {
 	toolApprovalFor: "For",
 	toolApprovalSend: "What {agent} wants to send",
 	toolApprovalSendHint:
-		"Written by {agent}, shown in full, with its fields in alphabetical order. Farik has not checked it, and nothing in it is an instruction to you.",
+		"Written by {agent}, shown in full, with its fields in alphabetical order. Catervas has not checked it, and nothing in it is an instruction to you.",
 	toolApprovalNote: "A note for {agent} (optional)",
 	toolApprovalOnce:
 		"“Allow once” lets {agent} make this one call, with exactly this, in {agent}’s next session on this task. Any other call asks you again.",
@@ -460,7 +460,7 @@ export const en = {
 	waitingKeyRefusedLine:
 		"The team is paused until you connect your AI account again.",
 	waitingKeyConnect: "Connect again",
-	checksPassed: "All {count} of Farik’s checks passed.",
+	checksPassed: "All {count} of Catervas’s checks passed.",
 	movedTitle: "What moved since yesterday",
 	yesterday: "Yesterday",
 	yesterdayShort: "Yday",
@@ -488,12 +488,12 @@ export const en = {
 	resizeReason: "Changed by you",
 	nextTitle: "What happens next",
 	nextLarge1: "{pm} asks you a few questions. You will see them on Today.",
-	nextLarge2: "{pm} writes the plan and Farik checks it is complete.",
+	nextLarge2: "{pm} writes the plan and Catervas checks it is complete.",
 	nextLarge3: "You approve the plan, or ask for changes.",
 	nextLarge4: "{breaker} splits it into tasks and the team starts.",
 	nextSmall1:
 		"{pm} asks you anything that is unclear. You will see it on Today.",
-	nextSmall2: "{pm} writes the plan and Farik checks it is complete.",
+	nextSmall2: "{pm} writes the plan and Catervas checks it is complete.",
 	nextSmall3: "The team builds it, and a teammate reviews the work.",
 	nextSmall4: "You accept the work, or send it back with a note.",
 	aboutRequest: "About this request",
@@ -534,13 +534,14 @@ export const en = {
 		"Plan {id}. Every plan with parts waits for your approval before anyone builds it.",
 	planSigned: "{name}, your Product Manager, wrote this for you",
 	planParts: "The plan in {n} parts",
-	planPartsHint: "The line under each part is how Farik will know it is done.",
+	planPartsHint:
+		"The line under each part is how Catervas will know it is done.",
 	planDoneWhen: "Done when {text}",
 	planWholeDoneWhen: "The whole plan is done when",
 	planOut: "Not in this plan",
-	planChecked: "What Farik checked",
+	planChecked: "What Catervas checked",
 	planCheckedAll:
-		"The plan is complete enough for the team to start. Farik checks this itself.",
+		"The plan is complete enough for the team to start. Catervas checks this itself.",
 	checkPassed: "Passed",
 	checkNotYet: "Not yet",
 	planWritten: "See the plan as written",
@@ -588,10 +589,10 @@ export const en = {
 	criterionWho: "Who checks it",
 	criterionReview: "Someone on the team reviews it",
 	criterionHuman: "You decide",
-	criterionCommand: "Farik runs a command",
+	criterionCommand: "Catervas runs a command",
 	criterionCommandField: "The command",
 	criterionCommandLocked:
-		"Farik runs a command. Turn on Advanced view to change it.",
+		"Catervas runs a command. Turn on Advanced view to change it.",
 	addCriterion: "Add a check",
 	removeCriterion: "Remove check {n}",
 	fieldOut: "What is left out",
@@ -606,7 +607,7 @@ export const en = {
 	verdictOne: "The one left: {plain}",
 	verdictMany: "Still to do:",
 	verdictNote:
-		"Farik checks the plan as you type. The results come from your project, not from this page.",
+		"Catervas checks the plan as you type. The results come from your project, not from this page.",
 	editSave: "Save",
 	savedBack:
 		"Saved. {pm} checks the plan again, then it comes back to you to approve.",
@@ -621,7 +622,7 @@ export const en = {
 	gateReviewedAfter:
 		"{name}, your {role}, reviewed the code after {designer} passed the screens",
 	gateCheckedHint:
-		"Farik ran these checks itself. It did not take the team’s word for them.",
+		"Catervas ran these checks itself. It did not take the team’s word for them.",
 	gateSeeChanges: "See the code changes",
 	gateHideChanges: "Hide the code changes",
 	gateSize: "{n} files, +{added} −{removed}",
@@ -637,7 +638,7 @@ export const en = {
 	gateScreensCheckedBy: "{day}, by {name}",
 	gateCodeReviewed: "Code reviewed",
 	gateWhoLooked: "Who looked at it, in order",
-	gateLookedFarik: "Farik ran its checks",
+	gateLookedCatervas: "Catervas ran its checks",
 	gateLookedScreens: "{name} checked the screens",
 	gateLookedScreensBack: "{name} sent the screens back",
 	gateLookedCode: "{name} reviewed the code",
@@ -653,12 +654,12 @@ export const en = {
 	sendBackElse: "Something else",
 	sendBackNote: "Your note to {name}",
 	sendBackTry:
-		"This is try {try} of {of}. After the last, Farik stops and asks you what to do.",
+		"This is try {try} of {of}. After the last, Catervas stops and asks you what to do.",
 	sendBackCancel: "Cancel",
 	sendBackSend: "Send back to {name}",
 	helpTitle: "{name} needs your help with “{title}”",
 	helpExplains: "{name}, your {role}, explains what happened",
-	helpFarikExplains: "Farik explains what happened",
+	helpCatervasExplains: "Catervas explains what happened",
 	helpReadPlan: "Read the plan",
 	helpNothing: "There is nothing to choose here yet.",
 	helpTried: "What {name} tried",
@@ -682,15 +683,15 @@ export const en = {
 		"Every agent reads the project. Pause the agent instead of taking reading away.",
 	refuseStatusFromCard: "Pause, retire or resume someone from their card.",
 	refuseJudge:
-		"Nobody on the team is an active {role}. Let Farik choose who checks, or add a {role}.",
+		"Nobody on the team is an active {role}. Let Catervas choose who checks, or add a {role}.",
 	refuseNoQuestions:
 		"Checking plans needs at least one question. Tick one, or stop checking plans.",
 	refuseQuestionLength: "A question is 10 to 200 characters long.",
 	refuseLastOfRole: "{name} is your only {role}, so add another {role} first.",
 	refuseLastJudge:
-		"{name} checks your plans. Let Farik choose who checks, or add another {role}, first.",
+		"{name} checks your plans. Let Catervas choose who checks, or add another {role}, first.",
 	refuseOther:
-		"Farik could not make this change. Check what you changed, then try again.",
+		"Catervas could not make this change. Check what you changed, then try again.",
 	refuseAlreadyPaused: "The team is already paused.",
 	refuseNotPaused: "The team is already working.",
 	refuseAlreadyAnswered: "This question already has an answer.",
@@ -700,7 +701,7 @@ export const en = {
 	refuseReviewFirst:
 		"The reviewer has not finished yet. Send it back once their review is in.",
 	refuseChecksNotRun:
-		"Farik has not finished checking this work yet. Try again once the checks have run.",
+		"Catervas has not finished checking this work yet. Try again once the checks have run.",
 	refuseChecksFailed:
 		"Some checks failed once the parts were put together, so this cannot be accepted yet. Send it back with what is missing.",
 	refuseUsePlan:
@@ -715,21 +716,21 @@ export const en = {
 	refuseSprintOpen: "A sprint is already open. End it before starting another.",
 	refuseNoSprintOpen: "No sprint is open right now.",
 	refuseTriage:
-		"Farik could not size this request. Reload the page to see where it is now.",
+		"Catervas could not size this request. Reload the page to see where it is now.",
 	refuseLock:
-		"Farik could not take or give back this plan. Reload the page to see where it is now.",
-	refuseCommand: "Farik could not do that. Reload the page, then try again.",
+		"Catervas could not take or give back this plan. Reload the page to see where it is now.",
+	refuseCommand: "Catervas could not do that. Reload the page, then try again.",
 	planHoldFirst:
 		"The team is working to this plan. Hold the work first, then change it.",
 	requestSentAs: "This was already sent, as {id}.",
 	setupNoFolder: "That folder is not there any more. Choose another.",
 	setupOutsideHome: "Choose a folder inside your home folder.",
-	setupUnreadable: "Farik cannot open that folder. Choose another.",
+	setupUnreadable: "Catervas cannot open that folder. Choose another.",
 	setupNotGit:
 		"That folder is not a git project. Choose another, or start a new project.",
 	setupInsideGit:
 		"That folder is inside a git project. Choose the project’s top folder instead.",
-	setupBusy: "Farik is already running this project.",
+	setupBusy: "Catervas is already running this project.",
 	setupNoAccount: "Connect your AI account first.",
 	setupName:
 		"A project’s name is lowercase letters, digits and dashes, up to 64 characters.",
@@ -746,16 +747,16 @@ export const en = {
 	setupNoKeep:
 		"This computer has no keychain and no folder to keep the key in.",
 	setupKeyFromEnvironment:
-		"Your AI account’s key is set where Farik runs. Change it there, then start Farik again.",
+		"Your AI account’s key is set where Catervas runs. Change it there, then start Catervas again.",
 	setupNoDocker: "Docker is not installed on this computer.",
 	setupBuildFailed:
-		"Farik could not prepare the sandbox. Check that Docker is running, then try again.",
+		"Catervas could not prepare the sandbox. Check that Docker is running, then try again.",
 	setupPullFailed:
-		"Farik could not fetch the browser. Check that Docker is running and you are online, then try again.",
+		"Catervas could not fetch the browser. Check that Docker is running and you are online, then try again.",
 	setupRefused:
-		"Farik could not do that. Check what you entered, then try again.",
+		"Catervas could not do that. Check what you entered, then try again.",
 	pageNotFound: "This is not here any more. It may have been removed.",
-	pageFailed: "Farik could not open this page. Reload it to try again.",
+	pageFailed: "Catervas could not open this page. Reload it to try again.",
 	teamAddRole: "Their role",
 	teamFull:
 		"Your team has seven people, the most it can have. Retire someone to make room.",
@@ -775,7 +776,7 @@ export const en = {
 	rulesSpendTitle: "What the team may spend",
 	rulesFinish: "How finished work is added",
 	accountConfirm:
-		"Disconnecting pauses your team until you start Farik again and connect an account.",
+		"Disconnecting pauses your team until you start Catervas again and connect an account.",
 	accountDisconnectYes: "Disconnect and pause the team",
 	board: "Board",
 	costs: "Costs",
@@ -868,11 +869,11 @@ export const en = {
 	tabChanges: "Code changes",
 	tabNotes: "Notes",
 	taskFor: "What this task is for",
-	taskChecks: "What Farik checks",
+	taskChecks: "What Catervas checks",
 	checkFailed: "Failed last time",
 	checkNotRun: "Not run yet",
 	taskHistoryHint:
-		"Everything that happened to this task, newest first. The grey names are what Farik records in its log.",
+		"Everything that happened to this task, newest first. The grey names are what Catervas records in its log.",
 	toldCreated: "{who} asked for it.",
 	toldMoved: "{who} moved {task} to {status}.",
 	toldIt: "it",
@@ -881,7 +882,7 @@ export const en = {
 	toldSentBack: "{who} sent {task} back.",
 	toldNote: "{who} left a note.",
 	toldReview: "{who} reviewed it.",
-	toldCheck: "Farik ran a check.",
+	toldCheck: "Catervas ran a check.",
 	toldStarted: "{who} started working on it.",
 	toldEnded: "{who} finished a session.",
 	toldCost: "{who} spent {usd}.",
@@ -889,20 +890,20 @@ export const en = {
 	toldResolved: "{who} answered the call for help.",
 	toldIntegrated: "It was added to the project.",
 	toldPlan: "The plan was written or checked.",
-	toldOther: "Farik recorded this in its log.",
+	toldOther: "Catervas recorded this in its log.",
 	toldLocked: "{who} locked the plan.",
 	toldUnlocked: "{who} unlocked the plan.",
 	toldAsked: "{who} asked you a question.",
 	toldAnswered: "{who} answered a question.",
 	toldTriaged: "{who} sized up the request.",
 	toldLimit: "A spending limit was reached.",
-	toldRefused: "Farik did not allow a move to {status}.",
+	toldRefused: "Catervas did not allow a move to {status}.",
 	toldAged: "The call for help has been waiting a while.",
-	toldPullRequest: "Farik opened a pull request for it.",
+	toldPullRequest: "Catervas opened a pull request for it.",
 	toldPlanned: "{who} planned it into a sprint.",
-	toldDrift: "Farik found its files out of step with its log.",
+	toldDrift: "Catervas found its files out of step with its log.",
 	toldSaid: "{who} said something about it in the channel.",
-	toldDenied: "Farik stopped a step {who} tried.",
+	toldDenied: "Catervas stopped a step {who} tried.",
 	toldDesignProposed: "{who} wrote a plan.",
 	toldDesignApproved: "{who} approved {designer}’s plan.",
 	toldDesignReturned: "{who} sent {designer}’s plan back.",
@@ -920,9 +921,9 @@ export const en = {
 	designApproved: "{pm} approved the plan {day} at {time}",
 	designReturned: "{pm} sent the plan back {day} at {time}",
 	designReturns:
-		"Plans sent back: {n} of {of}. If a {nth} is sent back, Farik stops the task and asks you.",
+		"Plans sent back: {n} of {of}. If a {nth} is sent back, Catervas stops the task and asks you.",
 	designReturnsMany:
-		"Plans sent back: {n} of {of}. If {of} are sent back, Farik stops the task and asks you.",
+		"Plans sent back: {n} of {of}. If {of} are sent back, Catervas stops the task and asks you.",
 	designWrote: "{designer} wrote this plan {day} at {time}",
 	designToday: "today",
 	designOnDay: "on {day}",
@@ -947,12 +948,12 @@ export const en = {
 	taskAddNothing:
 		"Nothing to add: this task’s work stays in the {role}’s private files, and its acceptance was its end.",
 	taskAddHint:
-		"Once the task is accepted, Farik adds its changes to your main branch, one task at a time.",
+		"Once the task is accepted, Catervas adds its changes to your main branch, one task at a time.",
 	taskAdd: "Add to the project",
 	taskAddNotYet: "Not yet: the task has not been accepted.",
-	taskAddOnItsOwn: "Accepted. Farik adds it to your project on its own.",
+	taskAddOnItsOwn: "Accepted. Catervas adds it to your project on its own.",
 	taskAddByPullRequest:
-		"Accepted. Farik opens a pull request for it, for you to merge.",
+		"Accepted. Catervas opens a pull request for it, for you to merge.",
 	taskAddByHand: "Accepted. It waits for you to add it.",
 	riskLowWhy: "Low. The team may accept it without you.",
 	riskMediumWhy: "Medium. The team may still accept it without you.",
@@ -1020,7 +1021,7 @@ export const en = {
 	metricNeeded: "Times the team needed you, per finished task",
 	metricNeededNote: "Approvals, answers, and help when stuck.",
 	metricCost: "Average cost of a finished task",
-	metricChecks: "Checks Farik runs itself",
+	metricChecks: "Checks Catervas runs itself",
 	metricChecksNote: "The others are judged by a reviewer or by you.",
 	metricWeeks: "Active weeks: {n}",
 	metricMessages:
@@ -1088,16 +1089,16 @@ export const en = {
 	channelMeetingGone: "That meeting is older than the channel keeps.",
 	channelEarlier: "Show earlier messages",
 	channelEarlierFailed:
-		"Farik could not read the earlier messages. Try again in a moment.",
+		"Catervas could not read the earlier messages. Try again in a moment.",
 	channelPreview: "In the channel",
 	channelOpen: "Open the channel",
 	sprintReadIt: "Read it",
 	previewTitle: "How to open your app",
 	previewLead:
-		"{designer}, your UI/UX Designer, looks at your app in a browser to check its screens. Tell Farik the commands you use to open it. Farik runs them inside Docker’s sandbox, never straight on your computer.",
+		"{designer}, your UI/UX Designer, looks at your app in a browser to check its screens. Tell Catervas the commands you use to open it. Catervas runs them inside Docker’s sandbox, never straight on your computer.",
 	previewSetupTitle: "{designer} needs to know how to open your app",
 	previewSetupLead:
-		"{designer} looks at your app in a browser. Tell Farik the commands you use to open it; Farik runs them inside Docker’s sandbox. Not sure? Leave them empty. You can add them in Settings later, and {designer} waits until you do.",
+		"{designer} looks at your app in a browser. Tell Catervas the commands you use to open it; Catervas runs them inside Docker’s sandbox. Not sure? Leave them empty. You can add them in Settings later, and {designer} waits until you do.",
 	previewPrepare: "Get it ready (optional)",
 	previewPrepareHint:
 		"Installs what your app needs and builds it. This may use the internet, for up to 15 minutes.",
@@ -1111,10 +1112,10 @@ export const en = {
 		"Not sure what to type? Whoever set up your app knows. Your README file often says too.",
 	refusePreviewPort: "Use a number from 1024 to 65535.",
 	refusePreview:
-		"Farik cannot use these. Starting your app needs a command and a port, each command is at most 500 characters, and the first page starts with /.",
+		"Catervas cannot use these. Starting your app needs a command and a port, each command is at most 500 characters, and the first page starts with /.",
 	teamNeedsSandbox: "Needs Docker’s sandbox",
 	teamNeedsSandboxNote:
-		"{designer} opens your app in a browser, and only inside Docker’s sandbox, a safe box that keeps it away from the rest of your computer. Farik did not find Docker here.",
+		"{designer} opens your app in a browser, and only inside Docker’s sandbox, a safe box that keeps it away from the rest of your computer. Catervas did not find Docker here.",
 	teamCheckAgain: "Check again",
 	teamInstallDocker: "How to install Docker",
 	connectors: "Connectors",
@@ -1126,28 +1127,29 @@ export const en = {
 	connectorOff: "Off: {name} can’t see your app, so gets no work.",
 	connectorsNote: "On for UI/UX Designers, optional for others.",
 	connectorsYours: "Added by you",
-	connectorsYoursLead: "Not checked by Farik; you labelled their tools.",
+	connectorsYoursLead: "Not checked by Catervas; you labelled their tools.",
 	connectorStdio: "Runs on this computer",
 	connectorHttp: "Web address",
 	connectorTools: "{count} tools: {labels}",
 	connectorOneTool: "1 tool: {labels}",
-	connectorCantUse: "{count} Farik can’t use",
+	connectorCantUse: "{count} Catervas can’t use",
 	connectorAgain: "Connect again to use it",
 	connectorAgainNote:
 		"Its settings changed since you connected it here. {name} skips it until you connect again.",
 	connectorAgainButton: "Connect again",
-	connectorUnreadable: "Farik cannot read {name}’s keys for {server} right now",
+	connectorUnreadable:
+		"Catervas cannot read {name}’s keys for {server} right now",
 	connectorUnreadableNote:
 		"Keychain or key file couldn’t be opened, so {name} works without {server}. If asked, choose “Always”.",
 	connectorRemove: "Remove",
 	connectorRemoveLabel: "Remove {server}",
 	connectorRemoveTitle: "Remove {server} from {name}?",
 	connectorRemoveBody:
-		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from this computer.",
+		"{name} stops using {server} from the next piece of work. Catervas deletes the keys you gave it for {name} from this computer.",
 	connectorRemoveBodyKeychain:
-		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from your keychain.",
+		"{name} stops using {server} from the next piece of work. Catervas deletes the keys you gave it for {name} from your keychain.",
 	connectorRemoveBodyFile:
-		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from the private file on this computer.",
+		"{name} stops using {server} from the next piece of work. Catervas deletes the keys you gave it for {name} from the private file on this computer.",
 	connectorKeychain: "Keys in your keychain.",
 	connectorFile: "Keys in a private file here.",
 	connectorRemoveOthers:
@@ -1155,25 +1157,25 @@ export const en = {
 	connectorKeep: "Keep it",
 	connectorSignedIn: "Signed in to {host}",
 	connectorSignInEnded:
-		"{host} ended Farik’s sign-in. Sign in again to use it.",
+		"{host} ended Catervas’s sign-in. Sign in again to use it.",
 	connectorSignInAgain: "Sign in again",
 	connectorRemoveSignedKeychain:
-		"Farik deletes the sign-in from your keychain and asks {host} to forget it.",
+		"Catervas deletes the sign-in from your keychain and asks {host} to forget it.",
 	connectorRemoveSignedFile:
-		"Farik deletes the sign-in from the private file on this computer and asks {host} to forget it.",
+		"Catervas deletes the sign-in from the private file on this computer and asks {host} to forget it.",
 	connectorRemoveSignedKeychainStays:
-		"Farik deletes the sign-in from your keychain. To remove Farik completely, also remove it in {settings}.",
+		"Catervas deletes the sign-in from your keychain. To remove Catervas completely, also remove it in {settings}.",
 	connectorRemoveSignedFileStays:
-		"Farik deletes the sign-in from the private file on this computer. To remove Farik completely, also remove it in {settings}.",
+		"Catervas deletes the sign-in from the private file on this computer. To remove Catervas completely, also remove it in {settings}.",
 	connectorSettings: "{host}’s settings",
 	connectorRemoveOthersSigned:
 		"Nobody else on the team is affected. To use it again, add it again and sign in.",
 	connectorRemoveGoogleAds:
-		"Farik pauses your marketing plan’s running ads first, since without this connection it could not stop them at their budget. If Google refuses, Google Ads is removed anyway, and the ads keep running at Google until their end date or their budget there; pause them in Google Ads.",
+		"Catervas pauses your marketing plan’s running ads first, since without this connection it could not stop them at their budget. If Google refuses, Google Ads is removed anyway, and the ads keep running at Google until their end date or their budget there; pause them in Google Ads.",
 	connectorRemoveAgainSigned: "To use it again, add it again and sign in.",
 	connectorCustom: "A custom connector",
 	connectorCustomNote:
-		"Any tool, by command or web address. Not checked by Farik: you label its tools. Runs with your rights; add only ones you trust. Give files by full path, starting with /.",
+		"Any tool, by command or web address. Not checked by Catervas: you label its tools. Runs with your rights; add only ones you trust. Give files by full path, starting with /.",
 	connectorCustomAdd: "Add a custom connector",
 	connectorCustomKeychain: "If asked about the keychain, choose “Always”.",
 	tagNetwork: "Only reads",
@@ -1194,7 +1196,7 @@ export const en = {
 		"Lowercase letters, numbers and dashes. It is how {name}’s page lists it.",
 	addHow: "How does it start?",
 	addCommandChoice: "A command",
-	addCommandChoiceNote: "Farik runs it on this computer.",
+	addCommandChoiceNote: "Catervas runs it on this computer.",
 	addUrlChoice: "A web address",
 	addUrlChoiceNote: "The service runs it for you.",
 	addCommand: "Command",
@@ -1209,7 +1211,7 @@ export const en = {
 	addUrl: "Web address",
 	addUrlHint: "Copy it from the service’s instructions.",
 	addUrlSecret:
-		"This address has a key inside it. Farik cannot keep a key that is part of an address safe yet, so a service like this cannot be added for now. Zapier is one.",
+		"This address has a key inside it. Catervas cannot keep a key that is part of an address safe yet, so a service like this cannot be added for now. Zapier is one.",
 	addHeader: "Where the key goes",
 	addHeaderHint: "Change it only if the service’s instructions say so.",
 	addHeaderN: "Header {count}",
@@ -1221,7 +1223,7 @@ export const en = {
 	addKeysHint:
 		"Each key is for {name} only. Name it as the connector’s instructions do.",
 	addKeysAgain:
-		"Type {name}’s key again. Farik does not reuse the old one for a changed connector.",
+		"Type {name}’s key again. Catervas does not reuse the old one for a changed connector.",
 	addKeyName: "Key name",
 	addKeyValue: "Key",
 	addKeyRemove: "Remove",
@@ -1229,111 +1231,111 @@ export const en = {
 	addKeyMore: "Add another key",
 	addNext: "Next: list its tools",
 	addNextNote:
-		"Farik starts it once, with {name}’s keys, to list what it can do.",
+		"Catervas starts it once, with {name}’s keys, to list what it can do.",
 	addChanged:
 		"{server}’s settings in your project changed since you connected it on this computer, or it was never connected here. Check each one against the service’s or the connector’s instructions before you go on.",
 	addListLead:
-		"Farik has not checked {server}, so you decide what {name} may do with each of its {count} tools. When unsure, leave “Changes things, asks you”.",
+		"Catervas has not checked {server}, so you decide what {name} may do with each of its {count} tools. When unsure, leave “Changes things, asks you”.",
 	addFrom: "Each tool’s description comes from {server}.",
 	addUnusable:
-		"Farik can’t use this tool: its name has characters Farik can’t pass on. {name} is not given it.",
+		"Catervas can’t use this tool: its name has characters Catervas can’t pass on. {name} is not given it.",
 	addBack: "Back",
 	addDone: "{server} is added to {name}",
 	addKeychain:
 		"{name}’s keys for {server} are kept in your computer’s keychain.",
 	addKeychainNote:
-		"{name} never sees them: Farik hands them to {server} when {server} starts.",
+		"{name} never sees them: Catervas hands them to {server} when {server} starts.",
 	addFile:
 		"{name}’s keys for {server} are kept in a private file only you can read.",
 	addFileNote:
-		"This computer has no keychain, so Farik keeps them in a file in your Farik folder that only your user account can open. {name} never sees them.",
+		"This computer has no keychain, so Catervas keeps them in a file in your Catervas folder that only your user account can open. {name} never sees them.",
 	addKeychainNoteNoSandbox:
-		"Farik hands them to {server} when {server} starts, and never puts them in {name}’s instructions. Without Docker’s sandbox, a command {name} runs on this computer could reach them.",
+		"Catervas hands them to {server} when {server} starts, and never puts them in {name}’s instructions. Without Docker’s sandbox, a command {name} runs on this computer could reach them.",
 	addFileNoteNoSandbox:
-		"This computer has no keychain, so Farik keeps them in a file in your Farik folder that only your user account can open. Without Docker’s sandbox, a command {name} runs on this computer could reach them.",
+		"This computer has no keychain, so Catervas keeps them in a file in your Catervas folder that only your user account can open. Without Docker’s sandbox, a command {name} runs on this computer could reach them.",
 	addNextWork: "{name} can use it from the next piece of work.",
 	addOnly:
 		"Only {name} has {server}. To give it to someone else, add it from their page, with their own key.",
 	addBackTo: "Back to {name}",
 	addNameWrong:
 		"Use lowercase letters, numbers and dashes, starting with a letter.",
-	addNameReserved: "Farik keeps this name for itself. Choose another.",
+	addNameReserved: "Catervas keeps this name for itself. Choose another.",
 	addNameTwice: "{name} already has a connector with this name.",
 	addCommandWrong:
-		"Farik cannot use this command as it is. Copy it again from the connector’s instructions.",
+		"Catervas cannot use this command as it is. Copy it again from the connector’s instructions.",
 	addUrlWrong:
-		"Farik cannot use this address. Copy it again from the service’s instructions; it starts with https://.",
+		"Catervas cannot use this address. Copy it again from the service’s instructions; it starts with https://.",
 	addHeaderWrong:
 		"Write a name, a colon, then the value, like Authorization: Bearer {API_KEY}, naming only the keys below.",
 	addCommandNotAbsolute:
-		"Farik cannot find a program by a path like this one. Give the program’s name alone, like npx, or its full path, starting with /.",
+		"Catervas cannot find a program by a path like this one. Give the program’s name alone, like npx, or its full path, starting with /.",
 	addCommandWhole:
 		"Put only the program here, like npx. Put each part after it below, in a field of its own.",
 	addStateInsideProject:
-		"Farik keeps its settings inside this project’s folder, so a connector here would run among the project’s files. Whoever set up Farik on this computer can keep its settings elsewhere.",
+		"Catervas keeps its settings inside this project’s folder, so a connector here would run among the project’s files. Whoever set up Catervas on this computer can keep its settings elsewhere.",
 	addArgSecret:
 		"This puts a key itself in your project’s shared settings. Leave it out here, and type the key under Keys, named as the connector’s instructions name it.",
 	addHeaderSecret:
 		"This puts the key itself in your project’s shared settings. Write {API_KEY} where the key goes, and type the key under Keys.",
 	addTagUnknown:
-		"{server}’s tools changed since Farik listed them. Press “Next: list its tools” to list them again, then label each one.",
+		"{server}’s tools changed since Catervas listed them. Press “Next: list its tools” to list them again, then label each one.",
 	addKeyWrong:
 		"A key name is capital letters, numbers and underscores, starting with a letter, like API_KEY. Up to 8 keys.",
 	addNotListed:
-		"Farik could not start {server} or reach it to list its tools. Check the command or the address, and the keys, against its instructions.",
+		"Catervas could not start {server} or reach it to list its tools. Check the command or the address, and the keys, against its instructions.",
 	addTimeout:
 		"{server} did not answer within thirty seconds. Check the command or the address, and try again.",
 	addSignInLead: "{host} lets you sign in.",
 	addSignInButton: "Sign in with {host}",
 	addSignInFor: "for {host}",
 	addSignInNote:
-		"Farik opens its sign-in page in a new tab. Come back here when you’re done.",
+		"Catervas opens its sign-in page in a new tab. Come back here when you’re done.",
 	addSignInCodeNote:
-		"Farik shows you a short code to type on {provider}’s page.",
+		"Catervas shows you a short code to type on {provider}’s page.",
 	addSigningIn: "Signing in",
 	addCodeLead: "Enter this code on {provider}:",
 	addCodeWarning:
-		"Only enter a code that this page shows you. Farik never sends you a code in a chat.",
+		"Only enter a code that this page shows you. Catervas never sends you a code in a chat.",
 	addCodeCopy: "Copy the code",
 	addCodeOpen: "Open {page}",
 	addCodeWaiting: "Waiting for you on {provider}…",
 	addInstallLine:
-		"To let {name} read private repositories, install Farik on them on {provider}.",
-	addInstallLink: "Install Farik on {provider}",
+		"To let {name} read private repositories, install Catervas on them on {provider}.",
+	addInstallLink: "Install Catervas on {provider}",
 	addUseAKey: "Use a key instead",
 	addWaiting: "Waiting for you to sign in to {host}…",
 	addOpenAgain: "Open the sign-in page again",
 	addSignedInTo: "Signed in to {host}.",
 	addTryAgain: "Try again",
-	addSignInDenied: "You said no on {host}’s page, so Farik isn’t connected.",
+	addSignInDenied: "You said no on {host}’s page, so Catervas isn’t connected.",
 	addSignInTimedOut: "The sign-in took longer than 10 minutes.",
 	addSignInMismatch:
-		"Something didn’t match on the way back from {host}, so Farik stopped to keep you safe.",
+		"Something didn’t match on the way back from {host}, so Catervas stopped to keep you safe.",
 	addSignInFailed:
 		"{host} didn’t finish the sign-in. Try again, or use a key if it gives you one.",
 	addNotSupported:
-		"{host} doesn’t let Farik sign in by itself yet. If it gives you a key, paste it below.",
+		"{host} doesn’t let Catervas sign in by itself yet. If it gives you a key, paste it below.",
 	addSignInCouldNot:
-		"Farik couldn’t sign in to {host}. If it gives you a key, paste it below.",
+		"Catervas couldn’t sign in to {host}. If it gives you a key, paste it below.",
 	addSignInEnded:
-		"{host} ended Farik’s sign-in. Sign in again to use {server}.",
+		"{host} ended Catervas’s sign-in. Sign in again to use {server}.",
 	addSignedIn: "Signed in.",
 	addSignedInKeychain:
-		"{name} uses {service} as you. Farik keeps the sign-in in your keychain.",
+		"{name} uses {service} as you. Catervas keeps the sign-in in your keychain.",
 	addSignedInFile:
-		"{name} uses {service} as you. Farik keeps the sign-in in a private file only you can read.",
+		"{name} uses {service} as you. Catervas keeps the sign-in in a private file only you can read.",
 	addSignedInNoSandbox:
 		"Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
 	addOnlySigned:
 		"Only {name} has {server}. To give it to someone else, add it from their page, and sign in again there.",
 	kitHeading: "From the {role}’s kit",
-	kitLead: "Checked by Farik; tools already labelled.",
+	kitLead: "Checked by Catervas; tools already labelled.",
 	kitConnect: "Connect",
 	kitConnected: "Connected",
 	kitSignedIn: "Signed in to {service}.",
-	kitAgain: "Farik updated this service. Connect it again to keep using it.",
-	kitAtLaunch: "Comes with Farik’s web launch.",
-	kitGone: "Farik no longer offers this service",
+	kitAgain: "Catervas updated this service. Connect it again to keep using it.",
+	kitAtLaunch: "Comes with Catervas’s web launch.",
+	kitGone: "Catervas no longer offers this service",
 	kitGoneNote: "{name} doesn’t use it. Removing deletes what it kept.",
 	kitTitle: "Connect {service} to {name}",
 	kitStepConnect: "Connect",
@@ -1345,32 +1347,32 @@ export const en = {
 	kitKeyLabel: "Your {service} key",
 	kitKeyLabelOf: "Your {service} key: {key}",
 	kitKeyHint:
-		"For {name} only, and never shown again. Farik checks it with {service} before keeping it.",
+		"For {name} only, and never shown again. Catervas checks it with {service} before keeping it.",
 	kitSignIn: "Sign in with {service}",
 	kitSignInNote:
-		"Farik opens {service}’s sign-in page in a new tab. Come back here when you’re done.",
+		"Catervas opens {service}’s sign-in page in a new tab. Come back here when you’re done.",
 	kitWaiting: "Waiting for you to sign in to {service}…",
 	kitDone: "{service} is connected to {name}",
 	kitCan: "{name} can now",
 	kitAsks: "{name} asks you first before",
-	kitNever: "Farik never offers",
+	kitNever: "Catervas never offers",
 	kitKeychain:
-		"{name}’s key is kept in your computer’s keychain. {name} never sees it: Farik hands it to {service}.",
+		"{name}’s key is kept in your computer’s keychain. {name} never sees it: Catervas hands it to {service}.",
 	kitFile:
-		"{name}’s key is kept in a private file only you can read, because this computer has no keychain. {name} never sees it: Farik hands it to {service}.",
+		"{name}’s key is kept in a private file only you can read, because this computer has no keychain. {name} never sees it: Catervas hands it to {service}.",
 	kitKeychainNoSandbox:
-		"{name}’s key is kept in your computer’s keychain. Farik hands it to {service} and never puts it in {name}’s instructions. Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
+		"{name}’s key is kept in your computer’s keychain. Catervas hands it to {service} and never puts it in {name}’s instructions. Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
 	kitFileNoSandbox:
 		"{name}’s key is kept in a private file only you can read, because this computer has no keychain. Without Docker’s sandbox, a command {name} runs on this computer could reach it.",
 	kitUse: "{name} can use {service} from the next piece of work.",
 	kitOnly:
 		"Only {name} has {service}. To give it to someone else, connect it from their page.",
 	kitRefused:
-		"Farik could not connect {service}. Check the key against {service}’s page, and try again.",
+		"Catervas could not connect {service}. Check the key against {service}’s page, and try again.",
 	kitTimeout:
 		"{service} did not answer within thirty seconds. Try again in a minute.",
 	kitChanged:
-		"Farik changed what it offers for {service} just now. Close this and look at {name}’s page again.",
+		"Catervas changed what it offers for {service} just now. Close this and look at {name}’s page again.",
 	allowStepConnect: "Connect",
 	allowStepHowMany: "How many",
 	allowStepDone: "Done",
@@ -1392,12 +1394,12 @@ export const en = {
 	allowTooMany: "Up to 1,000. Type a smaller number.",
 	allowWhole: "Type a whole number from 0 to 1,000.",
 	allowRefused:
-		"Farik could not save the numbers. Close this and look at {name}’s page again.",
+		"Catervas could not save the numbers. Close this and look at {name}’s page again.",
 	allowChange: "Change how many",
 	allowChangeHidden: "{name} may make with {service}",
 	allowAgainTitle: "Connect {service} again first",
 	allowAgain:
-		"Farik updated this service since you connected it. Connect it again to keep using it; you choose the numbers again there.",
+		"Catervas updated this service since you connected it. Connect it again to keep using it; you choose the numbers again there.",
 	allowMakeUpTo: "make up to {list} each sprint",
 	allowMore: "making more than that",
 	allowRowSprint: "This sprint: {list}.",
@@ -1417,7 +1419,7 @@ export const en = {
 	allowCostsSprint: "This sprint",
 	allowCostsDay: "Today",
 	allowCostsBill:
-		"Farik counts what agents made, not what the service charges. Check your bill there.",
+		"Catervas counts what agents made, not what the service charges. Check your bill there.",
 	allowApprovalStopped:
 		"{name} stopped to ask before making more {what}, which uses your {service} credits.",
 	allowApprovalCount: "{name} has made {used} of {of} {what} {period}.",
@@ -1438,7 +1440,7 @@ export const en = {
 	designBackThen: "{builder} changed it, and the next look passed.",
 	designChecksTitle: "The four checks",
 	designChecksLead:
-		"Farik took each picture and ran the accessibility check itself, against WCAG 2.2 AA, the usual standard for pages everyone can use.",
+		"Catervas took each picture and ran the accessibility check itself, against WCAG 2.2 AA, the usual standard for pages everyone can use.",
 	shotPhone: "Phone",
 	shotComputer: "Computer",
 	shotLight: "light",
@@ -1470,7 +1472,7 @@ export const en = {
 	stepNow: "Now",
 	plansSentBack: "Plans sent back",
 	plansOf: "{n} of {of}",
-	waitingPreviewMissing: "Tell Farik how to open your app",
+	waitingPreviewMissing: "Tell Catervas how to open your app",
 	waitingPreviewMissingLine:
 		"{designer} needs it to look at your screens. Until then {designer} takes no work, and nobody checks the screens {developer} builds.",
 	waitingOpenSettings: "Open Settings",
@@ -1482,7 +1484,7 @@ export const en = {
 	waitingNeedsBrowserLine:
 		"{designer} opens your app with Playwright. Turn Playwright on for {designer} on the Team page; until then {designer} takes no work, and nobody checks the screens {developer} builds.",
 	startsLegend:
-		"Start from the team Farik suggests, from a team you saved in another project, or from nothing. Whichever you pick, you can change anyone below.",
+		"Start from the team Catervas suggests, from a team you saved in another project, or from nothing. Whichever you pick, you can change anyone below.",
 	startSuggested: "The suggested team",
 	startSuggestedNote:
 		"Six people, one for each job. A good start for a first project.",
@@ -1515,17 +1517,17 @@ export const en = {
 	finishCommandsYes:
 		"The team may run commands, in a sealed box away from your other files.",
 	finishCommandsNo:
-		"Nobody runs commands; Farik still runs every check itself.",
+		"Nobody runs commands; Catervas still runs every check itself.",
 	finishPushYes: "The Developer may send work to its own branches online.",
 	finishPushNo: "Everything stays on this computer.",
 	finishCarriedBefore:
-		"You answered these when you saved the team, so Farik does not ask again. Change them any time in ",
+		"You answered these when you saved the team, so Catervas does not ask again. Change them any time in ",
 	finishCarriedAfter: ", under Your team’s rules.",
 	templateSaveOpen: "Save as a template",
 	templateUseOpen: "Use a saved team",
 	saveTitle: "Save this team as a template",
 	saveLead:
-		"Farik keeps a copy on this computer, so any of your projects can start from it.",
+		"Catervas keeps a copy on this computer, so any of your projects can start from it.",
 	saveKeeps: "What it keeps",
 	saveKeepsBody:
 		"Everyone’s name, picture, persona and model, and your answers about what they may do, checking plans, spending and finishing work.",
@@ -1547,11 +1549,11 @@ export const en = {
 	templateUnreadable:
 		"This saved team cannot be read. Delete it, or fix the file by hand.",
 	templateNoFolder:
-		"Farik has no folder on this computer to keep saved teams in.",
+		"Catervas has no folder on this computer to keep saved teams in.",
 	templateChanged:
 		"This saved team was saved again since you looked at it. Go back and look at what changes once more.",
 	useLead:
-		"Pick a team you saved. Farik shows you who stays, who joins and who leaves before anything changes.",
+		"Pick a team you saved. Catervas shows you who stays, who joins and who leaves before anything changes.",
 	useList: "Saved teams",
 	useSettingsBefore: "Rename or delete saved teams in ",
 	useShow: "Show what changes",
@@ -1571,7 +1573,7 @@ export const en = {
 	useNobody: "Nobody",
 	useChanges: "What changes",
 	useApply: "Use this team",
-	useCannot: "Farik cannot use this team here",
+	useCannot: "Catervas cannot use this team here",
 	useNothingChanged: "Nothing has changed.",
 	usePaused: "{role} · paused",
 	templateNoActive: "Your team would have no active {role}.",
@@ -1612,7 +1614,7 @@ export const en = {
 	skillClose: "Close",
 	skillReadTitle: "Read {skill}",
 	skillReadNote:
-		"Farik comes with this skill, and its text is shown here to read. It cannot be changed here.",
+		"Catervas comes with this skill, and its text is shown here to read. It cannot be changed here.",
 	skillToReview: "Changed in the project. Review before {name} uses it",
 	skillMissing: "is in the team file but its folder is gone",
 	skillRemoveTitle: "Remove {skill}?",
@@ -1621,7 +1623,7 @@ export const en = {
 	skillRemoveTeam:
 		"Your whole team stops using it, and its folder is deleted from the project.",
 	skillRemoveYes: "Remove {skill}",
-	skillCannotOpen: "Farik cannot open {skill} right now.",
+	skillCannotOpen: "Catervas cannot open {skill} right now.",
 	skillAddTitle: "Add a skill for {name}",
 	skillEditTitle: "Edit {skill}",
 	skillFor: "Who is it for?",
@@ -1636,18 +1638,19 @@ export const en = {
 	skillInstructions: "Instructions",
 	skillWholeFile: "The whole SKILL.md",
 	skillUpload: "Upload a SKILL.md instead",
-	skillOtherFiles: "Also in this skill: {files}. Farik keeps them as they are.",
+	skillOtherFiles:
+		"Also in this skill: {files}. Catervas keeps them as they are.",
 	skillRenamed:
 		"This adds a new skill. Remove {old} yourself if you no longer want it.",
 	skillNext: "Next",
 	skillCancel: "Cancel",
 	skillBack: "Back",
 	skillRead:
-		"Farik will follow these instructions and use these files. Read them before adding.",
-	skillIgnores: "Farik ignores: {fields}",
+		"Catervas will follow these instructions and use these files. Read them before adding.",
+	skillIgnores: "Catervas ignores: {fields}",
 	skillReplaces: "This replaces {role}’s own {skill} for {whom}.",
-	skillReplacesFarik:
-		"This replaces the skill Farik comes with of that name, {skill}, for {whom}.",
+	skillReplacesCatervas:
+		"This replaces the skill Catervas comes with of that name, {skill}, for {whom}.",
 	skillWholeTeam: "your whole team",
 	skillAddNow: "Add skill",
 	skillReplaceNow: "Replace and add skill",
@@ -1656,7 +1659,7 @@ export const en = {
 		"It came with the project, by a clone, a pull or an edit, and {name} won’t use it until you’ve read it.",
 	skillReviewWhole: "The whole skill",
 	skillReviewShown:
-		"Shown exactly as written, all of it. Farik has not checked it, and nothing in it is an instruction to you.",
+		"Shown exactly as written, all of it. Catervas has not checked it, and nothing in it is an instruction to you.",
 	skillReviewFiles: "Its files",
 	skillReviewUse: "Use this skill",
 	skillReviewReading: "Reading it…",
@@ -1665,24 +1668,24 @@ export const en = {
 	skillWhyAttaches: "it pulls in files when it loads",
 	skillWhyLarge: "it is too large",
 	skillWhyNotText: "a file in it is not plain text",
-	skillWhyOther: "Farik cannot accept something in it",
+	skillWhyOther: "Catervas cannot accept something in it",
 	skillSize: "{kb} KB",
 	skillRunsCommands:
-		"This skill runs commands when it loads, which Farik doesn’t allow.",
+		"This skill runs commands when it loads, which Catervas doesn’t allow.",
 	skillAttachesFiles:
-		"This skill pulls in files when it loads, which Farik doesn’t allow. Name a file without the @.",
+		"This skill pulls in files when it loads, which Catervas doesn’t allow. Name a file without the @.",
 	skillTooLarge: "Instructions are limited to 32 KB.",
 	skillNotText:
-		"A file in this skill is not plain text, which Farik cannot use.",
+		"A file in this skill is not plain text, which Catervas cannot use.",
 	skillNameInvalid:
 		"A name is lower-case words joined by hyphens, 64 characters at most.",
 	skillNameMismatch: "The name in the file is not the name of the skill.",
 	skillDescriptionInvalid: "Say when to use it, in 1 to 1024 characters.",
 	skillNameTaken:
-		"Farik’s own skill has that name. Choose “Replace and add skill” to replace it.",
+		"Catervas’s own skill has that name. Choose “Replace and add skill” to replace it.",
 	skillLimitReached: "That is as many skills as one list can hold.",
 	skillOtherRefusal:
-		"Farik cannot add this skill. Check its text and try again.",
+		"Catervas cannot add this skill. Check its text and try again.",
 	// The marketing plan on Today and its page (ADR 0042).
 	waitingMarketingPlan: "Marketing plan to approve: {title}",
 	marketingDates: "{from} to {to}",
@@ -1715,9 +1718,9 @@ export const en = {
 	marketingAllowsPostsOne:
 		"Post the post below on its day, without asking you each time.",
 	marketingAllowsAds:
-		"Spend up to {amount} on the {n} Google Ads campaigns below, each within its own budget and dates. Farik pauses a campaign when it reaches its budget.",
+		"Spend up to {amount} on the {n} Google Ads campaigns below, each within its own budget and dates. Catervas pauses a campaign when it reaches its budget.",
 	marketingAllowsAdsOne:
-		"Spend up to {amount} on the Google Ads campaign below, within its budget and dates. Farik pauses it when it reaches its budget.",
+		"Spend up to {amount} on the Google Ads campaign below, within its budget and dates. Catervas pauses it when it reaches its budget.",
 	marketingAllowsNothing:
 		"Nothing else. Another post, another campaign or a bigger budget still asks you first.",
 	marketingAllowsEnd: "You can end the plan at any time on this page.",
@@ -1745,7 +1748,7 @@ export const en = {
 	marketingMeasures: "How {name} will know it worked",
 	marketingWhole: "{name}’s whole plan, as written",
 	marketingWholeHint:
-		"Shown exactly as {name} wrote it, as plain text. Farik checked the dates and the budget above, not these words.",
+		"Shown exactly as {name} wrote it, as plain text. Catervas checked the dates and the budget above, not these words.",
 	marketingFactPlan: "Plan",
 	marketingFactFrom: "From",
 	marketingFactFromValue: "{name}, for ",
@@ -1797,7 +1800,7 @@ export const en = {
 	marketingPriceNotFixed:
 		"up to {amount} {currency}, may run over by about an hour’s spend",
 	marketingPriceNote:
-		"A fixed price is a total that Google itself never charges past. Google keeps one only for a campaign of 3 to 90 days; any other has a daily budget, and since Google reports cost up to about an hour late, Farik may pause it after about an hour’s more spend.",
+		"A fixed price is a total that Google itself never charges past. Google keeps one only for a campaign of 3 to 90 days; any other has a daily budget, and since Google reports cost up to about an hour late, Catervas may pause it after about an hour’s more spend.",
 	marketingPricesAsApproved: "Prices as on the day you approved the plan.",
 	marketingAllowsNotFixed:
 		"{name} is not at a fixed price, so it may run over by about an hour’s spend.",
@@ -1809,19 +1812,19 @@ export const en = {
 	marketingSpentOf: "{spent} of {budget} {currency}",
 	marketingSpentMeter: "{percent} per cent of the budget spent",
 	marketingSpentRead:
-		"Google Ads’ own figures, read {when}. Farik reads them every 15 minutes while it runs.",
+		"Google Ads’ own figures, read {when}. Catervas reads them every 15 minutes while it runs.",
 	marketingSpentReadStale: "Google Ads’ own figures, read {when}.",
 	marketingSpentReadEnded:
 		"Google Ads’ own figures, last read {when}, before the plan ended. Google Ads itself has the final figures.",
 	marketingSpentUnread:
-		"Farik can’t read the spend now: {reason} Last tried {when}; Farik tries again every 15 minutes. Until a read works, Farik cannot pause the ads at their budget.",
+		"Catervas can’t read the spend now: {reason} Last tried {when}; Catervas tries again every 15 minutes. Until a read works, Catervas cannot pause the ads at their budget.",
 	marketingTodayAt: "today at {time}",
 	marketingColSpent: "Spent so far",
 	marketingColSpentEnded: "Spent",
 	marketingPausedAtBudget: "Paused at its budget",
 	marketingPausedPlanEnded: "Paused: the plan ended",
 	marketingPausedRemoved: "Paused: Google Ads was removed",
-	marketingPausesTitle: "Ads Farik paused",
+	marketingPausesTitle: "Ads Catervas paused",
 	marketingPauseBudget:
 		"{name}: it reached its budget, {spent} of {budget} {currency}.",
 	marketingPauseBudgetPlan:
@@ -1829,9 +1832,9 @@ export const en = {
 	marketingPauseBudgetBare: "{name}: it reached its budget.",
 	marketingPausePlanEnded: "{name}: the plan ended.",
 	marketingPauseRemoved: "{name}: Google Ads was removed.",
-	marketingEndAds: "Farik pauses its running ads within a minute.",
+	marketingEndAds: "Catervas pauses its running ads within a minute.",
 	marketingEndAdsSpent:
-		"Farik pauses its running ads within a minute. {spent} is spent so far, by Google’s figures at {time}.",
+		"Catervas pauses its running ads within a minute. {spent} is spent so far, by Google’s figures at {time}.",
 	marketingEndHintAds:
 		"Ending pauses the ads within a minute and stops the posts not yet sent.",
 	marketingEndHintAdsOnly: "Ending pauses the ads within a minute.",
@@ -1841,9 +1844,9 @@ export const en = {
 		"Its campaign {name} reached its budget: {spent} of {budget} {currency}.",
 	waitingBudgetPlan:
 		"Its ads reached their budget: {spent} of {budget} {currency}.",
-	waitingBudgetPaused: "Farik paused {them}.",
+	waitingBudgetPaused: "Catervas paused {them}.",
 	waitingBudgetStuck:
-		"Farik could not pause {them}: {reason} Farik tries again every 15 minutes; pause {them} in Google Ads.",
+		"Catervas could not pause {them}: {reason} Catervas tries again every 15 minutes; pause {them} in Google Ads.",
 	waitingBudgetRaising:
 		"You asked {name} for a new version with a raised budget. It waits for you here when it is ready.",
 	waitingBudgetSpent: "Google Ads: {spent} of {budget} {currency} spent",
@@ -1852,10 +1855,10 @@ export const en = {
 	waitingOpenAds: "Open Google Ads",
 	waitingRunningTitle: "Ads still running: {plan}",
 	waitingRunningLine:
-		"Farik could not pause its ads: {reason} They keep running at Google until {day} or their budget there. Pause them in Google Ads.",
+		"Catervas could not pause its ads: {reason} They keep running at Google until {day} or their budget there. Pause them in Google Ads.",
 	waitingUnreadTitle: "Can’t read the ad spend: {plan}",
 	waitingUnreadLine:
-		"Farik can’t read its ad spend: {reason} Any of its ads still running keep running at Google until {day} or their budget there; pause them in Google Ads.",
+		"Catervas can’t read its ad spend: {reason} Any of its ads still running keep running at Google until {day} or their budget there; pause them in Google Ads.",
 	waitingUnreadLast: "Last read {when}: {spent} of {budget} {currency}",
 	// The raise of a marketing budget.
 	raiseTitle: "Raise the budget of {plan}",
@@ -1890,7 +1893,7 @@ export const en = {
 		"The campaigns’ budgets add up to {sum} {currency}: make this at least that.",
 	raiseNotAnAmount: "Type an amount, like 500.00.",
 	refuseRaiseRefused:
-		"Farik could not take those amounts. Check them and try again.",
+		"Catervas could not take those amounts. Check them and try again.",
 	refuseRaiseOpen:
 		"A new version with a raised budget is already being written.",
 	refuseMarketingPlanDecided: "You decided this plan already.",
@@ -1905,7 +1908,7 @@ export const en = {
 	waitingPost: "{name} wants to post on {network}",
 	postAsksFirst: "It is not in your plan, so {name} asks first.",
 	postIfYouAllow:
-		"If you allow it, Farik sends it at its time, and it waits under Going out until then, with Stop.",
+		"If you allow it, Catervas sends it at its time, and it waits under Going out until then, with Stop.",
 	postItYes: "Post it",
 	postItNo: "Don’t post",
 	goingOutTitle: "Going out ({count})",
@@ -1927,8 +1930,8 @@ export const en = {
 	postDays: "{n} days",
 	postApprovedBefore: "Approved in your plan ",
 	postAllowed: "You allowed this",
-	postHandsOverAt: ". Farik hands it to Buffer at {time}.",
-	postHandsOverBefore: ". Farik hands it to Buffer an hour before.",
+	postHandsOverAt: ". Catervas hands it to Buffer at {time}.",
+	postHandsOverBefore: ". Catervas hands it to Buffer an hour before.",
 	postBufferHas: ". Buffer has it, and posts it at {time}.",
 	postStop: "Stop",
 	postPictureAlt: "Picture {n} of this post",
@@ -1936,7 +1939,7 @@ export const en = {
 	postOpenPicture: "Open the picture",
 	postFailed: "Failed",
 	postMissed: "Missed",
-	postMissedNotRunning: "Farik could not hand it to Buffer before its time.",
+	postMissedNotRunning: "Catervas could not hand it to Buffer before its time.",
 	postMissedPaused: "The team was paused, so it was not sent.",
 	postMissedUndecided: "You had not decided by its time, so it was not sent.",
 	postHears: "{name} hears of this in its next session.",
@@ -1944,27 +1947,28 @@ export const en = {
 	stopNotGoOut: "It will not go out.",
 	stopFreesDay:
 		"Its day in your plan is free again, so {name} may write another post for it.",
-	stopTakesBack: "Buffer already has it, so Farik takes it back from Buffer.",
+	stopTakesBack:
+		"Buffer already has it, so Catervas takes it back from Buffer.",
 	stopConfirm: "Stop the post",
 	stopOpenBuffer: "Open Buffer",
 	refusePostNotTakenBack:
 		"Buffer did not take it back. Delete it in Buffer before {time}, or it goes out.",
 	refusePostBeingHandedOver:
-		"Farik is giving it to Buffer now. Stop it again in a minute.",
+		"Catervas is giving it to Buffer now. Stop it again in a minute.",
 	refusePostAlreadyOut: "It has gone out already, so it cannot be stopped.",
 	refusePostNotGoingOut:
 		"This post is not going out, so there is nothing to stop.",
 	refusePostUnknown: "There is no such post.",
 	refusePostDecided: "You decided this post already.",
 	refusePostInThePast:
-		"Its time is too near, or has passed, so Farik cannot send it now.",
+		"Its time is too near, or has passed, so Catervas cannot send it now.",
 	planPostsSent: "{n} sent",
 	planPostsGoingOut: "{n} going out",
 	planPostsStopped: "{n} stopped by you",
 	planPostsMissed: "{n} missed",
 	planPostsNotWritten: "{n} not written yet",
 	planPostsSentMeans:
-		"Sent means Farik handed the post to Buffer for its time; you stop a post on Today.",
+		"Sent means Catervas handed the post to Buffer for its time; you stop a post on Today.",
 	planSlotGoingOut: "Going out",
 	planSlotSent: "Sent",
 	planSlotStoppedByYou: "Stopped by you",
@@ -1974,7 +1978,7 @@ export const en = {
 	planSlotAt: "at {time}",
 	planSlotOn: "on {day}",
 	planSlotWhenEnded: "when the plan ended",
-	planSlotNotRunning: "Farik could not hand it to Buffer before its time.",
+	planSlotNotRunning: "Catervas could not hand it to Buffer before its time.",
 	planSlotPaused: "the team was paused",
 	planSlotFailedBefore: "An earlier post for this day failed at {time}.",
 	marketingEndNotSent: "Its {n} posts not yet sent will not go out.",
@@ -2007,7 +2011,7 @@ export const en = {
 	siteRequestPage: "The page {name} wants to read",
 	siteRequestWhy: "Why, in {name}’s words",
 	siteRequestWhat:
-		"{name} reads only Farik’s approved sites and the sites you allow. Allowing {host} lets it read any page there until you remove it.",
+		"{name} reads only Catervas’s approved sites and the sites you allow. Allowing {host} lets it read any page there until you remove it.",
 	siteRequestAllow: "Allow",
 	siteRequestDecline: "Don’t allow",
 	siteRequestNote: "A note for {name} (optional)",
@@ -2054,8 +2058,9 @@ export const en = {
 	sitesTitle: "Sites it may read",
 	sitesLead:
 		"Searches the whole web; opens pages only on these sites. Asks you on Today for others.",
-	sitesFarikTitle: "Farik’s approved sites",
-	sitesFarikNote: "Long-running shops Farik checked. Turn one off to stop it.",
+	sitesCatervasTitle: "Catervas’s approved sites",
+	sitesCatervasNote:
+		"Long-running shops Catervas checked. Turn one off to stop it.",
 	siteCategoryGeneralMarketplace: "Marketplaces",
 	siteCategoryOfficeSupplies: "Office supplies",
 	siteCategoryIndustrialSupplies: "Industrial supplies",
@@ -2091,7 +2096,7 @@ export const en = {
 	siteDayYesterday: "yesterday",
 	siteDayOn: "on {day}",
 	refuseSiteInvalid:
-		"That is not a site Farik can open. Write a name like shop.com, or a page’s address that starts with https://.",
+		"That is not a site Catervas can open. Write a name like shop.com, or a page’s address that starts with https://.",
 	refuseSiteAlreadyAllowed: "This site is allowed already.",
 	refuseSiteNotAllowed:
 		"This site is not allowed now, so there is nothing to remove.",
@@ -2122,16 +2127,16 @@ export const en = {
 	orderNoPage: "This order names no page for the seller.",
 	orderWhy: "Why, in {name}’s words",
 	orderComparison: "Read the comparison",
-	orderComparisonGone: "Farik can’t show the comparison now.",
+	orderComparisonGone: "Catervas can’t show the comparison now.",
 	orderDownload: "Download PO-{order}.xlsx",
-	orderFileGone: "Farik can’t find that file now.",
+	orderFileGone: "Catervas can’t find that file now.",
 	orderCloses: "If you don’t decide by {day}, the order closes by itself.",
 	orderApprove: "Approve, I’ll place it myself",
 	orderApproveDo: "Approve",
 	orderReject: "Reject",
 	orderApproveTitle: "Approve PO-{order} from {seller}?",
 	orderApproveBody:
-		"You place this order and pay for it yourself; Farik never pays. Then mark it placed on {name}’s page, and {name} follows it up until it comes.",
+		"You place this order and pay for it yourself; Catervas never pays. Then mark it placed on {name}’s page, and {name} follows it up until it comes.",
 	orderRejectTitle: "Reject PO-{order} from {seller}?",
 	orderRejectBody:
 		"{name} reads your note in its next piece of work and can set up another order.",
@@ -2146,9 +2151,9 @@ export const en = {
 	renewalReview: "Ask for a review",
 	renewalDismiss: "Dismiss",
 	renewalsUnreadable:
-		"{n} rows in the register have a renewal date Farik can’t read, so Farik can’t remind you of them.",
+		"{n} rows in the register have a renewal date Catervas can’t read, so Catervas can’t remind you of them.",
 	renewalsUnreadableOne:
-		"1 row in the register has a renewal date Farik can’t read, so Farik can’t remind you of it.",
+		"1 row in the register has a renewal date Catervas can’t read, so Catervas can’t remind you of it.",
 	renewalReviewTitle: "Ask the team to review {vendor}?",
 	renewalReviewDraft:
 		"Review {vendor} before it renews on {renewsOn}; decide by {decideBy}.",
@@ -2159,7 +2164,7 @@ export const en = {
 	// The Procurement Specialist's page: its orders.
 	ordersTitle: "Orders",
 	ordersLead:
-		"{name} suggests and tracks orders. Farik never orders or pays: you place each, then mark it placed and received.",
+		"{name} suggests and tracks orders. Catervas never orders or pays: you place each, then mark it placed and received.",
 	ordersToPlace: "Approved, for you to place",
 	ordersApproved: "Approved {day}.",
 	ordersPlaceBy: "If you don’t mark it placed by {day}, it closes by itself.",
@@ -2247,9 +2252,9 @@ export const en = {
 	mailboxPageTitle: "Connect a procurement mailbox",
 	mailboxBack: "Back to {name}",
 	mailboxLead:
-		"{name} writes to sellers from this address, and Farik reads their replies there. Use an address for buying, like buying@ your domain: a mailbox of its own, or an alias of yours.",
+		"{name} writes to sellers from this address, and Catervas reads their replies there. Use an address for buying, like buying@ your domain: a mailbox of its own, or an alias of yours.",
 	mailboxAlias:
-		"If it is an alias, its sign-in reaches your whole mailbox. Farik opens only messages sent to this address that answer a message Farik sent, or come from an address Farik wrote to. It reads no other message, and marks nothing read, moves nothing and deletes nothing.",
+		"If it is an alias, its sign-in reaches your whole mailbox. Catervas opens only messages sent to this address that answer a message Catervas sent, or come from an address Catervas wrote to. It reads no other message, and marks nothing read, moves nothing and deletes nothing.",
 	mailboxSendAs:
 		"For an alias, your provider must let you send as it (in Gmail: Settings, Accounts, Send mail as).",
 	mailboxAddress: "The address",
@@ -2262,17 +2267,17 @@ export const en = {
 	mailboxMicrosoftChoice: "Outlook.com or Microsoft 365",
 	mailboxSoon: "Not supported yet",
 	mailboxMicrosoft:
-		"Microsoft no longer lets mail programs sign in with a password, so Farik can’t use a Microsoft mailbox yet. Signing in with Microsoft comes with Farik Cloud. Until then, use an address at another provider.",
-	mailboxHowTitle: "Make an app password for Farik",
+		"Microsoft no longer lets mail programs sign in with a password, so Catervas can’t use a Microsoft mailbox yet. Signing in with Microsoft comes with Catervas Cloud. Until then, use an address at another provider.",
+	mailboxHowTitle: "Make an app password for Catervas",
 	mailboxHowGmail1: "Turn on 2-Step Verification for this Google account.",
 	mailboxHowGmail2:
-		"Open Google’s App passwords page, name it Farik, and copy the password Google shows.",
+		"Open Google’s App passwords page, name it Catervas, and copy the password Google shows.",
 	mailboxHowGmail3: "Paste it below.",
 	mailboxHowGmail:
 		"Google offers app passwords only with 2-Step Verification, not with security keys only or Advanced Protection, and some work accounts don’t have them.",
 	mailboxHowIcloud1: "Sign in at account.apple.com.",
 	mailboxHowIcloud2:
-		"In Sign-In and Security, open App-Specific Passwords and make one named Farik.",
+		"In Sign-In and Security, open App-Specific Passwords and make one named Catervas.",
 	mailboxHowIcloud3: "Paste it below.",
 	mailboxHowFastmail1:
 		"In Fastmail, open Settings, then Privacy & Security, then Manage app passwords and access.",
@@ -2285,7 +2290,7 @@ export const en = {
 	mailboxUsername: "Sign-in name",
 	mailboxPassword: "App password",
 	mailboxPasswordHint:
-		"Farik keeps it in this computer’s keychain and shows it to nobody, {name} included.",
+		"Catervas keeps it in this computer’s keychain and shows it to nobody, {name} included.",
 	mailboxServers: "Servers",
 	mailboxImap: "Reading mail (IMAP)",
 	mailboxSmtp: "Sending mail (SMTP)",
@@ -2294,9 +2299,9 @@ export const en = {
 	mailboxEncryption: "Encryption",
 	mailboxTls: "Encrypted from the start",
 	mailboxStarttls: "Encrypted after connecting (STARTTLS)",
-	mailboxFolder: "Folder Farik reads",
+	mailboxFolder: "Folder Catervas reads",
 	mailboxSignature: "Your signature",
-	mailboxSignatureHint: "Farik adds it under every message.",
+	mailboxSignatureHint: "Catervas adds it under every message.",
 	mailboxDisclose: "Say that an AI assistant wrote it",
 	mailboxDisclosure:
 		"Written with an AI assistant and sent by {name} after reading it.",
@@ -2306,9 +2311,9 @@ export const en = {
 	mailboxTitle: "Procurement mailbox",
 	mailboxFrom: "{name} writes from {address}.",
 	mailboxChecked:
-		"Farik checks it for replies every 15 minutes. Last checked {time}.",
-	mailboxEvery: "Farik checks it for replies every 15 minutes.",
-	mailboxError: "Farik could not read it {time}: {why}",
+		"Catervas checks it for replies every 15 minutes. Last checked {time}.",
+	mailboxEvery: "Catervas checks it for replies every 15 minutes.",
+	mailboxError: "Catervas could not read it {time}: {why}",
 	mailboxRestarted:
 		"Your provider renumbered this mailbox {day}, so replies that came shortly before may not be on Today.",
 	mailboxCheckNow: "Check now",
@@ -2316,7 +2321,7 @@ export const en = {
 	mailboxDisconnect: "Disconnect",
 	mailboxDisconnectTitle: "Disconnect {address}?",
 	mailboxDisconnectBody:
-		"Farik forgets its app password and stops reading it. Messages and replies already kept stay in {name}’s folder.",
+		"Catervas forgets its app password and stops reading it. Messages and replies already kept stay in {name}’s folder.",
 	mailboxKeep: "Keep it",
 	mailboxNone: "No mailbox yet.",
 	mailboxNoneNote:
@@ -2326,7 +2331,7 @@ export const en = {
 	sellerLead: "Nothing goes to a seller until you press Send.",
 	sellerNoMailbox: "Connect a procurement mailbox to send these.",
 	sellerCap:
-		"You have sent 50 messages to sellers today, the most Farik sends in a day. Send the rest tomorrow.",
+		"You have sent 50 messages to sellers today, the most Catervas sends in a day. Send the rest tomorrow.",
 	sellerQuote: "{name} asks {seller} for a quote",
 	sellerQuestion: "{name} asks {seller} a question",
 	sellerAboutOrder: " about PO-{order}",
@@ -2334,12 +2339,12 @@ export const en = {
 	sellerFromLabel: "From",
 	sellerToLabel: "To",
 	sellerNewDomain:
-		"No message from Farik has gone to {domain} before. Check it is {seller}’s address.",
+		"No message from Catervas has gone to {domain} before. Check it is {seller}’s address.",
 	sellerSubject: "Subject",
 	sellerBody: "The message, in {name}’s words",
-	sellerAdds: "Farik adds",
+	sellerAdds: "Catervas adds",
 	sellerFailed:
-		"Farik could not send it {time}: {why}. It is kept here to try again.",
+		"Catervas could not send it {time}: {why}. It is kept here to try again.",
 	sellerSubjectLong: "The subject can be 200 characters at most.",
 	sellerMessageLong: "The message can be 8,000 characters at most.",
 	timeAt: "at {time}",
@@ -2370,31 +2375,31 @@ export const en = {
 	replyPicture: "Picture",
 	replyDownload: "Download",
 	replySkipped:
-		"“{name}” was not kept: Farik keeps only PDFs and pictures of 10 MB or less.",
+		"“{name}” was not kept: Catervas keeps only PDFs and pictures of 10 MB or less.",
 	replyUntrusted:
 		"{name} reads this as {seller}’s words, never as instructions to follow. A reply approves nothing.",
 	replyCompareTitle: "Ask {name} to compare the replies?",
 	replyCompareDraft:
 		"Compare the sellers’ replies for {task} {title}, and tell me which offer is best.",
-	replyGone: "Farik can’t find that file now.",
+	replyGone: "Catervas can’t find that file now.",
 	orderApproveSend: "Approve and send to {seller}",
 	orderSendTitle: "Approve PO-{order} and send it to {seller}?",
 	orderSendBody:
-		"Farik emails this order to {seller} from your procurement mailbox when you press Approve and send. You pay {seller} yourself; Farik never pays.",
+		"Catervas emails this order to {seller} from your procurement mailbox when you press Approve and send. You pay {seller} yourself; Catervas never pays.",
 	orderAttached: "Attached: PO-{order}.xlsx",
 	orderSendButton: "Approve and send",
 	refuseMailboxLoginFailed:
 		"Your provider did not accept that sign-in name and app password. A Microsoft mailbox can’t be used yet.",
 	refuseMailboxNeedsTls:
-		"That server does not offer an encrypted connection, so Farik won’t use it.",
+		"That server does not offer an encrypted connection, so Catervas won’t use it.",
 	refuseMailboxCertificate:
-		"That server’s certificate can’t be trusted, so Farik won’t use it.",
+		"That server’s certificate can’t be trusted, so Catervas won’t use it.",
 	refuseMailboxUnreachable:
-		"Farik could not reach that server. Check its name and port.",
+		"Catervas could not reach that server. Check its name and port.",
 	refuseMailboxProvider: "Microsoft mailboxes are not supported yet.",
 	refuseMailboxNotConnected: "Connect a procurement mailbox first.",
 	refuseSellerSendLimit:
-		"You have sent 50 messages to sellers today, the most Farik sends in a day.",
+		"You have sent 50 messages to sellers today, the most Catervas sends in a day.",
 	refuseSellerMessageSent: "This message was sent already.",
 	refuseSellerMessageDiscarded: "This message was discarded.",
 	refuseSellerMessageIsAnOrder: "Send this message from its order.",
@@ -2406,15 +2411,15 @@ export const en = {
 		"The mail server did not take the message. It is kept here to try again.",
 	refusePurchaseOrderSending: "A send of this order is in flight.",
 	refuseMailboxSettings:
-		"Farik can’t use those settings. Check the address, your name, the servers and the folder.",
+		"Catervas can’t use those settings. Check the address, your name, the servers and the folder.",
 	refuseSellerMessageTooLong:
-		"That message is too long. Farik sends at most 8,000 characters.",
+		"That message is too long. Catervas sends at most 8,000 characters.",
 	refuseSellerMessageField:
 		"The subject must be one line of up to 200 characters, and the message plain text of up to 8,000.",
 	refuseMailboxFiles:
-		"Farik could not keep the mailbox in this project’s folder. Check that the folder can be written to.",
+		"Catervas could not keep the mailbox in this project’s folder. Check that the folder can be written to.",
 	refuseSecretStore:
-		"Farik could not keep the key on this computer. If it asks whether Farik may use the keychain, choose “Always”, then try again.",
+		"Catervas could not keep the key on this computer. If it asks whether Catervas may use the keychain, choose “Always”, then try again.",
 	refuseSellerMessageClosed:
 		"This message went with an order that was decided without it, so it is not sent.",
 };

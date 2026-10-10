@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -74,7 +74,7 @@ describe("Today, messages to sellers", () => {
 		expect(first.getByText("packagingexpress.test").tagName).toBe("STRONG");
 		expect(
 			first.getByText(
-				/No message from Farik has gone to packagingexpress.test before/,
+				/No message from Catervas has gone to packagingexpress.test before/,
 			),
 		).toBeTruthy();
 		const second = within(rows[1] as HTMLElement);
@@ -84,7 +84,7 @@ describe("Today, messages to sellers", () => {
 		expect(
 			third.getByText("Ivo asks Kitchen Parts Direct a question about PO-10"),
 		).toBeTruthy();
-		// What Farik adds under every message is shown with it.
+		// What Catervas adds under every message is shown with it.
 		expect(
 			first.getByText(/Written with an AI assistant and sent by Sam Ortiz/),
 		).toBeTruthy();
@@ -113,7 +113,7 @@ describe("Today, messages to sellers", () => {
 	});
 
 	it("to_shows_the_ascii_domain", async () => {
-		// The agent's own spelling of an address is kept (a Cyrillic i, capitals); the domain Farik
+		// The agent's own spelling of an address is kept (a Cyrillic i, capitals); the domain Catervas
 		// sends to is the ASCII one it works out, and that is the one set in bold.
 		await todayWithMail({
 			messages: [
@@ -281,7 +281,7 @@ describe("Today, messages to sellers", () => {
 		const alert = await screen.findByRole("alert");
 		// The sentence says when the try failed, and the server's words are text.
 		expect(alert.textContent).toBe(
-			"Farik could not send it at 08:14: The server refused it <b>not bold</b>. It is kept here to try again.",
+			"Catervas could not send it at 08:14: The server refused it <b>not bold</b>. It is kept here to try again.",
 		);
 	});
 });
@@ -292,7 +292,7 @@ describe("Today, a failed try without its time", () => {
 			messages: [{ ...KNOWN, why: "The server was busy" }],
 		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"Farik could not send it: The server was busy. It is kept here to try again.",
+			"Catervas could not send it: The server was busy. It is kept here to try again.",
 		);
 	});
 });
@@ -373,7 +373,7 @@ describe("Today, replies from sellers", () => {
 			name: "Replies from sellers (1)",
 		});
 		const row = within(section).getAllByRole("listitem")[0] as HTMLElement;
-		// The seller, the subject Farik sent and the address it came from.
+		// The seller, the subject Catervas sent and the address it came from.
 		showsWhatItHides(row);
 		expect(
 			within(row).getByText(
@@ -415,10 +415,10 @@ describe("an order's press", () => {
 		const dialog = await screen.findByRole("dialog", {
 			name: "Approve PO-12 and send it to Pie Box Pros?",
 		});
-		// The press says what it does, and that Farik pays nothing.
+		// The press says what it does, and that Catervas pays nothing.
 		expect(
 			within(dialog).getByText(
-				"Farik emails this order to Pie Box Pros from your procurement mailbox when you press Approve and send. You pay Pie Box Pros yourself; Farik never pays.",
+				"Catervas emails this order to Pie Box Pros from your procurement mailbox when you press Approve and send. You pay Pie Box Pros yourself; Catervas never pays.",
 			),
 		).toBeTruthy();
 		// From is the owner's mailbox; To is the seller's address, its domain in bold.
@@ -433,7 +433,7 @@ describe("an order's press", () => {
 		expect(to?.querySelector("code strong")?.textContent).toBe(
 			"pieboxpros.test",
 		);
-		// The words are the agent's draft, and what Farik adds is shown with them.
+		// The words are the agent's draft, and what Catervas adds is shown with them.
 		expect(
 			(within(dialog).getByLabelText("Subject") as HTMLInputElement).value,
 		).toBe("Order PO-12");

@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../../strings/en.ts";
@@ -38,7 +38,7 @@ describe("a message to a seller, edited", () => {
 		// On a phone the dialog fills the screen, and nothing in it breaks an accessibility rule.
 		expect(dialog.hasAttribute("data-fills-phone")).toBe(true);
 		await expectNoAxeViolations(container);
-		// From and To stay as the agent wrote them, with what Farik adds.
+		// From and To stay as the agent wrote them, with what Catervas adds.
 		expect(within(dialog).getByText("buying@cornerbakery.test")).toBeTruthy();
 		expect(within(dialog).getByText("pieboxpros.test").tagName).toBe("STRONG");
 		expect(
@@ -151,7 +151,7 @@ describe("a message to a seller, edited", () => {
 			failed_at: FAILED_AT,
 		});
 		expect(within(dialog).getByRole("alert").textContent).toBe(
-			"Farik could not send it at 08:14: The server was busy. It is kept here to try again.",
+			"Catervas could not send it at 08:14: The server was busy. It is kept here to try again.",
 		);
 		fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
 		const sent = await sentCommand(s);

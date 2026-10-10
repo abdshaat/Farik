@@ -5,11 +5,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use farik_core::budget::DEFAULT_SESSION_LIMITS;
-use farik_core::contract::Role;
-use farik_core::governor::permissions::{PermissionTier, SessionConnector};
-use farik_core::team::CustomServer;
-use farik_protocol::event::EventKind;
+use catervas_core::budget::DEFAULT_SESSION_LIMITS;
+use catervas_core::contract::Role;
+use catervas_core::governor::permissions::{PermissionTier, SessionConnector};
+use catervas_core::team::CustomServer;
+use catervas_protocol::event::EventKind;
 use serde_json::{Value, json};
 
 use super::{GOOGLE_ADS, ads_call};
@@ -26,9 +26,9 @@ use crate::tools::fixtures::with_the_marketing_specialist;
 pub(crate) const ACCOUNT: &str = "123-456-7890";
 pub(crate) const SESSION: &str = "session-ads";
 
-/// Kai's kit: Google Ads as `farik connector google-ads`, signing in, its three reads
+/// Kai's kit: Google Ads as `catervas connector google-ads`, signing in, its three reads
 /// `network` and its seven writes `external_effect` marked as approved by the plan.
-pub(crate) fn ads_kit() -> farik_roles::Kit {
+pub(crate) fn ads_kit() -> catervas_roles::Kit {
     let mut tools = serde_json::Map::new();
     for read in crate::google_ads::READ_TOOLS {
         tools.insert(read.to_string(), json!("network"));
@@ -39,7 +39,7 @@ pub(crate) fn ads_kit() -> farik_roles::Kit {
     let kit = json!({
         "role": "marketing_specialist", "skills": [],
         "connectors": [{
-            "name": GOOGLE_ADS, "transport": "stdio", "command": "farik",
+            "name": GOOGLE_ADS, "transport": "stdio", "command": "catervas",
             "args": ["connector", "google-ads"],
             "oauth": { "scopes": ["https://www.googleapis.com/auth/adwords"] },
             "title": "Google Ads", "about": "Shows your ads on Google.",
@@ -47,7 +47,7 @@ pub(crate) fn ads_kit() -> farik_roles::Kit {
             "tools": tools, "plan_approved": WRITE_TOOLS
         }]
     });
-    farik_roles::parse_fixture_kit(Role::MarketingSpecialist, &kit.to_string(), &[], &[])
+    catervas_roles::parse_fixture_kit(Role::MarketingSpecialist, &kit.to_string(), &[], &[])
         .expect("the fixture kit loads")
 }
 
@@ -55,7 +55,7 @@ pub(crate) fn ads_kit() -> farik_roles::Kit {
 pub(crate) fn register(harness: &Harness, connector: SessionConnector) -> String {
     harness.daemon.register_session(SessionRegistration {
         session_id: SESSION.to_string(),
-        web: farik_core::governor::sites::WebAccess::Open,
+        web: catervas_core::governor::sites::WebAccess::Open,
         agent_id: "kai".to_string(),
         task_id: Some("FRK-1".parse().expect("a task id")),
         purpose: SessionPurpose::Implement,
@@ -66,7 +66,7 @@ pub(crate) fn register(harness: &Harness, connector: SessionConnector) -> String
         cwd: harness.project.repo.path.clone(),
         executor: None,
         limits: DEFAULT_SESSION_LIMITS,
-        farik_tools: Vec::new(),
+        catervas_tools: Vec::new(),
         tiers: vec![PermissionTier::Read],
         connectors: vec![connector],
         preview: None,
@@ -87,7 +87,7 @@ pub(crate) struct Ads {
     pub(crate) store: Arc<MemoryConnectorSecrets>,
     pub(crate) server: CustomServer,
     pub(crate) at: SecretAt,
-    pub(crate) kit: farik_roles::Kit,
+    pub(crate) kit: catervas_roles::Kit,
     pub(crate) grant: crate::sign_in::OAuthGrant,
     pub(crate) ticket: String,
 }
@@ -139,9 +139,10 @@ impl Ads {
             .daemon
             .secret_at(files.root(), "kai", GOOGLE_ADS)
             .expect("an address");
-        let custom =
-            farik_core::team::custom_server(&serde_json::from_value(entry).expect("a wire entry"))
-                .expect("a custom server");
+        let custom = catervas_core::team::custom_server(
+            &serde_json::from_value(entry).expect("a wire entry"),
+        )
+        .expect("a custom server");
         let grant = keep_a_sign_in(&store, (&custom, &at), &oauth, chrono::Duration::hours(1));
         let ticket = register(
             &harness,
@@ -201,7 +202,7 @@ impl Ads {
         approved_at: chrono::DateTime<chrono::Utc>,
     ) {
         let mut body =
-            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+            catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
         body["plan"] = json!(plan);
         body["starts_on"] = json!("2026-09-20");
         body["ends_on"] = json!("2027-01-31");
@@ -254,9 +255,10 @@ impl Ads {
             .daemon
             .secret_at(files.root(), agent, GOOGLE_ADS)
             .expect("an address");
-        let custom =
-            farik_core::team::custom_server(&serde_json::from_value(entry).expect("a wire entry"))
-                .expect("a custom server");
+        let custom = catervas_core::team::custom_server(
+            &serde_json::from_value(entry).expect("a wire entry"),
+        )
+        .expect("a custom server");
         keep_a_sign_in(
             &self.store,
             (&custom, &at),
@@ -311,7 +313,7 @@ impl Ads {
         })
     }
 
-    pub(crate) fn made(&self) -> Vec<farik_protocol::event::FarikEvent> {
+    pub(crate) fn made(&self) -> Vec<catervas_protocol::event::CatervasEvent> {
         self.harness
             .project
             .events(&[EventKind::MarketingCampaignCreated])

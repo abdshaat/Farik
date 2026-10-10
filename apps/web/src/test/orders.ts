@@ -84,7 +84,7 @@ export const WRITTEN_ROW = {
 	why: `Cheapest ${MARKUP} and ‮this`,
 };
 
-/** A name written in another alphabet, as Farik keeps it. */
+/** A name written in another alphabet, as Catervas keeps it. */
 export const SCRIPT_ORDER_ROW = {
 	...ORDER_ROW,
 	order: 14,
@@ -262,7 +262,7 @@ export const renewal = (
 	flagged_at: at(25, 6),
 });
 
-/** `renewals.list` with two renewals coming up and two rows Farik cannot read. */
+/** `renewals.list` with two renewals coming up and two rows Catervas cannot read. */
 export const RENEWALS = {
 	open: [
 		renewal(7, "Vercel", "2026-11-15", "2026-10-16"),

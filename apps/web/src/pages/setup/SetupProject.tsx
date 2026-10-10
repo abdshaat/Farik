@@ -1,4 +1,4 @@
-import { Button, Choice, TextArea, TextField } from "@farik/ui";
+import { Button, Choice, TextArea, TextField } from "@catervas/ui";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
@@ -21,7 +21,7 @@ export function slug(name: string): string {
 		.replace(/^-+|-+$/g, "");
 }
 
-/** Setup's third step: an existing git folder from home, or a new project Farik makes. */
+/** Setup's third step: an existing git folder from home, or a new project Catervas makes. */
 export function SetupProject() {
 	const { client, status, reopen } = useConnection();
 	const navigate = useNavigate();
@@ -38,7 +38,7 @@ export function SetupProject() {
 	const [refused, setRefused] = useState<string>();
 	const [opening, setOpening] = useState(false);
 
-	// Farik restarts on the chosen project; once the page is connected to it again, it goes home.
+	// Catervas restarts on the chosen project; once the page is connected to it again, it goes home.
 	useEffect(() => {
 		if (opening && status === "open") navigate("/", { replace: true });
 	}, [opening, status, navigate]);

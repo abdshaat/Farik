@@ -4,23 +4,23 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-use farik_core::branch::task_branch;
-use farik_core::budget::{BudgetScope, SessionLedger, check_budgets};
-use farik_core::contract::{Role, TaskContract, TaskId, TaskStatus};
-use farik_core::governor::gates::{fits_the_open_sprint, in_the_backlog, waits_for_a_sprint};
-use farik_core::governor::task_status::is_terminal;
-use farik_core::governor::transition::TransitionRequest;
-use farik_core::governor::transition_table::TransitionActor;
-use farik_core::marketing::plans_to_end;
-use farik_core::team::{Agent, AgentStatus, Team, task_private_folder};
-use farik_protocol::event::{
-    EscalationAgedBody, EventBody, EventIds, EventKind, FarikEvent, SessionStartedBodyPurpose,
+use catervas_core::branch::task_branch;
+use catervas_core::budget::{BudgetScope, SessionLedger, check_budgets};
+use catervas_core::contract::{Role, TaskContract, TaskId, TaskStatus};
+use catervas_core::governor::gates::{fits_the_open_sprint, in_the_backlog, waits_for_a_sprint};
+use catervas_core::governor::task_status::is_terminal;
+use catervas_core::governor::transition::TransitionRequest;
+use catervas_core::governor::transition_table::TransitionActor;
+use catervas_core::marketing::plans_to_end;
+use catervas_core::team::{Agent, AgentStatus, Team, task_private_folder};
+use catervas_protocol::event::{
+    CatervasEvent, EscalationAgedBody, EventBody, EventIds, EventKind, SessionStartedBodyPurpose,
     Thread, new_event,
 };
-use farik_store::baseline::{copy_baseline, folder_in};
-use farik_store::marketing::{marketing_plans, social_posts};
-use farik_store::{CostScope, EventQuery, Git, TaskProjection};
+use catervas_store::baseline::{copy_baseline, folder_in};
+use catervas_store::marketing::{marketing_plans, social_posts};
+use catervas_store::{CostScope, EventQuery, Git, TaskProjection};
+use chrono::{DateTime, Utc};
 
 use super::design::{self, Stage};
 use super::integrate::{awaiting, cleanup};
@@ -83,7 +83,7 @@ pub(super) fn check_mail(deps: &OrchestratorDeps) {
 
 pub(super) async fn end_marketing_plans(
     deps: &OrchestratorDeps,
-) -> Result<Vec<FarikEvent>, OrchestratorError> {
+) -> Result<Vec<CatervasEvent>, OrchestratorError> {
     let tools = &deps.tools;
     tools.projections.catch_up()?;
     // Nothing due is nothing to wait for.
@@ -132,7 +132,7 @@ pub(super) fn close_orders_and_flag_renewals(
 /// The ends that dates bring to the plans of the log now.
 fn due_ends(
     tools: &crate::tools::ToolDeps,
-) -> Result<Vec<(String, farik_core::marketing::EndReason, Option<String>)>, OrchestratorError> {
+) -> Result<Vec<(String, catervas_core::marketing::EndReason, Option<String>)>, OrchestratorError> {
     let records: Vec<_> = marketing_plans(&tools.log)?
         .into_iter()
         .map(|plan| plan.record)
@@ -362,7 +362,7 @@ fn finished_sprint(
 /// thread until the retro has. Their tasks are the sprint file's, and their facts the events about
 /// those tasks while the sprint was open. The review is told each task's status, cost, and
 /// completion note, and the sprint's budget and spent; the retro the sprint's rejections,
-/// escalations, blocks, and iterations, and the last retros, and is offered `farik_append_retro`.
+/// escalations, blocks, and iterations, and the last retros, and is offered `catervas_append_retro`.
 /// Passed over for a sprint whose file lists no task, with no runner, or on a spent day.
 async fn review_and_retro(
     deps: &OrchestratorDeps,
@@ -453,16 +453,16 @@ async fn review_and_retro(
     }))
 }
 
-/// The Farik tools the retro is offered: the standup's and the review's, and the retro's append.
+/// The Catervas tools the retro is offered: the standup's and the review's, and the retro's append.
 const RETRO_TOOLS: &[&str] = &[
-    "farik_read_task",
-    "farik_read_board",
-    "farik_read_rules",
-    "farik_read_criteria",
-    "farik_post_message",
-    "farik_append_retro",
-    "farik_write_memory",
-    "farik_read_decisions",
+    "catervas_read_task",
+    "catervas_read_board",
+    "catervas_read_rules",
+    "catervas_read_criteria",
+    "catervas_post_message",
+    "catervas_append_retro",
+    "catervas_write_memory",
+    "catervas_read_decisions",
 ];
 
 /// Whether the sprint rules run in `scope`: they are about no one task, so only in a tick scoped
@@ -473,7 +473,7 @@ fn sprint_rules_run(scope: &TickScope) -> bool {
 
 /// The open sprint's planning ceremony (5.5, 5.9): while it holds no task and its planning has not
 /// run, the assigner (the ceremony runner) gets one `ceremony` session in the `planning` thread,
-/// about no task, given the reading tools, `farik_post_message`, and `farik_plan_sprint`, and
+/// about no task, given the reading tools, `catervas_post_message`, and `catervas_plan_sprint`, and
 /// offered the candidates (the rows `ready` with no parent and in no sprint, or, under the policy
 /// "plan work in sprints", the Backlog's rows with no parent, each epic with its count of tasks),
 /// the digest of the
@@ -579,23 +579,23 @@ async fn sprint_planning(
     }))
 }
 
-/// The Farik tools the planning ceremony is offered: the reading tools, the channel, the plan, the
+/// The Catervas tools the planning ceremony is offered: the reading tools, the channel, the plan, the
 /// notebook, and the decisions to read.
 const PLANNING_TOOLS: &[&str] = &[
-    "farik_read_task",
-    "farik_read_board",
-    "farik_read_rules",
-    "farik_read_criteria",
-    "farik_post_message",
-    "farik_plan_sprint",
-    "farik_write_memory",
-    "farik_read_decisions",
+    "catervas_read_task",
+    "catervas_read_board",
+    "catervas_read_rules",
+    "catervas_read_criteria",
+    "catervas_post_message",
+    "catervas_plan_sprint",
+    "catervas_write_memory",
+    "catervas_read_decisions",
 ];
 
 /// The open sprint's standup (5.9), under `All` alone in a tick scoped to no task: once a UTC day,
 /// when a task in the sprint moved in the standup's window (`standup_moves`), the ceremony runner
 /// gets one `ceremony` session in the `standup` thread, about no task, given the reading tools and
-/// `farik_post_message`, and told each such move, each blocked task of the sprint with its
+/// `catervas_post_message`, and told each such move, each blocked task of the sprint with its
 /// blocker, the open escalations, and the channel. Passed over with no runner or on a spent day.
 async fn standup(
     deps: &OrchestratorDeps,
@@ -674,16 +674,16 @@ async fn standup(
     }))
 }
 
-/// The Farik tools the standup and the review are offered: the reading tools, the channel, the
+/// The Catervas tools the standup and the review are offered: the reading tools, the channel, the
 /// notebook, and the decisions to read.
 const CEREMONY_TOOLS: &[&str] = &[
-    "farik_read_task",
-    "farik_read_board",
-    "farik_read_rules",
-    "farik_read_criteria",
-    "farik_post_message",
-    "farik_write_memory",
-    "farik_read_decisions",
+    "catervas_read_task",
+    "catervas_read_board",
+    "catervas_read_rules",
+    "catervas_read_criteria",
+    "catervas_post_message",
+    "catervas_write_memory",
+    "catervas_read_decisions",
 ];
 
 /// Whether the day's dollars stop a session about no task from starting; `day_spent` is set when
@@ -700,34 +700,34 @@ pub(super) fn day_is_spent(
     Ok(spent)
 }
 
-/// The Farik tools a conversation session is offered (5.9): the reading tools, its one post, a
+/// The Catervas tools a conversation session is offered (5.9): the reading tools, its one post, a
 /// request filed without a parent, the notebook, and the decisions to read (5.8).
 const CONVERSATION_TOOLS: &[&str] = &[
-    "farik_read_task",
-    "farik_read_board",
-    "farik_read_rules",
-    "farik_read_criteria",
-    "farik_post_message",
-    "farik_create_task",
-    "farik_write_memory",
-    "farik_read_decisions",
+    "catervas_read_task",
+    "catervas_read_board",
+    "catervas_read_rules",
+    "catervas_read_criteria",
+    "catervas_post_message",
+    "catervas_create_task",
+    "catervas_write_memory",
+    "catervas_read_decisions",
 ];
 
-/// The Farik tools a chat session is offered (ADR 0026): the reading tools and its one reply, and
+/// The Catervas tools a chat session is offered (ADR 0026): the reading tools and its one reply, and
 /// the lists of sites, of purchase orders and of data pipeline requests, which `offered_tools`
 /// keeps for the role they are the Procurement Specialist's alone.
 pub(super) const CHAT_TOOLS: &[&str] = &[
-    "farik_read_task",
-    "farik_read_board",
-    "farik_read_rules",
-    "farik_read_criteria",
-    "farik_read_decisions",
-    "farik_read_sites",
-    "farik_read_purchase_orders",
-    "farik_read_data_pipelines",
-    "farik_read_seller_messages",
-    "farik_read_seller_replies",
-    "farik_chat_reply",
+    "catervas_read_task",
+    "catervas_read_board",
+    "catervas_read_rules",
+    "catervas_read_criteria",
+    "catervas_read_decisions",
+    "catervas_read_sites",
+    "catervas_read_purchase_orders",
+    "catervas_read_data_pipelines",
+    "catervas_read_seller_messages",
+    "catervas_read_seller_replies",
+    "catervas_chat_reply",
 ];
 
 /// The chat rule alone, as a paused team runs it (ADR 0026): a chat is answered while the team is
@@ -1048,7 +1048,7 @@ async fn budget_and_channel(
 /// The budget rule, between rules 2 and 3: a task whose dollars or sessions are spent is escalated
 /// as the governor, whose `GovernorEscalation` gate names the reason (5.7). One whose escalation
 /// was refused since it entered its status is passed over; a task the human resumed without more
-/// room entered a new status, so it is escalated again, which is how Farik says it is still spent.
+/// room entered a new status, so it is escalated again, which is how Catervas says it is still spent.
 /// It governs work in progress, so it runs only in a tick of every rule scoped to no task; it
 /// passes over a terminal or escalated task and one waiting on the human.
 fn budget(
@@ -1129,7 +1129,7 @@ fn last_move_into(
     deps: &OrchestratorDeps,
     task_id: &TaskId,
     status: TaskStatus,
-) -> Result<Option<FarikEvent>, OrchestratorError> {
+) -> Result<Option<CatervasEvent>, OrchestratorError> {
     let moves = deps.tools.log.read(&EventQuery {
         task_id: Some(task_id.clone()),
         kinds: vec![EventKind::TaskTransitioned],
@@ -1606,22 +1606,22 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use farik_core::contract::{Role, TaskStatus};
-    use farik_core::governor::permissions::{PermissionTier, default_tiers};
-    use farik_core::pricing::Usage;
-    use farik_core::sprint::SprintStatus;
-    use farik_core::team::Effort;
-    use farik_protocol::clock::MovableClock;
-    use farik_protocol::command::Command;
-    use farik_protocol::event::SprintEndedBodyEndedBy;
-    use farik_protocol::event::{
+    use catervas_core::contract::{Role, TaskStatus};
+    use catervas_core::governor::permissions::{PermissionTier, default_tiers};
+    use catervas_core::pricing::Usage;
+    use catervas_core::sprint::SprintStatus;
+    use catervas_core::team::Effort;
+    use catervas_protocol::clock::MovableClock;
+    use catervas_protocol::command::Command;
+    use catervas_protocol::event::SprintEndedBodyEndedBy;
+    use catervas_protocol::event::{
         BudgetExhaustedBodyScope, CriterionRecordedBodyRunBy, EscalationRaisedBodyReason,
         EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody, SessionEndedBodyReason,
         SessionStartedBodyPurpose, TransitionActorWire,
     };
-    use farik_protocol::event::{MessageKind, NewEvent, Thread, event_from_value};
-    use farik_store::event_log::fixtures::refuse_appends_of;
-    use farik_store::git::fixtures::git_output_in;
+    use catervas_protocol::event::{MessageKind, NewEvent, Thread, event_from_value};
+    use catervas_store::event_log::fixtures::refuse_appends_of;
+    use catervas_store::git::fixtures::git_output_in;
     use serde_json::json;
 
     use crate::claude::allowed_builtins;
@@ -1637,7 +1637,7 @@ mod tests {
         accept_frk_1, chat_answers_with_a_request, credential_refused, hits_the_turn_limit,
         implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1,
         planning_ceremony_frk_1, provider_limit_429, provider_limit_rejected, reads_a_file,
-        replays_farik_read_board, reply_to_a_mention, retro, review, review_answers_nothing,
+        replays_catervas_read_board, reply_to_a_mention, retro, review, review_answers_nothing,
         review_writes_note, standup, success_with_is_error,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
@@ -1774,7 +1774,7 @@ mod tests {
             .project
             .moved("FRK-7", "ready", "cancelled", &json!({}));
         let adapter = harness.recorded(vec![
-            replays_farik_read_board(),
+            replays_catervas_read_board(),
             rewritten(&plan_assigns_frk_1(), "FRK-1", "FRK-4"),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
@@ -1908,7 +1908,7 @@ mod tests {
         ));
         assert!(matches!(
             &events[1].body,
-            EventBody::ToolCalled(body) if body.tool == "mcp__farik__farik_assign_task"
+            EventBody::ToolCalled(body) if body.tool == "mcp__catervas__catervas_assign_task"
         ));
         assert!(matches!(
             &events[2].body,
@@ -1998,11 +1998,11 @@ mod tests {
 
         // FRK-2 is in review; FRK-1 is in progress. The folder is not made yet.
         let harness = Harness::with_finance("orch-folder-sessions");
-        let folder = harness.project.repo.path.join(".farik/local/finance");
+        let folder = harness.project.repo.path.join(".catervas/local/finance");
         harness.file("FRK-2", "ready", |wire| {
             wire["assignee_role"] = json!("finance_specialist");
             wire["reviewer_role"] = json!("product_manager");
-            wire["allowed_paths"] = json!([".farik/local/finance/**"]);
+            wire["allowed_paths"] = json!([".catervas/local/finance/**"]);
             wire["exit_criteria"] = json!([{
                 "id": "C1",
                 "text": "Every number names its source.",
@@ -2076,7 +2076,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn farik_checks_a_finance_artifact_on_the_host() {
+    async fn catervas_checks_a_finance_artifact_on_the_host() {
         // Present, the workbook passes C1; absent, it fails it. Either way no sandbox is made, and
         // no branch, which a task in a folder does not have, is read.
         for (present, passes) in [(true, true), (false, false)] {
@@ -2124,7 +2124,7 @@ mod tests {
         std::fs::write(folder.join("books.xlsx"), "first books").expect("written");
         std::fs::write(folder.join("old.xlsx"), "an old one").expect("written");
         let task = "FRK-1".parse().expect("a task id");
-        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
         // What the task did: changed the books, added a forecast, removed an old workbook.
         std::fs::write(folder.join("books.xlsx"), "second books, longer").expect("written");
         std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
@@ -2143,7 +2143,7 @@ mod tests {
             "books.xlsx: changed, 20 bytes\nforecast.xlsx: new, 8 bytes\nold.xlsx: removed, it was 10 bytes"
         );
         assert!(!prompt.contains("The diff from"), "{prompt}");
-        assert!(prompt.contains("`farik_read_sheet`"), "{prompt}");
+        assert!(prompt.contains("`catervas_read_sheet`"), "{prompt}");
         assert!(block(prompt, "results").contains("C1: passed"), "{prompt}");
     }
 
@@ -2151,7 +2151,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn assignment_copies_the_books_once() {
         let harness = Harness::with_finance("orch-folder-baseline");
-        let folder = harness.project.repo.path.join(".farik/local/finance");
+        let folder = harness.project.repo.path.join(".catervas/local/finance");
         std::fs::create_dir_all(&folder).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "first books").expect("written");
         std::fs::write(folder.join("forecast.xlsx"), "first forecast").expect("written");
@@ -2201,7 +2201,7 @@ mod tests {
         harness.file("FRK-2", "ready", |wire| {
             wire["assignee_role"] = json!("procurement_specialist");
             wire["reviewer_role"] = json!("product_manager");
-            wire["allowed_paths"] = json!([".farik/local/procurement/**"]);
+            wire["allowed_paths"] = json!([".catervas/local/procurement/**"]);
             wire["exit_criteria"] = json!([{
                 "id": "C1",
                 "text": "Every price names its source.",
@@ -2260,13 +2260,13 @@ mod tests {
         assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
         assert!(!harness.worktree("FRK-1").exists());
         assert!(!harness.worktree("FRK-2").exists());
-        // No exception was made for it: the team still protects `.farik/local/**`, which the
+        // No exception was made for it: the team still protects `.catervas/local/**`, which the
         // session's `permissions.deny` is made from, and every other session is refused it.
         let team = harness.project.deps.files.read_team().expect("the team");
         assert!(
             team.rules()
                 .protected_paths
-                .contains(&".farik/local/**".to_string()),
+                .contains(&".catervas/local/**".to_string()),
             "{:?}",
             team.rules().protected_paths
         );
@@ -2309,7 +2309,7 @@ mod tests {
         std::fs::create_dir_all(folder.join("evaluations")).expect("the folder is made");
         std::fs::write(folder.join("vendors.xlsx"), "register").expect("written");
         let task = "FRK-1".parse().expect("a task id");
-        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
         // The task changed the register and wrote a note, and the reviewer's run of the criterion
         // finds it.
         std::fs::write(folder.join("vendors.xlsx"), "register, edited").expect("written");
@@ -2464,7 +2464,7 @@ mod tests {
             .deps
             .files
             .root()
-            .join(".farik/local/browser/FRK-1");
+            .join(".catervas/local/browser/FRK-1");
         std::fs::create_dir_all(browser.join("s-1/.cache")).expect("the folder is made");
         std::fs::write(browser.join("s-1/page.png"), "png").expect("written");
 
@@ -2705,7 +2705,10 @@ mod tests {
             "feature/FRK-1"
         );
         assert_eq!(
-            git_output_in(&harness.project.repo.path, &["branch", "--list", "farik/*"]),
+            git_output_in(
+                &harness.project.repo.path,
+                &["branch", "--list", "catervas/*"]
+            ),
             ""
         );
         let moves = harness.events(&[EventKind::TaskTransitioned]);
@@ -2867,7 +2870,7 @@ mod tests {
         let project = &harness.project;
         let body = |at: &str| {
             let mut body =
-                farik_protocol::event::fixtures::a_body_wire(EventKind::SocialPostScheduled);
+                catervas_protocol::event::fixtures::a_body_wire(EventKind::SocialPostScheduled);
             body["at"] = json!(at);
             body
         };
@@ -2911,7 +2914,7 @@ mod tests {
             "social_post.sent",
             &json!({ "post": sent, "buffer_post": "buf-1" }),
         );
-        // One Farik could not hand over before its time, for whatever kept it from running.
+        // One Catervas could not hand over before its time, for whatever kept it from running.
         let late = wrote("social_post.scheduled", &body("2026-11-10T09:00:00-05:00"));
         settles(
             "social_post.missed",
@@ -2945,7 +2948,7 @@ mod tests {
         let outside = outside_the_untrusted_blocks(prompt);
         assert!(
             outside.contains(&format!(
-                "Farik could not post {failed} (Instagram, Fri 6 Nov 09:00):"
+                "Catervas could not post {failed} (Instagram, Fri 6 Nov 09:00):"
             )),
             "{prompt}"
         );
@@ -2959,7 +2962,7 @@ mod tests {
         );
         assert!(
             outside.contains(&format!(
-                "Farik could not post {missed} (Instagram, Sat 7 Nov 09:00):"
+                "Catervas could not post {missed} (Instagram, Sat 7 Nov 09:00):"
             )),
             "{prompt}"
         );
@@ -2969,17 +2972,17 @@ mod tests {
         );
         assert!(
             outside.contains(&format!(
-                "Farik could not post {late} (Instagram, Tue 10 Nov 09:00):"
+                "Catervas could not post {late} (Instagram, Tue 10 Nov 09:00):"
             )),
             "{prompt}"
         );
         assert!(
-            prompt.contains("Farik could not hand it to Buffer before its time."),
-            "a post missed because Farik was off, paused or busy: {prompt}"
+            prompt.contains("Catervas could not hand it to Buffer before its time."),
+            "a post missed because Catervas was off, paused or busy: {prompt}"
         );
         assert!(
-            !prompt.contains("Farik was not running"),
-            "the old words say what Farik cannot know: {prompt}"
+            !prompt.contains("Catervas was not running"),
+            "the old words say what Catervas cannot know: {prompt}"
         );
         assert!(
             outside.contains(&format!(
@@ -3003,7 +3006,7 @@ mod tests {
         // The session after hears none of it again.
         let next = &started[1].initial_prompt;
         for gone in [
-            "Farik could not post",
+            "Catervas could not post",
             "The owner did not allow",
             "The owner stopped your post",
         ] {
@@ -3049,7 +3052,7 @@ mod tests {
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
     }
 
-    fn last_move(harness: &Harness) -> farik_protocol::event::TaskTransitionedBody {
+    fn last_move(harness: &Harness) -> catervas_protocol::event::TaskTransitionedBody {
         match &harness
             .events(&[EventKind::TaskTransitioned])
             .last()
@@ -3389,7 +3392,7 @@ mod tests {
         );
     }
 
-    /// The `criterion.recorded` events Farik recorded as the governor, with no agent on their
+    /// The `criterion.recorded` events Catervas recorded as the governor, with no agent on their
     /// envelope, as (id, passed).
     fn governor_runs(harness: &Harness) -> Vec<(String, bool)> {
         harness
@@ -3550,7 +3553,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn runs_only_the_criteria_farik_has_not_run() {
+    async fn runs_only_the_criteria_catervas_has_not_run() {
         let harness = Harness::new("orch-verify-remaining", |_| {});
         harness.verifying_with("FRK-1", true, true, |wire| {
             push_criterion(
@@ -3686,8 +3689,8 @@ mod tests {
         let wire = json!({
             "seq": 1,
             "recorded_at": at().to_rfc3339(),
-            "team_id": "farik",
-            "project_id": "farik",
+            "team_id": "catervas",
+            "project_id": "catervas",
             "task_id": "FRK-1",
             "agent_id": "dev-b",
             "kind": "criterion.recorded",
@@ -3782,7 +3785,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn posts_a_line_for_a_rejection_farik_filed() {
+    async fn posts_a_line_for_a_rejection_catervas_filed() {
         let harness = Harness::new("orch-verify-rejects-line", |_| {});
         harness.verifying_with("FRK-1", false, true, |_| {});
         let adapter = harness.recorded(vec![review_writes_note()]);
@@ -3914,9 +3917,9 @@ mod tests {
         let orchestrator = harness.orchestrator(adapter.clone());
         orchestrator.tick().await.expect("the review runs");
         orchestrator
-            .handle(farik_protocol::command::Command::HumanAccept {
+            .handle(catervas_protocol::command::Command::HumanAccept {
                 task_id: "FRK-1".parse().expect("a task id"),
-                subject: farik_protocol::command::AcceptSubject::Result,
+                subject: catervas_protocol::command::AcceptSubject::Result,
                 message: None,
             })
             .await
@@ -4137,7 +4140,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn escalates_a_task_whose_criterion_farik_could_not_run() {
+    fn escalates_a_task_whose_criterion_catervas_could_not_run() {
         let harness = Harness::new("orch-verify-unrunnable", |wire| {
             wire["policy"]["wip_limit_per_agent"] = json!(2);
         });
@@ -4352,7 +4355,7 @@ mod tests {
         orchestrator.tick().await.expect("the tick escalates it");
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
         orchestrator
-            .handle(farik_protocol::command::Command::EscalationResolve {
+            .handle(catervas_protocol::command::Command::EscalationResolve {
                 task_id: "FRK-1".parse().expect("a task id"),
                 to: TaskStatus::InProgress,
                 message: "Carry on.".to_string(),
@@ -4377,7 +4380,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn leaves_the_budget_to_farik_plan() {
+    async fn leaves_the_budget_to_catervas_plan() {
         let harness = Harness::new("orch-budget-planning", |_| {});
         harness.file("FRK-1", "refining", |wire| {
             wire["budget"]["max_sessions"] = json!(1);
@@ -4443,7 +4446,7 @@ mod tests {
         ));
         assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
         assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
-        let notes = farik_notes(&harness);
+        let notes = catervas_notes(&harness);
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(notes[0].contains("input or output tokens"), "{}", notes[0]);
     }
@@ -4451,13 +4454,13 @@ mod tests {
     /// What a session that ran past its wall clock is told when it ends.
     const WALL_CLOCK: &str = "the session ran past its wall clock of 1800 s";
 
-    /// The progress notes Farik wrote, in order.
-    fn farik_notes(harness: &Harness) -> Vec<String> {
+    /// The progress notes Catervas wrote, in order.
+    fn catervas_notes(harness: &Harness) -> Vec<String> {
         harness
             .events(&[EventKind::NoteWritten])
             .iter()
             .filter_map(|event| match &event.body {
-                EventBody::NoteWritten(body) if body.written_by == "farik" => {
+                EventBody::NoteWritten(body) if body.written_by == "catervas" => {
                     assert_eq!(body.kind, NoteWrittenBodyKind::Progress);
                     Some(body.text.clone())
                 }
@@ -4485,7 +4488,7 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
 
-        let notes = farik_notes(&harness);
+        let notes = catervas_notes(&harness);
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(notes[0].contains("a limit"), "{}", notes[0]);
         assert!(notes[0].contains(WALL_CLOCK), "{}", notes[0]);
@@ -4523,7 +4526,7 @@ mod tests {
             ),
             "{ends:?}"
         );
-        let notes = farik_notes(&harness);
+        let notes = catervas_notes(&harness);
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(notes[0].contains("input or output tokens"), "{}", notes[0]);
         assert!(!notes[0].contains("a limit"), "{}", notes[0]);
@@ -4544,7 +4547,7 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
 
-        let notes = farik_notes(&harness);
+        let notes = catervas_notes(&harness);
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(notes[0].contains(WALL_CLOCK), "{}", notes[0]);
         assert!(
@@ -4573,7 +4576,7 @@ mod tests {
             )),
             "{ends:?}"
         );
-        assert!(farik_notes(&harness).is_empty());
+        assert!(catervas_notes(&harness).is_empty());
     }
 
     #[tokio::test]
@@ -4645,7 +4648,7 @@ mod tests {
         ));
     }
 
-    /// A `.farik/prices.json` that prices a model no agent of the harness runs, so that every one
+    /// A `.catervas/prices.json` that prices a model no agent of the harness runs, so that every one
     /// of their sessions is recorded unpriced.
     fn prices_without_the_teams_models(harness: &Harness) {
         let prices = json!({
@@ -4662,7 +4665,7 @@ mod tests {
             }
         });
         std::fs::write(
-            harness.project.repo.path.join(".farik/prices.json"),
+            harness.project.repo.path.join(".catervas/prices.json"),
             prices.to_string(),
         )
         .expect("the override is written");
@@ -4949,7 +4952,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn gives_a_role_held_to_approved_sites_a_sandbox_with_no_network() {
-        use farik_core::governor::permissions::PermissionTier;
+        use catervas_core::governor::permissions::PermissionTier;
 
         let harness = Harness::new("orch-sandbox-held-role", |wire| {
             crate::tools::fixtures::with_the_procurement_specialist(wire);
@@ -5151,7 +5154,7 @@ mod tests {
             .project
             .deps
             .projections
-            .costs(farik_store::CostScope::Task)
+            .costs(catervas_store::CostScope::Task)
             .expect("the costs read");
         let frk_1 = costs
             .iter()
@@ -5162,7 +5165,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn gives_a_session_the_farik_tools_of_its_tiers() {
+    async fn gives_a_session_the_catervas_tools_of_its_tiers() {
         let harness = Harness::new("orch-session-tools", |_| {});
         harness.ready("FRK-1");
         let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
@@ -5182,39 +5185,42 @@ mod tests {
             .filter(|tool| tiers.contains(&tool.tier))
             .filter(|tool| {
                 ![
-                    "farik_check_page",
-                    "farik_record_design_review",
-                    "farik_chat_reply",
-                    "farik_read_costs",
-                    "farik_write_sheet",
-                    "farik_read_sheet",
-                    "farik_write_evaluation",
-                    "farik_request_sites",
-                    "farik_read_sites",
-                    "farik_draft_purchase_order",
-                    "farik_read_purchase_orders",
-                    "farik_update_purchase_order",
-                    "farik_request_data_pipeline",
-                    "farik_read_data_pipelines",
-                    "farik_decide_data_pipeline",
-                    "farik_draft_seller_message",
-                    "farik_read_seller_messages",
-                    "farik_read_seller_replies",
-                    "farik_schedule_post",
+                    "catervas_check_page",
+                    "catervas_record_design_review",
+                    "catervas_chat_reply",
+                    "catervas_read_costs",
+                    "catervas_write_sheet",
+                    "catervas_read_sheet",
+                    "catervas_write_evaluation",
+                    "catervas_request_sites",
+                    "catervas_read_sites",
+                    "catervas_draft_purchase_order",
+                    "catervas_read_purchase_orders",
+                    "catervas_update_purchase_order",
+                    "catervas_request_data_pipeline",
+                    "catervas_read_data_pipelines",
+                    "catervas_decide_data_pipeline",
+                    "catervas_draft_seller_message",
+                    "catervas_read_seller_messages",
+                    "catervas_read_seller_replies",
+                    "catervas_schedule_post",
                 ]
                 .contains(&tool.name)
             })
             .map(|tool| tool.name.to_string())
             .collect();
-        assert_eq!(spec.farik_tools, expected);
-        assert!(spec.farik_tools.contains(&"farik_assign_task".to_string()));
-        assert!(!spec.farik_tools.contains(&"farik_exec".to_string()));
+        assert_eq!(spec.catervas_tools, expected);
+        assert!(
+            spec.catervas_tools
+                .contains(&"catervas_assign_task".to_string())
+        );
+        assert!(!spec.catervas_tools.contains(&"catervas_exec".to_string()));
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn offers_a_verify_session_no_tool_that_runs_or_writes() {
-        const WITHHELD: [&str; 3] = ["farik_exec", "farik_git_commit", "farik_git_push"];
+        const WITHHELD: [&str; 3] = ["catervas_exec", "catervas_git_commit", "catervas_git_push"];
         let harness = Harness::new("orch-verify-tools", |_| {});
         harness.verifying("FRK-1");
         let recorded = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
@@ -5238,15 +5244,15 @@ mod tests {
         for (index, spec) in started.iter().enumerate() {
             assert_eq!(spec.purpose, SessionPurpose::Verify);
             assert_eq!(
-                given[index], spec.farik_tools,
+                given[index], spec.catervas_tools,
                 "the daemon was given the spec's"
             );
             for name in WITHHELD {
                 assert!(
-                    !spec.farik_tools.iter().any(|tool| tool == name),
+                    !spec.catervas_tools.iter().any(|tool| tool == name),
                     "{}'s spec offers {name}: {:?}",
                     spec.agent_id,
-                    spec.farik_tools
+                    spec.catervas_tools
                 );
                 assert!(
                     !listed[index].iter().any(|tool| tool == name),
@@ -5261,17 +5267,17 @@ mod tests {
                 );
             }
             assert!(
-                !spec.system_prompt.contains("The shell is `farik_exec`"),
+                !spec.system_prompt.contains("The shell is `catervas_exec`"),
                 "{}'s prompt names a shell it does not have",
                 spec.agent_id
             );
         }
         // The reviewer, a developer holding `git_local`, still reads the work through git.
-        for name in ["farik_git_status", "farik_git_diff"] {
+        for name in ["catervas_git_status", "catervas_git_diff"] {
             assert!(
-                started[0].farik_tools.iter().any(|tool| tool == name),
+                started[0].catervas_tools.iter().any(|tool| tool == name),
                 "{:?}",
-                started[0].farik_tools
+                started[0].catervas_tools
             );
             assert!(listed[0].iter().any(|tool| tool == name), "{:?}", listed[0]);
         }
@@ -5351,7 +5357,7 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: "the team is paused; farik resume starts it again".to_string(),
+                why: "the team is paused; catervas resume starts it again".to_string(),
                 until: None
             }
         );
@@ -5402,7 +5408,7 @@ mod tests {
         wire["agents"]
             .as_array_mut()
             .expect("a list of agents")
-            .push(farik_core::team::fixtures::an_agent_wire(
+            .push(catervas_core::team::fixtures::an_agent_wire(
                 "sm",
                 "scrum_master",
             ));
@@ -5421,20 +5427,20 @@ mod tests {
         );
     }
 
-    /// The Farik tools a session was given, in no order.
+    /// The Catervas tools a session was given, in no order.
     fn tools_of(spec: &crate::session::SessionSpec) -> BTreeSet<&str> {
-        spec.farik_tools.iter().map(String::as_str).collect()
+        spec.catervas_tools.iter().map(String::as_str).collect()
     }
 
-    /// The Farik tools the standup and the review are given.
+    /// The Catervas tools the standup and the review are given.
     const READ_AND_POST: [&str; 7] = [
-        "farik_read_task",
-        "farik_read_board",
-        "farik_read_rules",
-        "farik_read_criteria",
-        "farik_post_message",
-        "farik_write_memory",
-        "farik_read_decisions",
+        "catervas_read_task",
+        "catervas_read_board",
+        "catervas_read_rules",
+        "catervas_read_criteria",
+        "catervas_post_message",
+        "catervas_write_memory",
+        "catervas_read_decisions",
     ];
 
     #[tokio::test]
@@ -5485,14 +5491,14 @@ mod tests {
         assert_eq!(
             tools_of(spec),
             BTreeSet::from([
-                "farik_read_task",
-                "farik_read_board",
-                "farik_read_rules",
-                "farik_read_criteria",
-                "farik_post_message",
-                "farik_plan_sprint",
-                "farik_write_memory",
-                "farik_read_decisions",
+                "catervas_read_task",
+                "catervas_read_board",
+                "catervas_read_rules",
+                "catervas_read_criteria",
+                "catervas_post_message",
+                "catervas_plan_sprint",
+                "catervas_write_memory",
+                "catervas_read_decisions",
             ])
         );
         // The candidates, the escalation the digest lists, the last retro, and the channel.
@@ -6195,7 +6201,7 @@ mod tests {
 
     /// The team file as it is on disk.
     fn team_file(harness: &Harness) -> String {
-        std::fs::read_to_string(harness.project.repo.path.join(".farik/team.yaml"))
+        std::fs::read_to_string(harness.project.repo.path.join(".catervas/team.yaml"))
             .expect("the team file reads")
     }
 
@@ -6210,7 +6216,7 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
 
-        let notes = farik_notes(&harness);
+        let notes = catervas_notes(&harness);
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(
             notes[0].contains("its model provider's usage limit"),
@@ -6249,14 +6255,14 @@ mod tests {
         assert_eq!(
             pauses,
             vec![serde_json::json!({
-                "by": "farik",
+                "by": "catervas",
                 "reason": "credential_refused",
                 "detail": "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
             })]
         );
         assert!(matches!(second, TickReport::Idle { .. }), "{second:?}");
         assert_eq!(adapter.started().len(), 1);
-        assert!(farik_notes(&harness).is_empty());
+        assert!(catervas_notes(&harness).is_empty());
         assert!(sleeps(&harness).is_empty());
         assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
     }
@@ -6453,7 +6459,7 @@ mod tests {
             (started[1].agent_id.as_str(), started[1].purpose),
             ("dev-a", SessionPurpose::Implement)
         );
-        let notes = farik_notes(&harness);
+        let notes = catervas_notes(&harness);
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(
             notes[0].contains("its model provider's usage limit"),
@@ -6610,7 +6616,7 @@ mod tests {
 
         orchestrator.tick().await.expect("the tick runs");
 
-        let notes = farik_notes(&harness);
+        let notes = catervas_notes(&harness);
         assert_eq!(notes.len(), 1, "{notes:?}");
         assert!(!notes[0].contains("Your last note"), "{}", notes[0]);
     }
@@ -6656,7 +6662,7 @@ mod tests {
     }
 
     /// Every message in the channel, oldest first.
-    fn messages(harness: &Harness) -> Vec<farik_protocol::event::MessagePostedBody> {
+    fn messages(harness: &Harness) -> Vec<catervas_protocol::event::MessagePostedBody> {
         harness
             .events(&[EventKind::MessagePosted])
             .into_iter()
@@ -6690,16 +6696,16 @@ mod tests {
         assert_eq!(spec.effort, Effort::Low);
         assert_eq!(spec.task_id, None);
         assert_eq!(
-            spec.farik_tools,
+            spec.catervas_tools,
             [
-                "farik_read_task",
-                "farik_read_board",
-                "farik_read_rules",
-                "farik_read_criteria",
-                "farik_create_task",
-                "farik_post_message",
-                "farik_write_memory",
-                "farik_read_decisions",
+                "catervas_read_task",
+                "catervas_read_board",
+                "catervas_read_rules",
+                "catervas_read_criteria",
+                "catervas_create_task",
+                "catervas_post_message",
+                "catervas_write_memory",
+                "catervas_read_decisions",
             ]
         );
         assert_eq!(
@@ -6963,10 +6969,10 @@ mod tests {
     /// session's start is recorded.
     struct PostsWhenAsked {
         tools: Arc<crate::tools::ToolDeps>,
-        ids: farik_protocol::clock::SequentialIds,
+        ids: catervas_protocol::clock::SequentialIds,
     }
 
-    impl farik_protocol::clock::IdSource for PostsWhenAsked {
+    impl catervas_protocol::clock::IdSource for PostsWhenAsked {
         fn session_id(&self) -> String {
             crate::channel::post(
                 &self.tools.log,
@@ -7001,7 +7007,7 @@ mod tests {
             harness.gh.forge(&harness.project.repo.path),
             Arc::new(PostsWhenAsked {
                 tools: Arc::clone(&harness.project.deps),
-                ids: farik_protocol::clock::SequentialIds::new(),
+                ids: catervas_protocol::clock::SequentialIds::new(),
             }),
         );
 
@@ -7078,7 +7084,7 @@ mod tests {
                 .project
                 .repo
                 .path
-                .join(".farik/local/channel-summary.md"),
+                .join(".catervas/local/channel-summary.md"),
         )
         .expect("the summary is written");
         let started = adapter.started();
@@ -7304,16 +7310,16 @@ mod tests {
         );
         assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
         let mut retro_tools = BTreeSet::from(READ_AND_POST);
-        retro_tools.insert("farik_append_retro");
+        retro_tools.insert("catervas_append_retro");
         assert_eq!(tools_of(&adapter.started()[1]), retro_tools);
         let after = orchestrator.tick().await.expect("the tick runs");
         assert!(!matches!(after, TickReport::Sprint { .. }), "{after:?}");
     }
 
-    /// Every answer a replay's Farik tool calls were given: the tool's full name and the answer.
+    /// Every answer a replay's Catervas tool calls were given: the tool's full name and the answer.
     type Answers = Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>;
 
-    /// A recorded adapter playing `transcripts` as `recorded` does, and the answers its Farik tool
+    /// A recorded adapter playing `transcripts` as `recorded` does, and the answers its Catervas tool
     /// calls were given.
     fn answered(
         harness: &Harness,
@@ -7348,7 +7354,7 @@ mod tests {
             "escalation.raised",
             &json!({ "reason": "iterations", "detail": "three rejections" }),
         );
-        let retro_file = harness.project.repo.path.join(".farik/team/retro.md");
+        let retro_file = harness.project.repo.path.join(".catervas/team/retro.md");
         std::fs::write(
             &retro_file,
             "# Retro\n\n## S0 (2026-09-01)\n\nAsk the human sooner.\n",
@@ -7397,7 +7403,7 @@ mod tests {
             .lock()
             .expect("no test panics holding it")
             .iter()
-            .filter(|(tool, _)| tool == "mcp__farik__farik_append_retro")
+            .filter(|(tool, _)| tool == "mcp__catervas__catervas_append_retro")
             .map(|(_, answer)| answer.clone())
             .collect();
         assert_eq!(retros.len(), 2, "{retros:?}");
@@ -7475,8 +7481,9 @@ mod tests {
         assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
         assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
         assert_eq!(harness.events(&[EventKind::RetroAppended]).len(), 1);
-        let file = std::fs::read_to_string(harness.project.repo.path.join(".farik/team/retro.md"))
-            .expect("the retro reads");
+        let file =
+            std::fs::read_to_string(harness.project.repo.path.join(".catervas/team/retro.md"))
+                .expect("the retro reads");
         assert_eq!(file.matches("## S1 ").count(), 1, "{file}");
     }
 
@@ -7794,16 +7801,16 @@ mod tests {
             .copied()
             .filter(|tool| {
                 ![
-                    "farik_read_sites",
-                    "farik_read_purchase_orders",
-                    "farik_read_data_pipelines",
-                    "farik_read_seller_messages",
-                    "farik_read_seller_replies",
+                    "catervas_read_sites",
+                    "catervas_read_purchase_orders",
+                    "catervas_read_data_pipelines",
+                    "catervas_read_seller_messages",
+                    "catervas_read_seller_replies",
                 ]
                 .contains(tool)
             })
             .collect();
-        assert_eq!(spec.farik_tools, developers_chat);
+        assert_eq!(spec.catervas_tools, developers_chat);
         assert_eq!(
             spec.builtin_tools,
             allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
@@ -7836,21 +7843,21 @@ mod tests {
 
         let spec = &adapter.started()[0];
         assert_eq!(spec.purpose, SessionPurpose::Chat);
-        let given: BTreeSet<&str> = spec.farik_tools.iter().map(String::as_str).collect();
+        let given: BTreeSet<&str> = spec.catervas_tools.iter().map(String::as_str).collect();
         assert_eq!(
             given,
             BTreeSet::from([
-                "farik_read_task",
-                "farik_read_board",
-                "farik_read_rules",
-                "farik_read_criteria",
-                "farik_read_decisions",
-                "farik_read_sites",
-                "farik_read_purchase_orders",
-                "farik_read_data_pipelines",
-                "farik_read_seller_messages",
-                "farik_read_seller_replies",
-                "farik_chat_reply",
+                "catervas_read_task",
+                "catervas_read_board",
+                "catervas_read_rules",
+                "catervas_read_criteria",
+                "catervas_read_decisions",
+                "catervas_read_sites",
+                "catervas_read_purchase_orders",
+                "catervas_read_data_pipelines",
+                "catervas_read_seller_messages",
+                "catervas_read_seller_replies",
+                "catervas_chat_reply",
             ])
         );
     }
@@ -7943,7 +7950,7 @@ mod tests {
                 ("Read", json!({ "file_path": format!("{root}/README.md") })),
                 (
                     "Read",
-                    json!({ "file_path": format!("{root}/.farik/local/farik.db") }),
+                    json!({ "file_path": format!("{root}/.catervas/local/catervas.db") }),
                 ),
                 (
                     "Edit",
@@ -7955,15 +7962,15 @@ mod tests {
                     json!({ "url": "https://example.com", "prompt": "read" }),
                 ),
                 (
-                    "mcp__farik__farik_create_task",
+                    "mcp__catervas__catervas_create_task",
                     json!({ "text": "Pay with Apple Pay at checkout." }),
                 ),
                 (
-                    "mcp__farik__farik_post_message",
+                    "mcp__catervas__catervas_post_message",
                     json!({ "text": "Hello team." }),
                 ),
                 (
-                    "mcp__farik__farik_write_memory",
+                    "mcp__catervas__catervas_write_memory",
                     json!({ "text": "Remember this." }),
                 ),
                 (
@@ -8000,9 +8007,15 @@ mod tests {
                 ("Edit", "tier_not_granted"),
                 ("Bash", "tool_not_allowed"),
                 ("WebFetch", "tier_not_granted"),
-                ("mcp__farik__farik_create_task", "tool_not_in_session"),
-                ("mcp__farik__farik_post_message", "tool_not_in_session"),
-                ("mcp__farik__farik_write_memory", "tool_not_in_session"),
+                ("mcp__catervas__catervas_create_task", "tool_not_in_session"),
+                (
+                    "mcp__catervas__catervas_post_message",
+                    "tool_not_in_session"
+                ),
+                (
+                    "mcp__catervas__catervas_write_memory",
+                    "tool_not_in_session"
+                ),
                 (
                     "mcp__playwright__browser_navigate",
                     "connector_not_in_session"
@@ -8019,7 +8032,7 @@ mod tests {
         // session, given `network`, by nothing.
         let harness = Harness::with_procurement("orch-procurement-held");
         harness.procurement_task("FRK-1", Some("in_progress"));
-        let farik = farik_roles::sites::farik_sites()[0].host.clone();
+        let catervas = catervas_roles::sites::catervas_sites()[0].host.clone();
         let probe = Arc::new(HookProbe {
             inner: harness.recorded(vec![reads_a_file()]),
             daemon: Arc::clone(&harness.daemon),
@@ -8030,7 +8043,7 @@ mod tests {
                 ),
                 (
                     "WebFetch",
-                    json!({ "url": format!("https://www.{farik}/"), "prompt": "read" }),
+                    json!({ "url": format!("https://www.{catervas}/"), "prompt": "read" }),
                 ),
                 ("WebSearch", json!({ "query": "corrugated boxes" })),
             ],
@@ -8180,7 +8193,7 @@ mod tests {
         assert_eq!(
             second,
             TickReport::Idle {
-                why: "the team is paused; farik resume starts it again".to_string(),
+                why: "the team is paused; catervas resume starts it again".to_string(),
                 until: None
             }
         );
@@ -8190,7 +8203,7 @@ mod tests {
         harness.project.record(
             "",
             "team.paused",
-            &json!({ "by": "farik", "reason": "credential_refused", "detail": "401" }),
+            &json!({ "by": "catervas", "reason": "credential_refused", "detail": "401" }),
         );
         chatted(&harness, "dev-a", "human", "Still there?", None);
         let refused = orchestrator.tick().await.expect("the tick runs");
@@ -8236,20 +8249,20 @@ mod tests {
         refused_by_hook_and_tool(&harness, "dev-a", SessionPurpose::Implement).await;
         let mut context = harness.project.context("dev-a", None);
         context.purpose = SessionPurpose::Chat;
-        let read = crate::tools::call_tool(&context, "farik_read_board", json!({})).await;
+        let read = crate::tools::call_tool(&context, "catervas_read_board", json!({})).await;
         assert!(read.is_ok(), "{read:?}");
         refused_by_hook_and_tool(&harness, "old", SessionPurpose::Chat).await;
     }
 
     /// Registers a session of `agent` for `purpose` and asserts that the hook and `call_tool` both
-    /// refuse its `farik_read_board` with `agent_not_active`.
+    /// refuse its `catervas_read_board` with `agent_not_active`.
     async fn refused_by_hook_and_tool(harness: &Harness, agent: &str, purpose: SessionPurpose) {
         use crate::daemon::{HookRequest, SessionRegistration, decide_pre_tool_use};
 
         let session_id = format!("session-{agent}-{purpose:?}");
         harness.daemon.register_session(SessionRegistration {
             session_id: session_id.clone(),
-            web: farik_core::governor::sites::WebAccess::Open,
+            web: catervas_core::governor::sites::WebAccess::Open,
             agent_id: agent.to_string(),
             task_id: None,
             purpose,
@@ -8259,8 +8272,8 @@ mod tests {
             skills_root: None,
             cwd: harness.project.repo.path.clone(),
             executor: None,
-            limits: farik_core::budget::DEFAULT_SESSION_LIMITS,
-            farik_tools: vec!["farik_read_board".to_string()],
+            limits: catervas_core::budget::DEFAULT_SESSION_LIMITS,
+            catervas_tools: vec!["catervas_read_board".to_string()],
             tiers: vec![PermissionTier::Read],
             connectors: Vec::new(),
             preview: None,
@@ -8270,7 +8283,7 @@ mod tests {
                 session_id,
                 cwd: harness.project.repo.path.clone(),
                 hook_event_name: "PreToolUse".to_string(),
-                tool_name: "mcp__farik__farik_read_board".to_string(),
+                tool_name: "mcp__catervas__catervas_read_board".to_string(),
                 tool_input: json!({}),
                 tool_use_id: None,
                 tool_response: None,
@@ -8284,7 +8297,7 @@ mod tests {
         );
         let mut context = harness.project.context(agent, None);
         context.purpose = purpose;
-        let refused = crate::tools::call_tool(&context, "farik_read_board", json!({}))
+        let refused = crate::tools::call_tool(&context, "catervas_read_board", json!({}))
             .await
             .expect_err("the session is refused");
         assert!(
@@ -8327,7 +8340,7 @@ mod tests {
         let team = deps.files.read_team().expect("the team reads");
         let open = deps.projections.open_sprint().expect("the sprint reads");
         let row = harness.row(task);
-        farik_core::governor::gates::in_the_backlog(&crate::sprints::sprint_hold(
+        catervas_core::governor::gates::in_the_backlog(&crate::sprints::sprint_hold(
             &team,
             open.as_ref().map(|sprint| sprint.sprint_id.as_str()),
             &row,

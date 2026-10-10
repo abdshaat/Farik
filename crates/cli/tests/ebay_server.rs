@@ -1,15 +1,15 @@
-//! `farik connector ebay` as the built binary: the kit's `ebay` entry, listed through the same
+//! `catervas connector ebay` as the built binary: the kit's `ebay` entry, listed through the same
 //! path the daemon uses, answers with exactly the tools the kit tags (ADR 0038). Offline: the
 //! server lists its tools without asking eBay anything, with its two keys or without either.
 #![cfg(unix)]
 
 use std::collections::BTreeMap;
 
-use farik_core::contract::Role;
-use farik_core::team::{CustomServer, custom_server};
-use farik_roles::{KitConnector, load_kit, pin_drift};
-use farik_runtime::claude::Secret;
-use farik_runtime::connectors::{ConnectorError, call_tool, list_tools};
+use catervas_core::contract::Role;
+use catervas_core::team::{CustomServer, custom_server};
+use catervas_roles::{KitConnector, load_kit, pin_drift};
+use catervas_runtime::claude::Secret;
+use catervas_runtime::connectors::{ConnectorError, call_tool, list_tools};
 
 /// The Procurement Specialist's `ebay`, as the daemon would hold it.
 fn ebay_in_the_kit() -> CustomServer {
@@ -25,18 +25,18 @@ fn ebay_in_the_kit() -> CustomServer {
         .expect("the Procurement Specialist's kit has ebay")
 }
 
-/// A scratch folder of its own, and in it a name no `which farik` would find, linked to the built
+/// A scratch folder of its own, and in it a name no `which catervas` would find, linked to the built
 /// binary: only the executable a call was handed can answer.
 fn scratch_with_the_binary(folder: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     let scratch = std::env::temp_dir().join(format!("{folder}-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).expect("a scratch folder");
     let under_test = scratch.join("ebay-under-test");
     let _ = std::fs::remove_file(&under_test);
-    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_farik"), &under_test).expect("a symlink");
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_catervas"), &under_test).expect("a symlink");
     (scratch, under_test)
 }
 
-/// The names `server` lists when `farik` is started with `keys`, from a folder of its own.
+/// The names `server` lists when `catervas` is started with `keys`, from a folder of its own.
 async fn listed_names(
     server: &CustomServer,
     keys: &BTreeMap<String, Secret>,
@@ -82,7 +82,7 @@ async fn ebay_server_lists_the_kits_tools() {
             Secret::new("test-cert-id".to_string()),
         ),
     ]);
-    let names = listed_names(&ebay, &keys, "farik-ebay-under-test").await;
+    let names = listed_names(&ebay, &keys, "catervas-ebay-under-test").await;
     assert_the_kit_tags_exactly(&ebay, &names);
 }
 
@@ -94,7 +94,7 @@ async fn ebay_server_lists_its_tools_without_its_keys() {
     let mut bare = ebay_in_the_kit();
     assert_eq!(bare.credential_keys.len(), 2);
     bare.credential_keys.clear();
-    let names = listed_names(&bare, &BTreeMap::new(), "farik-ebay-bare-under-test").await;
+    let names = listed_names(&bare, &BTreeMap::new(), "catervas-ebay-bare-under-test").await;
     assert_the_kit_tags_exactly(&bare, &names);
 }
 
@@ -116,7 +116,7 @@ async fn ebay_server_reads_its_keys_from_its_environment() {
             Secret::new("test-cert-id".to_string()),
         ),
     ]);
-    let (scratch, under_test) = scratch_with_the_binary("farik-ebay-keys-under-test");
+    let (scratch, under_test) = scratch_with_the_binary("catervas-ebay-keys-under-test");
     let arguments = || {
         serde_json::json!({ "item_id": "123" })
             .as_object()

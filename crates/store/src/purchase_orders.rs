@@ -1,19 +1,19 @@
 //! The purchase orders the Procurement Specialist suggests (`docs/SPEC.md` 6.10, ADR 0039), folded
 //! from the eight `purchase_order.` kinds of the project's log. An order is drafted by the agent;
-//! approved or rejected, placed, then received or closed by the owner; or expired by Farik. Only
+//! approved or rejected, placed, then received or closed by the owner; or expired by Catervas. Only
 //! an event whose envelope names no agent and no session counts as a step after the drafting, so
-//! no Farik tool and no agent can move an order or record what was paid; a placed order's follow-up
+//! no Catervas tool and no agent can move an order or record what was paid; a placed order's follow-up
 //! status is its own agent's, or the owner's correction of it.
 
-use chrono::{DateTime, Duration, NaiveDate, Utc};
-use farik_core::contract::TaskId;
-use farik_protocol::event::{
-    EventBody, EventKind, FarikEvent, PurchaseOrderDraftedBody, PurchaseOrderStatus,
+use catervas_core::contract::TaskId;
+use catervas_protocol::event::{
+    CatervasEvent, EventBody, EventKind, PurchaseOrderDraftedBody, PurchaseOrderStatus,
 };
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::{EventLog, EventQuery, StoreError};
 
-/// How many days an order waits to be decided, or to be marked placed once approved, before Farik
+/// How many days an order waits to be decided, or to be marked placed once approved, before Catervas
 /// closes it by itself.
 pub const EXPIRES_AFTER_DAYS: i64 = 30;
 /// How many days after it was placed an order is expected, when no follow-up says another day.
@@ -34,7 +34,7 @@ pub enum OrderState {
     Received,
     /// The owner closed it: the seller cancelled or refunded it, or it was lost.
     Closed,
-    /// Farik closed it: nobody decided or placed it in time.
+    /// Catervas closed it: nobody decided or placed it in time.
     Expired,
 }
 
@@ -156,7 +156,7 @@ fn pay(record: &mut PurchaseOrderRecord, paid: Option<&str>, currency: Option<&s
 }
 
 /// The order a `purchase_order.drafted` event starts, if it names its task.
-fn drafted(event: &FarikEvent, body: &PurchaseOrderDraftedBody) -> Option<PurchaseOrderRecord> {
+fn drafted(event: &CatervasEvent, body: &PurchaseOrderDraftedBody) -> Option<PurchaseOrderRecord> {
     Some(PurchaseOrderRecord {
         order: body.order.get(),
         task_id: event.envelope.ids.task_id.clone()?,
@@ -181,11 +181,11 @@ fn find(orders: &mut [PurchaseOrderRecord], number: u64) -> Option<&mut Purchase
     orders.iter_mut().find(|record| record.order == number)
 }
 
-/// The order `event` is about, when it is in `from` and the event is the owner's or Farik's: its
+/// The order `event` is about, when it is in `from` and the event is the owner's or Catervas's: its
 /// envelope names no agent and no session.
 fn stepped<'a>(
     orders: &'a mut [PurchaseOrderRecord],
-    event: &FarikEvent,
+    event: &CatervasEvent,
     number: u64,
     from: &[OrderState],
 ) -> Option<&'a mut PurchaseOrderRecord> {
@@ -307,7 +307,7 @@ pub fn purchase_orders(log: &EventLog) -> Result<Vec<PurchaseOrderRecord>, Store
     Ok(orders)
 }
 
-/// When Farik closes the order by itself: 30 days after its drafting while it is drafted, 30 days
+/// When Catervas closes the order by itself: 30 days after its drafting while it is drafted, 30 days
 /// after its approval while it is approved. A placed order never expires.
 #[must_use]
 pub fn expires_at(record: &PurchaseOrderRecord) -> Option<DateTime<Utc>> {

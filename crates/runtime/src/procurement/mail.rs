@@ -9,18 +9,18 @@ use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use farik_core::contract::Role;
-use farik_core::governor::sites::site_of;
-use farik_core::team::private_folder;
-use farik_protocol::event::{
+use catervas_core::contract::Role;
+use catervas_core::governor::sites::site_of;
+use catervas_core::team::private_folder;
+use catervas_protocol::event::{
     EventBody, SellerMessageDiscardedBody, SellerMessageFailedBody, SellerMessagePurpose,
     SellerMessageSentBody,
 };
-use farik_store::StoreError;
-use farik_store::seller_mail::{
+use catervas_store::StoreError;
+use catervas_store::seller_mail::{
     MessageState, SellerMail, SellerMessageRecord, seller_mail, sent_on,
 };
-use farik_store::waiting::OrderSend;
+use catervas_store::waiting::OrderSend;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
@@ -36,7 +36,7 @@ use crate::mailbox::{
 use crate::tools::ToolDeps;
 use crate::tools::seller::{body_fault, hex, subject_fault};
 
-/// The line Farik adds under the signature when the owner has it on.
+/// The line Catervas adds under the signature when the owner has it on.
 fn disclosure(name: &str) -> String {
     format!("Written with an AI assistant and sent by {name} after reading it.")
 }
@@ -118,7 +118,7 @@ pub(crate) struct Prepared {
     password: Secret,
     trust: Trust,
     record: SellerMessageRecord,
-    /// The subject and the body as the owner sent them, and the text with what Farik adds.
+    /// The subject and the body as the owner sent them, and the text with what Catervas adds.
     subject: String,
     text: String,
     message_id: String,
@@ -306,7 +306,7 @@ pub(crate) fn prepare(
         return Err(refusal(
             "seller_send_limit",
             format!(
-                "You have sent {MOST_SENT_A_DAY} messages to sellers today, the most Farik sends \
+                "You have sent {MOST_SENT_A_DAY} messages to sellers today, the most Catervas sends \
                  in a day. Send the rest tomorrow."
             ),
         ));
@@ -337,7 +337,7 @@ pub(crate) fn prepare(
     })
 }
 
-/// Hands the message to the sending server: the one place a message leaves Farik, with no lock
+/// Hands the message to the sending server: the one place a message leaves Catervas, with no lock
 /// held.
 ///
 /// # Errors
@@ -399,7 +399,7 @@ pub(crate) fn record_sent(deps: &ToolDeps, prepared: &Prepared) -> Result<u64, M
     .map_err(mail_failed)
 }
 
-/// Records `seller_message.failed` with Farik's sentence for `error`, and answers the refusal
+/// Records `seller_message.failed` with Catervas's sentence for `error`, and answers the refusal
 /// the owner is shown; the message waits to be tried again.
 pub(crate) fn record_failed(
     deps: &ToolDeps,
@@ -589,10 +589,10 @@ pub fn add_order_send_fields(row: &mut Value, deps: &ToolDeps, send: &OrderSend)
 
 #[cfg(test)]
 mod tests {
-    use farik_protocol::command::Command;
-    use farik_protocol::event::{EventBody, EventKind};
-    use farik_store::purchase_orders::{OrderState, purchase_orders};
-    use farik_store::seller_mail::{MessageState, seller_mail};
+    use catervas_protocol::command::Command;
+    use catervas_protocol::event::{EventBody, EventKind};
+    use catervas_store::purchase_orders::{OrderState, purchase_orders};
+    use catervas_store::seller_mail::{MessageState, seller_mail};
     use serde_json::{Value, json};
     use sha2::{Digest as _, Sha256};
 

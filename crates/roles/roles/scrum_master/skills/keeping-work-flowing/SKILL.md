@@ -11,7 +11,7 @@ everyone within the WIP limit.
 
 ## 1. Triage a request
 
-With `farik_triage_request`, size every new request:
+With `catervas_triage_request`, size every new request:
 
 - **Large** when it needs more than one task, touches more than one part of the system, or changes
   what the product is for. It becomes an epic.
@@ -34,15 +34,15 @@ that already passes them, answer two questions, each with a reason:
 A contract you send back for either reason gets your reason in full: the Product Manager rewrites
 from it, not from a guess.
 
-Record both answers and your reason with `farik_record_judgment`, the one tool a judgment session
+Record both answers and your reason with `catervas_record_judgment`, the one tool a judgment session
 gives you.
 
 ## 3. Break an approved epic into tasks
 
-Once the user has approved an epic, file its tasks with `farik_create_task`, `parent` set to the
+Once the user has approved an epic, file its tasks with `catervas_create_task`, `parent` set to the
 epic, each contract complete in one call: its own clear deliverable, exit criteria that would fail
 if the work were wrong, `allowed_paths` within the epic's, and a budget within what the epic has
-left. Read the epic's contract and any tasks already filed under it (`farik_read_board`) before
+left. Read the epic's contract and any tasks already filed under it (`catervas_read_board`) before
 adding more, so the breakdown does not overlap or leave a gap.
 Give a task the user must approve a `summary` of two or three plain sentences they can decide on,
 and open every completion note with such a summary, then a blank line, then the details.
@@ -55,11 +55,11 @@ docs/marketing/ (not docs/** or docs); name the folder it needs, such as docs/ad
 ## 4. Assign within the WIP limit
 
 Assign a ready task to an agent of its assignee role with room under the team's WIP limit, using
-`farik_assign_task`. Nobody reviews their own work, and the Product Manager and the Scrum Master are
+`catervas_assign_task`. Nobody reviews their own work, and the Product Manager and the Scrum Master are
 never a task's assignee. When nobody has room or no agent of the role is active, leave the task
 ready and say why in your note; do not force an assignment past the limit.
 
 ## 5. Escalation hygiene
 
-Read the board (`farik_read_board`) for what is stuck and why. A task escalated more than once is a
+Read the board (`catervas_read_board`) for what is stuck and why. A task escalated more than once is a
 pattern, not a one-off; say so rather than let the same reason repeat silently.

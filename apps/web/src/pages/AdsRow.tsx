@@ -1,5 +1,5 @@
-import mark from "@farik/brand/assets/logo-mark-1254.png";
-import { Button } from "@farik/ui";
+import mark from "@catervas/brand/assets/logo-mark-1254.png";
+import { Button } from "@catervas/ui";
 import { type ReactNode, useState } from "react";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
@@ -40,7 +40,7 @@ export type AdsAsk = {
 	raising?: string;
 };
 
-/** The words of Google or of Farik as a sentence: a full stop after them unless they end in one. */
+/** The words of Google or of Catervas as a sentence: a full stop after them unless they end in one. */
 const sentence = (words: string) => {
 	const said = words.trim();
 	return /[.!?”"]$/.test(said) ? said : `${said}.`;
@@ -49,8 +49,8 @@ const sentence = (words: string) => {
 const ADS = "https://ads.google.com";
 
 /**
- * A row about a plan's ads, Farik's own: the budget they reached, with "Raise the budget" and "End
- * the plan"; ads that may still be running because Farik could not pause them; or a spend Farik
+ * A row about a plan's ads, Catervas's own: the budget they reached, with "Raise the budget" and "End
+ * the plan"; ads that may still be running because Catervas could not pause them; or a spend Catervas
  * cannot read (ADR 0042).
  */
 export function AdsRow({
@@ -121,7 +121,7 @@ export function AdsRow({
 	}
 	return (
 		<li className={styles.row}>
-			{/* The row is Farik's own, so it carries Farik's picture, as the team's agents carry theirs. */}
+			{/* The row is Catervas's own, so it carries Catervas's picture, as the team's agents carry theirs. */}
 			<img src={mark} alt={t("brand")} width={32} height={32} />
 			<div className={styles.rowText}>
 				<strong id={titleId}>{title}</strong>

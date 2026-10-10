@@ -1,20 +1,20 @@
-//! `farik procurement`: connect the mailbox the Procurement Specialist's messages go from, read
+//! `catervas procurement`: connect the mailbox the Procurement Specialist's messages go from, read
 //! what waits to be sent, send or discard a message, and check for replies (`docs/SPEC.md` 6.10,
-//! ADR 0039). Nothing is sent to a seller but by `farik procurement send`, which prints the
+//! ADR 0039). Nothing is sent to a seller but by `catervas procurement send`, which prints the
 //! message whole first; the password is read without echo and never printed.
 
 use std::io::BufRead as _;
 
-use farik_runtime::claude::Secret;
-use farik_runtime::mailbox::{ProviderChoice, ProviderOf, Server, provider_of, servers};
-use farik_runtime::procurement::{MailboxConnect, mailbox_state, seller_messages_list};
+use catervas_runtime::claude::Secret;
+use catervas_runtime::mailbox::{ProviderChoice, ProviderOf, Server, provider_of, servers};
+use catervas_runtime::procurement::{MailboxConnect, mailbox_state, seller_messages_list};
 use serde_json::{Value, json};
 
 use crate::printable::printable;
 use crate::project::{Project, tool_deps};
 use crate::{CliIo, Report};
 
-/// What `farik procurement mailbox connect` was given.
+/// What `catervas procurement mailbox connect` was given.
 pub struct ConnectArgs<'a> {
     /// The address mail is sent from and read for.
     pub address: &'a str,
@@ -28,11 +28,11 @@ pub struct ConnectArgs<'a> {
     pub smtp: Option<&'a str>,
     /// The sign-in name, the address when left out.
     pub username: Option<&'a str>,
-    /// The folder Farik reads, `INBOX` when left out.
+    /// The folder Catervas reads, `INBOX` when left out.
     pub folder: Option<&'a str>,
-    /// What Farik adds under every message.
+    /// What Catervas adds under every message.
     pub signature: Option<&'a str>,
-    /// Whether Farik leaves out the line saying an AI assistant wrote the message.
+    /// Whether Catervas leaves out the line saying an AI assistant wrote the message.
     pub no_disclosure: bool,
 }
 
@@ -72,16 +72,18 @@ pub fn connect_input(args: &ConnectArgs<'_>) -> Result<MailboxConnect, String> {
         Some("microsoft") => ProviderChoice::Microsoft,
         Some(other) => {
             return Err(format!(
-                "--provider {other} is not one Farik knows: write gmail, icloud, fastmail or other"
+                "--provider {other} is not one Catervas knows: write gmail, icloud, fastmail or other"
             ));
         }
         None => match provider_of(args.address) {
-            ProviderOf::Known(farik_runtime::mailbox::Provider::Gmail) => ProviderChoice::Gmail,
-            ProviderOf::Known(farik_runtime::mailbox::Provider::Icloud) => ProviderChoice::Icloud,
-            ProviderOf::Known(farik_runtime::mailbox::Provider::Fastmail) => {
+            ProviderOf::Known(catervas_runtime::mailbox::Provider::Gmail) => ProviderChoice::Gmail,
+            ProviderOf::Known(catervas_runtime::mailbox::Provider::Icloud) => {
+                ProviderChoice::Icloud
+            }
+            ProviderOf::Known(catervas_runtime::mailbox::Provider::Fastmail) => {
                 ProviderChoice::Fastmail
             }
-            ProviderOf::Known(farik_runtime::mailbox::Provider::Other) | ProviderOf::Unknown => {
+            ProviderOf::Known(catervas_runtime::mailbox::Provider::Other) | ProviderOf::Unknown => {
                 ProviderChoice::Other
             }
             ProviderOf::Microsoft => ProviderChoice::Microsoft,
@@ -129,10 +131,10 @@ fn read_password(io: &mut CliIo<'_>) -> Result<Secret, String> {
 
 /// The sentence for a mailbox command another process would have to run.
 #[cfg(unix)]
-const DRIVEN: &str = "another farik process is running this project: change the mailbox on the \
+const DRIVEN: &str = "another catervas process is running this project: change the mailbox on the \
                       Procurement Specialist's page in the web app";
 
-/// `farik procurement mailbox connect`.
+/// `catervas procurement mailbox connect`.
 ///
 /// # Errors
 ///
@@ -152,13 +154,13 @@ pub fn connect(
         project,
         || {
             crate::start::runtime()?
-                .block_on(farik_runtime::procurement::connect_mailbox_on(
+                .block_on(catervas_runtime::procurement::connect_mailbox_on(
                     &daemon, &tools, input, &password,
                 ))
                 .map_err(|refusal| refusal.to_string())?;
             Ok(Report {
                 lines: vec![format!(
-                    "Connected {address}: Farik logged in to both servers and sent nothing."
+                    "Connected {address}: Catervas logged in to both servers and sent nothing."
                 )],
                 json: json!({ "connected": true, "address": address }),
                 json_lines: None,
@@ -168,7 +170,7 @@ pub fn connect(
     )
 }
 
-/// `farik procurement mailbox disconnect`.
+/// `catervas procurement mailbox disconnect`.
 ///
 /// # Errors
 ///
@@ -179,7 +181,7 @@ pub fn disconnect(project: &Project, io: &CliIo<'_>) -> Result<Report, String> {
     crate::here_or_sent(
         project,
         || {
-            farik_runtime::procurement::disconnect_mailbox_on(&daemon, &tools)
+            catervas_runtime::procurement::disconnect_mailbox_on(&daemon, &tools)
                 .map_err(|refusal| refusal.to_string())?;
             Ok(Report {
                 lines: vec!["Disconnected the mailbox: its password is forgotten.".to_string()],
@@ -191,7 +193,7 @@ pub fn disconnect(project: &Project, io: &CliIo<'_>) -> Result<Report, String> {
     )
 }
 
-/// `farik procurement check`.
+/// `catervas procurement check`.
 ///
 /// # Errors
 ///
@@ -203,7 +205,7 @@ pub fn check(project: &Project, io: &CliIo<'_>) -> Result<Report, String> {
         project,
         || {
             let replies = crate::start::runtime()?
-                .block_on(farik_runtime::procurement::check_mailbox_on(
+                .block_on(catervas_runtime::procurement::check_mailbox_on(
                     &daemon, &tools,
                 ))
                 .map_err(|refusal| refusal.to_string())?;
@@ -225,8 +227,8 @@ fn daemon_of(
     io: &CliIo<'_>,
 ) -> Result<
     (
-        std::sync::Arc<farik_runtime::tools::ToolDeps>,
-        std::sync::Arc<farik_runtime::daemon::DaemonState>,
+        std::sync::Arc<catervas_runtime::tools::ToolDeps>,
+        std::sync::Arc<catervas_runtime::daemon::DaemonState>,
     ),
     String,
 > {
@@ -235,7 +237,7 @@ fn daemon_of(
     Ok((tools, daemon))
 }
 
-/// `farik procurement mailbox show`: what `procurement_mailbox.get` answers.
+/// `catervas procurement mailbox show`: what `procurement_mailbox.get` answers.
 ///
 /// # Errors
 ///
@@ -360,8 +362,8 @@ pub fn waiting(project: &Project, io: &CliIo<'_>, number: u64) -> Result<Value, 
 
 /// The command that sends message `row` as it was drafted, which the owner has just been shown.
 #[must_use]
-pub fn send_command(row: &Value) -> farik_protocol::command::Command {
-    farik_protocol::command::Command::SellerMessageSend {
+pub fn send_command(row: &Value) -> catervas_protocol::command::Command {
+    catervas_protocol::command::Command::SellerMessageSend {
         message: row["message"].as_u64().unwrap_or_default(),
         subject: row["subject"].as_str().unwrap_or_default().to_string(),
         body: row["body"].as_str().unwrap_or_default().to_string(),
@@ -440,10 +442,13 @@ mod tests {
             ..args("ivo@x.test", Some("other"))
         };
         let input = connect_input(&typed).expect("typed");
-        assert_eq!(input.imap.security, farik_runtime::mailbox::Security::Tls);
+        assert_eq!(
+            input.imap.security,
+            catervas_runtime::mailbox::Security::Tls
+        );
         assert_eq!(
             input.smtp.security,
-            farik_runtime::mailbox::Security::StartTls
+            catervas_runtime::mailbox::Security::StartTls
         );
         let bad = ConnectArgs {
             imap: Some("mail.x.test:nope"),

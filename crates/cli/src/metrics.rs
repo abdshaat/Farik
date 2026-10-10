@@ -1,7 +1,7 @@
-//! `farik metrics`: the harness metrics of F17, over the whole project or one sprint.
+//! `catervas metrics`: the harness metrics of F17, over the whole project or one sprint.
 
-use farik_store::files::FilesError;
-use farik_store::metrics::{CostSplit, HarnessMetrics, MessageCounts};
+use catervas_store::files::FilesError;
+use catervas_store::metrics::{CostSplit, HarnessMetrics, MessageCounts};
 use serde_json::{Map, Value, json};
 
 use crate::Report;

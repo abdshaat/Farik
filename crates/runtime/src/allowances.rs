@@ -3,11 +3,11 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use catervas_core::governor::permissions::MAX_ALLOWANCE;
+use catervas_protocol::event::{EventBody, EventKind};
+use catervas_roles::{Kit, KitConnector};
+use catervas_store::{EventLog, EventQuery, Projections, StoreError};
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
-use farik_core::governor::permissions::MAX_ALLOWANCE;
-use farik_protocol::event::{EventBody, EventKind};
-use farik_roles::{Kit, KitConnector};
-use farik_store::{EventLog, EventQuery, Projections, StoreError};
 use serde_json::Value;
 
 /// The allowances a connector entry is written with: the kit's defaults for the service `name`,

@@ -1,4 +1,4 @@
-import { Button } from "@farik/ui";
+import { Button } from "@catervas/ui";
 import { useState } from "react";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
@@ -11,7 +11,7 @@ import styles from "./Today.module.css";
 /**
  * "Renewals coming up": each renewal in the register whose decision day is two weeks off or
  * nearer, with the owner's "Ask for a review" and "Dismiss", and how many rows of the register
- * Farik could not read (spec 6.10). Nothing at all when there is nothing to say.
+ * Catervas could not read (spec 6.10). Nothing at all when there is nothing to say.
  */
 export function RenewalsSection({
 	agent,

@@ -1,5 +1,5 @@
 [package]
-name = "farik-runtime"
+name = "catervas-runtime"
 description = "Agent sessions behind one adapter trait: the Claude Code program, recorded transcripts, and what a session reports."
 version.workspace = true
 edition.workspace = true
@@ -8,7 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [features]
-# The end-to-end server's `--preview` admission (step 12, D1), switched on only by `farik`'s `e2e`,
+# The end-to-end server's `--preview` admission (step 12, D1), switched on only by `catervas`'s `e2e`,
 # so that the release binary does not have it.
 e2e = []
 
@@ -18,10 +18,10 @@ axum.workspace = true
 base64.workspace = true
 calamine.workspace = true
 chrono.workspace = true
-farik-core.workspace = true
-farik-protocol.workspace = true
-farik-roles.workspace = true
-farik-store.workspace = true
+catervas-core.workspace = true
+catervas-protocol.workspace = true
+catervas-roles.workspace = true
+catervas-store.workspace = true
 futures-util.workspace = true
 http.workspace = true
 keyring.workspace = true

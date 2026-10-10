@@ -1,9 +1,9 @@
-//! `farik_read_costs` (`docs/SPEC.md` 6.6): the Finance Specialist reads what the team has spent
+//! `catervas_read_costs` (`docs/SPEC.md` 6.6): the Finance Specialist reads what the team has spent
 //! on AI, summed by task, agent, sprint, day or purpose, from the costs the log already keeps.
 
+use catervas_core::contract::Role;
+use catervas_store::{CostScope, CostWindow};
 use chrono::NaiveDate;
-use farik_core::contract::Role;
-use farik_store::{CostScope, CostWindow};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
 
-/// `farik_read_costs`'s input.
+/// `catervas_read_costs`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadCostsInput {
@@ -76,7 +76,7 @@ fn window_of(input: &ReadCostsInput) -> Result<CostWindow, ToolError> {
     Ok(CostWindow::Between(from, to))
 }
 
-/// `farik_read_costs`: what the team spent, by the key the input names, for a Finance Specialist
+/// `catervas_read_costs`: what the team spent, by the key the input names, for a Finance Specialist
 /// in any session. Reads the projections and records nothing.
 pub(super) fn read_costs(call: &Call<'_>, input: &ReadCostsInput) -> Result<Value, ToolError> {
     if call.role() != Role::FinanceSpecialist {
@@ -144,7 +144,7 @@ mod tests {
         let project = a_project_with_costs("costs-scopes");
         let read = |input: Value| {
             project
-                .call("fin", None, "farik_read_costs", input)
+                .call("fin", None, "catervas_read_costs", input)
                 .expect("the costs are read")
         };
 
@@ -204,7 +204,12 @@ mod tests {
         let before = project.event_count();
         for task in [None, Some("FRK-1")] {
             let refused = project
-                .call("proc", task, "farik_read_costs", json!({ "by": "agent" }))
+                .call(
+                    "proc",
+                    task,
+                    "catervas_read_costs",
+                    json!({ "by": "agent" }),
+                )
                 .expect_err("only the Finance Specialist reads the costs");
             assert!(
                 matches!(&refused, ToolError::Refused { reason } if reason.starts_with("sheet_refused: ")),
@@ -213,7 +218,7 @@ mod tests {
         }
         assert_eq!(project.event_count(), before, "a read records nothing");
         project
-            .call("fin", None, "farik_read_costs", json!({ "by": "agent" }))
+            .call("fin", None, "catervas_read_costs", json!({ "by": "agent" }))
             .expect("the Finance Specialist still reads them");
     }
 
@@ -224,7 +229,7 @@ mod tests {
         let before = project.event_count();
         let invalid = |input: Value| {
             let refused = project
-                .call("fin", None, "farik_read_costs", input.clone())
+                .call("fin", None, "catervas_read_costs", input.clone())
                 .expect_err("the range is refused");
             assert!(
                 matches!(&refused, ToolError::Refused { reason } if reason.starts_with("cost_range_invalid: ")),
@@ -242,13 +247,13 @@ mod tests {
             .call(
                 "fin",
                 None,
-                "farik_read_costs",
+                "catervas_read_costs",
                 json!({ "by": "day", "from": "2026-01-01", "to": "2027-01-02" }),
             )
             .expect("366 days apart is within the range");
 
         let refused = project
-            .call("pm", None, "farik_read_costs", json!({ "by": "agent" }))
+            .call("pm", None, "catervas_read_costs", json!({ "by": "agent" }))
             .expect_err("only the Finance Specialist reads the costs");
         assert!(
             matches!(&refused, ToolError::Refused { reason } if reason.starts_with("sheet_refused: ")),

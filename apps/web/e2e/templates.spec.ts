@@ -18,7 +18,7 @@ async function setupShots(page: Page, name: string) {
 const templates = join(stateFolder, "templates");
 const mode = (path: string) => statSync(path).mode & 0o777;
 const teamOf = (project: string) =>
-	readFileSync(join(project, ".farik/team.yaml"), "utf8");
+	readFileSync(join(project, ".catervas/team.yaml"), "utf8");
 /** Each agent's id and status, in the team file's order. */
 const statuses = (project: string) =>
 	[

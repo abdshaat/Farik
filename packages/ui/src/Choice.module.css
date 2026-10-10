@@ -3,48 +3,49 @@
 	margin: 0;
 	padding: 0;
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
 }
 
 /* The legend floats so the info button sits beside its text, not under it. */
 .legend {
 	float: inline-start;
 	padding: 0;
-	margin-inline-end: var(--farik-space-1);
-	margin-bottom: var(--farik-space-2);
+	margin-inline-end: var(--catervas-space-1);
+	margin-bottom: var(--catervas-space-2);
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
-	color: var(--farik-color-ink);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
+	color: var(--catervas-color-ink);
 }
 
 .options {
 	display: flex;
 	flex-direction: column;
-	gap: var(--farik-space-2);
+	gap: var(--catervas-space-2);
 	clear: both;
 }
 
 .card {
 	display: flex;
-	gap: var(--farik-space-3);
+	gap: var(--catervas-space-3);
 	align-items: flex-start;
-	padding: var(--farik-space-3) var(--farik-space-4);
-	border: 1px solid var(--farik-color-control-border);
-	border-radius: var(--farik-radius-control);
-	background: var(--farik-color-surface);
-	color: var(--farik-color-ink);
+	padding: var(--catervas-space-3) var(--catervas-space-4);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-surface);
+	color: var(--catervas-color-ink);
 	cursor: pointer;
 }
 
 .card:has(.radio:checked) {
 	border-width: 3px;
-	padding: calc(var(--farik-space-3) - 2px) calc(var(--farik-space-4) - 2px);
+	padding: calc(var(--catervas-space-3) - 2px)
+		calc(var(--catervas-space-4) - 2px);
 }
 
 .card:has(.radio:focus-visible) {
-	outline: 2px solid var(--farik-color-focus);
+	outline: 2px solid var(--catervas-color-focus);
 	outline-offset: 2px;
 }
 
@@ -55,30 +56,30 @@
 
 .label {
 	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
+		var(--catervas-type-body-weight) var(--catervas-type-body-size) /
+		var(--catervas-type-body-line-height) var(--catervas-type-body-family);
 }
 
 .description {
 	font:
-		var(--farik-type-small-weight) var(--farik-type-small-size) /
-		var(--farik-type-small-line-height) var(--farik-type-small-family);
-	color: var(--farik-color-ink-muted);
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
+	color: var(--catervas-color-ink-muted);
 }
 
 .radio {
-	accent-color: var(--farik-color-ink);
+	accent-color: var(--catervas-color-ink);
 }
 
 .error {
 	margin: 0;
 	font:
-		600 var(--farik-type-small-size) / var(--farik-type-small-line-height)
-		var(--farik-type-small-family);
-	color: var(--farik-color-ink);
+		600 var(--catervas-type-small-size) / var(--catervas-type-small-line-height)
+		var(--catervas-type-small-family);
+	color: var(--catervas-color-ink);
 }
 
 .card:has(.radio:disabled) {
-	color: var(--farik-color-ink-muted);
+	color: var(--catervas-color-ink-muted);
 	cursor: default;
 }

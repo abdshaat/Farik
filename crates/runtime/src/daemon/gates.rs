@@ -7,33 +7,37 @@ use std::fmt::Display;
 use std::str::FromStr as _;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
-use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract};
-use farik_core::governor::gates::{ContractWriteActor, ContractWriteOutcome, check_contract_write};
-use farik_core::governor::plain::plain_readiness;
-use farik_core::governor::readiness::{ReadinessFailure, evaluate_readiness, rules_evaluated};
-use farik_core::governor::sites::site_of;
-use farik_core::governor::transition_table::TransitionActor;
-use farik_core::marketing::{
+use catervas_core::contract::{
+    Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract,
+};
+use catervas_core::governor::gates::{
+    ContractWriteActor, ContractWriteOutcome, check_contract_write,
+};
+use catervas_core::governor::plain::plain_readiness;
+use catervas_core::governor::readiness::{ReadinessFailure, evaluate_readiness, rules_evaluated};
+use catervas_core::governor::sites::site_of;
+use catervas_core::governor::transition_table::TransitionActor;
+use catervas_core::marketing::{
     CapScope, PlanSpend, RaiseAsk, Raised, active_plan, check_raise, parse_amount,
 };
-use farik_core::team::Team;
-use farik_protocol::command::{Command, CommandReply};
-use farik_protocol::event::{
-    ContractWrittenBody, EventBody, EventKind, FarikEvent, event_to_value, new_event,
+use catervas_core::team::Team;
+use catervas_protocol::command::{Command, CommandReply};
+use catervas_protocol::event::{
+    CatervasEvent, ContractWrittenBody, EventBody, EventKind, event_to_value, new_event,
 };
-use farik_store::EventQuery;
-use farik_store::activity::{ActivityState, activity, moved_since};
-use farik_store::diff::diff_of;
-use farik_store::marketing::{
+use catervas_store::EventQuery;
+use catervas_store::activity::{ActivityState, activity, moved_since};
+use catervas_store::diff::diff_of;
+use catervas_store::marketing::{
     BudgetReached, MarketingPlan, budgets_reached, created_campaigns, marketing_plans, social_posts,
 };
-use farik_store::purchase_orders::purchase_orders;
-use farik_store::requests::{
+use catervas_store::purchase_orders::purchase_orders;
+use catervas_store::requests::{
     RequestError, TOO_SHORT, contract_write, file_raise_request, file_request,
     placeholder_budget_usd, request_from_brief, request_from_text, summary_of,
 };
-use farik_store::waiting::{name_of, waiting};
+use catervas_store::waiting::{name_of, waiting};
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::DaemonState;
@@ -76,7 +80,7 @@ fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Fa
     let designer = team
         .agents
         .iter()
-        .find(|agent| agent.role == farik_core::team::RoleWire::UiUxDesigner)
+        .find(|agent| agent.role == catervas_core::team::RoleWire::UiUxDesigner)
         .map(|agent| agent.id.to_string());
     let mut rows = Vec::new();
     for row in board
@@ -111,7 +115,7 @@ fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Fa
                 (
                     "designer_needs_browser",
                     format!(
-                        "{name} has Playwright off, so Farik gives {name} no work. Turn \
+                        "{name} has Playwright off, so Catervas gives {name} no work. Turn \
                          Playwright on for {name} on the Team page"
                     ),
                 )
@@ -132,7 +136,7 @@ fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Fa
 /// One row of `waiting.list`; a connector call's also names its approval, server, tool and input,
 /// a post's its number, network, text, pictures and time, and a site request's its number, site,
 /// address and reason.
-fn waiting_row(deps: &ToolDeps, item: &farik_store::waiting::Waiting) -> Value {
+fn waiting_row(deps: &ToolDeps, item: &catervas_store::waiting::Waiting) -> Value {
     let mut row = json!({
         "task_id": item.task_id,
         "kind": item.kind.as_str(),
@@ -180,7 +184,7 @@ fn waiting_row(deps: &ToolDeps, item: &farik_store::waiting::Waiting) -> Value {
         row["delivery"] = json!(ask.delivery);
         row["terms"] = json!(ask.terms);
         row["url"] = json!(ask.url);
-        // The site the address names, in the form Farik keeps: the page shows it, so that the
+        // The site the address names, in the form Catervas keeps: the page shows it, so that the
         // owner can tell a look-alike from the seller's own.
         if let Ok(host) = site_of(&ask.url) {
             row["host"] = json!(host);
@@ -238,7 +242,7 @@ pub(super) fn query(
             let team = team()?;
             let listed = waiting(&deps.projections, &deps.log, &deps.files, &team)
                 .map_err(|e| internal(&e))?;
-            // What Farik could not keep within a budget or keep paused comes first: it is money.
+            // What Catervas could not keep within a budget or keep paused comes first: it is money.
             let mut rows = ads_rows(state, deps).map_err(|e| internal(&e))?;
             rows.extend(listed.iter().map(|item| waiting_row(deps, item)));
             rows.extend(design_reviews_waiting(deps, &team)?);
@@ -365,8 +369,8 @@ fn marketing_plan_list(deps: &ToolDeps) -> Result<Value, Failure> {
     }))
 }
 
-/// `marketing_plan.get`: one marketing plan whole, or `not_found`, with what Farik's watch knows of
-/// its ads' spend, the budgets they reached and the campaigns Farik paused.
+/// `marketing_plan.get`: one marketing plan whole, or `not_found`, with what Catervas's watch knows of
+/// its ads' spend, the budgets they reached and the campaigns Catervas paused.
 fn marketing_plan_get(state: &DaemonState, deps: &ToolDeps, id: &str) -> Result<Value, Failure> {
     let plans = marketing_plans(&deps.log).map_err(|e| internal(&e))?;
     let states = states_today(&plans, deps.clock.now().date_naive());
@@ -403,7 +407,7 @@ fn task_of(deps: &ToolDeps, params: &Value) -> Result<TaskId, Failure> {
     Ok(task_id)
 }
 
-fn row(deps: &ToolDeps, task_id: &TaskId) -> Result<farik_store::TaskProjection, Failure> {
+fn row(deps: &ToolDeps, task_id: &TaskId) -> Result<catervas_store::TaskProjection, Failure> {
     deps.projections
         .task(task_id)
         .map_err(|e| internal(&e))?
@@ -418,7 +422,7 @@ fn file_value(deps: &ToolDeps, task_id: &TaskId) -> Result<Value, Failure> {
     serde_json::to_value(contract_of(deps, task_id)?).map_err(|e| internal(&e))
 }
 
-fn history(deps: &ToolDeps, task_id: &TaskId) -> Result<Vec<FarikEvent>, Failure> {
+fn history(deps: &ToolDeps, task_id: &TaskId) -> Result<Vec<CatervasEvent>, Failure> {
     deps.log
         .read(&EventQuery {
             task_id: Some(task_id.clone()),
@@ -711,7 +715,7 @@ fn procurement_file(deps: &ToolDeps, path: &str, most: u64) -> Result<Vec<u8>, F
 
     let nothing = || Failure::new(NOT_FOUND, format!("there is no file at {path}"));
     let folder =
-        farik_core::team::private_folder(Role::ProcurementSpecialist).ok_or_else(nothing)?;
+        catervas_core::team::private_folder(Role::ProcurementSpecialist).ok_or_else(nothing)?;
     let at = crate::tools::sheets::private_path(deps.files.root(), folder, path)
         .map_err(|_| nothing())?;
     if !at.is_file() {
@@ -774,7 +778,7 @@ fn order_file(deps: &ToolDeps, order: u64) -> Result<Value, Failure> {
 
 /// `social_post.media`: one picture of a post, fetched here since the browser may not load pictures
 /// from other sites. `not_found` for an unknown post or picture, for a clip, and for an address
-/// that is not public, is gone, is not a picture of a kind Farik shows, or is too big.
+/// that is not public, is gone, is not a picture of a kind Catervas shows, or is too big.
 async fn post_picture(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     use base64::Engine as _;
 
@@ -860,7 +864,7 @@ fn plan_to_raise(
     plan_id: &str,
 ) -> Result<(MarketingPlan, Vec<BudgetReached>), Failure> {
     let plans = marketing_plans(&deps.log).map_err(|e| internal(&e))?;
-    let records: Vec<farik_core::marketing::PlanRecord> =
+    let records: Vec<catervas_core::marketing::PlanRecord> =
         plans.iter().map(|plan| plan.record.clone()).collect();
     let active = active_plan(&records, deps.clock.now().date_naive())
         .filter(|record| record.id == plan_id)
@@ -1100,7 +1104,7 @@ fn written_over(
             written_by: HUMAN.to_string(),
         }),
         deps.clock.now(),
-        farik_protocol::event::EventIds {
+        catervas_protocol::event::EventIds {
             task_id: Some(task_id.clone()),
             ..deps.ids.clone()
         },
@@ -1113,7 +1117,7 @@ fn written_over(
     Ok(())
 }
 
-fn schema_words(errors: &[farik_core::contract::ValidationError]) -> String {
+fn schema_words(errors: &[catervas_core::contract::ValidationError]) -> String {
     errors
         .iter()
         .map(|error| format!("{} {}", error.path, error.message))
@@ -1165,8 +1169,8 @@ pub(crate) fn choices(
 pub(super) mod tests {
     use std::sync::Arc;
 
-    use farik_core::contract::TaskStatus;
-    use farik_protocol::event::EventKind;
+    use catervas_core::contract::TaskStatus;
+    use catervas_protocol::event::EventKind;
     use serde_json::{Value, json};
 
     use super::choices;
@@ -1220,7 +1224,7 @@ pub(super) mod tests {
 
     pub(crate) fn conforms(value: &Value, definition: &str, reply: &Value) {
         let schema: Value =
-            serde_json::from_str(farik_protocol::rpc::SCHEMA_JSON).expect("the schema is JSON");
+            serde_json::from_str(catervas_protocol::rpc::SCHEMA_JSON).expect("the schema is JSON");
         let root = json!({
             "$schema": schema["$schema"],
             "$ref": format!("#/$defs/{definition}"),
@@ -1417,7 +1421,7 @@ pub(super) mod tests {
         harness.in_progress("FRK-1", "kai", "pm");
         let propose = |plan: &str, campaigns: Value| {
             let mut body =
-                farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+                catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
             body["plan"] = json!(plan);
             body["starts_on"] = json!("2026-09-20");
             body["ends_on"] = json!("2027-01-31");
@@ -1532,7 +1536,7 @@ pub(super) mod tests {
         harness.in_progress("FRK-1", "kai", "pm");
         let propose = |plan: &str, replaces: Option<&str>, ends_on: &str| {
             let mut body =
-                farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+                catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
             body["plan"] = json!(plan);
             body["starts_on"] = json!("2026-09-20");
             body["ends_on"] = json!("2027-01-31");
@@ -1587,7 +1591,7 @@ pub(super) mod tests {
             );
         };
 
-        // MP-1 runs 98 days (daily budgets) and Farik made `long-run` under it as a daily one;
+        // MP-1 runs 98 days (daily budgets) and Catervas made `long-run` under it as a daily one;
         // `short-run` was never made.
         propose("MP-1", None, "2026-12-31");
         harness.project.plan_approved("FRK-1", "MP-1", "");
@@ -1621,7 +1625,7 @@ pub(super) mod tests {
         reason = "the refusals one after another, then the request filed, then the second refused"
     )]
     fn raise_files_a_request_that_skips_triage() {
-        use farik_core::marketing::{Amount, PlanSpend};
+        use catervas_core::marketing::{Amount, PlanSpend};
 
         use crate::daemon::SpendRead;
 
@@ -1633,7 +1637,7 @@ pub(super) mod tests {
         let project = &harness.project;
         // MP-1, active: 2000.00 in all, 800.00 for Google Ads, two campaigns.
         let mut body =
-            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+            catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
         body["plan"] = json!("MP-1");
         body["starts_on"] = json!("2026-09-20");
         body["ends_on"] = json!("2027-01-31");
@@ -1670,7 +1674,7 @@ pub(super) mod tests {
         // No budget reached yet: nothing to raise.
         assert_eq!(code(&raise("1200.00", &json!([]))), "raise_refused");
 
-        // The plan and search-launch reached theirs, and Farik read 800.00 spent in all.
+        // The plan and search-launch reached theirs, and Catervas read 800.00 spent in all.
         project.record(
             "",
             "marketing_budget.reached",
@@ -1773,14 +1777,14 @@ pub(super) mod tests {
              it."
         );
         let events = project.events(&[EventKind::TaskCreated, EventKind::RequestTriaged]);
-        let filed: Vec<&farik_protocol::event::FarikEvent> = events
+        let filed: Vec<&catervas_protocol::event::CatervasEvent> = events
             .iter()
             .filter(|event| {
                 event.envelope.ids.task_id.as_ref().map(|id| id.as_str()) == Some(task.as_str())
             })
             .collect();
         assert_eq!(filed.len(), 2, "filed, then triaged at once");
-        let farik_protocol::event::EventBody::TaskCreated(created) = &filed[0].body else {
+        let catervas_protocol::event::EventBody::TaskCreated(created) = &filed[0].body else {
             panic!("a task.created first");
         };
         assert_eq!(created.created_by, "human");
@@ -1788,7 +1792,7 @@ pub(super) mod tests {
             created.raises.as_ref().map(|plan| plan.as_str()),
             Some("MP-1")
         );
-        let farik_protocol::event::EventBody::RequestTriaged(triaged) = &filed[1].body else {
+        let catervas_protocol::event::EventBody::RequestTriaged(triaged) = &filed[1].body else {
             panic!("a request.triaged next");
         };
         assert_eq!(
@@ -1797,7 +1801,7 @@ pub(super) mod tests {
                 triaged.reason.as_str(),
                 triaged.triaged_by.as_str()
             ),
-            ("small", "a raised marketing budget for MP-1", "farik")
+            ("small", "a raised marketing budget for MP-1", "catervas")
         );
         let row = harness.row(&task);
         assert!(row.skips_sprints && row.triaged, "{row:?}");
@@ -1869,13 +1873,13 @@ pub(super) mod tests {
     const LONG: &str = "customers/1234567890/campaigns/12";
     const UNAVAILABLE: &str = "Google answered “The service is currently unavailable.”";
 
-    /// MP-1, running today: 2000.00 in all, 800.00 for Google Ads, and two campaigns Farik made at
+    /// MP-1, running today: 2000.00 in all, 800.00 for Google Ads, and two campaigns Catervas made at
     /// Google, `search-launch` (500.00) and `search-long` (400.00), on FRK-1 by Kai.
     fn a_running_ads_plan(harness: &Harness) {
         harness.in_progress("FRK-1", "kai", "pm");
         let project = &harness.project;
         let mut body =
-            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+            catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
         body["plan"] = json!("MP-1");
         body["starts_on"] = json!("2026-09-20");
         body["ends_on"] = json!("2027-01-31");
@@ -1973,7 +1977,7 @@ pub(super) mod tests {
         project.plan_proposed("FRK-1", "MP-2", "2027-02-01", "2027-02-28");
         assert!(ads_rows(&harness).is_empty(), "nothing reached yet");
 
-        // search-launch reached its own budget, and Farik paused it.
+        // search-launch reached its own budget, and Catervas paused it.
         let mut cap = reached("campaign", Some("search-launch"), ("500.00", "500.00"));
         cap["paused"] = json!([LAUNCH]);
         project.record("", "marketing_budget.reached", &cap);
@@ -1981,7 +1985,7 @@ pub(super) mod tests {
             "task_id": "FRK-1", "kind": "marketing_budget", "agent_id": "kai",
             "title": "Ads budget reached: Spring launch",
             "line": "Its campaign search-launch reached its budget: 500.00 of 500.00 USD. \
-                     Farik paused it.",
+                     Catervas paused it.",
             "plan": "MP-1", "plan_title": "Spring launch", "ends_on": "2027-01-31",
             "currency": "USD", "google_ads": "800.00", "spent": "500.00",
             "cap": {
@@ -2010,8 +2014,8 @@ pub(super) mod tests {
         assert_eq!(rows.len(), 1, "one row for the plan");
         assert_eq!(
             rows[0]["line"],
-            "Its ads reached their budget: 800.00 of 800.00 USD. Farik could not pause them: \
-             Google answered “The service is currently unavailable.” Farik tries again every 15 \
+            "Its ads reached their budget: 800.00 of 800.00 USD. Catervas could not pause them: \
+             Google answered “The service is currently unavailable.” Catervas tries again every 15 \
              minutes; pause them in Google Ads."
         );
         assert_eq!(rows[0]["reason"], UNAVAILABLE);
@@ -2023,7 +2027,7 @@ pub(super) mod tests {
             json!({ "scope": "plan", "spent": "800.00", "budget": "800.00" })
         );
 
-        // A later read paused it: back to the form that Farik paused it.
+        // A later read paused it: back to the form that Catervas paused it.
         project.record(
             "",
             "marketing_campaign.paused",
@@ -2032,7 +2036,7 @@ pub(super) mod tests {
         let rows = ads_rows(&harness);
         assert_eq!(
             rows[0]["line"],
-            "Its ads reached their budget: 800.00 of 800.00 USD. Farik paused them."
+            "Its ads reached their budget: 800.00 of 800.00 USD. Catervas paused them."
         );
         assert!(rows[0].get("reason").is_none(), "{}", rows[0]);
         assert!(rows[0].get("raising").is_none());
@@ -2055,7 +2059,7 @@ pub(super) mod tests {
         assert!(
             rows[0]["line"]
                 .as_str()
-                .is_some_and(|line| line.contains("Farik could not pause them: Google answered")),
+                .is_some_and(|line| line.contains("Catervas could not pause them: Google answered")),
             "{}",
             rows[0]
         );
@@ -2122,7 +2126,7 @@ pub(super) mod tests {
             [json!({
                 "task_id": "FRK-1", "kind": "marketing_ads_running", "agent_id": "kai",
                 "title": "Ads still running: Spring launch",
-                "line": "Farik could not pause its ads: Google answered “The service is currently \
+                "line": "Catervas could not pause its ads: Google answered “The service is currently \
                          unavailable.” They keep running at Google until 2027-01-31 or their \
                          budget there. Pause them in Google Ads.",
                 "plan": "MP-1", "plan_title": "Spring launch", "ends_on": "2027-01-31",
@@ -2178,7 +2182,7 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn waiting_says_when_the_spend_cannot_be_read() {
-        use farik_core::marketing::{Amount, PlanSpend};
+        use catervas_core::marketing::{Amount, PlanSpend};
 
         use crate::daemon::SpendRead;
 
@@ -2214,7 +2218,7 @@ pub(super) mod tests {
             [json!({
                 "task_id": "FRK-1", "kind": "marketing_spend_unread", "agent_id": "kai",
                 "title": "Can't read the ad spend: Spring launch",
-                "line": "Farik can't read its ad spend: Kai's sign-in to Google has ended; sign \
+                "line": "Catervas can't read its ad spend: Kai's sign-in to Google has ended; sign \
                          Kai in again on Kai's page. Any of its ads still running keep running at \
                          Google until 2027-01-31 or their budget there; pause them in Google Ads.",
                 "plan": "MP-1", "plan_title": "Spring launch", "ends_on": "2027-01-31",
@@ -2269,7 +2273,7 @@ pub(super) mod tests {
         }
         // The owner raised it: MP-2 replaces MP-1, keeps both campaigns, and ends MP-1.
         let mut body =
-            farik_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
+            catervas_protocol::event::fixtures::a_body_wire(EventKind::MarketingPlanProposed);
         body["plan"] = json!("MP-2");
         body["replaces"] = json!("MP-1");
         body["starts_on"] = json!("2026-09-22");
@@ -2314,7 +2318,7 @@ pub(super) mod tests {
         project.record("", "marketing_budget.reached", &two("plan", None));
         assert_eq!(ads_rows(&harness)[0]["reason"], UNAVAILABLE);
 
-        // MP-1, which ended first, has ads Farik could not pause: its row follows the active plan's.
+        // MP-1, which ended first, has ads Catervas could not pause: its row follows the active plan's.
         harness.daemon.spend_reads().insert(
             "MP-1".to_string(),
             crate::daemon::SpendRead {
@@ -2378,7 +2382,7 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn the_plan_carries_its_spend_and_pauses() {
-        use farik_core::marketing::{Amount, PlanSpend};
+        use catervas_core::marketing::{Amount, PlanSpend};
 
         use crate::daemon::SpendRead;
 
@@ -3000,7 +3004,7 @@ pub(super) mod tests {
             json!([{
                 "task_id": "FRK-1", "kind": "designer_needs_browser", "agent_id": "iris",
                 "title": "Add a login page",
-                "line": "Iris has Playwright off, so Farik gives Iris no work. Turn Playwright \
+                "line": "Iris has Playwright off, so Catervas gives Iris no work. Turn Playwright \
                          on for Iris on the Team page"
             }])
         );
@@ -3044,15 +3048,15 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn an_open_approval_waits_on_the_human() {
-        use farik_protocol::event::{NewEvent, event_from_value};
+        use catervas_protocol::event::{NewEvent, event_from_value};
 
         let harness = Harness::new("gates-tool-approval", |wire| {
             wire["agents"][1]["display_name"] = json!("Theo");
         });
         harness.in_progress("FRK-1", "dev-a", "dev-b");
         let event = event_from_value(&json!({
-            "seq": 1, "recorded_at": "2026-09-17T10:00:00Z", "team_id": "farik",
-            "project_id": "farik", "task_id": "FRK-1", "agent_id": "dev-a", "session_id": "s-1",
+            "seq": 1, "recorded_at": "2026-09-17T10:00:00Z", "team_id": "catervas",
+            "project_id": "catervas", "task_id": "FRK-1", "agent_id": "dev-a", "session_id": "s-1",
             "kind": "tool_approval.requested",
             "body": {
                 "server": "github", "tool": "create_issue", "input": "{\"title\":\"x\"}",
@@ -3121,7 +3125,7 @@ pub(super) mod tests {
         let harness = Harness::new("gates-design-review-kai", |wire| {
             crate::tools::fixtures::browsing(wire);
             wire["agents"][3]["status"] = json!("paused");
-            let mut kai = farik_core::team::fixtures::an_agent_wire("kai", "ui_ux_designer");
+            let mut kai = catervas_core::team::fixtures::an_agent_wire("kai", "ui_ux_designer");
             kai["display_name"] = json!("Kai");
             wire["agents"]
                 .as_array_mut()
@@ -3145,7 +3149,7 @@ pub(super) mod tests {
             json!([{
                 "task_id": "FRK-1", "kind": "designer_needs_browser", "agent_id": "kai",
                 "title": "Add a login page",
-                "line": "Kai has Playwright off, so Farik gives Kai no work. Turn Playwright \
+                "line": "Kai has Playwright off, so Catervas gives Kai no work. Turn Playwright \
                          on for Kai on the Team page"
             }])
         );
@@ -3232,7 +3236,7 @@ pub(super) mod tests {
             .events(&[EventKind::TaskCreated])
             .iter()
             .map(|event| match &event.body {
-                farik_protocol::event::EventBody::TaskCreated(body) => {
+                catervas_protocol::event::EventBody::TaskCreated(body) => {
                     body.from_chat_message.map(std::num::NonZeroU64::get)
                 }
                 _ => None,
@@ -3263,7 +3267,7 @@ pub(super) mod tests {
         assert_eq!(contract["created_by"], "human");
         let created = harness.project.events(&[EventKind::TaskCreated]);
         match &created[0].body {
-            farik_protocol::event::EventBody::TaskCreated(body) => {
+            catervas_protocol::event::EventBody::TaskCreated(body) => {
                 assert_eq!(body.created_by, "human");
                 assert_eq!(
                     body.from_chat_message.map(std::num::NonZeroU64::get),
@@ -3301,7 +3305,7 @@ pub(super) mod tests {
             .project
             .deps
             .log
-            .read(&farik_store::EventQuery::default())
+            .read(&catervas_store::EventQuery::default())
             .expect("the log reads")
             .last()
             .map_or(0, |event| event.envelope.seq)
@@ -3555,7 +3559,7 @@ pub(super) mod tests {
             .expect("events")
             .iter()
             .filter_map(|event| event["kind"].as_str())
-            // Farik's line about the move in the channel is not the task's.
+            // Catervas's line about the move in the channel is not the task's.
             .filter(|kind| *kind != "message.posted")
             .collect();
         // Written before the move, so a session the move wakes reads the human's plan.
@@ -3570,7 +3574,7 @@ pub(super) mod tests {
         );
         let written = harness.project.events(&[EventKind::ContractWritten]);
         assert_eq!(
-            farik_protocol::event::event_to_value(&written[0])["body"]["written_by"],
+            catervas_protocol::event::event_to_value(&written[0])["body"]["written_by"],
             "human"
         );
 
@@ -3835,7 +3839,7 @@ pub(super) mod tests {
         let ask = |task: &str, input: Value| {
             harness
                 .project
-                .call("pm", Some(task), "farik_ask_human", input)
+                .call("pm", Some(task), "catervas_ask_human", input)
         };
         let question = "Which colour should the button be?";
         let long = "x".repeat(81);
@@ -3913,8 +3917,8 @@ pub(super) mod tests {
         std::fs::create_dir_all(folder.join("2026")).expect("the folder is made");
         std::fs::write(folder.join("books.xlsx"), "books").expect("written");
         std::fs::write(folder.join("2026/pricing.xlsx"), "pricing").expect("written");
-        let task: farik_core::contract::TaskId = "FRK-1".parse().expect("a task id");
-        farik_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
+        let task: catervas_core::contract::TaskId = "FRK-1".parse().expect("a task id");
+        catervas_store::baseline::copy_baseline(&folder, &task).expect("the copy is taken");
         std::fs::write(folder.join("books.xlsx"), "edited books").expect("written");
         std::fs::write(folder.join("forecast.xlsx"), "forecast").expect("written");
         std::fs::remove_file(folder.join("2026/pricing.xlsx")).expect("removed");
@@ -4210,9 +4214,9 @@ pub(super) mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn records_a_chat_cost_as_chat() {
-        use farik_core::budget::SessionLedger;
-        use farik_core::contract::Role;
-        use farik_protocol::event::{CostRecordedBodyPurpose, EventBody};
+        use catervas_core::budget::SessionLedger;
+        use catervas_core::contract::Role;
+        use catervas_protocol::event::{CostRecordedBodyPurpose, EventBody};
 
         let harness = Harness::new("gates-chat-cost", |_| {});
         let deps = &harness.project.deps;
@@ -4269,11 +4273,11 @@ pub(super) mod tests {
         assert!((day - spent).abs() < 1e-9, "{day} against {spent}");
 
         // While a chat runs, the agent is answering it, and no chat text is shown.
-        let running = farik_protocol::event::event_from_value(&json!({
+        let running = catervas_protocol::event::event_from_value(&json!({
             "seq": 1,
             "recorded_at": at().to_rfc3339(),
-            "team_id": "farik",
-            "project_id": "farik",
+            "team_id": "catervas",
+            "project_id": "catervas",
             "agent_id": "dev-a",
             "session_id": "chat-session",
             "kind": "session.started",
@@ -4281,7 +4285,7 @@ pub(super) mod tests {
         }))
         .expect("the fixture is schema-valid");
         deps.log
-            .append(&farik_protocol::event::NewEvent {
+            .append(&catervas_protocol::event::NewEvent {
                 recorded_at: running.envelope.recorded_at,
                 ids: running.envelope.ids,
                 body: running.body,
@@ -4322,7 +4326,7 @@ pub(super) mod tests {
             "before any run"
         );
 
-        // A register with one renewal due and two rows Farik cannot read, read by the daily run.
+        // A register with one renewal due and two rows Catervas cannot read, read by the daily run.
         let folder = harness.procurement_folder();
         let cells = |cells: &[&str]| -> Vec<crate::tools::sheets::CellInput> {
             cells
@@ -4358,7 +4362,7 @@ pub(super) mod tests {
         assert_eq!(open[0]["flagged_at"], "2026-09-22T12:00:00Z");
         let number = open[0]["renewal"].as_u64().expect("a number");
 
-        // Dismissed, it is not open; what Farik could not read is still said.
+        // Dismissed, it is not open; what Catervas could not read is still said.
         harness
             .project
             .record("", "renewal.dismissed", &json!({ "renewal": number }));
@@ -4366,23 +4370,23 @@ pub(super) mod tests {
     }
 
     /// `proc`'s order 1 on FRK-1 from `seller`, drafted in its session as the tool records it, with
-    /// its comparison written and its workbook made; a page on a site Farik ships, or none.
+    /// its comparison written and its workbook made; a page on a site Catervas ships, or none.
     fn order_drafted(harness: &Harness, seller: &str, page: bool) -> Value {
         let project = &harness.project;
         project
             .call(
                 "proc",
                 Some("FRK-1"),
-                "farik_write_evaluation",
+                "catervas_write_evaluation",
                 json!({ "name": "mirrors", "text": "# Baby car mirrors\n\nAcme is <b>cheapest</b>." }),
             )
             .expect("the comparison is written");
-        let shipped = &farik_roles::sites::farik_sites()[0].host;
+        let shipped = &catervas_roles::sites::catervas_sites()[0].host;
         project
             .call(
                 "proc",
                 Some("FRK-1"),
-                "farik_draft_purchase_order",
+                "catervas_draft_purchase_order",
                 json!({
                     "seller": seller,
                     "seller_contact": "sales@acme.example",
@@ -4417,7 +4421,7 @@ pub(super) mod tests {
             .find(|agent| agent.id.as_str() == "proc")
             .map(|agent| agent.display_name.to_string())
             .expect("proc");
-        let shipped = farik_roles::sites::farik_sites()[0].host.clone();
+        let shipped = catervas_roles::sites::catervas_sites()[0].host.clone();
 
         let waiting = query(
             &harness.daemon,
@@ -4498,9 +4502,9 @@ pub(super) mod tests {
             .find(|agent| agent.id.as_str() == "proc")
             .map(|agent| agent.display_name.to_string())
             .expect("proc");
-        let kit = farik_roles::load_kit(farik_core::contract::Role::ProcurementSpecialist)
+        let kit = catervas_roles::load_kit(catervas_core::contract::Role::ProcurementSpecialist)
             .expect("the shipped kit");
-        let farik_roles::KitConnector::Server { copy, .. } = &kit.connectors[0] else {
+        let catervas_roles::KitConnector::Server { copy, .. } = &kit.connectors[0] else {
             panic!("the kit's first service is a server");
         };
         let asked = |source: &str, url: &str| {
@@ -4536,7 +4540,7 @@ pub(super) mod tests {
         // Open, a request waits on the Product Manager and is not listed.
         assert_eq!(rows(&harness), json!([]));
 
-        // The Product Manager passes the first on in its decision session; Farik the second.
+        // The Product Manager passes the first on in its decision session; Catervas the second.
         harness.project.record_in(
             Some("pm"),
             Some("session-pm"),
@@ -4582,7 +4586,7 @@ pub(super) mod tests {
              Asked because: Two of the five sellers show their prices only in a full browser.",
         );
         listed["reason"] = json!("It needs a paid plan, so it is your call.");
-        // A source of the kit says so in the text the owner reads, and Farik's own passing on
+        // A source of the kit says so in the text the owner reads, and Catervas's own passing on
         // gives no reason of the manager's.
         let kit_text = row(
             second,
@@ -4661,7 +4665,12 @@ pub(super) mod tests {
         // A message waiting, and an order whose email waits with it.
         let draft = |input: Value| {
             project
-                .call("proc", Some("FRK-1"), "farik_draft_seller_message", input)
+                .call(
+                    "proc",
+                    Some("FRK-1"),
+                    "catervas_draft_seller_message",
+                    input,
+                )
                 .expect("a draft")["message"]
                 .as_u64()
                 .expect("a number")
@@ -4841,7 +4850,7 @@ pub(super) mod tests {
                 "{gone}"
             );
         }
-        // Checking a mailbox that is not connected is refused in Farik's words.
+        // Checking a mailbox that is not connected is refused in Catervas's words.
         let refused = rpc(&harness.daemon, "procurement_mailbox.check", &json!({}));
         assert_eq!(
             refused["error"]["code"],
@@ -5198,28 +5207,28 @@ pub(super) mod tests {
     fn lists_the_sites() {
         let harness = Harness::with_procurement("gates-sites-list");
         harness.procurement_task("FRK-1", Some("in_progress"));
-        let farik = farik_roles::sites::farik_sites();
+        let catervas = catervas_roles::sites::catervas_sites();
         let minute = |n: i64| at() + chrono::Duration::minutes(n);
         let stamp = |n: i64| minute(n).to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
-        // The owner turned one of Farik's off, and another off and on again, allowed a site a
+        // The owner turned one of Catervas's off, and another off and on again, allowed a site a
         // request named, added one unasked, and two requests wait.
         harness.project.record_at(
             minute(1),
             "",
             "site.removed",
-            &json!({ "host": farik[1].host }),
+            &json!({ "host": catervas[1].host }),
         );
         harness.project.record_at(
             minute(2),
             "",
             "site.removed",
-            &json!({ "host": farik[2].host }),
+            &json!({ "host": catervas[2].host }),
         );
         harness.project.record_at(
             minute(3),
             "",
             "site.approved",
-            &json!({ "host": farik[2].host }),
+            &json!({ "host": catervas[2].host }),
         );
         let allowed = site_asked(&harness, "allowed.example");
         harness.project.record_at(
@@ -5239,9 +5248,13 @@ pub(super) mod tests {
 
         let listed = query(&harness.daemon, "sites.list", &json!({}), "sitesListResult");
 
-        let rows = listed["farik"].as_array().expect("a list");
-        assert_eq!(rows.len(), farik.len(), "every entry, in the file's order");
-        for (row, site) in rows.iter().zip(farik) {
+        let rows = listed["catervas"].as_array().expect("a list");
+        assert_eq!(
+            rows.len(),
+            catervas.len(),
+            "every entry, in the file's order"
+        );
+        for (row, site) in rows.iter().zip(catervas) {
             assert_eq!(row["host"], site.host);
             assert_eq!(row["shop"], site.shop);
             assert_eq!(row["category"], site.category.to_string());

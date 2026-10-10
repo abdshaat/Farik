@@ -11,14 +11,14 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use base64::Engine;
-use chrono::Utc;
-use farik_core::team::{CustomServer, CustomTransport, OAuthSettings};
-use farik_runtime::claude::Secret;
-use farik_runtime::connectors::list_tools;
-use farik_runtime::registered_apps::{AppFlow, RegisteredApp};
-use farik_runtime::sign_in::{
+use catervas_core::team::{CustomServer, CustomTransport, OAuthSettings};
+use catervas_runtime::claude::Secret;
+use catervas_runtime::connectors::list_tools;
+use catervas_runtime::registered_apps::{AppFlow, RegisteredApp};
+use catervas_runtime::sign_in::{
     OAuthGrant, SIGN_IN_WINDOW, SignInError, refreshed, revoke, start_app_sign_in, start_sign_in,
 };
+use chrono::Utc;
 use oauth_fixture::{Fixture, Iss, Methods, callback, follow};
 use ports::free_port;
 use sha2::{Digest, Sha256};
@@ -62,7 +62,7 @@ async fn signs_in_with_dynamic_registration() {
     );
     assert!(
         page.page
-            .contains("<p>You can close this tab and go back to Farik.</p>")
+            .contains("<p>You can close this tab and go back to Catervas.</p>")
     );
 
     let registered: serde_json::Value =
@@ -73,7 +73,7 @@ async fn signs_in_with_dynamic_registration() {
         registered["redirect_uris"],
         serde_json::json!([format!("http://localhost:{port}/callback")])
     );
-    assert_eq!(registered["client_name"], "Farik");
+    assert_eq!(registered["client_name"], "Catervas");
     let authorized = &fixture.requests("/authorize")[0];
     assert_eq!(authorized.query["client_id"], grant.client_id);
     assert!(
@@ -347,10 +347,10 @@ async fn the_callback_page_quotes_nothing() {
     let finishing = tokio::spawn(sign_in.finish());
     let page = follow(&url).await;
     finishing.await.expect("task").expect_err("denied");
-    assert!(page.page.contains("<img alt=\"Farik\""), "{}", page.page);
+    assert!(page.page.contains("<img alt=\"Catervas\""), "{}", page.page);
     assert!(
         page.page
-            .contains("<h1>Farik couldn&#39;t finish signing in:"),
+            .contains("<h1>Catervas couldn&#39;t finish signing in:"),
         "{}",
         page.page
     );
@@ -551,7 +551,7 @@ async fn lists_tools_with_the_signed_in_token() {
         &BTreeMap::new(),
         Some(&grant.access_token),
         &folder,
-        std::path::Path::new("farik"),
+        std::path::Path::new("catervas"),
     )
     .await
     .expect("listed with the token");
@@ -566,7 +566,7 @@ async fn lists_tools_with_the_signed_in_token() {
         &BTreeMap::new(),
         None,
         &folder,
-        std::path::Path::new("farik"),
+        std::path::Path::new("catervas"),
     )
     .await
     .expect_err("without the token the server answers 401");
@@ -828,7 +828,7 @@ async fn a_kept_grant_is_only_sent_to_https_endpoints() {
     assert_eq!(fixture.count("/token") + fixture.count("/revoke"), 0);
 }
 
-// ---- Farik's registered apps: the device flow (phase 7 step 03b) ----
+// ---- Catervas's registered apps: the device flow (phase 7 step 03b) ----
 
 fn leaked(text: String) -> &'static str {
     Box::leak(text.into_boxed_str())
@@ -851,7 +851,7 @@ fn dev_table_polling(
         id: "dev",
         name: "Dev",
         host: Some(host),
-        farik_connector: None,
+        catervas_connector: None,
         flow: AppFlow::Device {
             device_endpoint: leaked(format!("{origin}/device/code")),
             verification_uri: leaked(format!("{origin}/login/device")),
@@ -1266,7 +1266,7 @@ async fn dropping_a_device_attempt_stops_polling() {
 }
 
 #[tokio::test]
-async fn farik_s_client_id_is_refused_elsewhere() {
+async fn catervas_s_client_id_is_refused_elsewhere() {
     let fixture = Fixture::start().await;
     let table = dev_table(&fixture, "127.0.0.1");
     let settings = OAuthSettings {
@@ -1278,7 +1278,7 @@ async fn farik_s_client_id_is_refused_elsewhere() {
     let elsewhere = fixture.mcp_url.replace("127.0.0.1", "localhost");
     let refused = start_sign_in(&elsewhere, &settings, table, Utc::now())
         .await
-        .expect_err("Farik's client id is for Dev's own servers");
+        .expect_err("Catervas's client id is for Dev's own servers");
     assert_eq!(
         refused,
         SignInError::Failed("this sign-in is only for Dev's own servers".to_string())
@@ -1287,7 +1287,7 @@ async fn farik_s_client_id_is_refused_elsewhere() {
 }
 
 #[tokio::test]
-async fn farik_s_client_id_on_its_own_host_uses_the_table() {
+async fn catervas_s_client_id_on_its_own_host_uses_the_table() {
     tokio::time::pause();
     let fixture = Fixture::start().await;
     let table = dev_table(&fixture, "127.0.0.1");
@@ -1355,7 +1355,7 @@ async fn an_unmatched_host_runs_step_03() {
     assert_eq!(fixture.count("/device/code"), 0);
 }
 
-// ---- Refreshing a grant made with one of Farik's own apps (phase 7 step 03b) ----
+// ---- Refreshing a grant made with one of Catervas's own apps (phase 7 step 03b) ----
 
 /// A grant made with `Dev`'s device flow, which the fixture honours, expiring in a minute.
 fn dev_grant(fixture: &Fixture, now: chrono::DateTime<Utc>) -> OAuthGrant {
@@ -1413,7 +1413,7 @@ async fn a_github_refresh_refused_at_200_lapses() {
     for error in ["bad_refresh_token", "incorrect_client_credentials"] {
         let fixture = Fixture::start().await;
         fixture.set(|flags| flags.refresh_error = Some((200, error.to_string())));
-        // Of Farik's app, and of a service's own: the codes are read for every grant.
+        // Of Catervas's app, and of a service's own: the codes are read for every grant.
         for grant in [dev_grant(&fixture, now), kept(&fixture, now, Some(MINUTE))] {
             let outcome = refreshed(
                 &grant,
@@ -1455,12 +1455,12 @@ async fn a_grant_without_revocation_is_not_revoked() {
     assert!(fixture.seen().is_empty(), "no request was made");
 }
 
-// ---- Farik's registered apps: the loopback flow, for Farik's own connector (step 08e) ----
+// ---- Catervas's registered apps: the loopback flow, for Catervas's own connector (step 08e) ----
 
 const GOOGLE_TEST_SCOPE: &str = "https://example.test/auth/ads";
 const GOOGLE_TEST_SECRET: &str = "the-test-secret";
 
-/// A table of one Loopback entry, `Google test`, which signs in for Farik's connector `osv` and
+/// A table of one Loopback entry, `Google test`, which signs in for Catervas's connector `osv` and
 /// serves no address, whose endpoints are `fixture`'s. Leaked, as [`dev_table`]'s is.
 fn google_table(fixture: &Fixture) -> &'static [RegisteredApp] {
     let origin = &fixture.origin;
@@ -1468,7 +1468,7 @@ fn google_table(fixture: &Fixture) -> &'static [RegisteredApp] {
         id: "google-test",
         name: "Google test",
         host: None,
-        farik_connector: Some("osv"),
+        catervas_connector: Some("osv"),
         flow: AppFlow::Loopback {
             authorization_endpoint: leaked(format!("{origin}/o/oauth2/v2/auth")),
         },
@@ -1640,7 +1640,7 @@ async fn asks_only_the_table_s_scopes() {
     let fixture = google_fixture().await;
     let table = google_table(&fixture);
     let refused = SignInError::Failed(format!(
-        "Farik's Google test sign-in asks only for {GOOGLE_TEST_SCOPE}"
+        "Catervas's Google test sign-in asks only for {GOOGLE_TEST_SCOPE}"
     ));
     for scopes in [
         vec!["https://example.test/auth/other".to_string()],
@@ -1672,22 +1672,22 @@ async fn refuses_a_sign_in_that_does_not_last_or_lacks_the_scope() {
         (
             "no refresh token",
             |flags| flags.no_refresh_token = true,
-            "Google test did not give Farik a lasting sign-in",
+            "Google test did not give Catervas a lasting sign-in",
         ),
         (
             "a narrower scope",
             |flags| flags.granted_scope = Some("https://example.test/auth/other".to_string()),
-            "you did not allow Farik all it asks of Google test; sign in again and tick every box",
+            "you did not allow Catervas all it asks of Google test; sign in again and tick every box",
         ),
         (
             "no scope at all",
             |flags| flags.granted_scope = Some(String::new()),
-            "you did not allow Farik all it asks of Google test; sign in again and tick every box",
+            "you did not allow Catervas all it asks of Google test; sign in again and tick every box",
         ),
         (
             "mac",
             |flags| flags.token_type = Some("mac".to_string()),
-            "Google test did not give Farik a bearer token",
+            "Google test did not give Catervas a bearer token",
         ),
     ];
     for (what, change, sentence) in cases {
@@ -1706,7 +1706,7 @@ async fn refuses_a_sign_in_that_does_not_last_or_lacks_the_scope() {
 }
 
 #[tokio::test]
-async fn farik_s_google_client_id_is_refused_on_any_address() {
+async fn catervas_s_google_client_id_is_refused_on_any_address() {
     let fixture = google_fixture().await;
     let table = google_table(&fixture);
     let settings = OAuthSettings {
@@ -1901,7 +1901,7 @@ async fn the_app_s_endpoints_must_be_https_or_loopback() {
     assert_eq!(fixture.count("/token"), 0);
 }
 
-// ---- Keeping a grant of Farik's own Google app (step 08e) ----
+// ---- Keeping a grant of Catervas's own Google app (step 08e) ----
 
 /// A grant made with `Google test`'s loopback flow, which the fixture honours, expiring in a
 /// minute.
@@ -1948,7 +1948,7 @@ async fn refreshes_with_the_secret_and_without_resource() {
 }
 
 /// The secret goes to the entry's own token endpoint (SPEC 8.6), never to the address a kept grant
-/// names: a grant file is the user's to edit, and what it says must not decide where Farik's
+/// names: a grant file is the user's to edit, and what it says must not decide where Catervas's
 /// client secret is sent.
 #[tokio::test]
 async fn refreshes_an_app_s_grant_at_the_entry_s_token_endpoint() {

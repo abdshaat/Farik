@@ -1,4 +1,4 @@
-import { Button, StatusWord } from "@farik/ui";
+import { Button, StatusWord } from "@catervas/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
@@ -64,7 +64,7 @@ function Row(props: {
 	);
 }
 
-/** Setup's first step: the programs Farik needs, and what to do about each one missing. */
+/** Setup's first step: the programs Catervas needs, and what to do about each one missing. */
 export function SetupComputer() {
 	const { client } = useConnection();
 	const navigate = useNavigate();

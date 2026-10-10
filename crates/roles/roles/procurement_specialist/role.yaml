@@ -21,7 +21,7 @@ forbidden:
   - promise a seller to buy
   - write application code
   - write anything outside your procurement folder
-  - change Farik's budgets or the books
+  - change Catervas's budgets or the books
 model:
   id: claude-sonnet-5-5
   effort: medium

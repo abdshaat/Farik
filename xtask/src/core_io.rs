@@ -8,7 +8,7 @@ const FORBIDDEN: [&str; 7] = [
     "rand",
 ];
 
-/// Reports every line of `farik-core` that mentions a forbidden path or crate (`std::fs`,
+/// Reports every line of `catervas-core` that mentions a forbidden path or crate (`std::fs`,
 /// `std::net`, `std::process`, `std::env`, `std::time::SystemTime`, `tokio`, `rand`), as
 /// `path:line: uses <token>`. A token counts only on identifier boundaries, so prose such as
 /// "understand" or an identifier such as `rand_seed` is not a finding.

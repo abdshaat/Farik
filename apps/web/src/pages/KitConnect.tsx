@@ -1,4 +1,4 @@
-import { Button, Dialog, Stepper, TextField } from "@farik/ui";
+import { Button, Dialog, Stepper, TextField } from "@catervas/ui";
 import { useEffect, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 import { refusalsOf } from "../app/refusals.ts";
@@ -10,7 +10,7 @@ import type { KitService } from "./Team.tsx";
 
 /** How often the page asks whether the user has said yes. */
 const POLL_MS = 2000;
-/** One of Farik's own apps signing the user in by a code (phase 7 step 03b): its name and the code to type. */
+/** One of Catervas's own apps signing the user in by a code (phase 7 step 03b): its name and the code to type. */
 type AppCode = { provider: string; userCode: string };
 /** How signing in to the service stands. */
 type SignIn =
@@ -47,7 +47,7 @@ const toolSaid = (labels: Record<string, string>, tool: string) =>
 
 /**
  * Connecting a service of the agent's role's kit (ADR 0036): what it is, why the role wants it and
- * what to do, then a key or a sign-in, and nothing to label, because Farik labelled every tool.
+ * what to do, then a key or a sign-in, and nothing to label, because Catervas labelled every tool.
  * Keys live in this component's state only, typed into password fields, and are dropped once
  * `connector.connect` is sent, whatever it answers.
  */
@@ -98,7 +98,7 @@ export function KitConnect({
 	const fill = { name, service: service.title };
 	const server = { name: service.name, source: "kit" };
 
-	/** What a failed ask or connect says, in Farik's words and never the daemon's. */
+	/** What a failed ask or connect says, in Catervas's words and never the daemon's. */
 	const said = (e: unknown) => {
 		const message = refusalsOf(e)[0]?.message ?? "";
 		if (codeOf(message) === "connector_not_in_kit")

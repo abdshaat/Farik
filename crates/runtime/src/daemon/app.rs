@@ -10,8 +10,8 @@ use rust_embed::RustEmbed;
 use super::DaemonState;
 use super::web::own_host;
 
-/// What a farik whose web app was not built serves in its place.
-const UNBUILT: &str = "The web app was not built into this farik. Run pnpm --filter @farik/web build, then build farik again.";
+/// What a catervas whose web app was not built serves in its place.
+const UNBUILT: &str = "The web app was not built into this catervas. Run pnpm --filter @catervas/web build, then build catervas again.";
 
 /// `GET` of any path the other routes do not have: the file of the embed `E` at the path, or else
 /// its `index.html`, so that the app's own routes load on refresh. It checks `Host` alone, since a

@@ -1,5 +1,5 @@
-import type { Command, Event } from "@farik/protocol-client";
-import { uiStrings } from "@farik/ui";
+import type { Command, Event } from "@catervas/protocol-client";
+import { uiStrings } from "@catervas/ui";
 import type { Agent } from "../pages/setup/TeamSetup.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://farik.dev/schemas/approved-sites.schema.json",
-  "title": "FarikApprovedSites",
-  "description": "Farik's own list of approved sites: the long-established shops the Procurement Specialist may read from its first task, stored as roles/procurement_specialist/approved_sites.yaml. It is public data, not a secret (ADR 0044 keeps Farik's credentials out of the code, and a list of shops is none). farik-roles loads it and refuses, beside what this schema cannot say, a host that is not a bare lower-case ASCII host with a dot (no scheme, path, port, IP address or leading www.) and a host listed twice. See docs/SPEC.md 6.10 and 8.6, and ADR 0039.",
+  "$id": "https://catervas.dev/schemas/approved-sites.schema.json",
+  "title": "CatervasApprovedSites",
+  "description": "Catervas's own list of approved sites: the long-established shops the Procurement Specialist may read from its first task, stored as roles/procurement_specialist/approved_sites.yaml. It is public data, not a secret (ADR 0044 keeps Catervas's credentials out of the code, and a list of shops is none). catervas-roles loads it and refuses, beside what this schema cannot say, a host that is not a bare lower-case ASCII host with a dot (no scheme, path, port, IP address or leading www.) and a host listed twice. See docs/SPEC.md 6.10 and 8.6, and ADR 0039.",
   "type": "object",
   "additionalProperties": false,
   "required": [

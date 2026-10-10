@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import {
 	act,
 	cleanup,
@@ -212,7 +212,7 @@ describe("today", () => {
 	});
 
 	it("waits_for_the_connection_before_a_request_can_be_sent", async () => {
-		// Today, drawn alone: the app's shell shows nothing until Farik has answered, so the page
+		// Today, drawn alone: the app's shell shows nothing until Catervas has answered, so the page
 		// is rendered here while the session check is still unanswered and there is no connection.
 		let answerSession: (status: number) => void = () => {};
 		const session = new Promise<Response>((resolve) => {
@@ -239,7 +239,7 @@ describe("today", () => {
 		}) as HTMLButtonElement;
 		expect(send.disabled).toBe(true);
 
-		// Farik answers: the page connects, and the button works.
+		// Catervas answers: the page connects, and the button works.
 		await act(async () => answerSession(204));
 		const socket = await waitFor(() => {
 			const s = sockets[0];
@@ -330,7 +330,7 @@ describe("today", () => {
 		});
 		expect(
 			await within(rows[1] as HTMLElement).findByText(
-				"All 3 of Farik’s checks passed.",
+				"All 3 of Catervas’s checks passed.",
 			),
 		).toBeTruthy();
 		expect(
@@ -502,7 +502,7 @@ describe("today", () => {
 					kind: "designer_needs_browser",
 					agent_id: "iris",
 					title: "A bigger basket",
-					line: "Iris has Playwright off, so Farik gives Iris no work. Turn Playwright on for Iris on the Team page",
+					line: "Iris has Playwright off, so Catervas gives Iris no work. Turn Playwright on for Iris on the Team page",
 				},
 			],
 			team: {
@@ -781,7 +781,7 @@ describe("today's posts", () => {
 			within(instagram).getByText("Thanksgiving pies are open for pre-order."),
 		).toBeTruthy();
 		expect(instagram.textContent).toContain(
-			"Approved in your plan MP-3. Farik hands it to Buffer at 12:00.",
+			"Approved in your plan MP-3. Catervas hands it to Buffer at 12:00.",
 		);
 		expect(
 			within(instagram)
@@ -793,7 +793,7 @@ describe("today's posts", () => {
 		).toBeTruthy();
 		expect(within(later).getByText("in 2 days")).toBeTruthy();
 		expect(later.textContent).toContain(
-			"Approved in your plan MP-3. Farik hands it to Buffer an hour before.",
+			"Approved in your plan MP-3. Catervas hands it to Buffer an hour before.",
 		);
 		expect(
 			within(last).getByText("Instagram, Saturday 31 October at 09:00"),
@@ -841,7 +841,7 @@ describe("today's posts", () => {
 			expect(within(row).getByRole("img", { name: "Kai" })).toBeTruthy();
 	});
 
-	it("what_farik_cannot_show_opens_in_a_new_tab", async () => {
+	it("what_catervas_cannot_show_opens_in_a_new_tab", async () => {
 		const { s } = await todayWith({ posts: GOING_OUT });
 		const [, instagram, , last] = (await goingOut()) as [
 			HTMLElement,
@@ -923,7 +923,7 @@ describe("today's posts", () => {
 		expect(container.querySelector("img[src='x']")).toBeNull();
 		expect(
 			within(row).getByText(
-				"If you allow it, Farik sends it at its time, and it waits under Going out until then, with Stop.",
+				"If you allow it, Catervas sends it at its time, and it waits under Going out until then, with Stop.",
 			),
 		).toBeTruthy();
 		expect(
@@ -1004,7 +1004,7 @@ describe("today's posts", () => {
 		expect(within(missed).getByText("X, yesterday at 18:00")).toBeTruthy();
 		expect(within(missed).getByText("Missed")).toBeTruthy();
 		expect(missed.textContent).toContain(
-			"Farik could not hand it to Buffer before its time.",
+			"Catervas could not hand it to Buffer before its time.",
 		);
 		expect(missed.textContent).toContain(
 			"Kai hears of this in its next session.",
@@ -1136,22 +1136,22 @@ describe("a marketing plan's ads and their budget", () => {
 		expect(
 			screen.getByRole("heading", { name: "Waiting on you (1)" }),
 		).toBeTruthy();
-		// The row is Farik's own, so it carries Farik's picture; the plan's title is text.
-		expect(within(row).getByRole("img", { name: "Farik" })).toBeTruthy();
+		// The row is Catervas's own, so it carries Catervas's picture; the plan's title is text.
+		expect(within(row).getByRole("img", { name: "Catervas" })).toBeTruthy();
 		expect(
 			within(row).getByText(`Ads budget reached: ${TITLE}`, {
 				selector: "strong",
 			}),
 		).toBeTruthy();
 		expect(row.textContent).toContain(
-			"Its campaign Bakery near me reached its budget: $150.00 of $150.00 USD. Farik paused it.",
+			"Its campaign Bakery near me reached its budget: $150.00 of $150.00 USD. Catervas paused it.",
 		);
 		expect(row.textContent).toContain(
 			"Google Ads: $318.65 of $450.00 USD spent",
 		);
 		expect(row.textContent).toContain("Ends Sunday 22 November");
 		expect(container.querySelector("b")).toBeNull();
-		// Farik paused it: nothing is left running to stop at Google.
+		// Catervas paused it: nothing is left running to stop at Google.
 		expect(
 			within(row).queryByRole("link", { name: "Open Google Ads" }),
 		).toBeNull();
@@ -1164,7 +1164,7 @@ describe("a marketing plan's ads and their budget", () => {
 		cleanup();
 		const refused = await rowOf(PLAN_BUDGET_ROW);
 		expect(refused.row.textContent).toContain(
-			"Its ads reached their budget: $450.00 of $450.00 USD. Farik could not pause them: Google answered “The service is currently unavailable.” Farik tries again every 15 minutes; pause them in Google Ads.",
+			"Its ads reached their budget: $450.00 of $450.00 USD. Catervas could not pause them: Google answered “The service is currently unavailable.” Catervas tries again every 15 minutes; pause them in Google Ads.",
 		);
 		const ads = within(refused.row).getByRole("link", {
 			name: "Open Google Ads",
@@ -1178,7 +1178,7 @@ describe("a marketing plan's ads and their budget", () => {
 		cleanup();
 		const raising = await rowOf({ ...BUDGET_ROW, raising: "FRK-40" });
 		expect(raising.row.textContent).toContain(
-			"Farik paused it. You asked Kai for a new version with a raised budget. It waits for you here when it is ready.",
+			"Catervas paused it. You asked Kai for a new version with a raised budget. It waits for you here when it is ready.",
 		);
 		expect(
 			within(raising.row).queryByRole("button", { name: "Raise the budget" }),
@@ -1200,7 +1200,7 @@ describe("a marketing plan's ads and their budget", () => {
 			],
 		});
 		expect(row.textContent).toContain(
-			"Its campaign Bakery near me reached its budget: $150.00 of $150.00 USD. Farik could not pause it: Google answered “The service is currently unavailable.” Farik tries again every 15 minutes; pause it in Google Ads.",
+			"Its campaign Bakery near me reached its budget: $150.00 of $150.00 USD. Catervas could not pause it: Google answered “The service is currently unavailable.” Catervas tries again every 15 minutes; pause it in Google Ads.",
 		);
 		expect(row.textContent).not.toContain("$450.00 of $450.00");
 	});
@@ -1218,7 +1218,7 @@ describe("a marketing plan's ads and their budget", () => {
 			name: "End this plan now?",
 		});
 		expect(dialog.textContent).toContain(
-			"Farik pauses its running ads within a minute. $318.65 is spent so far, by Google’s figures at 10:15.",
+			"Catervas pauses its running ads within a minute. $318.65 is spent so far, by Google’s figures at 10:15.",
 		);
 		// Asking first: nothing is sent until it is confirmed.
 		expect(s.calls("command")).toHaveLength(0);
@@ -1235,14 +1235,14 @@ describe("a marketing plan's ads and their budget", () => {
 
 	it("today_says_when_ads_keep_running", async () => {
 		const { container, row } = await rowOf(RUNNING_ROW);
-		expect(within(row).getByRole("img", { name: "Farik" })).toBeTruthy();
+		expect(within(row).getByRole("img", { name: "Catervas" })).toBeTruthy();
 		expect(
 			within(row).getByText(`Ads still running: ${TITLE}`, {
 				selector: "strong",
 			}),
 		).toBeTruthy();
 		expect(row.textContent).toContain(
-			"Farik could not pause its ads: Google answered “The service is currently unavailable.” They keep running at Google until Sunday 22 November or their budget there. Pause them in Google Ads.",
+			"Catervas could not pause its ads: Google answered “The service is currently unavailable.” They keep running at Google until Sunday 22 November or their budget there. Pause them in Google Ads.",
 		);
 		expect(
 			within(row)
@@ -1262,9 +1262,9 @@ describe("a marketing plan's ads and their budget", () => {
 			}),
 		).toBeTruthy();
 		expect(row.textContent).toContain(
-			"Farik can’t read its ad spend: Kai's sign-in to Google has ended; sign Kai in again on Kai's page. Any of its ads still running keep running at Google until Sunday 22 November or their budget there; pause them in Google Ads.",
+			"Catervas can’t read its ad spend: Kai's sign-in to Google has ended; sign Kai in again on Kai's page. Any of its ads still running keep running at Google until Sunday 22 November or their budget there; pause them in Google Ads.",
 		);
-		// The last spend Farik could read stays on the row, with when.
+		// The last spend Catervas could read stays on the row, with when.
 		expect(row.textContent).toContain(
 			"Last read Thursday 12 November at 10:15: $318.65 of $450.00 USD",
 		);
@@ -1668,7 +1668,7 @@ describe("the renewals coming up", () => {
 		await todayWithOrders({ renewals: RENEWALS });
 		expect(
 			await screen.findByText(
-				"2 rows in the register have a renewal date Farik can’t read, so Farik can’t remind you of them.",
+				"2 rows in the register have a renewal date Catervas can’t read, so Catervas can’t remind you of them.",
 			),
 		).toBeTruthy();
 	});
@@ -1681,7 +1681,7 @@ describe("the renewals coming up", () => {
 		).toBeTruthy();
 		expect(
 			screen.getByText(
-				"3 rows in the register have a renewal date Farik can’t read, so Farik can’t remind you of them.",
+				"3 rows in the register have a renewal date Catervas can’t read, so Catervas can’t remind you of them.",
 			),
 		).toBeTruthy();
 		expect(
@@ -1693,7 +1693,7 @@ describe("the renewals coming up", () => {
 		await todayWithOrders({ renewals: { open: [], unreadable: 1 } });
 		expect(
 			await screen.findByText(
-				"1 row in the register has a renewal date Farik can’t read, so Farik can’t remind you of it.",
+				"1 row in the register has a renewal date Catervas can’t read, so Catervas can’t remind you of it.",
 			),
 		).toBeTruthy();
 	});
@@ -2022,7 +2022,7 @@ describe("a data pipeline waiting on the owner", () => {
 		const why = within(paid).getByRole("group", {
 			name: "Why it comes to you",
 		});
-		// Farik's sentences, in their order, then the Product Manager's reason.
+		// Catervas's sentences, in their order, then the Product Manager's reason.
 		expect(why.textContent).toBe(
 			`It costs money.The Product Manager asks you:It needs a paid plan, so it is your call.\\u{202e} ${PIPELINE_MARKUP}`,
 		);
@@ -2032,7 +2032,7 @@ describe("a data pipeline waiting on the owner", () => {
 				.textContent,
 		).toContain("It sends your data to Shippo.The Product Manager asks you:");
 		expect(within(shippo).queryByText("It costs money.")).toBeNull();
-		// Three tries: Farik says so, and there is no reason to show.
+		// Three tries: Catervas says so, and there is no reason to show.
 		const undecided = await rowOf("Azure prices");
 		const unclear = within(undecided).getByRole("group", {
 			name: "Why it comes to you",

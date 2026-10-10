@@ -1,4 +1,4 @@
-import { Button, TextArea } from "@farik/ui";
+import { Button, TextArea } from "@catervas/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";

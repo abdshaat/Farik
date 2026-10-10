@@ -5,14 +5,14 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::paths::{
-    GlobError, PathRefusal, check_allowed_paths, reaches_the_farik_directory,
+    GlobError, PathRefusal, check_allowed_paths, reaches_the_catervas_directory,
     reaches_the_marketing_directory,
 };
 use super::team_rules::TeamRules;
 use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
 };
-use crate::generated::task_contract::FarikTaskContractKind as Kind;
+use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::team::{
     changes_code, plain_role, private_file_fault, private_folder, task_private_folder,
 };
@@ -56,8 +56,8 @@ pub enum ReadinessRule {
     /// While the team has an active Marketing Specialist, no other role's task names a path that
     /// could reach `docs/marketing/`, which the Marketing Specialist owns.
     MarketingPathsOwned,
-    /// No allowed path reaches under `.farik/`, whose files change only through Farik's tools.
-    NoFarikPaths,
+    /// No allowed path reaches under `.catervas/`, whose files change only through Catervas's tools.
+    NoCatervasPaths,
     /// A task for a role with a private folder works only there: every allowed path lies within
     /// the folder, no criterion is a `command` or a `test`, an `artifact` criterion names a
     /// workbook in the folder and searches no text, and the task has no parent epic.
@@ -163,7 +163,7 @@ const CHECKS: [Check; 22] = [
     allowed_paths_within_ceiling,
     document_paths_only,
     marketing_paths_owned,
-    no_farik_paths,
+    no_catervas_paths,
     private_folder_task,
     private_folder_reviewer,
     budget_within_team_max,
@@ -657,26 +657,26 @@ fn marketing_paths_owned(
     ))
 }
 
-/// No allowed path reaches under `.farik/` (5.3), whatever the role or kind: a contract, a
-/// decision, a notebook, or the retro changes only through Farik's tools, never through a commit.
+/// No allowed path reaches under `.catervas/` (5.3), whatever the role or kind: a contract, a
+/// decision, a notebook, or the retro changes only through Catervas's tools, never through a commit.
 /// A path with a backslash is refused outright: the glob engine reads `\` as an escape, so a
-/// glob such as `.f\arik/**` reads its first segment as `.f`, missing the directory it in fact
+/// glob such as `.c\atervas/**` reads its first segment as `.c`, missing the directory it in fact
 /// matches once escaped. The one exception is a task in a private folder (6.6), which may name
 /// paths within its own folder.
-fn no_farik_paths(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
+fn no_catervas_paths(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
     let backslashed: Vec<&str> = contract
         .allowed_paths
         .iter()
         .map(String::as_str)
         .filter(|path| path.contains('\\'))
         .collect();
-    // A task in a private folder may name the folder, which lies under `.farik/local/`.
+    // A task in a private folder may name the folder, which lies under `.catervas/local/`.
     let folder = task_private_folder(contract);
     let reaching: Vec<&str> = contract
         .allowed_paths
         .iter()
         .map(String::as_str)
-        .filter(|path| !path.contains('\\') && reaches_the_farik_directory(path))
+        .filter(|path| !path.contains('\\') && reaches_the_catervas_directory(path))
         .filter(|path| !folder.is_some_and(|folder| is_within_the_folder(path, folder)))
         .collect();
     if backslashed.is_empty() && reaching.is_empty() {
@@ -691,11 +691,11 @@ fn no_farik_paths(contract: &TaskContract, _: &ReadinessContext) -> Option<Readi
     }
     if !reaching.is_empty() {
         reasons.push(format!(
-            "allowed paths {} reach under .farik/, whose files change only through Farik's tools",
+            "allowed paths {} reach under .catervas/, whose files change only through Catervas's tools",
             reaching.join(", ")
         ));
     }
-    Some(failure(ReadinessRule::NoFarikPaths, reasons.join("; ")))
+    Some(failure(ReadinessRule::NoCatervasPaths, reasons.join("; ")))
 }
 
 /// Whether an allowed path stays within a private folder, by the ceiling's containment: the folder,
@@ -708,7 +708,7 @@ fn is_within_the_folder(path: &str, folder: &str) -> bool {
 /// lie within the folder, it has no `command` or `test` criterion, since it has no worktree to run
 /// one in, its `artifact` criteria name files as the folder holds them (workbooks, and notes in the
 /// procurement folder) and search no text, since a workbook is not text and a note is checked for
-/// existence alone, and it has no parent epic, whose paths could not name `.farik/`.
+/// existence alone, and it has no parent epic, whose paths could not name `.catervas/`.
 fn private_folder_task(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
     let folder = task_private_folder(contract)?;
     let mut reasons = Vec::new();
@@ -758,7 +758,7 @@ fn private_folder_task(contract: &TaskContract, _: &ReadinessContext) -> Option<
         else {
             continue;
         };
-        let why = if path.starts_with(".farik/") {
+        let why = if path.starts_with(".catervas/") {
             let example = if private_folder(Role::ProcurementSpecialist) == Some(folder) {
                 "vendors.xlsx"
             } else {
@@ -780,7 +780,7 @@ fn private_folder_task(contract: &TaskContract, _: &ReadinessContext) -> Option<
     }
     if let Some(parent) = &contract.parent {
         reasons.push(format!(
-            "it has a parent epic, {}, whose paths cannot name .farik/, so no task under one is \
+            "it has a parent epic, {}, whose paths cannot name .catervas/, so no task under one is \
              within the folder",
             parent.as_str()
         ));
@@ -960,7 +960,7 @@ mod tests {
     };
     use crate::contract::fixtures::a_contract_wire;
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire, validate_contract};
-    use crate::generated::task_contract::FarikTaskContractKind as Kind;
+    use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 
     fn failed_rules(contract: &TaskContract, context: &ReadinessContext) -> Vec<R> {
         evaluate_readiness(contract, context)
@@ -1266,33 +1266,35 @@ mod tests {
     }
 
     #[test]
-    fn refuses_allowed_paths_that_reach_under_the_farik_directory() {
-        // Each names a path under `.farik/` or could match one; every role and kind is held.
+    fn refuses_allowed_paths_that_reach_under_the_catervas_directory() {
+        // Each names a path under `.catervas/` or could match one; every role and kind is held.
         let reaching = [
-            ".farik/decisions/0001-x.md",
-            ".farik/**",
-            ".farik",
-            "./.farik/team.yaml",
-            ".FARIK/team/retro.md",
+            ".catervas/decisions/0001-x.md",
+            ".catervas/**",
+            ".catervas",
+            "./.catervas/team.yaml",
+            ".CATERVAS/team/retro.md",
             "**",
             "**/*.md",
             "*/memory.md",
-            ".f*/x",
-            "[.]farik/x",
-            "{src,.farik}/**",
-            ".f\\arik/**",
+            ".c*/x",
+            "[.]catervas/x",
+            "{src,.catervas}/**",
+            ".c\\atervas/**",
             "a\\b",
         ];
         for path in reaching {
             for role in [Role::SoftwareDeveloper, Role::Architect] {
                 let mut task = a_task_for(role, &["docs/x.md", path]);
                 assert!(
-                    failed_rules(&task, &a_context_without_marketing()).contains(&R::NoFarikPaths),
+                    failed_rules(&task, &a_context_without_marketing())
+                        .contains(&R::NoCatervasPaths),
                     "{path} for {role:?}"
                 );
                 task.kind = Kind::Epic;
                 assert!(
-                    failed_rules(&task, &a_context_without_marketing()).contains(&R::NoFarikPaths),
+                    failed_rules(&task, &a_context_without_marketing())
+                        .contains(&R::NoCatervasPaths),
                     "{path} for an epic"
                 );
             }
@@ -1300,10 +1302,11 @@ mod tests {
         let task = a_task_for(Role::Architect, &["**/*.md"]);
         assert_eq!(
             failed_rules(&task, &a_context_without_marketing()),
-            [R::NoFarikPaths]
+            [R::NoCatervasPaths]
         );
         assert!(
-            message_of(&task, &a_context_without_marketing(), R::NoFarikPaths).contains("**/*.md"),
+            message_of(&task, &a_context_without_marketing(), R::NoCatervasPaths)
+                .contains("**/*.md"),
             "the message names the path"
         );
         for path in [
@@ -1311,9 +1314,9 @@ mod tests {
             "*.md",
             "*",
             "docs/**",
-            ".farikx/**",
+            ".catervasx/**",
             ".github/**",
-            "src/.farik/x",
+            "src/.catervas/x",
         ] {
             let task = a_task_for(Role::SoftwareDeveloper, &[path]);
             assert_eq!(
@@ -1465,11 +1468,14 @@ mod tests {
 
     #[test]
     fn a_finance_task_is_ready_in_its_folder() {
-        let task = a_finance_task(&[".farik/local/finance/**"], the_books_criteria());
+        let task = a_finance_task(&[".catervas/local/finance/**"], the_books_criteria());
         assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
         // A path to one file in the folder, and the folder itself, are within it too.
         let task = a_finance_task(
-            &[".farik/local/finance/books.xlsx", ".farik/local/finance"],
+            &[
+                ".catervas/local/finance/books.xlsx",
+                ".catervas/local/finance",
+            ],
             the_books_criteria(),
         );
         assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
@@ -1496,7 +1502,7 @@ mod tests {
             { "id": "C3", "text": "The recommendation is clear to the founder.",
               "verification": { "method": "human", "question": "Is the recommendation clear?" } }
         ]);
-        let folder = &[".farik/local/procurement/**"];
+        let folder = &[".catervas/local/procurement/**"];
         let task = a_procurement_task(folder, evaluation.clone());
         assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
         // The register is a workbook in the folder, and a note may sit a folder down.
@@ -1536,21 +1542,21 @@ mod tests {
         );
         assert_eq!(failed_rules(&searched, &context), [R::PrivateFolderTask]);
         // The finance folder is not its own.
-        let finance = a_procurement_task(&[".farik/local/finance/**"], evaluation.clone());
+        let finance = a_procurement_task(&[".catervas/local/finance/**"], evaluation.clone());
         assert_eq!(
             failed_rules(&finance, &context),
-            [R::NoFarikPaths, R::PrivateFolderTask]
+            [R::NoCatervasPaths, R::PrivateFolderTask]
         );
         assert!(
             message_of(&finance, &context, R::PrivateFolderTask).contains(
-                "allowed paths .farik/local/finance/** lie outside .farik/local/procurement"
+                "allowed paths .catervas/local/finance/** lie outside .catervas/local/procurement"
             ),
         );
         // A path that is neither a workbook nor a note, and one that starts at the project.
         for (path, said) in [
             ("evaluations/x.txt", "is not a workbook or a note"),
             (
-                ".farik/local/procurement/vendors.xlsx",
+                ".catervas/local/procurement/vendors.xlsx",
                 "is relative to the project",
             ),
         ] {
@@ -1583,9 +1589,9 @@ mod tests {
         for role in [Role::FinanceSpecialist, Role::ProcurementSpecialist] {
             context.active_agents_by_role.insert(role, 1);
         }
-        let books = a_finance_task(&[".farik/local/finance/**"], the_books_criteria());
+        let books = a_finance_task(&[".catervas/local/finance/**"], the_books_criteria());
         let comparison = a_procurement_task(
-            &[".farik/local/procurement/**"],
+            &[".catervas/local/procurement/**"],
             json!([
                 { "id": "C1", "text": "The comparison is written.",
                   "verification": { "method": "artifact", "path": "evaluations/email-sending.md" } },
@@ -1600,17 +1606,21 @@ mod tests {
         assert_eq!(evaluate_readiness(&comparison, &context), Ok(()));
         // The other folder's role is refused, and so is any other role that could be available.
         for (task, reviewer, folder) in [
-            (&books, Role::ProcurementSpecialist, ".farik/local/finance"),
+            (
+                &books,
+                Role::ProcurementSpecialist,
+                ".catervas/local/finance",
+            ),
             (
                 &comparison,
                 Role::FinanceSpecialist,
-                ".farik/local/procurement",
+                ".catervas/local/procurement",
             ),
-            (&books, Role::Architect, ".farik/local/finance"),
+            (&books, Role::Architect, ".catervas/local/finance"),
             (
                 &comparison,
                 Role::SoftwareDeveloper,
-                ".farik/local/procurement",
+                ".catervas/local/procurement",
             ),
         ] {
             let mut task = task.clone();
@@ -1638,7 +1648,7 @@ mod tests {
         let books = || the_books_criteria()[0].clone();
         let with =
             |extra: serde_json::Value| json!([books(), the_books_criteria()[1].clone(), extra]);
-        let folder = &[".farik/local/finance/**"];
+        let folder = &[".catervas/local/finance/**"];
         // Each case: the task, and what its message says. Each fails this rule alone.
         let cases = [
             (
@@ -1676,11 +1686,11 @@ mod tests {
                     json!([
                         { "id": "C1", "text": "The books exist.",
                           "verification": { "method": "artifact",
-                                            "path": ".farik/local/finance/books.xlsx" } },
+                                            "path": ".catervas/local/finance/books.xlsx" } },
                         the_books_criteria()[1].clone()
                     ]),
                 ),
-                "criterion C1 names .farik/local/finance/books.xlsx",
+                "criterion C1 names .catervas/local/finance/books.xlsx",
             ),
             (
                 a_finance_task(
@@ -1695,26 +1705,26 @@ mod tests {
             ),
             (
                 a_finance_task(&["src/**"], the_books_criteria()),
-                "allowed paths src/** lie outside .farik/local/finance",
+                "allowed paths src/** lie outside .catervas/local/finance",
             ),
             (
                 a_finance_task(
                     &[
-                        ".farik/local/finance/**",
-                        ".farik/local/financeX/**",
+                        ".catervas/local/finance/**",
+                        ".catervas/local/financeX/**",
                         "docs/**",
                     ],
                     the_books_criteria(),
                 ),
-                "allowed paths .farik/local/financeX/**, docs/** lie outside .farik/local/finance",
+                "allowed paths .catervas/local/financeX/**, docs/** lie outside .catervas/local/finance",
             ),
         ];
         for (task, said) in cases {
             let context = a_context_without_marketing();
             let failed = failed_rules(&task, &context);
-            // `.farik/local/financeX/**` is also under `.farik/`.
+            // `.catervas/local/financeX/**` is also under `.catervas/`.
             let wanted: &[R] = if said.contains("financeX") {
-                &[R::NoFarikPaths, R::PrivateFolderTask]
+                &[R::NoCatervasPaths, R::PrivateFolderTask]
             } else {
                 &[R::PrivateFolderTask]
             };
@@ -1722,7 +1732,7 @@ mod tests {
             let message = message_of(&task, &context, R::PrivateFolderTask);
             assert!(message.contains(said), "{said}: {message}");
         }
-        // A parent epic is refused: an epic's paths cannot name `.farik/`, so no task under one is
+        // A parent epic is refused: an epic's paths cannot name `.catervas/`, so no task under one is
         // within the folder.
         let mut under_an_epic = a_finance_task(folder, the_books_criteria());
         under_an_epic.parent = Some("FRK-3".parse().expect("a task id"));
@@ -1744,7 +1754,7 @@ mod tests {
 
     #[test]
     fn a_team_requiring_tests_still_readies_a_finance_task() {
-        let task = a_finance_task(&[".farik/local/finance/**"], the_books_criteria());
+        let task = a_finance_task(&[".catervas/local/finance/**"], the_books_criteria());
         let mut context = a_ready_context();
         context.rules.required_criteria = vec!["command".to_string(), "test".to_string()];
         context.rules.require_new_tests = true;
@@ -1754,7 +1764,7 @@ mod tests {
         context.rules.required_criteria = vec!["command".to_string(), "review".to_string()];
         assert_eq!(evaluate_readiness(&task, &context), Ok(()));
         let artifact_only = a_finance_task(
-            &[".farik/local/finance/**"],
+            &[".catervas/local/finance/**"],
             json!([the_books_criteria()[0].clone()]),
         );
         assert_eq!(
@@ -1769,7 +1779,7 @@ mod tests {
 
     #[test]
     fn the_ceiling_does_not_hold_the_folder() {
-        let task = a_finance_task(&[".farik/local/finance/**"], the_books_criteria());
+        let task = a_finance_task(&[".catervas/local/finance/**"], the_books_criteria());
         let mut context = a_ready_context();
         context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
         assert_eq!(evaluate_readiness(&task, &context), Ok(()));
@@ -1791,7 +1801,7 @@ mod tests {
     }
 
     #[test]
-    fn another_roles_task_still_may_not_name_farik() {
+    fn another_roles_task_still_may_not_name_catervas() {
         // The folder is a finance task's own: a Developer's, an Architect's and a Marketing
         // Specialist's task naming it, or an epic whose assignee role is finance, is refused.
         for role in [
@@ -1799,15 +1809,15 @@ mod tests {
             Role::Architect,
             Role::MarketingSpecialist,
         ] {
-            let task = a_task_for(role, &[".farik/local/finance/**"]);
+            let task = a_task_for(role, &[".catervas/local/finance/**"]);
             assert!(
-                failed_rules(&task, &a_context_without_marketing()).contains(&R::NoFarikPaths),
+                failed_rules(&task, &a_context_without_marketing()).contains(&R::NoCatervasPaths),
                 "{role:?}"
             );
         }
-        let mut epic = a_finance_task(&[".farik/local/finance/**"], the_books_criteria());
+        let mut epic = a_finance_task(&[".catervas/local/finance/**"], the_books_criteria());
         epic.kind = Kind::Epic;
-        assert!(failed_rules(&epic, &a_ready_context()).contains(&R::NoFarikPaths));
+        assert!(failed_rules(&epic, &a_ready_context()).contains(&R::NoCatervasPaths));
     }
 
     /// A task for `role`, reviewed by the Product Manager so that any role may be the assignee,

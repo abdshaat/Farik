@@ -1,4 +1,4 @@
-//! Farik's own Google Ads connector (`docs/SPEC.md` 6.7, ADR 0038, ADR 0042): the client for
+//! Catervas's own Google Ads connector (`docs/SPEC.md` 6.7, ADR 0038, ADR 0042): the client for
 //! Google's API, and what each of the connector's ten tools sends. It speaks to one fixed address,
 //! follows no redirect and uses no proxy, sends the agent's grant as a bearer and nothing else (no
 //! developer token, no `login-customer-id`), checks every input before anything leaves, and builds
@@ -9,8 +9,8 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use catervas_core::marketing::{Amount, BudgetKind, parse_amount};
 use chrono::NaiveDate;
-use farik_core::marketing::{Amount, BudgetKind, parse_amount};
 use rmcp::model::{
     CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
     Implementation, InitializeResult, JsonObject, ListToolsResult, PaginatedRequestParams,
@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 
 use crate::claude::Secret;
 
-/// Google Ads' address, version 25 (released 2026-07-22; a Farik release moves it). Never an
+/// Google Ads' address, version 25 (released 2026-07-22; a Catervas release moves it). Never an
 /// argument or an input: the tests pass a fixture's address to [`GoogleAds::new`].
 pub const GOOGLE_ADS_API: &str = "https://googleads.googleapis.com/v25";
 
@@ -51,7 +51,7 @@ pub fn tool_names() -> Vec<&'static str> {
 pub enum GoogleAdsError {
     /// An input is not valid; nothing was sent.
     Input(String),
-    /// Google refused the request, in Farik's words with Google's own cut and quoted.
+    /// Google refused the request, in Catervas's words with Google's own cut and quoted.
     Google(String),
     /// Google would not allow it: its `PERMISSION_DENIED`.
     NotAllowed(String),
@@ -73,9 +73,9 @@ impl std::error::Error for GoogleAdsError {}
 
 /// How long one call to Google may take.
 const TIMEOUT: Duration = Duration::from_secs(25);
-/// The most of an answer Farik reads.
+/// The most of an answer Catervas reads.
 const MAX_BODY: usize = 4 * 1024 * 1024;
-/// The most characters of Google's own words Farik passes on.
+/// The most characters of Google's own words Catervas passes on.
 const MAX_WORDS: usize = 300;
 /// The most accounts `list_accounts` reads.
 const MAX_ACCOUNTS: usize = 20;
@@ -95,12 +95,12 @@ pub struct GoogleAds {
     timeout: Duration,
 }
 
-/// Why Farik could not speak to Google at all.
+/// Why Catervas could not speak to Google at all.
 fn failed(words: &str) -> GoogleAdsError {
     GoogleAdsError::Failed(words.to_string())
 }
 
-/// `text` cut at the most characters of Google's own words Farik passes on.
+/// `text` cut at the most characters of Google's own words Catervas passes on.
 fn cut(text: &str) -> String {
     text.chars().take(MAX_WORDS).collect()
 }
@@ -134,7 +134,7 @@ impl GoogleAds {
             ));
         }
         let client = reqwest::Client::builder()
-            // Nothing Google answers sends Farik anywhere else, and nothing goes through a proxy.
+            // Nothing Google answers sends Catervas anywhere else, and nothing goes through a proxy.
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
             .timeout(timeout)
@@ -181,7 +181,7 @@ impl GoogleAds {
         let status = response.status();
         if status.is_redirection() {
             return Err(failed(
-                "Google answered with a redirect, which Farik does not follow",
+                "Google answered with a redirect, which Catervas does not follow",
             ));
         }
         let mut bytes: Vec<u8> = Vec::new();
@@ -314,7 +314,7 @@ impl GoogleAds {
             .await
             .map_err(|error| match error {
                 GoogleAdsError::NotAllowed(_) => GoogleAdsError::NotAllowed(
-                    "Google has not yet allowed Farik's app to give keyword ideas.".to_string(),
+                    "Google has not yet allowed Catervas's app to give keyword ideas.".to_string(),
                 ),
                 other => other,
             })?;
@@ -322,7 +322,7 @@ impl GoogleAds {
     }
 }
 
-/// What Google's refusal, `status` and its error body, comes to in Farik's words, Google's own
+/// What Google's refusal, `status` and its error body, comes to in Catervas's words, Google's own
 /// message cut and quoted.
 fn refusal(status: u16, body: Option<&Value>) -> GoogleAdsError {
     let google = body.map_or("", |body| {
@@ -332,12 +332,12 @@ fn refusal(status: u16, body: Option<&Value>) -> GoogleAdsError {
         body["error"]["message"].as_str().unwrap_or_default()
     }));
     if status == 401 || google == "UNAUTHENTICATED" {
-        failed("Google did not accept Farik's sign-in; sign in again")
+        failed("Google did not accept Catervas's sign-in; sign in again")
     } else if status == 403 || google == "PERMISSION_DENIED" {
         GoogleAdsError::NotAllowed(format!("Google would not allow this: “{message}”"))
     } else if status == 429 || google == "RESOURCE_EXHAUSTED" {
         GoogleAdsError::Google(format!(
-            "Google says Farik has asked too often: “{message}”"
+            "Google says Catervas has asked too often: “{message}”"
         ))
     } else if status >= 500 {
         GoogleAdsError::Failed(format!(
@@ -1213,7 +1213,7 @@ pub fn spend_query(
 }
 
 /// The query that reads the status of `campaigns`, with no metrics, so that a campaign with no
-/// cost still has its row (step 08g): Farik's pause reads it first, and sends nothing for a
+/// cost still has its row (step 08g): Catervas's pause reads it first, and sends nothing for a
 /// campaign that is paused or removed already.
 ///
 /// # Errors
@@ -1361,13 +1361,13 @@ impl StatusInput {
 
 /// What the shim answers with when it was started in no session: a call needs the daemon's address
 /// and the ticket the launch route gave it.
-const NO_SESSION: &str = "Google Ads runs only inside a Farik session";
+const NO_SESSION: &str = "Google Ads runs only inside a Catervas session";
 
 /// How long the shim waits for the daemon: the route makes up to four calls to Google of 25
 /// seconds each.
 const SHIM_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// The shim `farik connector google-ads` runs (ADR 0038, ADR 0042): it lists the ten tools itself,
+/// The shim `catervas connector google-ads` runs (ADR 0038, ADR 0042): it lists the ten tools itself,
 /// so its list is pinned offline, and forwards each call to the daemon's `POST /connector/call`
 /// with the session's ticket. The daemon holds the grant and makes the call, so no token is ever
 /// in this process's environment, and a plan the owner ends takes effect at once.
@@ -1394,7 +1394,7 @@ fn is_the_daemon(url: &str) -> bool {
 
 impl Shim {
     /// A shim that forwards to `url` with `ticket`; with either missing, every call says that
-    /// Google Ads runs only inside a Farik session, and the list still answers.
+    /// Google Ads runs only inside a Catervas session, and the list still answers.
     ///
     /// # Errors
     ///
@@ -1409,7 +1409,7 @@ impl Shim {
         timeout: Duration,
     ) -> Result<Self, GoogleAdsError> {
         let client = reqwest::Client::builder()
-            // The daemon answers where it is; nothing it says sends Farik anywhere else, and
+            // The daemon answers where it is; nothing it says sends Catervas anywhere else, and
             // nothing goes through a proxy.
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
@@ -1429,7 +1429,7 @@ impl Shim {
     ///
     /// # Errors
     ///
-    /// The words of the refusal: the daemon's own (`<code>: <words>`), or Farik's when the call
+    /// The words of the refusal: the daemon's own (`<code>: <words>`), or Catervas's when the call
     /// could not be made.
     pub async fn call(&self, tool: &str, input: &Value) -> Result<String, String> {
         let (Some(url), Some(ticket)) = (&self.url, &self.ticket) else {
@@ -1437,7 +1437,7 @@ impl Shim {
         };
         // Checked at each call: a variable is whatever the environment held.
         if !is_the_daemon(url) {
-            return Err("Farik's daemon is not where this connector was told it is".to_string());
+            return Err("Catervas's daemon is not where this connector was told it is".to_string());
         }
         let mut response = self
             .client
@@ -1449,48 +1449,48 @@ impl Shim {
             .map_err(|error| {
                 if error.is_timeout() {
                     format!(
-                        "Farik did not answer within {} seconds",
+                        "Catervas did not answer within {} seconds",
                         self.timeout.as_secs()
                     )
                 } else {
-                    "Farik's daemon could not be reached".to_string()
+                    "Catervas's daemon could not be reached".to_string()
                 }
             })?;
         let status = response.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(
-                "Farik did not accept this session's ticket; the session may have ended"
+                "Catervas did not accept this session's ticket; the session may have ended"
                     .to_string(),
             );
         }
         if !status.is_success() {
-            return Err(format!("Farik answered with status {}", status.as_u16()));
+            return Err(format!("Catervas answered with status {}", status.as_u16()));
         }
         let mut bytes: Vec<u8> = Vec::new();
         while let Some(chunk) = response
             .chunk()
             .await
-            .map_err(|_| "Farik's answer was cut off".to_string())?
+            .map_err(|_| "Catervas's answer was cut off".to_string())?
         {
             if chunk.len() > MAX_BODY - bytes.len() {
-                return Err("Farik's answer is too large".to_string());
+                return Err("Catervas's answer is too large".to_string());
             }
             bytes.extend_from_slice(&chunk);
         }
-        let answer: Value =
-            serde_json::from_slice(&bytes).map_err(|_| "Farik's answer is not JSON".to_string())?;
+        let answer: Value = serde_json::from_slice(&bytes)
+            .map_err(|_| "Catervas's answer is not JSON".to_string())?;
         match (answer.get("ok"), answer["error"].as_str()) {
             (Some(ok), _) => Ok(ok.to_string()),
             (None, Some(error)) => Err(error.to_string()),
             (None, None) => {
-                Err("Farik's answer says neither what was done nor why not".to_string())
+                Err("Catervas's answer says neither what was done nor why not".to_string())
             }
         }
     }
 }
 
 /// The name the shim gives itself.
-const SERVER_NAME: &str = "farik-google-ads";
+const SERVER_NAME: &str = "catervas-google-ads";
 
 /// An ad account, as every tool writes it.
 fn account_schema() -> Value {
@@ -1722,7 +1722,7 @@ impl ServerHandler for Shim {
 
 /// Serves on standard input and output until the client leaves. With neither `url` nor `ticket`
 /// the list still answers, so connecting and the offline pin run it bare; a call then says that
-/// Google Ads runs only inside a Farik session.
+/// Google Ads runs only inside a Catervas session.
 ///
 /// # Errors
 ///
@@ -1747,8 +1747,8 @@ pub async fn serve_shim(url: Option<&str>, ticket: Option<&str>) -> Result<(), G
 mod tests {
     use std::time::Duration;
 
+    use catervas_core::marketing::{Amount, BudgetKind};
     use chrono::NaiveDate;
-    use farik_core::marketing::{Amount, BudgetKind};
     use serde_json::{Value, json};
 
     use super::{
@@ -2482,7 +2482,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn says_google_s_refusal_in_farik_s_words() {
+    async fn says_google_s_refusal_in_catervas_s_words() {
         let (fixture, ads) = ads().await;
         let input = json!({ "account": ACCOUNT, "words": ["boots"], "language": 1000, "locations": [2840] });
 
@@ -2503,7 +2503,7 @@ mod tests {
         assert_eq!(
             keyword_ideas(&ads, &token(), &input).await,
             Err(GoogleAdsError::NotAllowed(
-                "Google has not yet allowed Farik's app to give keyword ideas.".to_string()
+                "Google has not yet allowed Catervas's app to give keyword ideas.".to_string()
             ))
         );
         let GoogleAdsError::NotAllowed(words) = ads
@@ -2587,7 +2587,7 @@ mod tests {
     /// fixture that records, asks a second fixture directly.
     #[tokio::test]
     async fn uses_no_proxy_from_the_environment() {
-        if let Ok(target) = std::env::var("FARIK_ADS_PROXY_CHILD") {
+        if let Ok(target) = std::env::var("CATERVAS_ADS_PROXY_CHILD") {
             GoogleAds::new(&target)
                 .expect("a client")
                 .accessible(&token())
@@ -2603,7 +2603,7 @@ mod tests {
                 "--exact",
                 "google_ads::tests::uses_no_proxy_from_the_environment",
             ])
-            .env("FARIK_ADS_PROXY_CHILD", &target.address)
+            .env("CATERVAS_ADS_PROXY_CHILD", &target.address)
             .env("HTTP_PROXY", &through)
             .env("http_proxy", &through)
             .env("ALL_PROXY", &through)
@@ -3002,7 +3002,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_call_without_a_session_says_so() {
-        let said = "Google Ads runs only inside a Farik session".to_string();
+        let said = "Google Ads runs only inside a Catervas session".to_string();
         for (url, ticket) in [
             (None, None),
             (Some("http://127.0.0.1:1/connector/call"), None),
@@ -3056,7 +3056,7 @@ mod tests {
     /// a stand-in that records, calls a second one directly.
     #[tokio::test]
     async fn the_shim_uses_no_proxy_from_the_environment() {
-        if let Ok(target) = std::env::var("FARIK_SHIM_PROXY_CHILD") {
+        if let Ok(target) = std::env::var("CATERVAS_SHIM_PROXY_CHILD") {
             super::Shim::new(Some(&target), Some("t"))
                 .expect("a shim")
                 .call("list_accounts", &json!({}))
@@ -3072,7 +3072,7 @@ mod tests {
                 "--exact",
                 "google_ads::tests::the_shim_uses_no_proxy_from_the_environment",
             ])
-            .env("FARIK_SHIM_PROXY_CHILD", &target.url)
+            .env("CATERVAS_SHIM_PROXY_CHILD", &target.url)
             .env("HTTP_PROXY", &through)
             .env("http_proxy", &through)
             .env("ALL_PROXY", &through)

@@ -1,4 +1,4 @@
-import { Button, Choice, TextArea } from "@farik/ui";
+import { Button, Choice, TextArea } from "@catervas/ui";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -25,7 +25,7 @@ type EscalationChoice = {
 };
 
 /** The reasons the governor raises in its own words, not an agent's (SPEC 5.7). */
-const FARIKS = ["iterations", "budget", "sessions", "blocker_age"];
+const CATERVASS = ["iterations", "budget", "sessions", "blocker_age"];
 
 /** A request for help: what happened, what was tried, and the choices that fit its reason. */
 export function HelpNeeded() {
@@ -65,7 +65,8 @@ export function HelpNeeded() {
 	const reviewer =
 		contract.reviewerRole && active(agents, contract.reviewerRole);
 	const raised = events.findLast((e) => e.kind === "escalation.raised");
-	const fariks = !raised?.agentId || FARIKS.includes(raised.body.reason ?? "");
+	const catervass =
+		!raised?.agentId || CATERVASS.includes(raised.body.reason ?? "");
 	// What was tried since the human last answered an escalation of this task.
 	const since =
 		events.findLast((e) => e.kind === "escalation.resolved")?.seq ?? 0;
@@ -106,8 +107,8 @@ export function HelpNeeded() {
 			{raised && (
 				<section className={own.letter} aria-labelledby="explains">
 					<p id="explains" className={styles.muted}>
-						{fariks || !builder
-							? t("helpFarikExplains")
+						{catervass || !builder
+							? t("helpCatervasExplains")
 							: signed("helpExplains", builder)}
 					</p>
 					<p>{raised.body.detail}</p>

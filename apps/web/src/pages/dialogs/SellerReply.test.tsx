@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sentCommand } from "../../test/gate.ts";
@@ -58,7 +58,7 @@ describe("a reply from a seller, read", () => {
 		).toBeTruthy();
 		expect(
 			within(dialog).getByText(
-				"“tool.exe” was not kept: Farik keeps only PDFs and pictures of 10 MB or less.",
+				"“tool.exe” was not kept: Catervas keeps only PDFs and pictures of 10 MB or less.",
 			),
 		).toBeTruthy();
 	});
@@ -73,7 +73,7 @@ describe("a reply from a seller, read", () => {
 		const dialog = await screen.findByRole("dialog", {
 			name: "Reply from Packaging\\u{202e} Express",
 		});
-		// From, the subject Farik sent, the reply's subject and words, and both file names.
+		// From, the subject Catervas sent, the reply's subject and words, and both file names.
 		showsWhatItHides(dialog);
 		expect(s.calls("command")).toHaveLength(0);
 	});

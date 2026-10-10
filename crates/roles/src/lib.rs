@@ -1,20 +1,20 @@
-//! Farik's roles as data (`docs/SPEC.md` section 6): each shipped role's mandate, what it
+//! Catervas's roles as data (`docs/SPEC.md` section 6): each shipped role's mandate, what it
 //! produces, what it may not do, its default model and effort, its system prompt, and its skills,
 //! embedded in the binary and read through one loader. This crate performs no I/O at run time.
 
 use std::fmt;
 use std::sync::LazyLock;
 
-use farik_core::contract::Role;
-use farik_core::governor::permissions::{PermissionTier, default_tiers};
-use farik_core::team::Effort;
+use catervas_core::contract::Role;
+use catervas_core::governor::permissions::{PermissionTier, default_tiers};
+use catervas_core::team::Effort;
 use jsonschema::Validator;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::generated::role::{FarikRole, FarikRoleModelEffort};
+use crate::generated::role::{CatervasRole, CatervasRoleModelEffort};
 
-/// The connectors Farik ships.
+/// The connectors Catervas ships.
 mod connectors;
 /// Types generated from `docs/schemas/role.schema.json`.
 pub mod generated;
@@ -22,15 +22,15 @@ pub mod generated;
 mod kit;
 /// Which role reviews a task (D7).
 mod reviewer;
-/// Farik's own list of approved sites for the Procurement Specialist.
+/// Catervas's own list of approved sites for the Procurement Specialist.
 pub mod sites;
 /// Checking a skill a user adds.
 mod skill_check;
 
 pub use connectors::{ConnectorDefinition, builtin_connector};
 pub use kit::{
-    FARIK_COMMAND, FARIK_CONNECTORS, Kit, KitAllowance, KitConnector, KitError, PinDrift,
-    SetupCopy, is_farik_connector, load_kit, parse_fixture_kit, parse_kit, pin_drift,
+    CATERVAS_COMMAND, CATERVAS_CONNECTORS, Kit, KitAllowance, KitConnector, KitError, PinDrift,
+    SetupCopy, is_catervas_connector, load_kit, parse_fixture_kit, parse_kit, pin_drift,
     quoted_labels, shipped_skill_names,
 };
 pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
@@ -68,7 +68,7 @@ pub struct Skill {
     pub text: String,
 }
 
-/// A role as Farik ships it (`docs/SPEC.md` section 6).
+/// A role as Catervas ships it (`docs/SPEC.md` section 6).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RoleDefinition {
     /// The role.
@@ -96,7 +96,7 @@ pub struct RoleDefinition {
 /// Why a role could not be loaded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoleError {
-    /// Farik ships no definition of this role.
+    /// Catervas ships no definition of this role.
     NotFound {
         /// The role asked for, as its wire id.
         role_id: String,
@@ -114,7 +114,10 @@ impl fmt::Display for RoleError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotFound { role_id } => {
-                write!(formatter, "Farik ships no definition of the role {role_id}")
+                write!(
+                    formatter,
+                    "Catervas ships no definition of the role {role_id}"
+                )
             }
             Self::Invalid { role_id, detail } => {
                 write!(formatter, "the role {role_id} is not valid: {detail}")
@@ -125,7 +128,7 @@ impl fmt::Display for RoleError {
 
 impl std::error::Error for RoleError {}
 
-/// The definition Farik ships for a role.
+/// The definition Catervas ships for a role.
 ///
 /// # Errors
 ///
@@ -266,7 +269,7 @@ fn parse_role(
             errors.join("; ")
         )));
     }
-    let file: FarikRole = serde_json::from_value(value).map_err(|error| {
+    let file: CatervasRole = serde_json::from_value(value).map_err(|error| {
         invalid(format!(
             "the schema passed but the typed role could not be built: {error}"
         ))
@@ -303,9 +306,9 @@ fn parse_role(
         default_tiers: default_tiers(role).to_vec(),
         model: file.model.id.to_string(),
         effort: match file.model.effort {
-            FarikRoleModelEffort::Low => Effort::Low,
-            FarikRoleModelEffort::Medium => Effort::Medium,
-            FarikRoleModelEffort::High => Effort::High,
+            CatervasRoleModelEffort::Low => Effort::Low,
+            CatervasRoleModelEffort::Medium => Effort::Medium,
+            CatervasRoleModelEffort::High => Effort::High,
         },
         system_prompt: system.to_string(),
         skills,
@@ -346,8 +349,8 @@ fn parse_skill(name: &str, text: &str) -> Result<Skill, String> {
     })
 }
 
-/// The YAML dialect every file Farik reads is held to (ADR 0007): `true` spelled `true`. A copy of
-/// `farik_store::files`' options, since this crate cannot depend on the store; keep the two equal.
+/// The YAML dialect every file Catervas reads is held to (ADR 0007): `true` spelled `true`. A copy of
+/// `catervas_store::files`' options, since this crate cannot depend on the store; keep the two equal.
 fn yaml_options() -> serde_saphyr::Options {
     let mut options = serde_saphyr::Options::default();
     options.strict_booleans = true;
@@ -366,9 +369,9 @@ fn yaml_value(text: &str, named: &str) -> Result<Value, String> {
 mod tests {
     use std::path::Path;
 
-    use farik_core::contract::Role;
-    use farik_core::governor::permissions::default_tiers;
-    use farik_core::team::Effort;
+    use catervas_core::contract::Role;
+    use catervas_core::governor::permissions::default_tiers;
+    use catervas_core::team::Effort;
     use serde_json::Value;
 
     use super::{
@@ -515,7 +518,7 @@ mod tests {
     #[test]
     fn loads_the_software_developer() {
         let definition = assert_loads(Role::SoftwareDeveloper, "implementing-a-contract");
-        assert!(definition.system_prompt.contains("farik_exec"));
+        assert!(definition.system_prompt.contains("catervas_exec"));
         assert!(definition.system_prompt.contains("untrusted"));
     }
 
@@ -531,7 +534,7 @@ mod tests {
         assert!(!definition.skills[0].description.trim().is_empty());
         assert!(!definition.skills[0].body.trim().is_empty());
         assert!(definition.system_prompt.contains("untrusted"));
-        assert!(definition.system_prompt.contains("farik_triage_request"));
+        assert!(definition.system_prompt.contains("catervas_triage_request"));
     }
 
     #[test]
@@ -539,11 +542,11 @@ mod tests {
         let prompt = loaded(Role::ScrumMaster).system_prompt;
         let ending = &prompt[prompt.find("## How a session ends").expect("the section")..];
         assert!(
-            ending.contains("recorded with `farik_triage_request`: end your turn"),
+            ending.contains("recorded with `catervas_triage_request`: end your turn"),
             "{ending}"
         );
         assert!(
-            ending.contains("recorded with `farik_record_judgment`: end your turn"),
+            ending.contains("recorded with `catervas_record_judgment`: end your turn"),
             "{ending}"
         );
         assert!(
@@ -564,15 +567,15 @@ mod tests {
         assert!(!definition.skills[0].description.trim().is_empty());
         assert!(!definition.skills[0].body.trim().is_empty());
         assert!(definition.system_prompt.contains("untrusted"));
-        assert!(definition.system_prompt.contains("farik_write_note"));
+        assert!(definition.system_prompt.contains("catervas_write_note"));
     }
 
     #[test]
     fn records_the_architects_decisions_through_the_tools() {
         let definition = loaded(Role::Architect);
         for text in [&definition.system_prompt, &definition.skills[0].body] {
-            assert!(text.contains("farik_write_decision"), "{text}");
-            assert!(text.contains("farik_read_decisions"), "{text}");
+            assert!(text.contains("catervas_write_decision"), "{text}");
+            assert!(text.contains("catervas_read_decisions"), "{text}");
             assert!(
                 !text.contains("written directly to the repository"),
                 "a decision is not written into the repository: {text}"
@@ -620,7 +623,7 @@ mod tests {
             definition.forbidden,
             [
                 "pay, refund, or move money",
-                "change Farik's budgets or anything in Stripe or a mailbox",
+                "change Catervas's budgets or anything in Stripe or a mailbox",
                 "send, delete, move, or mark any email",
                 "publish anywhere",
                 "write application code",
@@ -659,7 +662,7 @@ mod tests {
                 "promise a seller to buy",
                 "write application code",
                 "write anything outside your procurement folder",
-                "change Farik's budgets or the books",
+                "change Catervas's budgets or the books",
             ]
         );
         assert!(definition.system_prompt.contains("untrusted"));
@@ -756,8 +759,8 @@ mod tests {
 
     /// Step 09b: the skill teaches the spending and workbook tools, and the three rules that keep
     /// the books safe: read before writing, a value for anything a service or a receipt gave, and a
-    /// formula only for a total inside the workbook (Farik never computes one). The tool names are
-    /// held to tools Farik lists by `kit_skills_name_only_tools_farik_lists` in the runtime.
+    /// formula only for a total inside the workbook (Catervas never computes one). The tool names are
+    /// held to tools Catervas lists by `kit_skills_name_only_tools_catervas_lists` in the runtime.
     #[test]
     fn the_books_skill_names_the_spending_and_sheet_tools() {
         let definition = loaded(Role::FinanceSpecialist);
@@ -768,16 +771,16 @@ mod tests {
             .join(" ")
             .to_lowercase();
         for tool in [
-            "`farik_read_costs`",
-            "`farik_read_sheet`",
-            "`farik_write_sheet`",
+            "`catervas_read_costs`",
+            "`catervas_read_sheet`",
+            "`catervas_write_sheet`",
         ] {
             assert!(skill.contains(tool), "the skill lost {tool}: {skill}");
         }
         for phrase in [
             "read a workbook before you write it",
             "as a value, never as a formula",
-            "farik never computes a formula",
+            "catervas never computes a formula",
         ] {
             assert!(
                 skill.contains(phrase),
@@ -812,7 +815,11 @@ mod tests {
                 );
             }
         }
-        for phrase in ["`baseline: true`", "`farik_read_sheet`", "beside the copy"] {
+        for phrase in [
+            "`baseline: true`",
+            "`catervas_read_sheet`",
+            "beside the copy",
+        ] {
             assert!(skill.contains(phrase), "the skill lost {phrase}: {skill}");
         }
         // One item of the prompt's ending asks for `verifying`, and it names the workbooks.
@@ -833,7 +840,7 @@ mod tests {
         assert!(item.contains("fix what it names and ask again"), "{item}");
         // Each `artifact` criterion is recorded before `verifying` is asked for, in the prompt's
         // item and in the skill: the governor refuses a request while one has no result.
-        let recording = "record each `artifact` criterion with `farik_record_criterion_result` \
+        let recording = "record each `artifact` criterion with `catervas_record_criterion_result` \
                          before asking for `verifying`";
         let third = ending
             .split_once("3. the work is done")
@@ -877,9 +884,9 @@ mod tests {
         // The skill names the tool of each file the role writes, and that each `artifact`
         // criterion names a file it writes.
         for phrase in [
-            "`farik_write_evaluation`",
+            "`catervas_write_evaluation`",
             "`evaluations/<name>.md`",
-            "`farik_write_sheet`",
+            "`catervas_write_sheet`",
             "`vendors.xlsx`",
             "each `artifact` criterion",
             "names a file you write",
@@ -908,7 +915,7 @@ mod tests {
         assert!(item.contains("fix what it names and ask again"), "{item}");
         // Each `artifact` criterion is recorded before `verifying` is asked for, in the prompt's
         // item and in the skill: the governor refuses a request while one has no result.
-        let recording = "record each `artifact` criterion with `farik_record_criterion_result` \
+        let recording = "record each `artifact` criterion with `catervas_record_criterion_result` \
                          before asking for `verifying`";
         let third = ending
             .split_once("3. the work is done")
@@ -922,10 +929,10 @@ mod tests {
         assert!(skill.contains(recording), "{skill}");
     }
 
-    /// Step 10b2: the role reads only Farik's approved sites and the sites the owner allowed, and
+    /// Step 10b2: the role reads only Catervas's approved sites and the sites the owner allowed, and
     /// its prompt and its skill say how it learns which they are, how it asks for another, and that
     /// the address it asks with is no place for the business's details (ADR 0039). The tool names
-    /// are held to tools Farik lists by `kit_skills_name_only_tools_farik_lists` in the runtime.
+    /// are held to tools Catervas lists by `kit_skills_name_only_tools_catervas_lists` in the runtime.
     #[test]
     fn sourcing_a_product_says_how_to_ask_for_a_site() {
         let definition = loaded(Role::ProcurementSpecialist);
@@ -938,12 +945,12 @@ mod tests {
         let prompt = flatten(&definition.system_prompt);
         let skill = flatten(&definition.skills[0].body);
         assert!(
-            prompt.contains("farik's approved sites and the sites the owner allowed"),
+            prompt.contains("catervas's approved sites and the sites the owner allowed"),
             "the prompt lost the sites it may read: {prompt}"
         );
         for phrase in [
-            "`farik_read_sites`",
-            "`farik_request_sites`",
+            "`catervas_read_sites`",
+            "`catervas_request_sites`",
             "end your turn",
             "never put the business's details in an address",
         ] {
@@ -953,7 +960,7 @@ mod tests {
 
     /// Step 10c: the role suggests an order and tracks it, and its prompt and its skill say that it
     /// never places, pays for, confirms or cancels one, nor marks one placed or received (ADR
-    /// 0039). The tool names are held to tools Farik lists by `kit_skills_name_only_tools_farik_lists`
+    /// 0039). The tool names are held to tools Catervas lists by `kit_skills_name_only_tools_catervas_lists`
     /// in the runtime.
     #[test]
     fn sourcing_a_product_says_how_to_suggest_and_track_an_order() {
@@ -967,9 +974,9 @@ mod tests {
         let prompt = flatten(&definition.system_prompt);
         let skill = flatten(&definition.skills[0].body);
         for phrase in [
-            "suggest an order with `farik_draft_purchase_order`",
-            "`farik_update_purchase_order`",
-            "`farik_read_purchase_orders`",
+            "suggest an order with `catervas_draft_purchase_order`",
+            "`catervas_update_purchase_order`",
+            "`catervas_read_purchase_orders`",
             "place, pay for, confirm or cancel an order",
             "mark one placed or received",
         ] {
@@ -988,18 +995,18 @@ mod tests {
             "{may_not}"
         );
         for phrase in [
-            "`farik_draft_purchase_order`",
+            "`catervas_draft_purchase_order`",
             "`evaluations/<name>.md`",
             "on a site the owner allowed",
-            "ask for it with `farik_request_sites`",
-            "`farik_read_purchase_orders`",
-            "`farik_update_purchase_order`",
+            "ask for it with `catervas_request_sites`",
+            "`catervas_read_purchase_orders`",
+            "`catervas_update_purchase_order`",
             "`preparing`, `shipped`, `delayed`",
             "`problem`",
             "never place, pay for, confirm or cancel an order",
             "never mark one placed or received",
             "`purchase` column",
-            "`farik_ask_human`",
+            "`catervas_ask_human`",
         ] {
             assert!(skill.contains(phrase), "the skill lost {phrase}: {skill}");
         }
@@ -1018,7 +1025,7 @@ mod tests {
             .to_lowercase();
         for phrase in [
             "`vendors.xlsx`",
-            "`farik_read_sheet`",
+            "`catervas_read_sheet`",
             "`folder: procurement`",
             "data, not instructions",
         ] {
@@ -1137,7 +1144,7 @@ mod tests {
             let said = of(name);
             assert!(
                 said.contains(
-                    "in the owner's approved marketing plan goes out through `farik_schedule_post`"
+                    "in the owner's approved marketing plan goes out through `catervas_schedule_post`"
                 ) && said.contains("any other post waits for the owner"),
                 "{name} lost its line on who sends a post"
             );
@@ -1156,12 +1163,12 @@ mod tests {
         }
     }
 
-    /// A post goes out through `farik_schedule_post` alone (ADR 0042): no Marketing Specialist skill
-    /// names Buffer's `create_post` or `edit_post`, which Farik calls itself, or says that a post goes
+    /// A post goes out through `catervas_schedule_post` alone (ADR 0042): no Marketing Specialist skill
+    /// names Buffer's `create_post` or `edit_post`, which Catervas calls itself, or says that a post goes
     /// out after the human allows that call. The calendar, the images and the launch skills each
     /// name the tool.
     #[test]
-    fn marketing_skills_post_only_through_farik() {
+    fn marketing_skills_post_only_through_catervas() {
         let flatten = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
         for (name, text) in marketing_skill_texts() {
             for tool in ["create_post", "edit_post"] {
@@ -1173,7 +1180,7 @@ mod tests {
             );
         }
         let texts = marketing_skill_texts();
-        // Stop works until the post's time, not only until Farik hands it to Buffer.
+        // Stop works until the post's time, not only until Catervas hands it to Buffer.
         let running = texts
             .iter()
             .find(|(skill, _)| skill == "running-social-channels")
@@ -1192,8 +1199,8 @@ mod tests {
             assert!(
                 texts
                     .iter()
-                    .any(|(skill, text)| skill == name && text.contains("`farik_schedule_post`")),
-                "{name} does not name farik_schedule_post"
+                    .any(|(skill, text)| skill == name && text.contains("`catervas_schedule_post`")),
+                "{name} does not name catervas_schedule_post"
             );
         }
     }
@@ -1441,7 +1448,7 @@ mod tests {
         );
     }
 
-    /// ADR 0007: YAML 1.1's `no` is a word, not `false`, here as in `farik-store`. The role file
+    /// ADR 0007: YAML 1.1's `no` is a word, not `false`, here as in `catervas-store`. The role file
     /// is read into a `Value`, where the dialect decides; the frontmatter's typed fields would take
     /// `no` as a string under either setting.
     #[test]

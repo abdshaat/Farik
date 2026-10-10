@@ -23,7 +23,7 @@ pub mod kit {
     );
 }
 
-/// Types generated from `docs/schemas/approved-sites.schema.json`; Farik's list of approved sites
+/// Types generated from `docs/schemas/approved-sites.schema.json`; Catervas's list of approved sites
 /// is validated against the schema before it is deserialised into these.
 #[allow(clippy::all, clippy::pedantic, missing_docs)]
 pub mod approved_sites {

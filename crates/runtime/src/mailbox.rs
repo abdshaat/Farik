@@ -1,5 +1,5 @@
 //! The procurement mailbox over IMAP and SMTP (`docs/SPEC.md` 6.6, 6.10; phase 7 step 10f): the
-//! settings the owner connects, the providers Farik knows, and a login to both servers over TLS
+//! settings the owner connects, the providers Catervas knows, and a login to both servers over TLS
 //! whose certificate is always checked. The password is a [`Secret`] and is kept in the OS
 //! keychain, never in these settings, an event, a refusal or the log. Phase 15's receipts intake
 //! reuses this module.
@@ -67,7 +67,7 @@ impl Server {
     }
 }
 
-/// A provider whose servers Farik knows, or "another provider", whose servers are typed.
+/// A provider whose servers Catervas knows, or "another provider", whose servers are typed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
@@ -93,7 +93,7 @@ pub enum ProviderChoice {
     Fastmail,
     /// Any other.
     Other,
-    /// Outlook.com or Microsoft 365: not supported before Farik Cloud's sign-in.
+    /// Outlook.com or Microsoft 365: not supported before Catervas Cloud's sign-in.
     Microsoft,
 }
 
@@ -114,7 +114,7 @@ impl ProviderChoice {
 /// What an address's domain says of its provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderOf {
-    /// One whose servers Farik knows.
+    /// One whose servers Catervas knows.
     Known(Provider),
     /// Microsoft's consumer mail, which no longer takes a password from a mail program.
     Microsoft,
@@ -177,11 +177,11 @@ pub struct MailboxSettings {
     pub smtp: Server,
     /// The sign-in name.
     pub username: String,
-    /// The folder Farik reads.
+    /// The folder Catervas reads.
     pub folder: String,
-    /// What Farik adds under every message; empty for none.
+    /// What Catervas adds under every message; empty for none.
     pub signature: String,
-    /// Whether Farik says an AI assistant wrote the message.
+    /// Whether Catervas says an AI assistant wrote the message.
     pub disclose_ai: bool,
 }
 
@@ -247,7 +247,7 @@ pub enum Trust {
     Root(Vec<u8>),
 }
 
-/// Where Farik has read to in a mailbox: kept in `mail/ledger.json`.
+/// Where Catervas has read to in a mailbox: kept in `mail/ledger.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ledger {
     /// The folder's `UIDVALIDITY` when the last UID was taken.
@@ -256,7 +256,7 @@ pub struct Ledger {
     pub last_uid: u32,
     /// When the last check ended.
     pub checked_at: Option<DateTime<Utc>>,
-    /// Why the last check failed, in Farik's words; none when it did not.
+    /// Why the last check failed, in Catervas's words; none when it did not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// When the provider renumbered the folder and the ledger started again.
@@ -264,7 +264,7 @@ pub struct Ledger {
     pub restarted_at: Option<DateTime<Utc>>,
 }
 
-/// Why a server could not be used, in Farik's words. The words never quote the settings, the
+/// Why a server could not be used, in Catervas's words. The words never quote the settings, the
 /// server's reply or the password.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MailboxError {
@@ -276,7 +276,7 @@ pub enum MailboxError {
     Certificate,
     /// The server could not be reached in time.
     Unreachable,
-    /// The server answered in a way Farik cannot use; the words say what, never the server's own.
+    /// The server answered in a way Catervas cannot use; the words say what, never the server's own.
     Server(String),
 }
 
@@ -295,7 +295,7 @@ impl MailboxError {
 }
 
 impl MailboxError {
-    /// Why a send failed, as a sentence for the log and the owner: Farik's, never the server's
+    /// Why a send failed, as a sentence for the log and the owner: Catervas's, never the server's
     /// words.
     #[must_use]
     pub fn why(&self) -> String {
@@ -315,17 +315,17 @@ impl std::fmt::Display for MailboxError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NeedsTls => formatter.write_str(
-                "That server does not offer an encrypted connection, so Farik won\u{2019}t use it.",
+                "That server does not offer an encrypted connection, so Catervas won\u{2019}t use it.",
             ),
             Self::Login => formatter.write_str(
                 "Your provider did not accept that sign-in name and app password. A Microsoft \
                  mailbox can\u{2019}t be used yet.",
             ),
             Self::Certificate => formatter.write_str(
-                "That server\u{2019}s certificate can\u{2019}t be trusted, so Farik won\u{2019}t use it.",
+                "That server\u{2019}s certificate can\u{2019}t be trusted, so Catervas won\u{2019}t use it.",
             ),
             Self::Unreachable => formatter
-                .write_str("Farik could not reach that server. Check its name and port."),
+                .write_str("Catervas could not reach that server. Check its name and port."),
             Self::Server(why) => formatter.write_str(why),
         }
     }
@@ -365,7 +365,8 @@ fn tls_failure(error: &(dyn std::error::Error + 'static)) -> MailboxError {
 
 /// The TLS configuration for `trust`: the platform verifier with, for a test, one more root.
 fn tls_connector(trust: &Trust) -> Result<tokio_rustls::TlsConnector, MailboxError> {
-    let broken = || MailboxError::Server("Farik could not set up an encrypted connection.".into());
+    let broken =
+        || MailboxError::Server("Catervas could not set up an encrypted connection.".into());
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let roots = match trust {
         Trust::Platform => Vec::new(),
@@ -417,7 +418,7 @@ fn imap_error(error: &async_imap::error::Error) -> MailboxError {
         Error::No(_) => MailboxError::Login,
         Error::Io(_) | Error::ConnectionLost => MailboxError::Unreachable,
         _ => MailboxError::Server(
-            "The mail server answered in a way Farik can\u{2019}t use.".to_string(),
+            "The mail server answered in a way Catervas can\u{2019}t use.".to_string(),
         ),
     }
 }
@@ -491,7 +492,8 @@ fn smtp_transport(
     password: &Secret,
     trust: &Trust,
 ) -> Result<AsyncSmtpTransport<Tokio1Executor>, MailboxError> {
-    let broken = || MailboxError::Server("Farik could not set up an encrypted connection.".into());
+    let broken =
+        || MailboxError::Server("Catervas could not set up an encrypted connection.".into());
     let server = &settings.smtp;
     let mut parameters = TlsParameters::builder(server.host.clone());
     if let Trust::Root(der) = trust {
@@ -542,7 +544,7 @@ fn smtp_failure(error: &lettre::transport::smtp::Error) -> MailboxError {
 /// # Errors
 ///
 /// `NeedsTls` for a server that does not offer an encrypted connection, `Certificate`, `Login`,
-/// `Unreachable`, or `Server` for an answer Farik cannot use.
+/// `Unreachable`, or `Server` for an answer Catervas cannot use.
 pub async fn check_login(
     settings: &MailboxSettings,
     password: &Secret,
@@ -554,9 +556,9 @@ pub async fn check_login(
             .examine(&settings.folder)
             .await
             .map_err(|error| match imap_error(&error) {
-                MailboxError::Login => {
-                    MailboxError::Server("Farik could not open that folder of the mailbox.".into())
-                }
+                MailboxError::Login => MailboxError::Server(
+                    "Catervas could not open that folder of the mailbox.".into(),
+                ),
                 other => other,
             })
     })
@@ -565,7 +567,7 @@ pub async fn check_login(
     let mailbox = examined?;
     let (Some(validity), Some(next)) = (mailbox.uid_validity, mailbox.uid_next) else {
         return Err(MailboxError::Server(
-            "That mail server does not number its messages, so Farik can\u{2019}t read replies from it."
+            "That mail server does not number its messages, so Catervas can\u{2019}t read replies from it."
                 .to_string(),
         ));
     };
@@ -591,7 +593,7 @@ pub struct Outgoing {
     pub to: String,
     /// The subject, on one line.
     pub subject: String,
-    /// The text, as the owner read it and with what Farik adds.
+    /// The text, as the owner read it and with what Catervas adds.
     pub text: String,
     /// The `Message-ID`, without angle brackets.
     pub message_id: String,
@@ -682,13 +684,13 @@ pub async fn send(
     }
 }
 
-/// The most bytes of a message Farik reads: bigger ones are passed on their headers.
+/// The most bytes of a message Catervas reads: bigger ones are passed on their headers.
 const MOST_MESSAGE_BYTES: u64 = 25 * 1024 * 1024;
-/// The most bytes of a reply's text Farik keeps.
+/// The most bytes of a reply's text Catervas keeps.
 const MOST_TEXT_BYTES: usize = 64 * 1024;
-/// The most bytes of one attachment Farik keeps.
+/// The most bytes of one attachment Catervas keeps.
 const MOST_KEPT_BYTES: usize = 10 * 1024 * 1024;
-/// The most attachments of one reply Farik lists; the rest are not (the log holds at most this
+/// The most attachments of one reply Catervas lists; the rest are not (the log holds at most this
 /// many for a reply, so a reply with more is listed by its first ones).
 const MOST_ATTACHMENTS: usize = 100;
 /// Who a reply is from when its `From` header names no one.
@@ -717,7 +719,7 @@ pub struct Headers {
     pub size: u64,
 }
 
-/// What Farik knows of the mail it sent: the procurement address, the `Message-ID` of every message
+/// What Catervas knows of the mail it sent: the procurement address, the `Message-ID` of every message
 /// sent, and the addresses they were sent to.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Known {
@@ -738,9 +740,9 @@ fn bare(address: &str) -> String {
         .to_ascii_lowercase()
 }
 
-/// Whether a message is one Farik reads: the procurement address is in its `To`, `Cc` or
-/// `Delivered-To`, compared without regard to case; and it answers a message Farik sent (its
-/// `In-Reply-To` or `References` holds one's `Message-ID`) or comes from an address Farik wrote to;
+/// Whether a message is one Catervas reads: the procurement address is in its `To`, `Cc` or
+/// `Delivered-To`, compared without regard to case; and it answers a message Catervas sent (its
+/// `In-Reply-To` or `References` holds one's `Message-ID`) or comes from an address Catervas wrote to;
 /// and it is at most 25 MB. This is the alias rule: the login reaches the whole mailbox, and
 /// anything this refuses is passed on its headers and its body is never fetched.
 #[must_use]
@@ -767,7 +769,7 @@ pub fn is_for_us(headers: &Headers, known: &Known) -> bool {
     answers || known.written_to.iter().any(|written| bare(written) == from)
 }
 
-/// One file attached to a reply. `bytes` and `media_type` are set only for one Farik keeps: a PDF,
+/// One file attached to a reply. `bytes` and `media_type` are set only for one Catervas keeps: a PDF,
 /// a PNG or a JPEG, as its bytes say whatever its name does, of at most 10 MB.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attachment {
@@ -781,7 +783,7 @@ pub struct Attachment {
     pub size: u64,
 }
 
-/// A seller's message Farik read.
+/// A seller's message Catervas read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reply {
     /// Its UID in the folder.
@@ -816,7 +818,7 @@ pub struct Fetched {
     pub restarted: bool,
 }
 
-/// The media type of `bytes` when Farik keeps them: a PDF, a PNG or a JPEG by their first bytes.
+/// The media type of `bytes` when Catervas keeps them: a PDF, a PNG or a JPEG by their first bytes.
 fn kept_type(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
     if bytes.starts_with(b"%PDF-") {
         Some(("application/pdf", "pdf"))
@@ -990,7 +992,7 @@ fn reply_of(uid: u32, raw: &[u8]) -> Option<Reply> {
 ///
 /// # Errors
 ///
-/// As [`check_login`] for the connection and the sign-in; `Server` for an answer Farik cannot use.
+/// As [`check_login`] for the connection and the sign-in; `Server` for an answer Catervas cannot use.
 pub async fn fetch_replies(
     settings: &MailboxSettings,
     password: &Secret,
@@ -1013,7 +1015,7 @@ async fn read_replies(
     use futures_util::TryStreamExt as _;
     let unusable = || {
         MailboxError::Server(
-            "The mail server answered in a way Farik can\u{2019}t use.".to_string(),
+            "The mail server answered in a way Catervas can\u{2019}t use.".to_string(),
         )
     };
     let mailbox = within(async {

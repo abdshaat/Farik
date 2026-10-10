@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://farik.dev/schemas/task-contract.schema.json",
-  "title": "Farik Task Contract",
+  "$id": "https://catervas.dev/schemas/task-contract.schema.json",
+  "title": "Catervas Task Contract",
   "description": "The document that makes an epic or a task ready. An epic is a large request from the user, written by the Product Manager after asking the user its questions and approved by the user before it is broken down; a task is one deliverable of an epic, written by the epic's assignee, or a standalone task from a small request, written by the Product Manager. Triage decides which (docs/SPEC.md 5.16). Checked by the governor (structural rules) and the Scrum Master (judgment rules) before any work starts.",
   "type": "object",
   "additionalProperties": false,

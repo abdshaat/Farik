@@ -1,4 +1,4 @@
-import { Avatar, type AvatarKey, Button } from "@farik/ui";
+import { Avatar, type AvatarKey, Button } from "@catervas/ui";
 import { useId, useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -34,7 +34,7 @@ const WORKBOOK =
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 /**
- * "Download PO-n.xlsx": the workbook Farik wrote for the order, fetched from the daemon and handed
+ * "Download PO-n.xlsx": the workbook Catervas wrote for the order, fetched from the daemon and handed
  * to the browser to keep (spec 6.10). It says so when the file is gone.
  */
 export function DownloadOrder({ order }: { order: number }) {
@@ -126,7 +126,7 @@ function opened(url: string): string | undefined {
 
 /**
  * A purchase order waiting for the owner: what it holds line by line, its total, the seller's page
- * on a site the owner allowed, why, the comparison it rests on and the file Farik wrote, and the
+ * on a site the owner allowed, why, the comparison it rests on and the file Catervas wrote, and the
  * owner's "Approve, I'll place it myself" or "Reject", each of which asks for a note (spec 6.10).
  * Everything the agent wrote is shown as text.
  */

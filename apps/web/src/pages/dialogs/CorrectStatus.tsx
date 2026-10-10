@@ -1,4 +1,4 @@
-import { Button, Choice, Dialog, TextField, uiStrings } from "@farik/ui";
+import { Button, Choice, Dialog, TextField, uiStrings } from "@catervas/ui";
 import { useState } from "react";
 import { t } from "../../strings/t.ts";
 import { type OrderItem, STATUSES, statusWords, todayIso } from "../orders.ts";

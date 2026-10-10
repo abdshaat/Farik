@@ -1,5 +1,5 @@
 [package]
-name = "farik-protocol"
+name = "catervas-protocol"
 description = "The event envelope, the event kinds, the commands, and the clock and identifier traits shared by the daemon and the front end."
 version.workspace = true
 edition.workspace = true
@@ -9,7 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 chrono.workspace = true
-farik-core.workspace = true
+catervas-core.workspace = true
 jsonschema.workspace = true
 regress.workspace = true
 typify.workspace = true

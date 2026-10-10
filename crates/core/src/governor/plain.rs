@@ -40,7 +40,7 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
         ReadinessRule::MarketingPathsOwned => {
             "Only the Marketing Specialist changes the brand kit and the marketing plans, and this plan lets someone else."
         }
-        ReadinessRule::NoFarikPaths => "The plan reaches into Farik's own files.",
+        ReadinessRule::NoCatervasPaths => "The plan reaches into Catervas's own files.",
         ReadinessRule::PrivateFolderTask => {
             "A task in a private folder works only there: no commands, no tests, no text searched in a workbook or a note, and no parent epic."
         }
@@ -85,7 +85,7 @@ mod tests {
         AllowedPathsWithinCeiling,
         DocumentPathsOnly,
         MarketingPathsOwned,
-        NoFarikPaths,
+        NoCatervasPaths,
         PrivateFolderTask,
         PrivateFolderReviewer,
         BudgetWithinTeamMax,
@@ -114,7 +114,7 @@ mod tests {
             | AllowedPathsWithinCeiling
             | DocumentPathsOnly
             | MarketingPathsOwned
-            | NoFarikPaths
+            | NoCatervasPaths
             | PrivateFolderTask
             | PrivateFolderReviewer
             | BudgetWithinTeamMax

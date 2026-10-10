@@ -1,6 +1,6 @@
 //! The project scan (`docs/SPEC.md` section 4's onboarding, 5.8, 5.13, F2 and F16).
 //!
-//! A person points Farik at a git repository and is told what it thinks it is looking at: one line,
+//! A person points Catervas at a git repository and is told what it thinks it is looking at: one line,
 //! `TypeScript monorepo, pnpm, 3 packages, tests in vitest, last commit 4 days ago`. The same
 //! reading gives the criterion library its first entries, so that a contract in this project is
 //! verified by the project's own commands rather than by something a Product Manager invented.
@@ -12,10 +12,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
-use chrono::{DateTime, Utc};
-use farik_core::criteria::{
+use catervas_core::criteria::{
     CriteriaLibrary, CriterionSource, CriterionTemplate, validate_criteria,
 };
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use crate::git::{Git, GitError, HeadSummary};
@@ -88,7 +88,7 @@ impl ScanFacts {
 /// Why a project could not be scanned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScanError {
-    /// There is no git repository there. A project is a git repository plus `.farik/` (spec 3), and
+    /// There is no git repository there. A project is a git repository plus `.catervas/` (spec 3), and
     /// the scan reads the tree through git, so this is the first thing onboarding checks.
     NotARepository {
         /// The directory that was asked about.
@@ -248,10 +248,10 @@ pub fn names_of(criteria: &[CriterionTemplate]) -> Vec<String> {
     criteria.iter().map(|one| one.name.to_string()).collect()
 }
 
-/// The heading of the section of `.farik/project.md` that holds the user's own words.
+/// The heading of the section of `.catervas/project.md` that holds the user's own words.
 pub(crate) const USER_SAYS: &str = "## The user says";
 
-/// What `.farik/project.md` holds: the line the scan read back, and the criteria it found.
+/// What `.catervas/project.md` holds: the line the scan read back, and the criteria it found.
 ///
 /// This is the file every session is given (`docs/SPEC.md` section 5.8), so it says what the scan
 /// found and nothing it did not, and what the user said in `previous`, the file as it was.
@@ -712,7 +712,7 @@ fn tests_in(
 /// A name with nothing behind it is not a command: `"test": ""` would become a criterion whose
 /// command exits 0 having verified nothing, which is worse than no criterion at all. What this
 /// cannot see is a stub that runs and fails on purpose, as `npm init` writes for `test`; that is a
-/// project telling its own tools something, and the person who adopts Farik has to look at it.
+/// project telling its own tools something, and the person who adopts Catervas has to look at it.
 fn scripts_in(manifest: Option<&Value>) -> Vec<String> {
     manifest
         .and_then(|value| value.get("scripts"))
@@ -795,10 +795,10 @@ fn how_long_ago(committed_at: &str, now: DateTime<Utc>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Utc};
-    use farik_core::criteria::{
+    use catervas_core::criteria::{
         CriteriaLibrary, CriterionSource, TemplateVerification, validate_criteria,
     };
+    use chrono::{DateTime, Utc};
     use serde_json::json;
 
     use super::{
@@ -1309,7 +1309,7 @@ mod tests {
         // count. TOML also lets a person indent a table header. Every other fixture in this step
         // writes the header at column 0 with LF, so nothing else asks the trim to do any work.
         let directory = std::env::temp_dir().join(format!(
-            "farik-workspace-header-{}-{:?}",
+            "catervas-workspace-header-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));

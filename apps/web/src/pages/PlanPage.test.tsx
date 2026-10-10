@@ -1,4 +1,4 @@
-import { expectNoAxeViolations } from "@farik/ui/test";
+import { expectNoAxeViolations } from "@catervas/ui/test";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
@@ -104,7 +104,9 @@ describe("plan page", () => {
 				.map((li) => li.textContent),
 		).toEqual(["Printed gift cards", "Gift cards at the café counter"]);
 
-		const checked = screen.getByRole("region", { name: "What Farik checked" });
+		const checked = screen.getByRole("region", {
+			name: "What Catervas checked",
+		});
 		expect(
 			within(checked).getByText(
 				"The plan has no short summary for you to decide on.",

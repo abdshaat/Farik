@@ -1,4 +1,4 @@
-//! `farik run` and `farik plan` (`docs/SPEC.md` sections 5.7, 8.2, and 8.3): the start, the loop,
+//! `catervas run` and `catervas plan` (`docs/SPEC.md` sections 5.7, 8.2, and 8.3): the start, the loop,
 //! Ctrl-C, and what waits on the human, driven by the recorded adapter through the harness's
 //! engine, never by a Claude Code session.
 //!
@@ -13,22 +13,22 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
-use farik::{Engine, Interrupts};
-use farik_core::pricing::Usage;
-use farik_protocol::clock::MovableClock;
-use farik_protocol::event::{EventBody, EventKind, SessionEndedBodyReason};
-use farik_runtime::RuntimeAdapter;
-use farik_runtime::recorded::fixtures::{
+use catervas::{Engine, Interrupts};
+use catervas_core::pricing::Usage;
+use catervas_protocol::clock::MovableClock;
+use catervas_protocol::event::{EventBody, EventKind, SessionEndedBodyReason};
+use catervas_runtime::RuntimeAdapter;
+use catervas_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1,
     planning_ceremony_frk_1, refine_writes_task_frk_1, reply_to_a_mention, review_writes_note,
     standup,
 };
-use farik_runtime::sleep::Sleeper;
-use farik_store::git::fixtures::TempRepo;
+use catervas_runtime::sleep::Sleeper;
+use catervas_store::git::fixtures::TempRepo;
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
-use farik_core::team::fixtures::an_agent_wire;
+use catervas_core::team::fixtures::an_agent_wire;
 use project::{
     LiveDriver, a_bare_env, a_claude_saying, a_high_risk_task_verifying, a_project, a_team,
     a_team_with, at, events, filed, hold_the_run_lock, joined, no_sandbox, record, record_as,
@@ -58,7 +58,7 @@ impl Sleeper for MovingSleeper {
 }
 
 fn daemon_file(repository: &TempRepo) -> PathBuf {
-    repository.path.join(".farik/local/daemon.json")
+    repository.path.join(".catervas/local/daemon.json")
 }
 
 /// Waits until the log holds `count` events of `kind`.
@@ -96,7 +96,7 @@ fn a_small_request(repository: &TempRepo) -> String {
 fn warned(err: &str) -> bool {
     err.contains("~/.git-credentials")
         && err.contains("a git hidden in a script")
-        && err.contains(".farik/local/daemon.json, whose token lets them act as you through farik")
+        && err.contains(".catervas/local/daemon.json, whose token lets them act as you through catervas")
         // ADR 0030: the token also gets a connector's keys, as does its process's environment.
         // ADR 0034: a command that reads the token can also send `skill_save`, which counts as the
         // person's confirmation of a skill.
@@ -227,7 +227,7 @@ fn warns_on_every_start_in_no_sandbox_mode() {
 /// What every start says of `claude-unknown-9`, used by `dev`.
 const UNPRICED_WARNING: &str = "warning: no price table prices claude-unknown-9 (used by dev): \
     its usage is recorded at no cost, and no dollar limit counts it. Add it to \
-    .farik/prices.json to price it.";
+    .catervas/prices.json to price it.";
 
 /// A team of `pm` and `dev`, with `dev` on a model the shipped table does not price.
 fn a_team_on_an_unpriced_model(name: &str) -> TempRepo {
@@ -267,7 +267,7 @@ fn warns_on_every_start_of_a_model_no_table_prices() {
 fn refuses_to_start_on_a_price_table_it_cannot_read() {
     let repository = a_team("run-prices-unreadable");
     std::fs::write(
-        repository.path.join(".farik/prices.json"),
+        repository.path.join(".catervas/prices.json"),
         "{\"version\": 2}",
     )
     .expect("the override is written");
@@ -278,7 +278,7 @@ fn refuses_to_start_on_a_price_table_it_cannot_read() {
     });
 
     assert_eq!(ran.code, 1, "{}", ran.out);
-    assert!(ran.err.contains(".farik/prices.json"), "{}", ran.err);
+    assert!(ran.err.contains(".catervas/prices.json"), "{}", ran.err);
     assert!(!daemon_file(&repository).exists());
     lock_is_free(&repository);
     assert_eq!(events(&repository, &[]).len(), before);
@@ -296,7 +296,7 @@ fn refuses_a_second_driver() {
         assert_eq!(ran.code, 1, "{}", ran.out);
         assert!(
             ran.err
-                .contains("another farik process is driving this project"),
+                .contains("another catervas process is driving this project"),
             "{}",
             ran.err
         );
@@ -316,7 +316,7 @@ fn names_the_driving_process_a_second_driver_found() {
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(
         ran.err.contains(&format!(
-            "another farik process is driving this project (pid {} in .farik/local/daemon.json)",
+            "another catervas process is driving this project (pid {} in .catervas/local/daemon.json)",
             driver.pid()
         )),
         "{}",
@@ -382,7 +382,7 @@ fn runs_a_task_to_acceptance_and_says_what_waits() {
     );
     assert!(
         lines.contains(
-            &format!("{task} waits for you to integrate it: farik integrate {task}").as_str()
+            &format!("{task} waits for you to integrate it: catervas integrate {task}").as_str()
         ),
         "{}",
         ran.out
@@ -521,7 +521,7 @@ fn exits_1_when_a_tick_fails() {
 
     assert_eq!(ran.code, 1, "{}\n{}", ran.out, ran.err);
     assert!(
-        ran.err.lines().any(|line| line.starts_with("farik: ")),
+        ran.err.lines().any(|line| line.starts_with("catervas: ")),
         "{}",
         ran.err
     );
@@ -531,7 +531,7 @@ fn exits_1_when_a_tick_fails() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn stops_a_plan_through_farik_stop() {
+fn stops_a_plan_through_catervas_stop() {
     let repository = a_team("plan-stop");
     a_small_request(&repository);
     let adapter = Arc::new(UsageThenWaitAdapter::waiting(Usage::default()));
@@ -637,7 +637,7 @@ fn plans_without_starting_work() {
     assert!(
         !repository
             .path
-            .join(format!(".farik/local/worktrees/{task}"))
+            .join(format!(".catervas/local/worktrees/{task}"))
             .exists()
     );
     assert_eq!(purposes(&repository), ["plan"]);
@@ -736,8 +736,8 @@ fn lists_what_waits_on_the_human() {
         .collect();
     let expected = [
         format!("question {n} on {first} from pm: "),
-        format!("  farik answer {n} <your answer>"),
-        format!("{second} awaits your approval: farik approve {second}"),
+        format!("  catervas answer {n} <your answer>"),
+        format!("{second} awaits your approval: catervas approve {second}"),
         format!("{third} is escalated (iterations)"),
     ];
     assert_eq!(after.len(), expected.len(), "{}", ran.out);
@@ -794,8 +794,9 @@ fn lists_a_connector_calls_whole_input_escaped() {
         "  input: {\"body\":\"\\u001b[2Jpay \\u202e100\\u200b0\",\"to\":\"a@example.com\"}";
     assert!(ran.out.lines().any(|line| line == expected), "{}", ran.out);
     assert!(
-        ran.out
-            .contains(&format!("farik tool approve {n}, or farik tool refuse {n}")),
+        ran.out.contains(&format!(
+            "catervas tool approve {n}, or catervas tool refuse {n}"
+        )),
         "{}",
         ran.out
     );
@@ -806,8 +807,8 @@ fn lists_a_connector_calls_whole_input_escaped() {
 fn lists_a_marketing_plan_that_waits_with_its_commands() {
     let repository = a_team("run-waiting-plan");
     let task = a_small_request(&repository);
-    let mut body = farik_protocol::event::fixtures::a_body_wire(
-        farik_protocol::event::EventKind::MarketingPlanProposed,
+    let mut body = catervas_protocol::event::fixtures::a_body_wire(
+        catervas_protocol::event::EventKind::MarketingPlanProposed,
     );
     body["title"] = json!("Spring launch");
     record_as(
@@ -824,8 +825,8 @@ fn lists_a_marketing_plan_that_waits_with_its_commands() {
 
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
     let line = format!(
-        "{task} waits: kai proposes a marketing plan: Spring launch: farik marketing plan approve \
-         MP-1, or farik marketing plan return MP-1 --reason <text>"
+        "{task} waits: kai proposes a marketing plan: Spring launch: catervas marketing plan approve \
+         MP-1, or catervas marketing plan return MP-1 --reason <text>"
     );
     assert!(ran.out.lines().any(|found| found == line), "{}", ran.out);
 
@@ -860,7 +861,7 @@ fn says_the_backlog_waits() {
     );
     assert_eq!(
         ran.out.lines().last(),
-        Some("start a sprint: 1 waits in the Backlog (`farik sprint start`)"),
+        Some("start a sprint: 1 waits in the Backlog (`catervas sprint start`)"),
         "{}",
         ran.out
     );
@@ -938,7 +939,7 @@ fn lists_a_high_risk_result_and_no_answered_question() {
     assert_eq!(
         after,
         [format!(
-            "{task} may need your acceptance: farik accept {task} --message <your review>"
+            "{task} may need your acceptance: catervas accept {task} --message <your review>"
         )],
         "{}",
         ran.out
@@ -948,13 +949,13 @@ fn lists_a_high_risk_result_and_no_answered_question() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn gives_a_session_the_connectors_kept_where_this_computer_keeps_them() {
-    use farik_core::team::{custom_server, spec_sha256, validate_team};
-    use farik_runtime::claude::Secret;
-    use farik_runtime::connectors::{
+    use catervas_core::team::{custom_server, spec_sha256, validate_team};
+    use catervas_runtime::claude::Secret;
+    use catervas_runtime::connectors::{
         ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
     };
-    use farik_runtime::recorded::fixtures::tool_runner;
-    use farik_runtime::{RecordedAdapter, SessionSpec};
+    use catervas_runtime::recorded::fixtures::tool_runner;
+    use catervas_runtime::{RecordedAdapter, SessionSpec};
 
     let mut team = Value::Null;
     let repository = a_team_with("run-custom-connector", |wire| {
@@ -972,12 +973,12 @@ fn gives_a_session_the_connectors_kept_where_this_computer_keeps_them() {
         .flatten()
         .find_map(custom_server)
         .expect("a custom server");
-    // `XDG_CONFIG_HOME`, outside the repository: its `farik` folder keeps the project's id.
+    // `XDG_CONFIG_HOME`, outside the repository: its `catervas` folder keeps the project's id.
     let config = PathBuf::from(format!("{}-config", repository.path.display()));
     let store = Arc::new(MemoryConnectorSecrets::default());
     store
         .save(
-            &SecretAt::of(&config.join("farik"), &repository.path, "pm", "github")
+            &SecretAt::of(&config.join("catervas"), &repository.path, "pm", "github")
                 .expect("an address"),
             &ConnectorEntry {
                 spec_sha256: spec_sha256(&server),
@@ -1012,7 +1013,7 @@ fn gives_a_session_the_connectors_kept_where_this_computer_keeps_them() {
     let specs: Vec<SessionSpec> = adapter.started();
     assert_eq!(
         specs[0].purpose,
-        farik_runtime::SessionPurpose::Refine,
+        catervas_runtime::SessionPurpose::Refine,
         "{}\n{}",
         ran.out,
         ran.err

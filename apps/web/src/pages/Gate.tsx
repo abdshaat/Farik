@@ -1,4 +1,4 @@
-import { Button, DiffView, TextArea } from "@farik/ui";
+import { Button, DiffView, TextArea } from "@catervas/ui";
 import { Fragment, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
@@ -71,7 +71,7 @@ export const signed = (
 	agent: Agent,
 ) => t(key, { name: agent.displayName, role: roleWord(agent.role) });
 
-/** The acceptance gate: the two summaries, Farik's checks, and the code one click away. */
+/** The acceptance gate: the two summaries, Catervas's checks, and the code one click away. */
 export function Gate() {
 	const { id = "" } = useParams();
 	const { client } = useConnection();
@@ -157,7 +157,7 @@ export function Gate() {
 	);
 	const codeReviewer = (codeReview?.body as { reviewer?: string } | undefined)
 		?.reviewer;
-	// Farik's checks, then each Designer's and reviewer's look in time order, then the person.
+	// Catervas's checks, then each Designer's and reviewer's look in time order, then the person.
 	const looks = [
 		...designReviews.map((r) => ({
 			at: r.recordedAt,
@@ -178,7 +178,7 @@ export function Gate() {
 			}),
 	].sort((a, b) => a.at.localeCompare(b.at));
 	const looked = [
-		t("gateLookedFarik"),
+		t("gateLookedCatervas"),
 		...looks.map((l) => l.line),
 		...(waits("acceptance") ? [t("gateLookedYou")] : []),
 	];

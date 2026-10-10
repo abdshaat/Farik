@@ -1,5 +1,5 @@
 [package]
-name = "farik-core"
+name = "catervas-core"
 description = "Schemas, task state machine, governor, and cost model. Performs no I/O."
 version.workspace = true
 edition.workspace = true

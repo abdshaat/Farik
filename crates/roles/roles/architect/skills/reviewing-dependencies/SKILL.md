@@ -35,7 +35,7 @@ Name the version the lock file pins, or should. Prefer an exact one.
 
 ## 6. Write it down
 
-In a document task, record the choice with `farik_write_decision`: the library, the version, why,
+In a document task, record the choice with `catervas_write_decision`: the library, the version, why,
 and what it rules out. In a review session, a finding goes to the `review` criterion it bears on,
-with the file and line, through `farik_record_criterion_result`; record a decision there only when
+with the file and line, through `catervas_record_criterion_result`; record a decision there only when
 the contract asks for one.

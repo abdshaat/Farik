@@ -1,23 +1,23 @@
-//! `farik connect` and `farik disconnect` (`docs/SPEC.md` 5.6, ADR 0030): this process reads the
+//! `catervas connect` and `catervas disconnect` (`docs/SPEC.md` 5.6, ADR 0030): this process reads the
 //! keys, lists the server's tools with them and keeps them, so that a key never crosses a socket;
 //! the team file and the event go through the command, which carries names only.
 
 use std::collections::BTreeMap;
 use std::io::BufRead as _;
 
-use farik_core::contract::ValidationError;
-use farik_core::team::{CustomServer, CustomTransport, spec_sha256};
-use farik_protocol::command::Command;
-use farik_runtime::claude::Secret;
-use farik_runtime::connectors::{
+use catervas_core::contract::ValidationError;
+use catervas_core::team::{CustomServer, CustomTransport, spec_sha256};
+use catervas_protocol::command::Command;
+use catervas_runtime::claude::Secret;
+use catervas_runtime::connectors::{
     ConnectorEntry, ConnectorError, SecretAt, SecretStore, folder_refusal, list_tools, own_program,
     working_folder,
 };
-use farik_runtime::credential::CredentialError;
-use farik_runtime::daemon::{custom_entry, kit_entry, labelled};
-use farik_runtime::registered_apps::{RegisteredApp, app_for_farik_connector};
-use farik_runtime::sign_in::{SignInError, revoke, start_app_sign_in, start_sign_in};
-use farik_store::marketing::{created_campaigns, paused_for_end};
+use catervas_runtime::credential::CredentialError;
+use catervas_runtime::daemon::{custom_entry, kit_entry, labelled};
+use catervas_runtime::registered_apps::{RegisteredApp, app_for_catervas_connector};
+use catervas_runtime::sign_in::{SignInError, revoke, start_app_sign_in, start_sign_in};
+use catervas_store::marketing::{created_campaigns, paused_for_end};
 use serde_json::{Map, Value, json};
 
 use crate::project::Project;
@@ -25,13 +25,13 @@ use crate::start::{command, runtime};
 use crate::{CliIo, Report};
 
 /// What the user is told beside a code to type, since any program can ask a service for a code in
-/// Farik's name.
+/// Catervas's name.
 const CODE_WARNING: &str =
-    "Only enter a code that this page shows you. Farik never sends you a code in a chat.";
+    "Only enter a code that this page shows you. Catervas never sends you a code in a chat.";
 /// The labels a tool can be given.
 const TAGS: [&str; 3] = ["network", "external_effect", "denied"];
 
-/// What `farik connect` was asked, as typed.
+/// What `catervas connect` was asked, as typed.
 pub(crate) struct Asked<'a> {
     pub(crate) agent: &'a str,
     pub(crate) name: &'a str,
@@ -50,7 +50,7 @@ pub(crate) struct Asked<'a> {
     pub(crate) scopes: &'a [String],
 }
 
-/// `farik connect`: the entry held to the team's rules, each key read from standard input, the
+/// `catervas connect`: the entry held to the team's rules, each key read from standard input, the
 /// server's tools listed with them and labelled, the keys kept beside the definition's hash, then
 /// `connector_connect` handled here or sent. Prints each tool with its label, what the command
 /// said, and where the keys were kept, last.
@@ -80,7 +80,7 @@ pub(crate) fn connect(
 }
 
 /// [`connect`], opening the sign-in page with `open`, which a test passes to follow it, and signing
-/// in with `apps`, the apps Farik has registered with a service.
+/// in with `apps`, the apps Catervas has registered with a service.
 ///
 /// # Errors
 ///
@@ -157,7 +157,7 @@ fn needs_its_form(asked: &Asked<'_>) -> Result<(), String> {
     }
 }
 
-/// `farik connect <agent> <name>`: the service `name` of the agent's role's kit, which says how
+/// `catervas connect <agent> <name>`: the service `name` of the agent's role's kit, which says how
 /// it starts, which keys it takes and what each tool may do (ADR 0036). Each key is read in order
 /// from standard input after a line saying where it is made; a service the user signs in to is
 /// signed in to, as `--sign-in` does.
@@ -195,7 +195,7 @@ fn connect_kit(
         .iter()
         .find(|held| held.id.as_str() == asked.agent)
         .ok_or_else(|| format!("there is no agent {}", asked.agent))?;
-    let kit = (io.kits)(farik_core::contract::Role::from(held.role))
+    let kit = (io.kits)(catervas_core::contract::Role::from(held.role))
         .map_err(|error| error.to_string())?;
     let allowances = asked_from(asked.allowances)?;
     let build = || kit_entry(&kit, &project.team, asked.agent, name, &allowances);
@@ -203,8 +203,8 @@ fn connect_kit(
         let has: Vec<&str> = kit
             .connectors
             .iter()
-            .filter(|connector| matches!(connector, farik_roles::KitConnector::Server { .. }))
-            .map(farik_roles::KitConnector::name)
+            .filter(|connector| matches!(connector, catervas_roles::KitConnector::Server { .. }))
+            .map(catervas_roles::KitConnector::name)
             .collect();
         let said = errors(&refused);
         if said.contains("connector_not_in_kit") {
@@ -218,7 +218,7 @@ fn connect_kit(
             said
         }
     })?;
-    let tools_of = |_: &[farik_runtime::connectors::ListedTool]| {
+    let tools_of = |_: &[catervas_runtime::connectors::ListedTool]| {
         Ok(build()
             .map(|(entry, _)| entry["tools"].as_object().cloned().unwrap_or_default())
             .unwrap_or_default())
@@ -236,7 +236,7 @@ fn connect_kit(
         );
     }
     let page = kit.connectors.iter().find_map(|connector| match connector {
-        farik_roles::KitConnector::Server { entry, copy, .. } if entry.name.as_str() == name => {
+        catervas_roles::KitConnector::Server { entry, copy, .. } if entry.name.as_str() == name => {
             copy.key_page.clone()
         }
         _ => None,
@@ -276,10 +276,10 @@ fn asked_from(given: &[String]) -> Result<BTreeMap<String, u32>, String> {
                 .map_or_else(|_| Value::from(calls), Value::from),
         );
     }
-    farik_runtime::allowances::asked_allowances(&Value::Object(asked))
+    catervas_runtime::allowances::asked_allowances(&Value::Object(asked))
 }
 
-/// What signing in uses: how a page is opened, and the apps Farik has registered with a service.
+/// What signing in uses: how a page is opened, and the apps Catervas has registered with a service.
 struct SignInWith<'a> {
     open: &'a dyn Fn(&str),
     apps: &'a [RegisteredApp],
@@ -287,7 +287,7 @@ struct SignInWith<'a> {
 
 /// What decides the tools an entry is written with: the labels the user gave, or the kit's.
 type ToolsOf<'a> =
-    &'a dyn Fn(&[farik_runtime::connectors::ListedTool]) -> Result<Map<String, Value>, String>;
+    &'a dyn Fn(&[catervas_runtime::connectors::ListedTool]) -> Result<Map<String, Value>, String>;
 
 /// How the entry is built once its tools are known.
 type Build<'a> =
@@ -308,9 +308,9 @@ fn keep_keys(
     let at = secret_at(&state, project, agent, &server.name)?;
     let folder = working_folder(&state, &project.root, &at)
         .map_err(|error| format!("{}: {}", server.name, folder_refusal(&error)))?;
-    let farik = own_program(server, io.own_program.as_deref()).map_err(str::to_string)?;
+    let catervas = own_program(server, io.own_program.as_deref()).map_err(str::to_string)?;
     let listed = runtime()?
-        .block_on(list_tools(server, &keys, None, &folder, &farik))
+        .block_on(list_tools(server, &keys, None, &folder, &catervas))
         .map_err(|error| not_listed(&error))?;
     let tools = tools_of(&listed)?;
     let (entry, server) = build(tools).map_err(|e| errors(&e))?;
@@ -340,10 +340,10 @@ fn keep_keys(
     Ok(connected_report(&listed, &entry, said, stored_in))
 }
 
-/// What `farik connect` prints once the server is kept: each tool with its label, what the
+/// What `catervas connect` prints once the server is kept: each tool with its label, what the
 /// command said, and where the keys or the sign-in were kept, last.
 fn connected_report(
-    listed: &[farik_runtime::connectors::ListedTool],
+    listed: &[catervas_runtime::connectors::ListedTool],
     entry: &Value,
     said: Report,
     stored_in: SecretStore,
@@ -352,7 +352,7 @@ fn connected_report(
         .iter()
         .map(|tool| match entry["tools"][&tool.name].as_str() {
             Some(tag) => format!("{}: {tag}", tool.name),
-            None => format!("{}: Farik can't use this tool", tool.name),
+            None => format!("{}: Catervas can't use this tool", tool.name),
         })
         .collect();
     lines.extend(said.lines);
@@ -370,7 +370,7 @@ fn connected_report(
     }
 }
 
-/// `farik connect --sign-in`: the server's sign-in found out, its page printed and opened, the
+/// `catervas connect --sign-in`: the server's sign-in found out, its page printed and opened, the
 /// way back waited for up to ten minutes, the server's tools listed with the token and labelled,
 /// the grant kept where keys are, then `connector_connect` handled here or sent, which names who
 /// signed in and holds no token (ADR 0033).
@@ -407,8 +407,8 @@ fn connect_signed_in(
     )
 }
 
-/// Signs `agent` in to the service of `server`, a web address or one of Farik's own connectors,
-/// lists its tools (with the token for a web address, which a connector Farik starts takes none
+/// Signs `agent` in to the service of `server`, a web address or one of Catervas's own connectors,
+/// lists its tools (with the token for a web address, which a connector Catervas starts takes none
 /// of), decides them with `tools_of`, keeps the grant where keys are, and connects it.
 fn keep_sign_in(
     project: &Project,
@@ -423,7 +423,7 @@ fn keep_sign_in(
         return Err(format!("{} does not sign in", server.name));
     };
     // What a sentence calls the service before it has said who it is: a web address by its host,
-    // one of Farik's own connectors by its name.
+    // one of Catervas's own connectors by its name.
     let host = match &server.transport {
         CustomTransport::Http { url, .. } => host_of(url),
         CustomTransport::Stdio { .. } => server.name.clone(),
@@ -438,7 +438,7 @@ fn keep_sign_in(
         .map_err(|error| refused(&error, &host))?;
     // Prompts, not results: on stderr, so that `--json` leaves the output as the JSON alone.
     match signing.user_code() {
-        // One of Farik's own apps: the user types a code, which is the one thing to warn about.
+        // One of Catervas's own apps: the user types a code, which is the one thing to warn about.
         Some(code) => {
             crate::say(
                 &mut io.stderr,
@@ -463,7 +463,7 @@ fn keep_sign_in(
     (how.open)(signing.authorize_url());
     let issuer = signing.issuer().to_string();
     let provider = signing.provider().map(ToString::to_string);
-    // The page the person said yes or no on is the provider's for one of Farik's own apps.
+    // The page the person said yes or no on is the provider's for one of Catervas's own apps.
     let grant = runtime
         .block_on(signing.finish())
         .map_err(|error| refused(&error, provider.as_deref().unwrap_or(&host)))?;
@@ -471,14 +471,14 @@ fn keep_sign_in(
         &mut io.stderr,
         &format!("Signed in to {}.", provider.as_deref().unwrap_or(&issuer)),
     );
-    let farik = own_program(server, io.own_program.as_deref()).map_err(str::to_string)?;
+    let catervas = own_program(server, io.own_program.as_deref()).map_err(str::to_string)?;
     let listed = runtime
         .block_on(list_tools(
             server,
             &BTreeMap::new(),
             Some(&grant.access_token),
             &folder,
-            &farik,
+            &catervas,
         ))
         .map_err(|error| not_listed(&error))?;
     let tools = tools_of(&listed)?;
@@ -524,17 +524,17 @@ fn keep_sign_in(
 }
 
 /// Starts signing in to `server`: a web address through its own sign-in or the app `apps` has for
-/// it, one of Farik's own connectors through the app `apps` has for that.
+/// it, one of Catervas's own connectors through the app `apps` has for that.
 async fn start_signing(
     server: &CustomServer,
-    settings: &farik_core::team::OAuthSettings,
+    settings: &catervas_core::team::OAuthSettings,
     apps: &[RegisteredApp],
-) -> Result<farik_runtime::sign_in::SignIn, SignInError> {
+) -> Result<catervas_runtime::sign_in::SignIn, SignInError> {
     let now = chrono::Utc::now();
     match &server.transport {
         CustomTransport::Http { url, .. } => start_sign_in(url, settings, apps, now).await,
         CustomTransport::Stdio { command, args, .. } => {
-            match app_for_farik_connector(apps, command, args) {
+            match app_for_catervas_connector(apps, command, args) {
                 Some(app) => start_app_sign_in(app, &settings.scopes, now).await,
                 None => Err(SignInError::NotSupported),
             }
@@ -562,14 +562,14 @@ fn refused(error: &SignInError, host: &str) -> String {
             format!("{host} does not offer signing in; give its key with --key")
         }
         SignInError::NotSupported => format!(
-            "{host} does not let Farik sign in by itself yet; if it gives you a key, use --key"
+            "{host} does not let Catervas sign in by itself yet; if it gives you a key, use --key"
         ),
         SignInError::PkceNotSupported => {
-            format!("{host}'s sign-in is not one Farik will use")
+            format!("{host}'s sign-in is not one Catervas will use")
         }
         SignInError::Denied(_) => format!("you said no on {host}'s page, so nothing was connected"),
         SignInError::Mismatch => format!(
-            "something did not match on the way back from {host}, so Farik stopped to keep you safe"
+            "something did not match on the way back from {host}, so Catervas stopped to keep you safe"
         ),
         SignInError::TimedOut => "the sign-in took longer than 10 minutes".to_string(),
         SignInError::Lapsed => format!("{host} ended the sign-in"),
@@ -577,7 +577,7 @@ fn refused(error: &SignInError, host: &str) -> String {
     }
 }
 
-/// `farik disconnect`: `connector_disconnect` handled here or sent, which takes the entry out of
+/// `catervas disconnect`: `connector_disconnect` handled here or sent, which takes the entry out of
 /// the team file, then the agent's keys for it deleted, and no other agent's.
 ///
 /// # Errors
@@ -590,11 +590,11 @@ pub(crate) fn disconnect(
     io: &mut CliIo<'_>,
 ) -> Result<Report, String> {
     if name == GOOGLE_ADS && google_ads_still_runs(project)? {
-        // Farik pauses its running ads before this connection goes (spec 6.7), which only the
+        // Catervas pauses its running ads before this connection goes (spec 6.7), which only the
         // daemon of a process driving the project can do, in the browser.
         return Err(format!(
             "disconnect_in_the_browser: remove Google Ads on {agent}'s page in the browser, where \
-             Farik pauses its running ads first"
+             Catervas pauses its running ads first"
         ));
     }
     let said = crate::human::said(command(
@@ -623,11 +623,11 @@ pub(crate) fn disconnect(
     Ok(said)
 }
 
-/// The name of Farik's Google Ads connector.
+/// The name of Catervas's Google Ads connector.
 const GOOGLE_ADS: &str = "google-ads";
 
-/// Whether a campaign Farik made is not recorded paused for its plan's end (`paused_for_end`):
-/// Farik's own pause before the connection is removed is what the browser's Remove makes, a pause
+/// Whether a campaign Catervas made is not recorded paused for its plan's end (`paused_for_end`):
+/// Catervas's own pause before the connection is removed is what the browser's Remove makes, a pause
 /// for an earlier removal counts until Google Ads is connected again and while no agent that is
 /// not retired has it, and a campaign recorded paused for another reason may have been started
 /// again since.
@@ -643,7 +643,7 @@ fn google_ads_still_runs(project: &Project) -> Result<bool, String> {
 /// connector runs (ADR 0030).
 fn state_of(io: &CliIo<'_>) -> Result<std::path::PathBuf, String> {
     crate::state::state_dir(&io.env).ok_or_else(|| {
-        "XDG_CONFIG_HOME, HOME and APPDATA are all unset, so Farik has no state folder to keep \
+        "XDG_CONFIG_HOME, HOME and APPDATA are all unset, so Catervas has no state folder to keep \
          this project's connectors in"
             .to_string()
     })
