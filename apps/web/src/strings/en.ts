@@ -261,29 +261,28 @@ export const en = {
 	roleFinance: "Finance Specialist",
 	roleProcurement: "Procurement Specialist",
 	mayTitle: "What may your team do on its own?",
-	mayLead:
-		"Two things can cause real harm, so Catervas asks you about them directly. Nothing runs until you answer both.",
+	mayLead: "You can change these later in Settings.",
 	mayCommands: "May the team run commands on this computer?",
 	mayCommandsNote:
-		"Running the tests and trying the app needs this. Commands run in a sealed box, away from your other files.",
+		"Needed to run the tests and try the app.\nCommands run in a sealed box, away from your other files.",
 	mayCommandsYes: "Yes, the Developer and Architect may",
-	mayCommandsYesNote:
-		"Recommended. Without it nobody can check that the code works.",
+	mayCommandsYesNote: "Recommended.",
 	mayCommandsNo: "No, nobody may",
-	mayCommandsNoNote: "The team can plan and write, but cannot test anything.",
+	mayCommandsNoNote: "The team cannot test anything.",
 	mayStillChecks:
 		"Catervas still runs every check itself; the agents cannot run commands.",
 	mayPush: "May the Developer send its work to your online repository?",
 	mayPushNoteOne:
-		"Only {name}, the Developer, ever sends code, and only to its own fix or feature branch. Catervas sends the other agents’ documents itself. Nothing reaches your main branch without you.",
+		"Only {name}, the Developer, sends code, and only to its own branches.\nNothing reaches your main branch without you.",
 	mayPushNoteMany:
-		"Only the Developers ever send code, and only to their own fix or feature branches. Catervas sends the other agents’ documents itself. Nothing reaches your main branch without you.",
+		"Only the Developers send code, and only to their own branches.\nNothing reaches your main branch without you.",
 	mayPushYes: "Yes, on its own branches",
 	mayPushYesNote: "Useful if you review work on GitHub.",
 	mayPushNo: "No, keep everything on this computer",
-	mayPushNoNote: "The safer choice. You can change it later in Team.",
+	mayPushNoNote: "The safer choice.",
 	mayAlready: "What each agent may do already",
-	mayAnswerBoth: "Answer both questions to continue.",
+	mayAlreadyShow: "Show what each agent may do",
+	mayAlreadyHide: "Hide what each agent may do",
 	spendTitle: "Do you want a daily spending limit?",
 	spendLead:
 		"Each agent uses an AI model, and each piece of work costs a little. You can set a limit, or leave it open and watch costs on the Costs page.",

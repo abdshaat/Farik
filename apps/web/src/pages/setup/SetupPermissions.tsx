@@ -1,6 +1,8 @@
 import { Button, Choice } from "@catervas/ui";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useQuery } from "../../app/store.ts";
+import { Bullets } from "../../components/Bullets.tsx";
 import type { en } from "../../strings/en.ts";
 import { t } from "../../strings/t.ts";
 import type { Tier } from "../Team.tsx";
@@ -61,6 +63,7 @@ export function PermissionChoices({
 				<Choice<Answer>
 					name="commands"
 					legend={t("mayCommands")}
+					info={<Bullets text={t("mayCommandsNote")} />}
 					value={word(commands)}
 					onChange={(v) => onAnswer({ commands: v === "yes" })}
 					options={[
@@ -76,7 +79,6 @@ export function PermissionChoices({
 						},
 					]}
 				/>
-				<p>{t("mayCommandsNote")}</p>
 				{commands === false && (
 					<p className={styles.warn}>{t("mayStillChecks")}</p>
 				)}
@@ -85,6 +87,18 @@ export function PermissionChoices({
 				<Choice<Answer>
 					name="push"
 					legend={t("mayPush")}
+					info={
+						<Bullets
+							text={
+								developers.length === 1
+									? t("mayPushNoteOne").replace(
+											"{name}",
+											developers[0]?.displayName ?? "",
+										)
+									: t("mayPushNoteMany")
+							}
+						/>
+					}
 					value={word(push)}
 					onChange={(v) => onAnswer({ push: v === "yes" })}
 					options={[
@@ -100,14 +114,6 @@ export function PermissionChoices({
 						},
 					]}
 				/>
-				<p>
-					{developers.length === 1
-						? t("mayPushNoteOne").replace(
-								"{name}",
-								developers[0]?.displayName ?? "",
-							)
-						: t("mayPushNoteMany")}
-				</p>
 			</div>
 			<PutBack onClick={putBack} />
 		</>
@@ -120,7 +126,7 @@ export function SetupPermissions() {
 	const { draft, change } = useSetup();
 	const defaults = useDefaults()?.policy.permissions;
 	const { commands, push } = draft.answers;
-	const answered = commands !== undefined && push !== undefined;
+	const [showing, setShowing] = useState(false);
 	const team = teamOf(draft);
 	const agents = team.agents;
 	const developers = agents.filter((a) => a.role === "software_developer");
@@ -144,6 +150,15 @@ export function SetupPermissions() {
 		});
 	};
 
+	// The questions start at the recommended answers, which the user may change.
+	useEffect(() => {
+		if (defaults && (commands === undefined || push === undefined))
+			answer({
+				commands: commands ?? defaults.runCommands,
+				push: push ?? defaults.push,
+			});
+	});
+
 	return (
 		<Wizard step={5} title={t("mayTitle")} lead={t("mayLead")}>
 			<PermissionChoices
@@ -160,33 +175,44 @@ export function SetupPermissions() {
 						}))
 				}
 			/>
-			<section className={styles.card} aria-labelledby="may-already">
-				<h2 id="may-already" className={styles.heading}>
-					{t("mayAlready")}
-				</h2>
-				<dl className={styles.facts}>
-					{agents.map((agent) => (
-						<div key={agent.id}>
-							<dt>
-								{agent.displayName}
-								<small>{roleName(agent.role)}</small>
-							</dt>
-							<dd>{tiersOf(agent.id) ? mayOf(tiersOf(agent.id) ?? []) : ""}</dd>
-						</div>
-					))}
-				</dl>
-			</section>
+			<span>
+				<Button
+					kind="quiet"
+					expanded={showing}
+					controls="may-already-section"
+					onClick={() => setShowing(!showing)}
+				>
+					{t(showing ? "mayAlreadyHide" : "mayAlreadyShow")}
+				</Button>
+			</span>
+			{showing && (
+				<section
+					id="may-already-section"
+					className={styles.card}
+					aria-labelledby="may-already"
+				>
+					<h2 id="may-already" className={styles.heading}>
+						{t("mayAlready")}
+					</h2>
+					<dl className={styles.facts}>
+						{agents.map((agent) => (
+							<div key={agent.id}>
+								<dt>
+									{agent.displayName}
+									<small>{roleName(agent.role)}</small>
+								</dt>
+								<dd>
+									{tiersOf(agent.id) ? mayOf(tiersOf(agent.id) ?? []) : ""}
+								</dd>
+							</div>
+						))}
+					</dl>
+				</section>
+			)}
 			<div className={styles.foot}>
 				<Button onClick={() => navigate("/setup/team")}>{t("back")}</Button>
 				<span>
-					{!answered && (
-						<span className={styles.note}>{t("mayAnswerBoth")}</span>
-					)}
-					<Button
-						kind="primary"
-						disabled={!answered}
-						onClick={() => navigate("/setup/spending")}
-					>
+					<Button kind="primary" onClick={() => navigate("/setup/spending")}>
 						{t("continue")}
 					</Button>
 				</span>

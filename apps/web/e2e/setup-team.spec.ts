@@ -53,8 +53,12 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 		await page.getByRole("button", { name: "Continue with this team" }).click();
 
 		await expect(page).toHaveURL(/\/setup\/permissions$/);
-		await page.getByLabel(/^Yes, the Developer and Architect may/).check();
-		await page.getByLabel(/^No, keep everything on this computer/).check();
+		await expect(
+			page.getByLabel(/^Yes, the Developer and Architect may/),
+		).toBeChecked();
+		await expect(
+			page.getByLabel(/^No, keep everything on this computer/),
+		).toBeChecked();
 		await screenshots(page, "setup-permissions");
 		await page.getByRole("button", { name: "Continue", exact: true }).click();
 

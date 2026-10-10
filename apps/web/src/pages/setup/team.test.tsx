@@ -21,6 +21,12 @@ import { onlyInTips } from "../../test/tips.ts";
 import type { Template } from "../SavedTeams.tsx";
 import { type Agent, draftOf, type Proposed, someone } from "./TeamSetup.tsx";
 
+/** What `settings.defaults` answers for the permissions: run commands, do not push. */
+const RECOMMENDED = {
+	policy: { permissions: { run_commands: true, push: false } },
+	budgets: {},
+	rules: {},
+};
 const BUDGET = "Does the task fit its budget?";
 const NOTICE =
 	"Would its checks notice if the work went wrong the way its intent worries about?";
@@ -1009,6 +1015,23 @@ describe("team setup", () => {
 		warned.mockRestore();
 	});
 
+	it("shows_what_each_agent_may_do_on_request", async () => {
+		const { socket } = await renderApp("/setup/permissions");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await screen.findByRole("heading", { name: en.mayTitle });
+		expect(screen.queryByRole("heading", { name: en.mayAlready })).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: en.mayAlreadyShow }));
+		expect(
+			screen
+				.getByRole("button", { name: en.mayAlreadyHide })
+				.getAttribute("aria-expanded"),
+		).toBe("true");
+		expect(screen.getByRole("heading", { name: en.mayAlready })).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: en.mayAlreadyHide }));
+		expect(screen.queryByRole("heading", { name: en.mayAlready })).toBeNull();
+	});
+
 	it("asks_both_permission_questions", async () => {
 		const { container, socket } = await renderApp("/setup/permissions");
 		const s = socket as FakeSocket;
@@ -1016,14 +1039,37 @@ describe("team setup", () => {
 		await screen.findByRole("heading", { name: en.mayTitle });
 		const onward = () =>
 			screen.getByRole("button", { name: en.continue }) as HTMLButtonElement;
-		expect(onward().disabled).toBe(true);
-		expect(screen.getByText(en.mayAnswerBoth)).toBeTruthy();
+		// The questions start at the recommended answers, once the defaults are known.
+		await answerQuery(s, "settings.defaults", RECOMMENDED);
+		await waitFor(() =>
+			expect(
+				(
+					screen.getByRole("radio", {
+						name: /^Yes, the Developer and Architect may/,
+					}) as HTMLInputElement
+				).checked,
+			).toBe(true),
+		);
+		expect(
+			(
+				screen.getByRole("radio", {
+					name: /^No, keep everything on this computer/,
+				}) as HTMLInputElement
+			).checked,
+		).toBe(true);
+		expect(onward().disabled).toBe(false);
+		expect(screen.queryByText(/Nothing runs until/)).toBeNull();
+		expect(screen.queryByText(/Answer both questions/)).toBeNull();
+		for (const line of en.mayCommandsNote.split("\n")) onlyInTips(line);
+		for (const line of t("mayPushNoteOne", { name: "Theo" }).split("\n"))
+			onlyInTips(line);
 		// What each agent may do is the daemon's answer for the team as it stands.
 		const theo = (tiers: string[]) => ({
 			errors: [],
 			effects: [],
 			agents: [{ id: "theo", tiers }],
 		});
+		fireEvent.click(screen.getByRole("button", { name: en.mayAlreadyShow }));
 		await s.reply(
 			await asked(s, "team.validate"),
 			theo(["read", "write_workspace", "execute", "git_local"]),
@@ -1058,12 +1104,7 @@ describe("team setup", () => {
 				"Reads the project, changes the files of its task and saves its work on its own branch.",
 			),
 		).toBeTruthy();
-		expect(onward().disabled).toBe(true);
-		fireEvent.click(
-			screen.getByRole("radio", { name: /^No, keep everything/ }),
-		);
 		expect(onward().disabled).toBe(false);
-		expect(screen.queryByText(en.mayAnswerBoth)).toBeNull();
 
 		const start = await startFrom(s, en.mayTitle);
 		expect(start.team.policy).toMatchObject({

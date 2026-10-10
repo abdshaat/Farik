@@ -127,7 +127,7 @@ Files: modified `SetupPermissions.tsx`, `en.ts`, `team.test.tsx`, `apps/web/e2e/
 - `shows_what_each_agent_may_do_on_request` — the "What each agent may do already" heading is absent until "Show what each agent may do" is pressed (its `aria-expanded` then `true`), then present; pressing "Hide what each agent may do" removes it.
 - e2e: the two `.check()` calls become `expect(...).toBeChecked()`.
 
-- [ ] `feat(web): start the permission questions at the recommended answers`
+- [x] `feat(web): start the permission questions at the recommended answers`
 
 ### Task 6: earlier steps are links
 
