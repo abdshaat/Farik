@@ -91,7 +91,7 @@ Tests:
 
 - `shows_the_plan's_advanced_fields_in_place_when_asked` (`PlanEditor.test.tsx`) — closed: a criterion's "Who checks it" choice has no command option and the risk choice is absent; pressed, the command option and the risk choice appear where they were, and the button reads "Hide advanced settings"; no `switch` named `editAdvanced`.
 - Any existing plan-editor test that turned `plan-advanced` on presses the button instead.
-- No file under `apps/web/src` names `useAdvanced`, and only `keeps_advanced_settings_to_their_own_section` names `catervas.advanced` (`grep -rn "useAdvanced\|catervas.advanced" apps/web/src` prints that one line).
+- No file under `apps/web/src` names `useAdvanced`, and only the tests that hold pages to ignoring it name `catervas.advanced` (`grep -rn "useAdvanced\|catervas.advanced" apps/web/src` prints two lines: `keeps_advanced_settings_to_their_own_section` in `settings.test.tsx` and, since the landing review's `72108792`, `starts_closed_on_each_page` in `team.test.tsx`).
 
 - [x] `feat(web): open a plan's advanced fields with a button`
 
