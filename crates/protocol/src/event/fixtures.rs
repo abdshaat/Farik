@@ -279,6 +279,40 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             ]
         }),
         EventKind::SellerReplyDismissed => json!({ "reply": 1 }),
+        EventKind::FolderDocWritten => json!({
+            "path": "docs/catervas/delivery/cadence.md",
+            "written_by": "sol",
+            "change": 1,
+            "sha": "9f2b0c1d"
+        }),
+        EventKind::FolderDocProposed => json!({
+            "path": "docs/catervas/product/roadmap.md",
+            "text": "# Roadmap\n\nNow: pie pre-orders.\n",
+            "agent_text": "# Roadmap\n- now: pie pre-orders\n",
+            "summary": "Pie pre-orders are done, so they move to Done.",
+            "sprint_id": "S4",
+            "proposed_by": "mira"
+        }),
+        EventKind::FolderDocApproved => json!({ "proposals": [3, 4] }),
+        EventKind::FolderDocReturned => json!({
+            "proposals": [3],
+            "reason": "Keep gift cards in Now."
+        }),
+        EventKind::FolderChangeOpened => json!({
+            "change": 1,
+            "url": "https://github.com/pie/shop/pull/7",
+            "number": 7
+        }),
+        EventKind::FolderChangeIntegrated => json!({
+            "change": 1,
+            "sha": "9f2b0c1d",
+            "into": "main",
+            "integrated_by": "governor"
+        }),
+        EventKind::FolderChangeEscalated => json!({
+            "change": 1,
+            "detail": "The merge conflicted in docs/catervas/delivery/cadence.md."
+        }),
         EventKind::MarketingCampaignCreated => json!({
             "plan": "MP-1",
             "key": "search-launch",

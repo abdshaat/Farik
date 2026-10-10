@@ -13,6 +13,8 @@ pub mod error;
 pub mod event_log;
 /// The files under `.catervas/`.
 pub mod files;
+/// The documents agents write and propose in their folders, and the folder changes that carry them.
+pub mod folder_docs;
 /// The repository Catervas works in.
 pub mod git;
 /// The marketing plans the log holds.

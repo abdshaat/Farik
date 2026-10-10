@@ -125,7 +125,7 @@ Files: `event.schema.json` (seven bodies, kinds), `event.rs` (bodies' names, `at
 - `folder_doc_bodies_hold_their_bounds` (`event.rs`) — a proposal whose `summary` has 301 characters, whose `path` is `docs/x.md`, or whose `sprint_id` is `S0` is refused; an approval with no proposals, or with the same proposal twice, a return with an empty reason, and a `folder_change.integrated` with `change: 0` or `integrated_by: agent` are refused; a `written` with a blank `written_by` is refused by `attribution`'s rule. RED: no such kinds.
 - `folds_each_proposal_and_change_to_where_it_stands` (`folder_docs.rs`) — proposals 1 (roadmap), 2 (spec), 3 (roadmap) by `pm`: 1 superseded, 2 and 3 pending; the owner's `approved { proposals: [2], change: 4 }` settles 2 approved; an `approved { proposals: [3] }` with an agent on its envelope changes nothing; the owner's `returned { proposals: [3], reason: "Keep gift cards in Now" }` settles 3 returned, and a later `approved { proposals: [3] }` leaves it returned; `decisions` holds the two owner's decisions in order with their words; `written { change: 5, path: docs/catervas/delivery/cadence.md }` and the approval give changes 4 (`spec.md`, `spec.agent.md`, approved) and 5 (`cadence.md`), not integrated until `folder_change.integrated { change: 5 }`; each proposal carries its texts, summary, sprint, agent and time. RED: no module.
 
-- [ ] `feat(store): record folder documents and folder changes`
+- [x] `feat(store): record folder documents and folder changes`
 
 ### Task 3: A one-commit branch from the integration branch
 

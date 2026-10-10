@@ -157,7 +157,14 @@
         "seller_message.failed",
         "seller_message.discarded",
         "seller_reply.received",
-        "seller_reply.dismissed"
+        "seller_reply.dismissed",
+        "folder_doc.written",
+        "folder_doc.proposed",
+        "folder_doc.approved",
+        "folder_doc.returned",
+        "folder_change.opened",
+        "folder_change.integrated",
+        "folder_change.escalated"
       ]
     },
     "eventBodyWire": {
@@ -254,7 +261,14 @@
         { "$ref": "#/$defs/sellerMessageFailedBody" },
         { "$ref": "#/$defs/sellerMessageDiscardedBody" },
         { "$ref": "#/$defs/sellerReplyReceivedBody" },
-        { "$ref": "#/$defs/sellerReplyDismissedBody" }
+        { "$ref": "#/$defs/sellerReplyDismissedBody" },
+        { "$ref": "#/$defs/folderDocWrittenBody" },
+        { "$ref": "#/$defs/folderDocProposedBody" },
+        { "$ref": "#/$defs/folderDocApprovedBody" },
+        { "$ref": "#/$defs/folderDocReturnedBody" },
+        { "$ref": "#/$defs/folderChangeOpenedBody" },
+        { "$ref": "#/$defs/folderChangeIntegratedBody" },
+        { "$ref": "#/$defs/folderChangeEscalatedBody" }
       ]
     },
     "contractSummary": {
@@ -1669,6 +1683,110 @@
       "required": ["reply"],
       "properties": {
         "reply": { "$ref": "#/$defs/sellerReplyNumber" }
+      }
+    },
+    "folderDocPath": {
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^docs/catervas/[^/]+/.+\\.md$",
+      "description": "A document under a role's folder (docs/SPEC.md 5.17), repository-relative."
+    },
+    "folderDocText": { "type": "string", "minLength": 1, "maxLength": 262144 },
+    "folderDocProposals": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+      "description": "The numbers of the proposals one decision covers; a proposal's number is its event's seq."
+    },
+    "folderChangeNumber": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+    "folderDocWrittenBody": {
+      "title": "Folder Doc Written Body",
+      "description": "An agent wrote a document of its own folder at a sprint ceremony through catervas_write_folder_doc (docs/SPEC.md 5.17): Catervas committed it as folder change change, on its own branch, whose commit is sha; the team's integration policy then adds it to the project. The envelope names the agent and its session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "written_by", "change", "sha"],
+      "properties": {
+        "path": { "$ref": "#/$defs/folderDocPath" },
+        "written_by": { "type": "string" },
+        "change": { "$ref": "#/$defs/folderChangeNumber" },
+        "sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "folderDocProposedBody": {
+      "title": "Folder Doc Proposed Body",
+      "description": "An agent proposed a change to a document the owner approves, at the sprint review (docs/SPEC.md 5.7, 5.17): text is the version for people, agent_text its .agent.md version, summary what changed and why, for the owner, and sprint_id the sprint the review was about. The event's seq is the proposal's number. Nothing is written until the owner approves. The envelope names the agent and its session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "text", "agent_text", "summary", "sprint_id", "proposed_by"],
+      "properties": {
+        "path": { "$ref": "#/$defs/folderDocPath" },
+        "text": { "$ref": "#/$defs/folderDocText" },
+        "agent_text": { "$ref": "#/$defs/folderDocText" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+        "proposed_by": { "type": "string" }
+      }
+    },
+    "folderDocApprovedBody": {
+      "title": "Folder Doc Approved Body",
+      "description": "The owner approved proposals (docs/SPEC.md 5.7): change and sha are the folder change Catervas made of their files and its commit, absent when the files already said it all and nothing was made; note is what the owner added. The envelope names no agent, no session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposals"],
+      "properties": {
+        "proposals": { "$ref": "#/$defs/folderDocProposals" },
+        "change": { "$ref": "#/$defs/folderChangeNumber" },
+        "sha": { "type": "string", "minLength": 1 },
+        "note": { "type": "string", "maxLength": 600 }
+      }
+    },
+    "folderDocReturnedBody": {
+      "title": "Folder Doc Returned Body",
+      "description": "The owner sent proposals back (docs/SPEC.md 5.7): reason is the owner's own words, which the agent's next sprint review reads as the owner's, not as untrusted text. The envelope names no agent, no session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposals", "reason"],
+      "properties": {
+        "proposals": { "$ref": "#/$defs/folderDocProposals" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 600 }
+      }
+    },
+    "folderChangeOpenedBody": {
+      "title": "Folder Change Opened Body",
+      "description": "Catervas pushed a folder change's branch and opened a pull request for it under the pull_request policy (docs/SPEC.md 5.14): its url and its number on the forge. The envelope names no agent, no session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change", "url", "number"],
+      "properties": {
+        "change": { "$ref": "#/$defs/folderChangeNumber" },
+        "url": { "type": "string", "minLength": 1 },
+        "number": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "folderChangeIntegratedBody": {
+      "title": "Folder Change Integrated Body",
+      "description": "A folder change's branch reached the integration branch (docs/SPEC.md 5.14): sha is the integration branch's commit that holds it, into is that branch, and integrated_by is governor for Catervas's own merge and human for the human's integrate or a pull request the human merged. The envelope names no agent, no session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change", "sha", "into", "integrated_by"],
+      "properties": {
+        "change": { "$ref": "#/$defs/folderChangeNumber" },
+        "sha": { "type": "string", "minLength": 1 },
+        "into": { "type": "string", "minLength": 1 },
+        "integrated_by": { "type": "string", "enum": ["governor", "human"] }
+      }
+    },
+    "folderChangeEscalatedBody": {
+      "title": "Folder Change Escalated Body",
+      "description": "Catervas could not integrate a folder change and left it to the human (docs/SPEC.md 5.14): detail is what stopped it. The envelope names no agent, no session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change", "detail"],
+      "properties": {
+        "change": { "$ref": "#/$defs/folderChangeNumber" },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 4000 }
       }
     },
     "connectorTag": {
