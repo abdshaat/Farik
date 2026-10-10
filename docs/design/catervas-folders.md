@@ -29,7 +29,7 @@ The founder wants every agent to keep its knowledge of the project as documents 
 | `docs/catervas/marketing/` | Marketing Specialist | today's `docs/marketing/` moved here: brand kit, persona, plans, research |
 | `docs/catervas/operations/` | DevOps Engineer | incident response plan, logging conventions, incident write-ups; arrives with the role (phase 12 after this ADR) |
 
-- A folder belongs to a role, not to one agent: two Developers both own `engineering/`. Catervas creates a folder when its role joins the team. The Finance and Procurement Specialists keep their private, gitignored folders (`.catervas/local/<role>/`); their books are not documentation.
+- A folder belongs to a role, not to one agent: two Developers both own `engineering/`. A folder appears with its first document (git keeps no empty folder); the Files page lists every active role's folder, an empty one as "Nothing here yet". The Finance and Procurement Specialists keep their private, gitignored folders (`.catervas/local/<role>/`); their books are not documentation.
 - `.catervas/product/` and `catervas_write_product_doc` go: the Product Manager's documents are `docs/catervas/product/`. `docs/marketing/` moves to `docs/catervas/marketing/` and every rule naming it follows. No migration: no Catervas install predates this (ADR 0050).
 
 ## Ownership and reading
@@ -99,10 +99,10 @@ At sprint review the Product Manager proposes the spec's and the roadmap's chang
 
 | Step | Name | Delivers |
 |---|---|---|
-| 01 | Role folders and ownership | `role_folder`, the human-document list, pairs and staleness in `catervas-core`; `folder_owned` and `pair_changed_alone`; `.catervas/product/` and `docs/marketing/` moved; prompts and skills updated |
+| 01 | Role folders and ownership | `role_folder`, the human-document list and pairs in `catervas-core`; `folder_owned` and `pair_changed_alone`; `.catervas/product/` and `docs/marketing/` moved; prompts and skills updated |
 | 02 | Marketing's read limit | read paths per session, `read_not_allowed` in the hook |
 | 03 | The folder write tool and approving human documents | `catervas_write_folder_doc`, the `folder_doc.*` events, Today's approval card, the re-derive task; mocked up first |
-| 04 | The Files page | browse, view with Mermaid, edit and save as the owner's commit; mocked up first |
+| 04 | The Files page | browse, view with Mermaid, edit and save as the owner's commit; staleness, the re-derive task and `pair_changed_alone`'s re-derive exception; mocked up first |
 | 05 | Plans with lanes | contract `plan` and `lane`, `lanes_overlap`, the Architect's planning, the Product Manager's contracts from the plan, the Scrum Master's scheduling by lane |
 | 06 | A new project's interview and product plan | the chat's button, the owner accepting a task that changes a human document, `product_plan_first`; mocked up first |
 | 07 | Catervafication | the recommendation, the epic and its tasks, every role's `catervafying-the-repository`, Catervas's recommended workflow, the sprint review's refreshes |

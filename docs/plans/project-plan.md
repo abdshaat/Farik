@@ -6,7 +6,7 @@ Decision changes: each pull request that edits this plan says which decision cha
 
 This document divides the project into phases and each phase into steps. Vocabulary is as defined in `docs/standards/workflow.md`; where a step name below says "task" it means the product's task contract from `docs/SPEC.md`, not a plan task. A phase ends in something a person can use or verify. A phase is one pull request from the branch `phase/<n>-<name>`. A step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md` and lands as a group of commits on the phase branch. Steps run in the order listed; a step depends only on steps above it in the same phase and on phases already merged. The rules are in `docs/standards/workflow.md` stage 2 (Plan) and ADR 0003.
 
-Milestones are defined in `docs/SPEC.md` section 11. Phases 0 through 4 build Milestone 0 and the team; its exit, with Milestone 1's, is run in the web UI in phase 10 step 03, with every role equipped but the DevOps Engineer, which comes later (ADR 0029, ADR 0049). Phases 5 and 6 deliver Milestone 1's product. Phases 7 to 14 deliver Milestone 2: the role kits, Farik Cloud, ask or auto with the kit check and the milestone runs, engines and providers, the rest of the ecosystem with the DevOps Engineer, the proof of concept, and the open-source launch on the web; the proof is inside Milestone 2 because it gates that milestone's launch (ADR 0025). Phase 16 is Milestone 3, the desktop app; phase 17 Milestone 4, mobile; phase 18 Milestone 5, premium.
+Milestones are defined in `docs/SPEC.md` section 11. Phases 0 through 4 build Milestone 0 and the team; its exit, with Milestone 1's, is run in the web UI in phase 10 step 03, with every role equipped but the DevOps Engineer, which comes later (ADR 0029, ADR 0049). Phases 5 and 6 deliver Milestone 1's product. Phases 7 to 14 deliver Milestone 2: the role kits, the Catervas folders, Farik Cloud, ask or auto with the kit check and the milestone runs, engines and providers, the rest of the ecosystem with the DevOps Engineer, the proof of concept, and the open-source launch on the web; the proof is inside Milestone 2 because it gates that milestone's launch (ADR 0025). Phase 16 is Milestone 3, the desktop app; phase 17 Milestone 4, mobile; phase 18 Milestone 5, premium.
 
 ## How to read a phase
 
@@ -542,6 +542,32 @@ Steps:
 | 10g | Product safety and eBay | 6.7, 6.10 | Added by revision 33. Farik's own `recalls` (CPSC product recalls; NHTSA vehicle recalls, complaints and ratings; vPIC VIN decoding; no account) and `ebay` (eBay's Browse API with a free developer key; search and one item), `FARIK_CONNECTORS` becoming `[osv, google-ads, fx, recalls, ebay]`, each pinned offline through the built binary (`step-10g-product-safety-and-ebay-sources.md`) |
 
 Interfaces this phase adds: written when the phase is next to be planned.
+
+## Phase 8: Catervas folders
+
+Ends with: each role on a team keeps its own documentation in `docs/catervas/<folder>/`, committed, which it alone writes and every agent reads, the Marketing Specialist reading only the Product Manager's folder and its own; a document the owner approves comes as a version for people and an `.agent.md` version for agents; the owner reads and edits every document on the web app's Files page; an approved feature is planned by the Product Manager, the Architect (in lanes as wide as the team's builders), the Product Manager's contracts and the Scrum Master's schedule; an existing repository's team is offered a Catervafication sprint that documents it, and a new project's Product Manager interviews the owner and has the product plan approved before anything else is planned; and the founder has run both in the web app, recorded in `docs/milestones/catervas-folders.md` (ADR 0051, `docs/design/catervas-folders.md`).
+
+Decisions for this phase (the founder, 2026-10-09; ADR 0051):
+
+- Made (the founder, 2026-10-09): the Catervas Folder System, as designed in `docs/design/catervas-folders.md`: committed folders per role ("In the repo, committed"); owner-only writes, every agent reads, the Marketing Specialist reads the Product Manager's folder and its own ("Read all; Marketing reads PM only"); an agent may change any document in its own folder, human documents included; human-approved documents in two versions, internal ones for agents alone; the hybrid of docs tasks and a ceremony write tool ("C: hybrid"); the owner's edit commits at once and the folder's agent re-derives its own version ("Commit at once as yours", "Owner re-derives it"); planning PM → Architect → PM → Scrum Master ("PM → Architect → SM"); a new project's interview and approval gate ("PM interview, then approval gate"); a Files page for the owner to view and modify the files.
+- Made (the founder, 2026-10-09): "Replace phase 8 with 9. Build Catervas folder system first before cloud." This phase is built before Catervas Cloud, which nothing in it needs; the phases from 8 on moved down by one (revision 42).
+- Made (ADR 0051): the DevOps Engineer's `operations/` folder, its Catervafication task and its incident response plan join its role's steps in phase 12.
+- Made (ADR 0032): the steps with screens (03, 04, 06, 07) are mocked up and the mockups approved by the founder before they are built.
+
+Steps:
+
+| Step | Name | Spec | Delivers |
+|---|---|---|---|
+| 01 | Role folders and ownership | 5.3, 5.4, 5.8, 6 | `role_folder`, the human-document list and pairs in `catervas-core`; readiness `folder_owned` (generalizing `marketing_paths_owned`) and the Definition of Done's `pair_changed_alone`; `docs/marketing/` moved to `docs/catervas/marketing/`; `.catervas/product/` and `catervas_write_product_doc` removed, the Product Manager's documents in `docs/catervas/product/`; every session told the folders (`step-01-role-folders-and-ownership.md`) |
+| 02 | The Marketing Specialist's read limit | 5.6, 6.5, 8.2 | a session's read paths, fixed when it starts; the hook refuses the Marketing Specialist's `Read`, `Grep` and `Glob` outside `docs/catervas/product/` and `docs/catervas/marketing/` (`read_not_allowed`) |
+| 03 | The folder write tool and approving human documents | 5.2, 5.4, 8.5 | `catervas_write_folder_doc` in ceremony sessions, held to the caller's folder; an agent-only document committed at once (`folder_doc.written`); a human document proposed and approved or sent back on Today (`folder_doc.proposed`, `.approved`, `.returned`); a task whose diff changes a human document accepted by the owner; the marketing plan's agent version; mocked up first |
+| 04 | The Files page | 4, 8.5 | browse the team's folders, view Markdown with Mermaid diagrams, edit and save as the owner's commit (`folder_doc.edited`, `file_changed`); a twin made stale by the owner's edit and its re-derive task; `pair_changed_alone`'s re-derive exception; mocked up first |
+| 05 | Plans with lanes | 5.3, 5.16, 6.1, 6.2, 6.3 | contract fields `plan` and `lane`; readiness `lanes_overlap`; the Architect's implementation plan in lanes no wider than the team's active builders; the Product Manager's contracts from it; the Scrum Master's schedule by lane; the fallbacks with no Architect or no Scrum Master |
+| 06 | A new project's interview and product plan | 4.1, 4.3, 5.3, 6.1 | `project.started`; the Product Manager's interview in the one-to-one chat and its "Draft the product plan" button; `product_plan_first` until `spec.md` and `roadmap.md` are on the default branch; mocked up first |
+| 07 | Catervafication | 4.1, 6 | the recommendation in the first run and on Today; the Catervafication epic with one docs task per role (`catervafication.started`), filed on approval of a new project's product plan too; every role's `catervafying-the-repository` skill; Catervas's recommended workflow in the Developer's kit; the sprint review's refreshes; mocked up first |
+| 08 | The founder's live check | 11 | in the web app, an existing repository Catervafied and a new project from interview to approved plan to its Catervafication, recorded in `docs/milestones/catervas-folders.md` and signed off |
+
+Interfaces this phase adds: each step plan's Interfaces section.
 
 ## Phase 9: Farik Cloud
 
