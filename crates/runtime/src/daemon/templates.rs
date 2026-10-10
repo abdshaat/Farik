@@ -331,6 +331,7 @@ mod tests {
             port: 49_731,
             clock: Arc::new(FixedClock::new(at())),
             take_on_error: std::sync::Mutex::default(),
+            leaving: std::sync::Mutex::default(),
             stores: Vec::new(),
             env: BTreeMap::new(),
             in_use: None,

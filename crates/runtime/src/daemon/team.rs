@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use farik_core::contract::Role;
@@ -38,7 +38,7 @@ use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 16] = [
+pub(super) const METHODS: [&str; 18] = [
     "team.save",
     "agent.replace",
     "team.start",
@@ -55,6 +55,8 @@ pub(super) const METHODS: [&str; 16] = [
     "procurement_mailbox.connect",
     "procurement_mailbox.disconnect",
     "procurement_mailbox.check",
+    "project.leave",
+    "keys_copied.dismiss",
 ];
 
 /// The marker the setup host leaves in a project it just made one, which "Start the team" removes.
@@ -1841,6 +1843,29 @@ pub(super) async fn call(
         "procurement_mailbox.connect" => Box::pin(mailbox_connect(state, &deps, &params)).await,
         "procurement_mailbox.disconnect" => mailbox_disconnect(state, &deps).await,
         "procurement_mailbox.check" => Box::pin(mailbox_check(state, &deps)).await,
+        "project.leave" => {
+            if let Some(web) = state.web() {
+                *crate::locked(&web.leaving) = Some(web.project_root.clone());
+            }
+            match super::handled(state, farik_protocol::command::Command::RunStop).await {
+                farik_protocol::command::CommandReply::Done { .. } => Ok(json!({})),
+                farik_protocol::command::CommandReply::Error { detail, .. } => {
+                    if let Some(web) = state.web() {
+                        *crate::locked(&web.leaving) = None;
+                    }
+                    Err(Failure::new(REFUSED, detail))
+                }
+            }
+        }
+        "keys_copied.dismiss" => {
+            let root = state
+                .web()
+                .map_or_else(PathBuf::new, |web| web.project_root.clone());
+            match std::fs::remove_file(root.join(crate::connectors::KEYS_COPIED)) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(internal(&error)),
+                _ => Ok(json!({})),
+            }
+        }
         "project.note" => off_the_worker(move || {
             deps.files
                 .append_project_note(
@@ -2130,6 +2155,7 @@ pub(super) mod tests {
                 port: 49_731,
                 clock: Arc::new(FixedClock::new(at())),
                 take_on_error: std::sync::Mutex::default(),
+                leaving: std::sync::Mutex::default(),
                 stores,
                 env: env
                     .iter()

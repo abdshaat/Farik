@@ -591,15 +591,14 @@ pub fn write_keys_copied(
 }
 
 /// What [`write_keys_copied`] noted in `root`: the folder the keys came from and how many; `None`
-/// when there is no note or it cannot be read.
+/// when there is no note, it cannot be read, or it lists no keys.
 #[must_use]
 pub fn keys_copied(root: &std::path::Path) -> Option<(String, usize)> {
     let note: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join(KEYS_COPIED)).ok()?).ok()?;
-    Some((
-        note.get("from")?.as_str()?.to_string(),
-        note.get("keys")?.as_array()?.len(),
-    ))
+    let count = note.get("keys")?.as_array()?.len();
+    let from = note.get("from")?.as_str()?.to_string();
+    (count > 0).then_some((from, count))
 }
 
 /// Why a server's tools could not be listed, or its launch not described.
@@ -1977,6 +1976,8 @@ mod tests {
         std::fs::create_dir_all(root.join(".farik/local")).expect("a root");
         assert_eq!(keys_copied(&root), None);
         std::fs::write(root.join(KEYS_COPIED), "not json").expect("written");
+        assert_eq!(keys_copied(&root), None);
+        std::fs::write(root.join(KEYS_COPIED), r#"{"from":"/x","keys":[]}"#).expect("written");
         assert_eq!(keys_copied(&root), None);
     }
 }

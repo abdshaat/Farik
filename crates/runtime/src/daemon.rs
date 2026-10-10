@@ -356,6 +356,14 @@ impl DaemonState {
         }
     }
 
+    /// The project `project.leave` is leaving, if it was asked to; serve reads it once the run has
+    /// stopped.
+    #[must_use]
+    pub fn left(&self) -> Option<PathBuf> {
+        self.web()
+            .and_then(|web| crate::locked(&web.leaving).clone())
+    }
+
     /// Keeps the agents' connector keys in `secrets` from now on. Answers `true`, or `false` when
     /// a store was already set, which is kept.
     pub fn set_connector_secrets(&self, secrets: Arc<dyn ConnectorSecrets>) -> bool {

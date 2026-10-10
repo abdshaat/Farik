@@ -163,7 +163,7 @@ Files: modified `crates/runtime/src/daemon/web.rs` (`WebState.leaving`, `serve_s
 - `serve_status_names_the_project_being_left_in_setup` — a setup state whose `web.leaving` is `/h/old`: `leaving` `"/h/old"`, `project_root` `null`, `keys_copied` `null`.
 - `serve_status_reports_copied_keys_until_dismissed` — `write_keys_copied` with three keys: `keys_copied` is `{ "from": <old>, "count": 3 }`; `keys_copied.dismiss` answers `{}`, the file is gone and `keys_copied` is `null`; a second dismiss answers `{}`.
 
-- [ ] `feat(runtime): leave the project from the browser`
+- [x] `feat(runtime): leave the project from the browser`
 
 ### Task 6: serve goes from drive to setup and back
 
