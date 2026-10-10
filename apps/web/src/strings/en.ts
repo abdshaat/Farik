@@ -14,7 +14,6 @@ export const en = {
 	sectionSavedTeams: "Saved teams",
 	sectionComputer: "This computer",
 	sectionAccount: "AI account",
-	sectionRules: "Your team’s rules",
 	sectionGeneralSummary: "Theme, language, advanced",
 	sectionAllowedActionsSummary: "What agents may do",
 	sectionSpendingSummary: "The daily limit",
@@ -23,7 +22,6 @@ export const en = {
 	sectionSavedTeamsSummary: "Your saved teams",
 	sectionComputerSummary: "Folder and connection",
 	sectionAccountSummary: "Your Claude account",
-	sectionRulesSummary: "Spending, permissions and plans",
 	yourAppNone: "Add a UI/UX Designer to your team first.",
 	noPage: "No page here",
 	noPageHome: "Go to the start page",
@@ -806,7 +804,6 @@ export const en = {
 	mayGitRemote: "sends its work to its own branches online",
 	mayExternal: "acts outside your computer, with your approval",
 	putBack: "Put back the default",
-	rulesArea: "Your team’s rules",
 	rulesNextSession:
 		"Your answers from setup. Change them whenever you like.\nA change starts with each agent’s next piece of work, never in the middle of one.",
 	rulesMay: "What agents may do",

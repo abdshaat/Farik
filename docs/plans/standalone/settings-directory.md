@@ -112,7 +112,7 @@ Tests:
 - The rules tests in `team.test.tsx` move from `/settings/rules` to their page; the `settings()` helper's `part(name)` looks within `main` (no `rulesArea` region is left) and it returns no `rules`; `switches_planning_in_sprints` uses `main` where it used `rules`. Saving one part still leaves another's draft (`keeps_each_rules_draft_until_it_is_saved_or_cancelled`, kept on `/settings/work` with two of that page's parts).
 - e2e: `templates.spec.ts:58` → `/settings/allowed-actions`, `board.spec.ts:227`, `sprints.spec.ts:245` and `setup-team.spec.ts:90` → `/settings/work`.
 
-- [ ] `feat(web): put the team's rules on three Settings pages`
+- [x] `feat(web): put the team's rules on three Settings pages`
 
 ### Task 3: links land on their section
 

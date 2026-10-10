@@ -16,14 +16,16 @@ import { Questions } from "../pages/Questions.tsx";
 import { RequestFiled } from "../pages/RequestFiled.tsx";
 import { SprintPage } from "../pages/SprintPage.tsx";
 import { Account } from "../pages/settings/Account.tsx";
+import { AllowedActions } from "../pages/settings/AllowedActions.tsx";
 import { Computer } from "../pages/settings/Computer.tsx";
 import { General } from "../pages/settings/General.tsx";
-import { Rules } from "../pages/settings/Rules.tsx";
 import { SavedTeamsPage } from "../pages/settings/SavedTeamsPage.tsx";
 import {
 	SettingsIndex,
 	SettingsLayout,
 } from "../pages/settings/SettingsLayout.tsx";
+import { Spending } from "../pages/settings/Spending.tsx";
+import { Work } from "../pages/settings/Work.tsx";
 import { YourApp } from "../pages/settings/YourApp.tsx";
 import { SetupAccount } from "../pages/setup/SetupAccount.tsx";
 import { SetupAdvanced } from "../pages/setup/SetupAdvanced.tsx";
@@ -93,7 +95,9 @@ export function App() {
 						path="general"
 						element={<General theme={theme} onTheme={setTheme} />}
 					/>
-					<Route path="rules" element={<Rules />} />
+					<Route path="allowed-actions" element={<AllowedActions />} />
+					<Route path="spending" element={<Spending />} />
+					<Route path="work" element={<Work />} />
 					<Route path="your-app" element={<YourApp />} />
 					<Route path="saved-teams" element={<SavedTeamsPage />} />
 					<Route path="computer" element={<Computer />} />

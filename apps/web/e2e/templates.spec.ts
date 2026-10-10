@@ -55,7 +55,7 @@ test("the user saves a team, starts a project from it, and uses one on a live te
 				.getByText("the login form is done and its tests are next."),
 		).toBeVisible({ timeout: 15_000 });
 
-		await page.goto(inA("/settings/rules"));
+		await page.goto(inA("/settings/allowed-actions"));
 		const may = page.getByRole("region", { name: "What agents may do" });
 		await may.getByLabel(/^Yes, on its own branches/).check();
 		await may.getByRole("button", { name: "Save changes" }).click();

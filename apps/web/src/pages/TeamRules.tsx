@@ -35,10 +35,11 @@ type Part = {
 };
 
 /**
- * Settings' "Your team's rules": setup's four questions after setup, each saved on its own
- * through `team.save`, its effect shown first (SPEC 4.4, 10).
+ * The team's rules after setup: setup's four questions, each part saved on its own through
+ * `team.save`, its effect shown first (SPEC 4.4, 10). The hook is what the Settings pages share;
+ * each page draws its own parts with `key(name)`, so saving one starts only that one again.
  */
-export function TeamRules({ advanced = false }: { advanced?: boolean }) {
+export function useRuleParts() {
 	const { data, again } = useQuery<{ team: Team }>("team.get", {});
 	const defaults = useDefaults();
 	const { data: base } = useQuery<Checked>(
@@ -49,9 +50,8 @@ export function TeamRules({ advanced = false }: { advanced?: boolean }) {
 	// Each part's round: saving or cancelling one starts that one again, and no other, so the
 	// others keep their drafts over the team as the daemon reads it again.
 	const [rounds, setRounds] = useState<Record<string, number>>({});
-	if (!data) return null;
-	const part = (name: string) => ({
-		saved: data.team,
+	const part = (name: string): Part => ({
+		saved: data?.team as Team,
 		defaults,
 		base,
 		done: () => {
@@ -59,30 +59,23 @@ export function TeamRules({ advanced = false }: { advanced?: boolean }) {
 			again();
 		},
 	});
+	// The spending fields keep their own state, so a newly saved limit starts them again.
+	const key = (name: string) =>
+		name === "spend"
+			? `spend-${rounds.spend ?? 0}-${data?.team.budgets.dailyUsd}`
+			: `${name}-${rounds[name] ?? 0}`;
+	return { ready: Boolean(data), part, key };
+}
+
+/** A rules page's heading, with the note that a change starts with each agent's next work. */
+export function RulesTitle({ name }: { name: string }) {
 	return (
-		<section className={styles.section} aria-labelledby="rules-area">
-			<div className={styles.titled}>
-				<h2 id="rules-area">{t("rulesArea")}</h2>
-				<InfoTip id="rulesNextSession-info">
-					<Bullets text={t("rulesNextSession")} />
-				</InfoTip>
-			</div>
-			<May key={`may-${rounds.may ?? 0}`} {...part("may")} />
-			{/* Its fields keep their own state, so a newly saved limit starts it again. */}
-			<Spend
-				key={`spend-${rounds.spend ?? 0}-${data.team.budgets.dailyUsd}`}
-				{...part("spend")}
-			/>
-			<Finish key={`finish-${rounds.finish ?? 0}`} {...part("finish")} />
-			<Planning
-				key={`planning-${rounds.planning ?? 0}`}
-				{...part("planning")}
-			/>
-			<Plans key={`plans-${rounds.plans ?? 0}`} {...part("plans")} />
-			{advanced && (
-				<UiPaths key={`paths-${rounds.paths ?? 0}`} {...part("paths")} />
-			)}
-		</section>
+		<div className={styles.titled}>
+			<h2 className={styles.pageHeading}>{name}</h2>
+			<InfoTip id="rulesNextSession-info">
+				<Bullets text={t("rulesNextSession")} />
+			</InfoTip>
+		</div>
 	);
 }
 

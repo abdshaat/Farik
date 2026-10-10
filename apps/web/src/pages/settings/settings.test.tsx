@@ -71,6 +71,9 @@ describe("settings directory", () => {
 		expect(links.map((a) => a.textContent)).toEqual(
 			SECTIONS.map((s) => en[s.name]),
 		);
+		// The team's rules have three sections of their own, not one.
+		expect(links).toHaveLength(8);
+		expect(links.map((a) => a.textContent)).not.toContain("Your team’s rules");
 		expect(links.map((a) => a.getAttribute("aria-current"))).toEqual(
 			SECTIONS.map((s) => (s.path === "general" ? "page" : null)),
 		);
@@ -177,5 +180,79 @@ describe("settings directory", () => {
 		for (const line of en.advancedMore.split("\n")) onlyInTips(line);
 		fireEvent.click(advanced);
 		expect(localStorage.getItem("catervas.advanced")).toBe("true");
+	});
+
+	it("splits_the_rules_across_three_sections", async () => {
+		const rules = {
+			team: {
+				name: "Corner Bakery",
+				agents: [agent("software_developer")],
+				budgets: {},
+				policy: {
+					integration: "auto_merge",
+					permissions: { run_commands: false, push: false },
+				},
+				rules: {},
+			},
+			agents: [],
+			judges: [],
+			max_agents: 7,
+		};
+		const defaults = {
+			budgets: {},
+			rules: {},
+			policy: {
+				integration: "auto_merge",
+				judgment: {
+					required: "always",
+					questions: ["Does the task fit its budget?"],
+					judge: "auto",
+				},
+				permissions: { run_commands: true, push: false },
+				plan_in_sprints: true,
+			},
+			ui_paths: ["**/*.tsx"],
+		};
+		const parts = [
+			en.rulesMay,
+			en.rulesSpendTitle,
+			en.rulesFinish,
+			en.rulesPlanning,
+			en.planTitle,
+			en.uiPathsTitle,
+		];
+		const pages = [
+			["allowed-actions", en.sectionAllowedActions, [en.rulesMay]],
+			["spending", en.sectionSpending, [en.rulesSpendTitle]],
+			[
+				"work",
+				en.sectionWork,
+				[en.rulesFinish, en.rulesPlanning, en.planTitle],
+			],
+		] as const;
+		for (const [path, name, held] of pages) {
+			const { container, s } = await open(`/settings/${path}`, rules);
+			await answerQuery(s, "settings.defaults", defaults);
+			expect(
+				await screen.findByRole("heading", { level: 2, name }),
+			).toBeTruthy();
+			for (const part of parts) {
+				const region = main().queryByRole("region", { name: part });
+				// The patterns come with Advanced, not with the page.
+				if ((held as readonly string[]).includes(part))
+					expect(region).toBeTruthy();
+				else expect(region).toBeNull();
+			}
+			for (const line of en.rulesNextSession.split("\n")) onlyInTips(line);
+			await expectNoAxeViolations(container);
+			cleanup();
+		}
+
+		localStorage.setItem("catervas.advanced", "true");
+		const { s } = await open("/settings/work", rules);
+		await answerQuery(s, "settings.defaults", defaults);
+		expect(
+			await main().findByRole("region", { name: en.uiPathsTitle }),
+		).toBeTruthy();
 	});
 });

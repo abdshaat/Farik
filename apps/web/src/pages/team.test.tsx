@@ -172,12 +172,14 @@ const DEFAULTS = {
 	ui_paths: UI_PATHS,
 };
 
-/** A Settings section, with the queries it asks answered: the rules page asks for the defaults. */
-async function settings(team: object = TEAM, path = "/settings/rules") {
+const RULES_PAGES = ["allowed-actions", "spending", "work"];
+
+/** A Settings section, with the queries it asks answered: a rules page asks for the defaults. */
+async function settings(team: object = TEAM, path = "/settings/work") {
 	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
-	const isRules = path.endsWith("/rules");
+	const isRules = RULES_PAGES.some((page) => path.endsWith(`/${page}`));
 	// Only the rules and the preview ask for the team, on a phone.
 	if (isRules || path.endsWith("/your-app"))
 		await answerQuery(s, "team.get", {
@@ -187,12 +189,10 @@ async function settings(team: object = TEAM, path = "/settings/rules") {
 			max_agents: 7,
 		});
 	if (isRules) await answerQuery(s, "settings.defaults", DEFAULTS);
-	const rules = isRules
-		? await screen.findByRole("region", { name: en.rulesArea })
-		: await screen.findByRole("main");
+	const main = await screen.findByRole("main");
 	const part = (name: string) =>
-		within(rules).getByRole("region", { name }) as HTMLElement;
-	return { container, s, rules, part };
+		within(main).getByRole("region", { name }) as HTMLElement;
+	return { container, s, main, part };
 }
 
 const picked = (el: HTMLElement) => (el as HTMLInputElement).checked;
@@ -744,11 +744,11 @@ describe("team page", () => {
 
 	it("edits_the_ui_paths_in_advanced", async () => {
 		// With Advanced off the page does not ask for the patterns.
-		await settings(WITH_IRIS);
+		await settings(WITH_IRIS, "/settings/work");
 		expect(screen.queryByRole("region", { name: en.uiPathsTitle })).toBeNull();
 		cleanup();
 		localStorage.setItem("catervas.advanced", "true");
-		const { container, s } = await settings(WITH_IRIS);
+		const { container, s } = await settings(WITH_IRIS, "/settings/work");
 		const paths = screen.getByRole("region", { name: en.uiPathsTitle });
 		const list = within(paths).getByRole("list");
 		// The team says none, so the seven defaults stand.
@@ -788,7 +788,10 @@ describe("team page", () => {
 	});
 
 	it("changes_what_agents_may_do_and_the_limit_from_settings", async () => {
-		const { container, s, part } = await settings();
+		const { container, s, part } = await settings(
+			TEAM,
+			"/settings/allowed-actions",
+		);
 		for (const line of en.rulesNextSession.split("\n")) onlyInTips(line);
 		await expectNoAxeViolations(container);
 
@@ -850,8 +853,11 @@ describe("team page", () => {
 			).toBeGreaterThan(1),
 		);
 
-		// The same daily limit as the Costs page's.
-		const spend = part(en.rulesSpendTitle);
+		// The same daily limit as the Costs page's, on its own page.
+		cleanup();
+		const next = await settings(TEAM, "/settings/spending");
+		const { s: s2, part: part2 } = next;
+		const spend = part2(en.rulesSpendTitle);
 		expect(
 			picked(within(spend).getByRole("radio", { name: /^No limit/ })),
 		).toBe(true);
@@ -863,18 +869,20 @@ describe("team page", () => {
 		fireEvent.change(within(spend).getByLabelText(en.spendAmount), {
 			target: { value: "15" },
 		});
-		const limited = await validated(s, ["The team may spend up to $15 a day."]);
+		const limited = await validated(s2, [
+			"The team may spend up to $15 a day.",
+		]);
 		expect(limited.budgets).toEqual({ daily_usd: 15 });
 		expect(
 			await within(spend).findByText("The team may spend up to $15 a day."),
 		).toBeTruthy();
 		fireEvent.click(within(spend).getByRole("button", { name: en.agentSave }));
-		await waitFor(() => expect(s.calls("team.save")).toHaveLength(3));
-		expect((await saved(s)).budgets).toEqual({ daily_usd: 15 });
+		await waitFor(() => expect(s2.calls("team.save")).toHaveLength(1));
+		expect((await saved(s2)).budgets).toEqual({ daily_usd: 15 });
 	});
 
 	it("changes_how_work_is_added_and_how_plans_are_checked_from_settings", async () => {
-		const { container, s, part } = await settings();
+		const { container, s, part } = await settings(TEAM, "/settings/work");
 
 		const finish = part(en.rulesFinish);
 		expect(
@@ -1001,7 +1009,7 @@ describe("team page", () => {
 	it("reads_an_old_team_as_not_planning_in_sprints", async () => {
 		// TEAM has no plan_in_sprints, as a team file from before step 15; the default is on.
 		expect("plan_in_sprints" in TEAM.policy).toBe(false);
-		const { part } = await settings(TEAM);
+		const { part } = await settings(TEAM, "/settings/work");
 		const toggle = within(part(en.rulesPlanning)).getByRole("switch", {
 			name: en.planInSprints,
 		});
@@ -1010,9 +1018,9 @@ describe("team page", () => {
 
 	it("switches_planning_in_sprints", async () => {
 		const on = { ...TEAM, policy: { ...TEAM.policy, plan_in_sprints: true } };
-		const { container, s, rules, part } = await settings(on);
+		const { container, s, main, part } = await settings(on, "/settings/work");
 		// The section sits after "How finished work is added", before the plan check.
-		const headings = within(rules)
+		const headings = within(main)
 			.getAllByRole("heading", { level: 3 })
 			.map((h) => h.textContent);
 		expect(headings.indexOf(en.rulesPlanning)).toBe(
@@ -1059,7 +1067,7 @@ describe("team page", () => {
 	});
 
 	it("keeps_each_rules_draft_until_it_is_saved_or_cancelled", async () => {
-		const { s, part } = await settings();
+		const { s, part } = await settings(TEAM, "/settings/work");
 		// The saved team is checked once on load, not once for each part.
 		await act(async () => {});
 		expect(
@@ -1067,11 +1075,13 @@ describe("team page", () => {
 		).toHaveLength(1);
 
 		// A draft in one part survives another part's save and the page's re-read.
-		const branches = () =>
-			within(part(en.rulesMay)).getByRole("radio", {
-				name: /^Yes, on its own branches/,
+		const sprints = () =>
+			within(part(en.rulesPlanning)).getByRole("switch", {
+				name: en.planInSprints,
 			});
-		fireEvent.click(branches());
+		expect(sprints().getAttribute("aria-checked")).toBe("false");
+		fireEvent.click(sprints());
+		expect(sprints().getAttribute("aria-checked")).toBe("true");
 		const finish = part(en.rulesFinish);
 		fireEvent.click(
 			within(finish).getByRole("radio", {
@@ -1105,22 +1115,21 @@ describe("team page", () => {
 				),
 			).toBe(true),
 		);
-		expect(picked(branches())).toBe(true);
+		expect(sprints().getAttribute("aria-checked")).toBe("true");
 
 		// Cancel drops the draft: the part shows the team's own answer again.
 		fireEvent.click(
-			within(part(en.rulesMay)).getByRole("button", { name: en.agentCancel }),
+			within(part(en.rulesPlanning)).getByRole("button", {
+				name: en.agentCancel,
+			}),
 		);
-		await waitFor(() => expect(picked(branches())).toBe(false));
-		expect(
-			picked(
-				within(part(en.rulesMay)).getByRole("radio", {
-					name: /^No, nobody may/,
-				}),
-			),
-		).toBe(true);
+		await waitFor(() =>
+			expect(sprints().getAttribute("aria-checked")).toBe("false"),
+		);
+	});
 
-		// A saved limit is what the part shows once the team is read again.
+	it("shows_a_saved_limit_once_the_team_is_read_again", async () => {
+		const { s, part } = await settings(TEAM, "/settings/spending");
 		const spend = () => part(en.rulesSpendTitle);
 		fireEvent.click(
 			within(spend()).getByRole("radio", {
@@ -1137,8 +1146,8 @@ describe("team page", () => {
 		fireEvent.click(
 			within(spend()).getByRole("button", { name: en.agentSave }),
 		);
-		await waitFor(() => expect(s.calls("team.save")).toHaveLength(2));
-		await s.reply(s.calls("team.save")[1] as never, {});
+		await waitFor(() => expect(s.calls("team.save")).toHaveLength(1));
+		await s.reply(s.calls("team.save")[0] as never, {});
 		const again = await waitFor(() => {
 			const all = s.calls("query").filter((q) => q.params.name === "team.get");
 			if (all.length === reads) throw new Error("the team was not read again");
@@ -1823,7 +1832,7 @@ describe("info buttons on Settings", () => {
 		await expectNoAxeViolations(general.container);
 		cleanup();
 
-		await settings();
+		await settings(TEAM, "/settings/allowed-actions");
 		for (const line of en.rulesNextSession.split("\n")) onlyInTips(line);
 		cleanup();
 

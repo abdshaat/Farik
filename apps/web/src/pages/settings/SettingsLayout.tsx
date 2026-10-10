@@ -16,7 +16,17 @@ type Section = {
 /** The sections, in the order the list shows them. */
 export const SECTIONS: readonly Section[] = [
 	{ path: "general", name: "sectionGeneral", summary: "sectionGeneralSummary" },
-	{ path: "rules", name: "sectionRules", summary: "sectionRulesSummary" },
+	{
+		path: "allowed-actions",
+		name: "sectionAllowedActions",
+		summary: "sectionAllowedActionsSummary",
+	},
+	{
+		path: "spending",
+		name: "sectionSpending",
+		summary: "sectionSpendingSummary",
+	},
+	{ path: "work", name: "sectionWork", summary: "sectionWorkSummary" },
 	{
 		path: "your-app",
 		name: "sectionYourApp",
