@@ -268,7 +268,7 @@ describe("Files", () => {
 		});
 		await screen.findByRole("heading", { name: "Roadmap" });
 		expect(
-			screen.queryByText(en.filesBringing.replace("{name}", "Mira")),
+			screen.queryByText(en.filesBringing.replace("{owner}", "Mira")),
 		).toBeNull();
 		fireEvent.click(screen.getByRole("button", { name: en.filesForTeam }));
 		const notice = screen
@@ -551,6 +551,16 @@ describe("Files", () => {
 					"/path",
 					"file_busy",
 					"This file was also changed on your computer, outside Catervas. Finish or undo that change, then save here again.",
+				],
+				[
+					"/path",
+					"marketing_plan",
+					"A marketing plan changes through a new version on its page.",
+				],
+				[
+					"/path",
+					"is_a_link",
+					"This file is a link, which Catervas does not write through.",
 				],
 				[
 					"/text",
