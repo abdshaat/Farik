@@ -6,7 +6,7 @@ description: Use before writing a marketing plan, or when the task asks who the 
 # Researching the market
 
 A plan built on a guess spends the owner's money on it. Research the whole market and its channels
-first, and write it down where the plan can point at it, under `docs/marketing/research/`. Where
+first, and write it down where the plan can point at it, under `docs/catervas/marketing/research/`. Where
 `researching-competitors` compares three to five rivals, this skill covers everything around
 them. Take that skill's table for the rivals and do not repeat it here.
 

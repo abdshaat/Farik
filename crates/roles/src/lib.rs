@@ -1070,9 +1070,9 @@ mod tests {
             );
         }
         for path in [
-            "docs/marketing/brand/brand-kit.md",
-            "docs/marketing/brand/persona.md",
-            "docs/marketing/plans/",
+            "docs/catervas/marketing/brand/brand-kit.md",
+            "docs/catervas/marketing/brand/persona.md",
+            "docs/catervas/marketing/plans/",
         ] {
             assert!(prompt.contains(path), "the prompt does not name {path}");
         }
@@ -1151,10 +1151,10 @@ mod tests {
         }
         let ships = of("marketing-what-ships").to_lowercase();
         for path in [
-            "docs/marketing/brand/brand-kit.md",
-            "docs/marketing/brand/persona.md",
-            "docs/marketing/plans/",
-            "docs/marketing/research/",
+            "docs/catervas/marketing/brand/brand-kit.md",
+            "docs/catervas/marketing/brand/persona.md",
+            "docs/catervas/marketing/plans/",
+            "docs/catervas/marketing/research/",
         ] {
             assert!(
                 ships.contains(path),
@@ -1215,7 +1215,9 @@ mod tests {
             .find(|skill| skill.name == "brand-and-design-tokens")
             .expect("the Designer's brand-and-design-tokens skill");
         assert!(
-            skill.body.contains("docs/marketing/brand/brand-kit.md"),
+            skill
+                .body
+                .contains("docs/catervas/marketing/brand/brand-kit.md"),
             "{}",
             skill.body
         );
@@ -1240,6 +1242,58 @@ mod tests {
             let flat = skill.body.split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(flat.contains(sentence), "{role}/{skill_name}: {flat}");
         }
+    }
+
+    /// The Marketing Specialist's folder is `docs/catervas/marketing/` (spec 5.17): no shipped
+    /// text, a role's or a kit's, still names the old one.
+    #[test]
+    fn no_shipped_text_names_the_old_marketing_folder() {
+        for role in super::SHIPPED_ROLES {
+            let definition = loaded(role);
+            let mut texts = vec![
+                definition.system_prompt.clone(),
+                definition.mandate.clone(),
+                definition.persona.clone(),
+            ];
+            texts.extend(definition.produces.iter().cloned());
+            texts.extend(definition.forbidden.iter().cloned());
+            texts.extend(definition.skills.iter().map(|skill| skill.text.clone()));
+            if let Ok(kit) = load_kit(role) {
+                for skill in &kit.skills {
+                    texts.extend(skill.session_files.values().cloned());
+                }
+            }
+            // Built apart, so that this file does not name the folder it forbids.
+            let old = format!("docs/{}/", "marketing");
+            for text in texts {
+                assert!(!text.contains(&old), "{role}: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_plan_skill_commits_the_plan_and_its_twin() {
+        let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
+        let skill = kit
+            .skills
+            .iter()
+            .find(|skill| skill.name == "writing-the-marketing-plan")
+            .expect("the plan skill");
+        let flat = skill.session_files["SKILL.md"]
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        for needle in ["agent_text", "MP-<n>.agent.md", "catervas_git_commit"] {
+            assert!(
+                flat.contains(needle),
+                "the plan skill lost {needle}: {flat}"
+            );
+        }
+        assert!(
+            flat.contains("MP-<n>.md and MP-<n>.agent.md together")
+                || flat.contains("`MP-<n>.md` and `MP-<n>.agent.md` together"),
+            "{flat}"
+        );
     }
 
     #[test]

@@ -2215,7 +2215,7 @@ mod tests {
         produced.exit_criteria[0].verification = VerificationWire::Variant2 {
             method: json!("artifact"),
             must_contain: Vec::new(),
-            path: "docs/marketing/release-notes.md".to_string(),
+            path: "docs/catervas/marketing/release-notes.md".to_string(),
         };
         assert_eq!(
             reasons(check_criteria_recorded(&produced, &[], &work)),

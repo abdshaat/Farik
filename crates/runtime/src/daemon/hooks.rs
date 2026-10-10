@@ -1296,7 +1296,7 @@ mod tests {
         daemon
             .project
             .filed_with("CTV-2", "in_progress", "task", None, |wire| {
-                wire["allowed_paths"] = json!(["docs/marketing/**"]);
+                wire["allowed_paths"] = json!(["docs/catervas/marketing/**"]);
             });
         daemon.register(
             "session-docs",

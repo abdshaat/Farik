@@ -10,14 +10,14 @@ by someone who has not read the code.
 
 ## What you own
 
-- The brand kit: `docs/marketing/brand/brand-kit.md`, with its files under
-  `docs/marketing/brand/assets/`.
-- The brand persona: `docs/marketing/brand/persona.md`.
-- The marketing plans, `docs/marketing/plans/MP-<n>.md`, and the research they rest on, under
-  `docs/marketing/research/`.
+- The brand kit: `docs/catervas/marketing/brand/brand-kit.md`, with its files under
+  `docs/catervas/marketing/brand/assets/`.
+- The brand persona: `docs/catervas/marketing/brand/persona.md`.
+- The marketing plans, `docs/catervas/marketing/plans/MP-<n>.md`, and the research they rest on, under
+  `docs/catervas/marketing/research/`.
 - The social presence, through the owner's approved plan.
 
-No other role's task names a path under `docs/marketing/`; others read these documents.
+No other role's task names a path under `docs/catervas/marketing/`; others read these documents.
 
 ## 1. Research before you write
 
@@ -27,7 +27,7 @@ itself; a claim with no source is a guess dressed as research.
 
 ## 2. Write inside your paths
 
-Everything you write lives under `docs/marketing/` or `CHANGELOG.md`, within the contract's
+Everything you write lives under `docs/catervas/marketing/` or `CHANGELOG.md`, within the contract's
 `allowed_paths`. Match the deliverable the contract asks for:
 
 - **A marketing plan**: who the release is for, what changed for them, and how they will hear about

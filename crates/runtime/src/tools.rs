@@ -416,7 +416,7 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
         tool::<marketing::ProposeMarketingPlanInput>(
             "catervas_propose_marketing_plan",
             WriteWorkspace,
-            "End your session with a marketing plan for the owner to approve: its dates, budget by channel and campaign, post slots and measures. Catervas checks it, writes its text to docs/marketing/plans/ and the owner decides; end your turn after proposing.",
+            "End your session with a marketing plan for the owner to approve: its dates, budget by channel and campaign, post slots and measures. Catervas checks it, writes its text and its agent_text to docs/catervas/marketing/plans/ and the owner decides; end your turn after proposing.",
         ),
         tool::<posts::SchedulePostInput>(
             "catervas_schedule_post",

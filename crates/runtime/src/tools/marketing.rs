@@ -1,6 +1,7 @@
 //! The Marketing Specialist's tools (ADR 0042): `catervas_propose_marketing_plan`, which ends its
 //! session with a plan for the owner to approve. It acts on the task's worktree; a module of its
-//! own keeps the files it writes under `docs/marketing/` together.
+//! own keeps the files it writes under `docs/catervas/marketing/` together: a plan's text for people
+//! and its twin for agents.
 
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
@@ -34,8 +35,11 @@ pub struct ProposeMarketingPlanInput {
     /// it costs and what they get. The owner reads this first.
     summary: String,
     /// The plan in full, 200 to 16,000 characters. Catervas also writes it to
-    /// docs/marketing/plans/MP-<n>.md.
+    /// docs/catervas/marketing/plans/MP-<n>.md.
     text: String,
+    /// The plan written for agents, 200 to 16,000 characters. Catervas writes it to
+    /// docs/catervas/marketing/plans/MP-<n>.agent.md, beside the plan for people.
+    agent_text: String,
     /// The first day, as YYYY-MM-DD in UTC: yesterday's date or later.
     starts_on: String,
     /// The last day, as YYYY-MM-DD in UTC: at most 92 days from the first, both counted.
@@ -113,12 +117,67 @@ pub struct PlanPostInput {
 }
 
 /// Where the marketing plans' texts live in a worktree and in the project root.
-const PLANS_FOLDER: &str = "docs/marketing/plans";
+const PLANS_FOLDER: &str = "docs/catervas/marketing/plans";
 
 /// The path of plan `MP-<number>`'s text, relative to a worktree. Number 0 stands for the number
 /// not taken yet: the path of the folder's check.
 pub(super) fn plan_file(number: u32) -> String {
     format!("{PLANS_FOLDER}/MP-{number}.md")
+}
+
+/// The path of plan `MP-<number>`'s agent twin, relative to a worktree.
+fn plan_twin_file(number: u32) -> String {
+    format!("{PLANS_FOLDER}/MP-{number}.agent.md")
+}
+
+/// How many characters a plan written for agents has, once its edges are trimmed.
+const AGENT_TEXT_LENGTH: std::ops::RangeInclusive<usize> = 200..=16_000;
+
+/// The fault of a plan that replaces one that is not in force, or is in another currency.
+fn replaces_fault(plans: &[MarketingPlan], proposal: &PlanProposal) -> Option<ProposalRefusal> {
+    let replaced = proposal.replaces.as_ref()?;
+    let in_force = plans.iter().find(|plan| {
+        &plan.record.id == replaced
+            && plan.record.approved_seq.is_some()
+            && plan.record.ended.is_none()
+    });
+    match in_force {
+        None => Some(fault(
+            "marketing_plan_unknown",
+            "replaces",
+            format!("{replaced} is not an approved plan that is still in force"),
+        )),
+        // The campaigns Catervas made for the old plan hold its amounts in its currency, which
+        // the new plan's figures would be read as (ADR 0042, SPEC 6.7): a plan in another
+        // currency is a new plan, started when the old one has ended.
+        Some(plan) if plan.proposal.currency != proposal.currency => Some(fault(
+            "marketing_plan_currency",
+            "currency",
+            format!(
+                "{replaced} is in {}, and a plan replaces another only in the same currency, \
+                 not in {}; to change currency, wait for {replaced} to end and propose a plan \
+                 that replaces nothing",
+                plan.proposal.currency, proposal.currency
+            ),
+        )),
+        Some(_) => None,
+    }
+}
+
+/// The fault of a plan for agents that is too short or too long, when it is.
+fn agent_text_fault(agent_text: &str) -> Option<ProposalRefusal> {
+    let length = agent_text.trim().chars().count();
+    (!AGENT_TEXT_LENGTH.contains(&length)).then(|| {
+        fault(
+            "marketing_plan_text",
+            "agent_text",
+            format!(
+                "the agent_text is {length} characters; it must be {} to {}",
+                AGENT_TEXT_LENGTH.start(),
+                AGENT_TEXT_LENGTH.end()
+            ),
+        )
+    })
 }
 
 /// The tool's name.
@@ -178,34 +237,8 @@ pub(crate) fn propose_plan(
     let mut found = check_proposal(&proposal, deps.clock.now().date_naive())
         .err()
         .unwrap_or_default();
-    if let Some(replaced) = &proposal.replaces {
-        let in_force = plans.iter().find(|plan| {
-            &plan.record.id == replaced
-                && plan.record.approved_seq.is_some()
-                && plan.record.ended.is_none()
-        });
-        match in_force {
-            None => found.push(fault(
-                "marketing_plan_unknown",
-                "replaces",
-                format!("{replaced} is not an approved plan that is still in force"),
-            )),
-            // The campaigns Catervas made for the old plan hold its amounts in its currency, which
-            // the new plan's figures would be read as (ADR 0042, SPEC 6.7): a plan in another
-            // currency is a new plan, started when the old one has ended.
-            Some(plan) if plan.proposal.currency != proposal.currency => found.push(fault(
-                "marketing_plan_currency",
-                "currency",
-                format!(
-                    "{replaced} is in {}, and a plan replaces another only in the same currency, \
-                     not in {}; to change currency, wait for {replaced} to end and propose a plan \
-                     that replaces nothing",
-                    plan.proposal.currency, proposal.currency
-                ),
-            )),
-            Some(_) => {}
-        }
-    }
+    found.extend(replaces_fault(&plans, &proposal));
+    found.extend(agent_text_fault(&input.agent_text));
     if !found.is_empty() {
         return Err(faults(found));
     }
@@ -220,13 +253,14 @@ pub(crate) fn propose_plan(
     );
     let id = format!("MP-{number}");
     let path = plan_file(number);
+    let twin_path = plan_twin_file(number);
     let tool = TOOLS
         .iter()
         .find(|tool| tool.name == PROPOSE_TOOL)
         .ok_or_else(|| ToolError::Failed {
             detail: format!("{PROPOSE_TOOL} is not listed"),
         })?;
-    call.permit(tool, vec![path.clone()])?;
+    call.permit(tool, vec![path.clone(), twin_path.clone()])?;
     if !worktree.is_dir() {
         return Err(failed(format!(
             "{} has no worktree to write {path} in",
@@ -235,10 +269,18 @@ pub(crate) fn propose_plan(
     }
     let title = input.title.split_whitespace().collect::<Vec<_>>().join(" ");
     let file = worktree.join(&path);
+    let twin = worktree.join(&twin_path);
     write_new(
         &file,
         &format!("# {id}: {title}\n\n{}\n", input.text.trim_end()),
     )?;
+    if let Err(error) = write_new(
+        &twin,
+        &format!("# {id}: {title}\n\n{}\n", input.agent_text.trim_end()),
+    ) {
+        let _ = std::fs::remove_file(&file);
+        return Err(error);
+    }
     let recorded = call.append(
         Some(task),
         EventBody::MarketingPlanProposed(body_of(call, &id, input, &proposal)?),
@@ -246,6 +288,7 @@ pub(crate) fn propose_plan(
     if let Err(error) = recorded {
         // The number was never recorded; the next try may take it.
         let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_file(&twin);
         return Err(error);
     }
     Ok(json!({
@@ -556,10 +599,10 @@ mod tests {
         )
     }
 
-    /// `task` in progress with Kai, allowed `docs/marketing/**`, and its worktree made.
+    /// `task` in progress with Kai, allowed `docs/catervas/marketing/**`, and its worktree made.
     fn works_on(project: &TestProject, task: &str) -> PathBuf {
         project.filed_with(task, "assigned", "task", None, |wire| {
-            wire["allowed_paths"] = json!(["docs/marketing/**"]);
+            wire["allowed_paths"] = json!(["docs/catervas/marketing/**"]);
             wire["assignee_role"] = json!("marketing_specialist");
             wire["reviewer_role"] = json!("product_manager");
         });
@@ -588,6 +631,7 @@ mod tests {
             "title": "Spring launch",
             "summary": "Two weeks of posts and one small search campaign.",
             "text": "x".repeat(300),
+            "agent_text": "y".repeat(300),
             "starts_on": "2026-09-22",
             "ends_on": "2026-10-05",
             "currency": "USD",
@@ -700,20 +744,30 @@ mod tests {
             Some("CTV-1".to_string())
         );
 
-        let file = std::fs::read_to_string(worktree.join("docs/marketing/plans/MP-1.md"))
+        let file = std::fs::read_to_string(worktree.join("docs/catervas/marketing/plans/MP-1.md"))
             .expect("the plan's text is written to the task's worktree");
         assert_eq!(
             file,
             format!("# MP-1: Spring launch\n\n{}\n", "x".repeat(300))
         );
-        assert!(
-            !project
-                .repo
-                .path
-                .join("docs/marketing/plans/MP-1.md")
-                .exists(),
-            "the project root is not written"
+        let twin =
+            std::fs::read_to_string(worktree.join("docs/catervas/marketing/plans/MP-1.agent.md"))
+                .expect("the plan's agent twin is written beside it");
+        assert_eq!(
+            twin,
+            format!("# MP-1: Spring launch\n\n{}\n", "y".repeat(300))
         );
+        for name in ["MP-1.md", "MP-1.agent.md"] {
+            assert!(
+                !project
+                    .repo
+                    .path
+                    .join("docs/catervas/marketing/plans")
+                    .join(name)
+                    .exists(),
+                "the project root is not written"
+            );
+        }
 
         let row = project
             .deps
@@ -729,7 +783,7 @@ mod tests {
     fn numbers_past_a_committed_plan() {
         let project = a_marketing_project("tools-plan-numbers");
         // A committed plan in the project root, with an empty log: the next is MP-5.
-        let committed = project.repo.path.join("docs/marketing/plans");
+        let committed = project.repo.path.join("docs/catervas/marketing/plans");
         std::fs::create_dir_all(&committed).expect("a directory");
         std::fs::write(committed.join("MP-4.md"), "# MP-4\n").expect("a file");
         works_on(&project, "CTV-1");
@@ -744,14 +798,25 @@ mod tests {
             propose(&project, "CTV-2", &a_plan()).expect("proposed")["plan"],
             "MP-6"
         );
-        assert!(other.join("docs/marketing/plans/MP-6.md").is_file());
+        assert!(
+            other
+                .join("docs/catervas/marketing/plans/MP-6.md")
+                .is_file()
+        );
 
         // And so does a file already in the task's own worktree.
         let third = works_on(&project, "CTV-3");
-        std::fs::create_dir_all(third.join("docs/marketing/plans")).expect("a directory");
-        std::fs::write(third.join("docs/marketing/plans/MP-9.md"), "# MP-9\n").expect("a file");
-        std::fs::write(third.join("docs/marketing/plans/notes.md"), "not a plan\n")
-            .expect("a file");
+        std::fs::create_dir_all(third.join("docs/catervas/marketing/plans")).expect("a directory");
+        std::fs::write(
+            third.join("docs/catervas/marketing/plans/MP-9.md"),
+            "# MP-9\n",
+        )
+        .expect("a file");
+        std::fs::write(
+            third.join("docs/catervas/marketing/plans/notes.md"),
+            "not a plan\n",
+        )
+        .expect("a file");
         assert_eq!(
             propose(&project, "CTV-3", &a_plan()).expect("proposed")["plan"],
             "MP-10"
@@ -786,9 +851,51 @@ mod tests {
         }
         assert_eq!(project.event_count(), before, "nothing is recorded");
         assert!(
-            !worktree.join("docs/marketing/plans").exists(),
+            !worktree.join("docs/catervas/marketing/plans").exists(),
             "nothing is written"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_plan_without_its_agent_twin() {
+        let project = a_marketing_project("tools-plan-twin");
+        let worktree = works_on(&project, "CTV-1");
+        let plans = worktree.join("docs/catervas/marketing/plans");
+        let before = project.event_count();
+
+        let mut plan = a_plan();
+        plan.as_object_mut().expect("a plan").remove("agent_text");
+        match propose(&project, "CTV-1", &plan).expect_err("no agent_text") {
+            ToolError::InvalidInput { detail } => {
+                assert!(detail.contains("agent_text"), "{detail}");
+            }
+            other => panic!("expected invalid input, got {other:?}"),
+        }
+        assert!(!plans.exists(), "nothing is written");
+
+        plan["agent_text"] = json!("y".repeat(199));
+        let reason = refused(propose(&project, "CTV-1", &plan).expect_err("too short"));
+        assert!(
+            reason.starts_with("marketing_plan_text: agent_text:"),
+            "{reason}"
+        );
+        assert!(!plans.exists(), "nothing is written");
+        assert_eq!(project.event_count(), before, "nothing is recorded");
+
+        // A twin already there refuses the call and takes the plan's own file with it.
+        std::fs::create_dir_all(&plans).expect("a directory");
+        std::fs::write(plans.join("MP-1.agent.md"), "# MP-1\n").expect("a file");
+        plan["agent_text"] = json!("y".repeat(300));
+        let reason = refused(propose(&project, "CTV-1", &plan).expect_err("the twin is there"));
+        assert!(reason.starts_with("marketing_plan_file_exists"), "{reason}");
+        assert!(!plans.join("MP-1.md").exists(), "the plan file is removed");
+        assert_eq!(
+            std::fs::read_to_string(plans.join("MP-1.agent.md")).expect("reads"),
+            "# MP-1\n",
+            "the twin that was there is untouched"
+        );
+        assert_eq!(project.event_count(), before, "nothing is recorded");
     }
 
     #[test]
@@ -951,7 +1058,7 @@ mod tests {
         works_on(&project, "CTV-1");
         // A Developer allowed to write there passes the tier and path checks and meets the gate.
         project.filed_with("CTV-2", "in_progress", "task", None, |wire| {
-            wire["allowed_paths"] = json!(["docs/marketing/**"]);
+            wire["allowed_paths"] = json!(["docs/catervas/marketing/**"]);
         });
         let kai = |purpose: crate::session::SessionPurpose, task: Option<&str>| {
             let mut context: ToolContext = project.context("kai", task);
@@ -990,7 +1097,7 @@ mod tests {
     fn refuses_to_write_over_a_plan_that_is_there() {
         let folder =
             std::env::temp_dir().join(format!("catervas-plan-file-{}", std::process::id()));
-        let file = folder.join("docs/marketing/plans/MP-3.md");
+        let file = folder.join("docs/catervas/marketing/plans/MP-3.md");
         super::write_new(&file, "# MP-3: First\n").expect("a new file is written");
         let reason =
             refused(super::write_new(&file, "# MP-3: Second\n").expect_err("the file is there"));
@@ -1008,7 +1115,7 @@ mod tests {
     fn refuses_a_path_the_contract_does_not_allow() {
         let project = a_marketing_project("tools-plan-paths");
         project.filed_with("CTV-1", "in_progress", "task", None, |wire| {
-            wire["allowed_paths"] = json!(["docs/marketing/research/**"]);
+            wire["allowed_paths"] = json!(["docs/catervas/marketing/research/**"]);
             wire["assignee_role"] = json!("marketing_specialist");
         });
         let reason = refused(

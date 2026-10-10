@@ -122,7 +122,7 @@ Files: every `docs/marketing` of `git grep -n "docs/marketing" -- crates apps pa
 - `refuses_a_plan_without_its_agent_twin` — no `agent_text` is `InvalidInput`; 199 characters is `marketing_plan_faults` with a fault of code `marketing_plan_text` and field `agent_text`; neither refusal writes a file in the worktree's plans folder or records an event; with `MP-1.agent.md` already in the worktree, the call is refused `marketing_plan_file_exists` and no `MP-1.md` remains. RED: the field is unknown.
 - The other tests of `marketing.rs`, `posts.rs`, `hooks.rs`, `kit.rs` and `lib.rs` that name the folder follow it unchanged in what they assert.
 
-- [ ] `feat(runtime): move the marketing folder under docs/catervas/ with each plan's twin`
+- [x] `feat(runtime): move the marketing folder under docs/catervas/ with each plan's twin`
 
 ### Task 5: Done refuses half a pair
 
